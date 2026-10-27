@@ -55,3 +55,6 @@ Subsequent user clarifications (preserving the original objective above):
   VM mapping in DSP interfaces, specifying ownership/concurrency. Concepts check
   interfaces; shared semantic tests qualify behavior. Optimize native regions
   and measure hardware isolation separately from translation speed.
+- Latest user instruction reauthorizes pushing every verified commit to the
+  existing private Weichwolf/dsp56300 origin, including accumulated local
+  progress. This supersedes the earlier local-only publication restriction.
