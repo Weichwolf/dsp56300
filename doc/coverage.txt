@@ -183,8 +183,9 @@ for other operations and parallel memory moves. It has exact budgets, numerical 
 invalidation, bounded executable storage and immutable RX mappings. Shared
 fixtures cover all three backends; host tests check ABI/boundary behavior and
 native/helper counters expose actual lowered execution. See doc/jit.txt for
-instrumentation scope and remaining native work. All twenty-two CTests pass in release
-and strict builds, including exact fixture regeneration. SIMD is not implemented.
+instrumentation scope and remaining native work. All twenty-five CTests pass in release
+and strict builds, including exact fixture regeneration. SIMD is not implemented
+in VM execution; the separate native FFT research comparison uses AVX2.
 Earlier isolated arithmetic experiments do not establish emulator speed.
 More source-built workloads, register-bank SIMD
 measurements, guarded independent-voice batching and code/cache evidence remain
@@ -265,6 +266,31 @@ or device specification. NXP's DSP56371 Rev.4.1 datasheet specifies 181 MIPS at
 neither a family peak nor our throughput target proves whole-device realtime.
 References: https://www.nxp.com/docs/en/data-sheet/DSP56371.pdf
             https://www.nxp.com/docs/en/data-sheet/DSP56321.pdf
+
+FFT/compiler-headroom experiment: 112 project-authored scaled radix-2 DIF FFT
+fixtures cover 16/64/256/1024 complex inputs, both RM choices, sticky state,
+clipping and reverse-carry output ordering. The independent integer model checks
+all visible registers, nested-loop frames, complete RAM and exact progress on
+all three backends. Low-amplitude cases also match an independent direct DFT
+within 2.35 output LSBs; CPU/model agreement itself remains bit exact.
+No manufacturer FFT or optimized hardware-peak claim is involved.
+Three runs on the i5-10400 measure approximately 55-61 MIPS for these own DSP
+programs, versus 26-35 MIPS in the previously qualified Blofeld cases. The 270-MIPS
+target remains unmet. A 1024-point transform retires 157810 guest instructions
+and 164100 estimated base units, with a JIT median of 2.596 ms.
+Its separately qualified native algorithm takes about 140 microseconds scalar,
+43.6 microseconds with single-core AVX2 and 31.1 microseconds with two AVX2
+workers. Six AVX2 workers take about 57.0 microseconds. Smaller transforms favor
+one worker. The experiment exposes substantial mathematical-computation
+headroom and a synchronization/granularity cost; it is not a transpilation or
+multicore VM performance claim. Native algorithm tests pass for every fixture
+with 1/2/3/6 workers and scalar/AVX2, including ASan/UBSan and ThreadSanitizer.
+Plans, worker startup and input restoration are excluded from native timing;
+output ordering and synchronization are included. Three-run medians, all raw
+trials, affinity/governor settings and artifact hashes remain local. RAPL energy
+counters exist but are root-readable, so energy/frequency claims remain untested.
+Automatic lifting, dependency proof, register/flag state mapping, ordered commit
+and guarded VM integration remain required. See doc/compiler-research.txt.
 
 Measured linear-address improvement: three alternating before/after runs on
 four directed ordinary/wide filter and complete LP12 cases reduce JIT warm-call

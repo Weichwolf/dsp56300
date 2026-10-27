@@ -78,10 +78,17 @@ if(BUILD_TESTING)
   target_link_libraries(dsp56300_generate_addressing PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_addition test/generate_addition.cpp)
   target_link_libraries(dsp56300_generate_addition PRIVATE dsp56300_fixture_format)
+  add_executable(dsp56300_generate_fft test/generate_fft.cpp)
+  target_link_libraries(dsp56300_generate_fft PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_fixture_test test/fixture_test.cpp)
   target_link_libraries(dsp56300_fixture_test PRIVATE dsp56300::core dsp56300_fixture_format)
   add_executable(dsp56300_fixture_bench test/fixture_bench.cpp)
   target_link_libraries(dsp56300_fixture_bench PRIVATE dsp56300::core dsp56300_fixture_format)
+  find_package(Threads REQUIRED)
+  add_executable(dsp56300_fft_native_bench test/fft_native_bench.cpp)
+  target_link_libraries(dsp56300_fft_native_bench PRIVATE dsp56300_fixture_format Threads::Threads)
+  add_test(NAME fft-native-algorithm COMMAND dsp56300_fft_native_bench --verify
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/fft.d56")
   add_test(NAME arithmetic-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/arithmetic.d56")
   add_test(NAME condition-fixtures COMMAND dsp56300_fixture_test
@@ -96,6 +103,13 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/addressing.d56")
   add_test(NAME addition-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/addition.d56")
+  add_test(NAME fft-fixtures COMMAND dsp56300_fixture_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/fft.d56")
+  add_test(NAME fft-reproducibility COMMAND "${CMAKE_COMMAND}"
+    "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_fft>"
+    "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/fft-regenerated.d56"
+    "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/fft.d56"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
   add_test(NAME addition-reproducibility COMMAND "${CMAKE_COMMAND}"
     "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_addition>"
     "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/addition-regenerated.d56"

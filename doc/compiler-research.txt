@@ -1,0 +1,59 @@
+Native-region compiler research
+
+The objective is one DSP56300 program with arbitrary supported control flow,
+full architectural semantics and at least 270 million guest instructions/s per
+host core on representative workloads. SIMD and multicore execution should
+exploit independent work expressed serially by the guest. A safe VM owns memory
+bounds, code versions, instruction/time budgets, interrupt/I/O boundaries and
+architectural commit. Host computation may finish early without advancing guest
+time early. Full ISA, precise timing and sustained realtime qualification remain
+incomplete; the current emitter is a partial compiler with many general helpers.
+
+The compilation direction is DSP instructions to typed dataflow/SSA regions,
+then native loops and vector operations. Preserve 24/48/56-bit coordinates,
+rounding, saturation and old-register parallel-move inputs. Explicit read/write
+sets, alias guards and numerical-mode guards establish when memory operations
+can become native and when iterations can execute independently. Program writes
+invalidate compiled regions, including writes through overlapping X/Y storage.
+A failed guard must transfer to general execution before uncommitted effects.
+
+Register values should remain in host registers across native regions. Flag
+computation should follow real liveness/observability rather than instruction
+count. Some flags that arithmetic does not read are still observable in saved
+hardware-loop/interrupt stack frames; the full FFT binary expectations exercise
+this distinction. Sticky S/L can sometimes become ordered prefix summaries,
+while other final flags/registers must come from the last logical guest operation.
+These transformations require proof and tests; the native algorithm reference
+has not implemented architectural state reconstruction.
+
+Parallel work units are independent voice/sample blocks or independent portions
+of a loop level. SIMD lanes represent independent iterations of this single
+program. Larger work units can amortize persistent worker scheduling, whereas
+barriers and cache sharing can dominate small operations. Cross-iteration RAM,
+RNG, feedback, mixing and control dependencies must remain ordered. Reexecute
+through the general path when independence or admissible event windows cannot
+be established. Arbitrary instruction-level concurrency is not assumed.
+
+Current controlled experiment: an own fixed-point DIF FFT is executed as real
+DSP code through reference/cached/JIT backends and as a separately written native
+integer algorithm. Both use identical coefficients, quantization and clipping.
+The native comparison tests scalar and four-lane AVX2 with persistent workers
+and stage barriers. It validates numerical data, not DSP registers, loop stack,
+retirement, events or self modification. It is a computation-headroom reference,
+not a VM backend, automatic code recognizer or a claim to have transpiled the DSP.
+The DSP fixtures provide the complete architectural qualification needed for a
+future region compiler. See doc/fixtures.txt and doc/coverage.txt for exact scope.
+
+Next implementation experiments should remove memory/move helper calls and
+instruction-by-instruction register/flag materialization on guarded RAM regions.
+Compare the current emitter against lifted region execution, then investigate
+independent-iteration grouping and vector lowering. Validate partial budgets,
+loop exits, code changes, aliased memory and mode changes with a general fallback.
+Keep compilation/planning cost separate from warm execution and measure actual
+fallback frequency, hot code/data size, latency and complete-workload throughput.
+
+Evaluate joules per audio block using actual energy counters when accessible.
+Core count and GHz alone cannot establish energy: voltage, static power, cache
+traffic, synchronization, idle policy and latency windows matter. No systemwide
+frequency/governor changes are implied by these experiments. Current package
+RAPL energy counters are root-readable; no energy benefit has been measured.

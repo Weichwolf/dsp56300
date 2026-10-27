@@ -21,7 +21,7 @@
 namespace dsp56300::test {
 namespace {
 using Clock = std::chrono::steady_clock;
-constexpr unsigned warmup_calls = 64, trial_count = 9, calls_per_trial = 4096;
+constexpr unsigned warmup_calls = 64, trial_count = 9, default_replays = 4096;
 constexpr Word loop_flag = Word{1} << 15;
 
 double elapsed(const Clock::time_point begin, const Clock::time_point end) {
@@ -70,7 +70,7 @@ public:
 
   [[nodiscard]] JitStatistics statistics() const noexcept { return core_.jit_statistics(); }
 
-  Timing trial() {
+  Timing trial(const unsigned calls_per_trial) {
     Timing timing;
     const auto before = core_.progress();
     for (unsigned call = 0; call < calls_per_trial; ++call) {
@@ -100,7 +100,7 @@ private:
   Core core_;
 };
 
-void benchmark(const BinaryCase &item, const Backend backend) {
+void benchmark(const BinaryCase &item, const Backend backend, const unsigned replays) {
   Replay replay(item, backend);
   for (unsigned call = 0; call < warmup_calls; ++call) {
     replay.prepare();
@@ -110,7 +110,7 @@ void benchmark(const BinaryCase &item, const Backend backend) {
   std::array<double, trial_count> execution{};
   std::array<double, trial_count> preparation{};
   for (std::size_t trial = 0; trial < execution.size(); ++trial) {
-    const auto timing = replay.trial();
+    const auto timing = replay.trial(replays);
     execution[trial] = timing.execution;
     preparation[trial] = timing.preparation;
   }
@@ -151,21 +151,29 @@ std::optional<Backend> selected_backend(const std::string_view name) {
 
 int main(const int argc, const char *const *const argv) {
   try {
-    if (argc < 2 || argc > 4) {
-      throw std::runtime_error("Usage: dsp56300_fixture_bench FILE.d56 [CASE_INDEX [BACKEND]]");
+    if (argc < 2 || argc > 5) {
+      throw std::runtime_error(
+          "Usage: dsp56300_fixture_bench FILE.d56 [CASE_INDEX [BACKEND [REPLAYS]]]");
     }
-    const auto selected = dsp56300::test::selected_backend(argc == 4 ? argv[3] : "all");
+    const auto selected = dsp56300::test::selected_backend(argc >= 4 ? argv[3] : "all");
     const auto cases = dsp56300::test::read_fixture(argv[1]);
     const auto index = argc >= 3 ? dsp56300::test::case_index(argv[2]) : std::size_t{0};
+    const auto replays =
+        argc == 5 ? dsp56300::test::case_index(argv[4]) : dsp56300::test::default_replays;
+    constexpr unsigned maximum_replays = 1U << 20;
+    if (replays == 0 || replays > maximum_replays) {
+      throw std::invalid_argument("Replays must be in [1,1048576]");
+    }
     const auto &item = cases.at(index);
     std::cout << std::fixed << std::setprecision(2) << item.name << '\n'
-              << "One DSP instance per backend, 64 warmups, median of 9 x 4096 replays.\n"
+              << "One DSP instance per backend, 64 warmups, median of 9 x " << replays
+              << " replays.\n"
               << "Execution includes timer/retirement-check overhead; no overhead subtraction.\n"
               << "Host RAM/register restoration is timed separately; no cold-load/device claim.\n";
     for (const auto backend :
          {dsp56300::Backend::reference, dsp56300::Backend::cached, dsp56300::Backend::jit}) {
       if (selected.has_value() && *selected != backend) { continue; }
-      dsp56300::test::benchmark(item, backend);
+      dsp56300::test::benchmark(item, backend, static_cast<unsigned>(replays));
     }
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';
