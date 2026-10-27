@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: GPL-3.0-only
+cmake_minimum_required(VERSION 3.25)
+project(dsp56300_core VERSION 0.1.0 LANGUAGES C CXX)
+
+include(cmake/CompilerCache.cmake)
+include(CTest)
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+foreach(language C CXX)
+  if(NOT CMAKE_${language}_COMPILER_ID STREQUAL "Clang" OR
+     NOT CMAKE_${language}_COMPILER_VERSION VERSION_GREATER_EQUAL 19 OR
+     NOT CMAKE_${language}_COMPILER_VERSION VERSION_LESS 20)
+    message(FATAL_ERROR "Use LLVM 19: cmake --preset strict")
+  endif()
+endforeach()
+include(cmake/Quality.cmake)
+find_program(BLOFELD_CLANG_TIDY NAMES clang-tidy-19 REQUIRED)
+find_program(BLOFELD_CLANG_FORMAT NAMES clang-format-19 REQUIRED)
+
+set(CMAKE_CXX_CLANG_TIDY "${BLOFELD_CLANG_TIDY};--warnings-as-errors=*")
+
+add_library(dsp56300_core STATIC src/core.cpp src/core_state.cpp src/memory_arena.cpp
+  src/arithmetic.cpp src/decode.cpp src/moves.cpp src/registers.cpp src/agu.cpp src/control.cpp)
+add_library(dsp56300::core ALIAS dsp56300_core)
+target_include_directories(dsp56300_core PUBLIC include)
+target_link_libraries(dsp56300_core PUBLIC blofeld_quality)
+target_include_directories(dsp56300_core PRIVATE src)
+
+file(GLOB_RECURSE DSP56300_OWN_FILES CONFIGURE_DEPENDS
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/test/*.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/test/*.hpp")
+add_custom_target(format-check
+  COMMAND "${BLOFELD_CLANG_FORMAT}" --dry-run --Werror ${DSP56300_OWN_FILES}
+  VERBATIM)
+
+if(BUILD_TESTING)
+  add_executable(dsp56300_core_test test/core_test.cpp)
+  target_link_libraries(dsp56300_core_test PRIVATE dsp56300::core)
+  add_test(NAME core-instructions COMMAND dsp56300_core_test)
+endif()

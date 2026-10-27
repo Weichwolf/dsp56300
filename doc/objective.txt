@@ -1,0 +1,12 @@
+Baue in ~/Git/dsp56000 einen eigenständigen, maximal auf x86-64 optimierten DSP56300-Emulatorkern, den blofeld-emu später als Bibliothek übernehmen kann. Übernimm dessen Projektsetup mit C++23, CMake/Ninja, LLVM 19, strikten Warnungen, clang-format, clang-tidy und ASan/UBSan. Unterstütze eine einzelne DSP-Instanz mit beliebigen Programmen und priorisiere die Audio-, Filter-, Oszillator- und Effektprogramme unter ~/Git/blofeld-src/src/dsp56371. Optimiere anhand reproduzierbarer Messungen durch Blockübersetzung/JIT, Registerhaltung, kompakte Datenstrukturen und bei nachgewiesenem Nutzen SSE/AVX/AVX2. Minimiere Cachezugriffe und den Umfang häufig verwendeter Code- und Datenbereiche. Bewahre die vollständige Befehlssemantik einschließlich Festkommaarithmetik, Rundung, Sättigung, Statusbits, paralleler Moves, Adressierungsmodi, Schleifen und Interruptzustände; spezialisierte Ausführungspfade benötigen geprüfte Voraussetzungen und einen allgemeinen Rückfallpfad. Verifiziere Korrektheit durch unabhängige Erwartungen und Vergleichstests sowie Leistung anhand tatsächlicher Blofeld-Programme. Implementiere ausschließlich den DSP-Kern mit klarer Speicher-, Ereignis- und I/O-Schnittstelle, Tests, Benchmarks und Integrationsdokumentation. Verändere weder blofeld-emu noch blofeld-src und übernimm keine Board-Emulation oder Herstellerprogramme in veröffentlichbare Quellen.
+
+Subsequent user clarifications (preserving the original objective above):
+- The project directory is now ~/Git/dsp56300.
+- Implement independently: no dsp56kEmu dependency in build, API, tests or runtime.
+- Use Core/core.cpp naming. Implement only the DSP56300 CPU; blofeld-emu owns
+  the DSP56371 derivative peripherals and board integration.
+- Investigate packing DSP registers in SIMD registers and recognizing repeated,
+  independent per-voice work inside one DSP program (up to 24 Blofeld voices).
+  Preserve shared-state dependencies, quantization, output order and interrupt
+  boundaries, with a general fallback when batching is inadmissible.
+- Commit and push each verified increment to private Weichwolf/dsp56300.

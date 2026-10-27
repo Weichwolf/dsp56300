@@ -1,0 +1,9 @@
+Original DSP emulator and reused blofeld-emu project setup: GPL-3.0-only (LICENSE).
+
+Project setup (CMake quality/hardening, presets and Clang configuration) originates in
+https://github.com/Weichwolf/blofeld-emu, revision
+2978c190143ef757189b3b82eb0e9350720eb954. No board emulation is copied.
+The DSP emulator has no dependency on another DSP emulator or JIT library.
+
+Manufacturer programs, tables, manuals and Blofeld source extracts are private
+reference inputs. They are not part of this library or its redistributable tests.

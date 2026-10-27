@@ -1,0 +1,269 @@
+// SPDX-License-Identifier: GPL-3.0-only
+#include "architecture.hpp"
+#include "core_impl.hpp"
+#include "dsp56300/core.hpp"
+
+#include <array>
+#include <bit>
+#include <cstdint>
+
+namespace dsp56300 {
+using namespace detail;
+
+namespace {
+constexpr unsigned main_word_shift = 32;
+constexpr unsigned normal_integer_shift = 55;
+constexpr unsigned normal_growth_shift = 53;
+constexpr std::uint64_t main_word_mask = std::uint64_t{word_mask} << main_word_shift;
+constexpr unsigned multiply_shift = padding_bits + 1;
+constexpr unsigned operation_mask = 0xf7;
+
+enum AluCode : std::uint8_t {
+  op_clear = 0x13,
+  op_round = 0x11,
+  op_abs = 0x26,
+  op_negate = 0x36,
+  op_asr = 0x22,
+  op_asl = 0x32,
+  op_lsr = 0x23,
+  op_lsl = 0x33,
+  op_not = 0x17,
+  op_tfr_x0 = 0x41,
+  op_tfr_y0 = 0x51,
+  op_tfr_x1 = 0x61,
+  op_tfr_y1 = 0x71,
+  op_max = 0x1d,
+  op_maxm = 0x15,
+};
+
+bool signed_overflow(const std::uint64_t left,
+                     const std::uint64_t right,
+                     const std::uint64_t result) noexcept {
+  return ((left ^ result) & (right ^ result)) >> host_sign_bit != 0;
+}
+
+unsigned integer_shift(const Word status) noexcept {
+  return normal_integer_shift + ((status & scale_down) != 0 ? 1U : 0U) -
+         ((status & scale_up) != 0 ? 1U : 0U);
+}
+
+std::uint64_t magnitude(const std::uint64_t value) noexcept {
+  return (value >> host_sign_bit) != 0 ? wrapped_sub(0, value) : value;
+}
+}
+
+void Core::Impl::arithmetic_flags(const std::uint64_t value, const bool overflowed) {
+  const auto shift = integer_shift(cpu.reg.sr);
+  const auto integer = value >> shift;
+  const auto all_ones = ~std::uint64_t{0} >> shift;
+  Word flags = value == 0 ? zero : 0;
+  if ((value >> host_sign_bit) != 0) { flags |= negative; }
+  if (integer != 0 && integer != all_ones) { flags |= extension; }
+  if (((value >> shift) & 1) == ((value >> (shift - 1)) & 1)) { flags |= unnormalized; }
+  if (overflowed) { flags |= overflow | limit; }
+  constexpr Word changed = negative | zero | extension | unnormalized | overflow;
+  cpu.reg.sr = (cpu.reg.sr & ~changed) | flags;
+}
+
+void Core::Impl::logical_flags(const Word value) {
+  Word flags = value == 0 ? zero : 0;
+  if ((value & sign24_bit) != 0) { flags |= negative; }
+  cpu.reg.sr = (cpu.reg.sr & ~(negative | zero | overflow)) | flags;
+}
+
+Word Core::Impl::transfer_word(const std::uint64_t value) {
+  const unsigned shift = main_word_shift + ((cpu.reg.sr & scale_down) != 0 ? 1U : 0U) -
+                         ((cpu.reg.sr & scale_up) != 0 ? 1U : 0U);
+  const auto result = std::bit_cast<std::int64_t>(value) >> shift;
+  const auto growth_shift = normal_growth_shift + ((cpu.reg.sr & scale_down) != 0 ? 1U : 0U) -
+                            ((cpu.reg.sr & scale_up) != 0 ? 1U : 0U);
+  if ((((value >> growth_shift) ^ (value >> (growth_shift + 1))) & 1) != 0) {
+    cpu.reg.sr |= growth;
+  }
+  if (result > maximum_word) {
+    cpu.reg.sr |= limit;
+    return static_cast<Word>(maximum_word);
+  }
+  if (result < minimum_word) {
+    cpu.reg.sr |= limit;
+    return sign24_bit;
+  }
+  return static_cast<Word>(result) & word_mask;
+}
+
+void Core::Impl::round(std::uint64_t &value) {
+  const unsigned cleared = main_word_shift + ((cpu.reg.sr & scale_down) != 0 ? 1U : 0U) -
+                           ((cpu.reg.sr & scale_up) != 0 ? 1U : 0U);
+  const std::uint64_t half = std::uint64_t{1} << (cleared - 1);
+  const std::uint64_t unit = std::uint64_t{1} << padding_bits;
+  const auto bias = (cpu.reg.sr & rounding_mode) != 0
+                        ? half
+                        : half - unit + (((value >> cleared) & 1) << padding_bits);
+  const auto added = wrapped_add(value, bias);
+  const bool overflowed = signed_overflow(value, bias, added);
+  value = added & ~((std::uint64_t{1} << cleared) - 1);
+  arithmetic_flags(value, overflowed);
+}
+
+std::uint64_t Core::Impl::source(const unsigned selector, const bool destination_b) const {
+  const auto x = latched[2];
+  const auto y = latched[3];
+  switch (selector) {
+    case 0:
+    case 1: return latched[destination_b ? 0 : 1];
+    case 2:
+      return ((x & (std::uint64_t{1} << (double_word_bits - 1))) != 0 ? x | ~long_mask : x)
+             << padding_bits;
+    case 3:
+      return ((y & (std::uint64_t{1} << (double_word_bits - 1))) != 0 ? y | ~long_mask : y)
+             << padding_bits;
+    case 4: return aligned_word(static_cast<Word>(x) & word_mask);
+    case 5: return aligned_word(static_cast<Word>(y) & word_mask);
+    case 6: return aligned_word(static_cast<Word>(x >> word_bits));
+    case 7: return aligned_word(static_cast<Word>(y >> word_bits));
+    default: return 0;
+  }
+}
+
+void Core::Impl::multiply(const Word opcode) {
+  const bool destination_b = (opcode & 8U) != 0;
+  auto &destination = destination_b ? cpu.reg.b : cpu.reg.a;
+  const auto before = latched[destination_b ? 1 : 0];
+  constexpr std::array<std::array<unsigned, 2>, 8> pairs{
+      {{0, 0}, {2, 2}, {1, 0}, {3, 2}, {0, 3}, {2, 0}, {1, 2}, {3, 1}}};
+  const auto pair = pairs[(opcode >> 4) & 7];
+  const std::array inputs{static_cast<Word>(latched[2]) & word_mask,
+                          static_cast<Word>(latched[2] >> word_bits),
+                          static_cast<Word>(latched[3]) & word_mask,
+                          static_cast<Word>(latched[3] >> word_bits)};
+  const auto product =
+      static_cast<std::int64_t>(signed_word(inputs[pair[0]])) * signed_word(inputs[pair[1]]);
+  auto term = static_cast<std::uint64_t>(product) << multiply_shift;
+  if ((opcode & 4U) != 0) { term = wrapped_sub(0, term); }
+  const auto initial = (opcode & 2U) != 0 ? before : 0;
+  destination = wrapped_add(initial, term);
+  const bool overflowed = signed_overflow(initial, term, destination);
+  arithmetic_flags(destination, overflowed);
+  if ((opcode & 1U) != 0) {
+    round(destination);
+    if (overflowed) { cpu.reg.sr |= overflow | limit; }
+  }
+}
+
+bool Core::Impl::logic(const Word opcode) {
+  const auto operation = opcode & operation_mask;
+  const auto group = (opcode >> 4) & 7;
+  const auto kind = opcode & 7;
+  const bool binary = group >= 4 && (kind == 2 || kind == 3 || kind == 6);
+  if (!binary && operation != op_not) { return false; }
+  const bool destination_b = (opcode & 8U) != 0;
+  auto &destination = destination_b ? cpu.reg.b : cpu.reg.a;
+  const auto before = latched[destination_b ? 1 : 0];
+  auto word = static_cast<Word>(before >> main_word_shift) & word_mask;
+  const auto input = static_cast<Word>(source(group, destination_b) >> main_word_shift) & word_mask;
+  if (operation == op_not) {
+    word ^= word_mask;
+  } else if (kind == 2) {
+    word |= input;
+  } else if (kind == 3) {
+    word ^= input;
+  } else {
+    word &= input;
+  }
+  destination = (before & ~main_word_mask) | (std::uint64_t{word} << main_word_shift);
+  logical_flags(word);
+  return true;
+}
+
+bool Core::Impl::unary(const Word opcode) {
+  const auto operation = opcode & operation_mask;
+  const bool destination_b = (opcode & 8U) != 0;
+  auto &destination = destination_b ? cpu.reg.b : cpu.reg.a;
+  const auto before = latched[destination_b ? 1 : 0];
+  switch (operation) {
+    case 0: return true;
+    case 1:
+    case op_tfr_x0:
+    case op_tfr_y0:
+    case op_tfr_x1:
+    case op_tfr_y1: destination = source((opcode >> 4) & 7, destination_b); return true;
+    case op_clear:
+      destination = 0;
+      arithmetic_flags(0, false);
+      return true;
+    case 3: arithmetic_flags(before, false); return true;
+    case op_round:
+      destination = before;
+      round(destination);
+      return true;
+    case op_abs:
+      destination = magnitude(before);
+      arithmetic_flags(destination, before == (std::uint64_t{1} << host_sign_bit));
+      return true;
+    case op_negate:
+      destination = wrapped_sub(0, before);
+      arithmetic_flags(destination, before == (std::uint64_t{1} << host_sign_bit));
+      return true;
+    case op_asr:
+      destination =
+          static_cast<std::uint64_t>(std::bit_cast<std::int64_t>(before) >> 1) & padding_mask;
+      arithmetic_flags(destination, false);
+      cpu.reg.sr = (cpu.reg.sr & ~carry) | (((before >> padding_bits) & 1) != 0 ? carry : 0);
+      return true;
+    case op_asl:
+      destination = before << 1;
+      arithmetic_flags(destination, ((before ^ destination) >> host_sign_bit) != 0);
+      cpu.reg.sr = (cpu.reg.sr & ~carry) | ((before >> host_sign_bit) != 0 ? carry : 0);
+      return true;
+    default: return false;
+  }
+}
+
+bool Core::Impl::addition(const Word opcode) {
+  const unsigned group = (opcode >> 4) & 7;
+  const unsigned kind = opcode & 7;
+  const bool with_carry = (group == 2 || group == 3) && (kind == 1 || kind == 5);
+  const bool compare = kind == 5 && (group == 0 || group >= 4);
+  const bool add = (group >= 1 && kind == 0) || (with_carry && kind == 1);
+  const bool subtract = (group >= 1 && kind == 4) || compare || (with_carry && kind == 5);
+  if (!add && !subtract) { return false; }
+  const bool destination_b = (opcode & 8U) != 0;
+  auto &destination = destination_b ? cpu.reg.b : cpu.reg.a;
+  const auto before = latched[destination_b ? 1 : 0];
+  const auto operand = source(group, destination_b);
+  const auto carry_in =
+      with_carry && (cpu.reg.sr & carry) != 0 ? std::uint64_t{1} << padding_bits : 0;
+  const auto intermediate = subtract ? wrapped_sub(before, operand) : wrapped_add(before, operand);
+  const auto result =
+      subtract ? wrapped_sub(intermediate, carry_in) : wrapped_add(intermediate, carry_in);
+  const bool overflowed = subtract ? ((before ^ operand) & (before ^ result)) >> host_sign_bit != 0
+                                   : signed_overflow(before, operand, result);
+  const bool carried = subtract ? (before < operand || intermediate < carry_in)
+                                : (intermediate < before || result < intermediate);
+  arithmetic_flags(result, overflowed);
+  cpu.reg.sr = (cpu.reg.sr & ~carry) | (carried ? carry : 0);
+  if (!compare) { destination = result; }
+  return true;
+}
+
+void Core::Impl::alu(const Word opcode) {
+  if (opcode == 8) {
+    fail(FaultKind::invalid_instruction, Space::program, current_pc, opcode);
+    return;
+  }
+  if ((opcode & 0x80U) != 0) {
+    multiply(opcode);
+    return;
+  }
+  if (opcode == op_max || opcode == op_maxm) {
+    const bool transfer = opcode == op_max ? std::bit_cast<std::int64_t>(latched[0]) >=
+                                                 std::bit_cast<std::int64_t>(latched[1])
+                                           : magnitude(latched[0]) >= magnitude(latched[1]);
+    if (transfer) { cpu.reg.b = latched[0]; }
+    cpu.reg.sr = (cpu.reg.sr & ~carry) | (transfer ? 0 : carry);
+    return;
+  }
+  if (unary(opcode) || logic(opcode) || addition(opcode)) { return; }
+  fail(FaultKind::unsupported_instruction, Space::program, current_pc, opcode);
+}
+} // namespace dsp56300

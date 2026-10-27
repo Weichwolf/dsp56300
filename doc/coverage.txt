@@ -1,0 +1,43 @@
+Objective audit: incomplete
+
+Build/setup: C++23, CMake/Ninja, LLVM19, inherited strict diagnostics,
+clang-format/clang-tidy and ASan/UBSan setup. Release and strict builds/tests pass
+for the initial narrow fixture, including its REP instruction-cost expectation.
+The strict executable runs with ASan/UBSan and additional integer/conversion checks.
+
+Independence: production/test targets contain only this project's own DSP
+implementation and compiler/standard-library facilities. No external DSP core
+or JIT library is built or linked. Neighbor checkouts remain read-only.
+
+Framework: caller-owned P/X/Y spans, architectural register view, left-aligned
+A/B, synchronous I/O, explicit faults, individual instruction execution and a
+paged decoded-word cache. Optional MemoryArena reserves complete address
+spaces without touching cold RAM pages.
+
+ISA: partial. Selected multiply/MAC, add/subtract, logical/unary operations,
+parallel moves, AGU paths, basic control, DO/REP and admitted interrupts have
+initial code. Coded forms are not all qualified. Independent tests currently
+cover the manual MAC example, old-register latching on a parallel move,
+REP/LC restore and fail-stop diagnostics through both execution paths.
+Broader arithmetic, move, AGU, loop and interrupt expectations are required.
+
+Modes: ordinary 24-bit arithmetic, three defined transfer-scaling modes and
+two rounding choices have initial code. Compatibility, double precision,
+sixteen-bit arithmetic and arithmetic saturation reject at parallel execution;
+these required modes remain to be implemented and tested.
+
+Timing: documented base costs are being added for implemented forms. Pipeline
+interlocks, IRQ entry/return qualification, exact event admission and external
+waits remain open. A complete checkpoint API is pending; Registers omits hidden
+REP/interrupt continuation.
+
+Performance: no qualified final-core benchmark yet. JIT/SIMD are not implemented.
+Earlier isolated arithmetic experiments remain ignored local files and do not
+establish emulator speed. Real source-built Blofeld benchmarks, register-bank
+SIMD measurements, guarded independent-voice batching and code/cache evidence
+remain required.
+
+Integration: basic header/library target and memory/I/O contract exist.
+Installed package consumption and integration fixtures remain pending.
+The complete objective remains active. No full ISA/device/performance claim
+follows from the narrow initial checks.
