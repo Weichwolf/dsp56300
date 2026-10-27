@@ -41,6 +41,9 @@ REP bodies use their original latched general execution path.
 MOVEC/MOVEM/MOVEP use the general helpers. Guest SR writes exit on changed
 numerical mode, and guest P writes exit on invalidation before executing a
 previously planned successor. Directed host sequences exercise both boundaries.
+Bit access and bit control-flow instructions currently use general helpers too.
+Bit SR writes and I/O-bit callback program changes use the same mode/invalidation
+exits; no new native-ALU or SIMD performance claim follows from this ISA extension.
 
 Blocks are keyed by guest PC and numerical mode. Planning reads only available
 P RAM and causes no guest fetch fault for instructions not executed. A helper

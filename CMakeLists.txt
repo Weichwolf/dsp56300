@@ -25,6 +25,7 @@ add_library(dsp56300_core STATIC
   src/Core/core.cpp src/Core/core_state.cpp src/Core/arithmetic.cpp src/Core/shifts.cpp
   src/Core/conditional.cpp src/Core/immediate.cpp src/Core/decode.cpp src/Core/moves.cpp
   src/Core/transfers.cpp src/Core/registers.cpp src/Core/agu.cpp src/Core/control.cpp
+  src/Core/bits.cpp
   src/Jit/jit.cpp src/Jit/jit_helpers.cpp src/Jit/X64/jit_emitter.cpp src/Jit/X64/x64.cpp
   src/Memory/memory_arena.cpp)
 add_library(dsp56300::core ALIAS dsp56300_core)
@@ -50,6 +51,9 @@ if(BUILD_TESTING)
   add_executable(dsp56300_transfer_test test/transfer_test.cpp)
   target_link_libraries(dsp56300_transfer_test PRIVATE dsp56300::core)
   add_test(NAME transfer-boundaries COMMAND dsp56300_transfer_test)
+  add_executable(dsp56300_bit_access_test test/bit_access_test.cpp)
+  target_link_libraries(dsp56300_bit_access_test PRIVATE dsp56300::core)
+  add_test(NAME bit-access-boundaries COMMAND dsp56300_bit_access_test)
   add_library(dsp56300_fixture_format STATIC test/binary_fixture.cpp)
   target_include_directories(dsp56300_fixture_format PUBLIC test include)
   target_link_libraries(dsp56300_fixture_format PUBLIC blofeld_quality)
@@ -61,6 +65,8 @@ if(BUILD_TESTING)
   target_link_libraries(dsp56300_generate_conditions PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_transfers test/generate_transfers.cpp)
   target_link_libraries(dsp56300_generate_transfers PRIVATE dsp56300_fixture_format)
+  add_executable(dsp56300_generate_bit_access test/generate_bit_access.cpp)
+  target_link_libraries(dsp56300_generate_bit_access PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_fixture_test test/fixture_test.cpp)
   target_link_libraries(dsp56300_fixture_test PRIVATE dsp56300::core dsp56300_fixture_format)
   add_executable(dsp56300_fixture_bench test/fixture_bench.cpp)
@@ -71,6 +77,17 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/conditions.d56")
   add_test(NAME transfer-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/transfers.d56")
+  add_test(NAME bit-access-fixtures COMMAND dsp56300_fixture_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/bit-access.d56")
+  add_test(NAME bit-branch-fixtures COMMAND dsp56300_fixture_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/bit-branches.d56")
+  add_test(NAME bit-access-reproducibility COMMAND "${CMAKE_COMMAND}"
+    "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_bit_access>"
+    "-DACCESS_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/bit-access-regenerated.d56"
+    "-DBRANCH_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/bit-branches-regenerated.d56"
+    "-DACCESS_FIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/bit-access.d56"
+    "-DBRANCH_FIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/bit-branches.d56"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_bit_access.cmake")
   add_test(NAME transfer-fixture-reproducibility COMMAND "${CMAKE_COMMAND}"
     "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_transfers>"
     "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/transfers-regenerated.d56"

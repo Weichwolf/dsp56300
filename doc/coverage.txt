@@ -49,6 +49,24 @@ REP can execute these single-word shifts and reevaluates register shift counts.
 The model uses wrapped 56-bit magnitudes for CMPM; its minimum-negative corner
 still needs independent hardware qualification. No hardware reference was used.
 
+Bit access/control extension: BCLR/BSET/BCHG/BTST and JCLR/JSET/JSCLR/JSSET,
+BRCLR/BRSET/BSCLR/BSSET now execute for registers, ordinary X/Y memory and
+both I/O short ranges. 30539 access fixtures and 55012 branch fixtures compare
+complete visible state, RAM, progress and interrupt boundaries on all backends.
+They cover all 24 bit positions, scaling/limiting of full accumulator sources,
+SR's special Carry behavior, register-field widths, SSH read versus in-place
+modification, always-updated EAs, relative wrapping, saved return frames, DO/REP
+and explicit invalid/address/stack/I/O failures. Shared raw-register expectation
+code is used only by fixture generators; it never executes or links the core.
+20754 host checks verify single bit callbacks for every I/O port, all twelve
+instruction families, failed actions, P invalidation, reentry rejection and
+guest SR changes before mode-specialized native code. See doc/io.txt.
+No hardware reference was used. Full-accumulator modifying forms follow the
+manual's shifter/limiter description, whose A/B field lists are inconsistent;
+those forms still require hardware qualification. The BRSET pre-update cost
+uses the same EA rule as BRCLR/BSCLR/BSSET. Rev.5 table A-1 puts a BRSET +pru
+marker on qq instead of ea; independent timing qualification remains open.
+
 Conditional/immediate extension: Jcc/JScc, BRA/BSR/Bcc/BScc (short, long,
 register-relative), Tcc and IFcc/IFcc.U now execute alongside short/long
 immediate ADD/SUB/CMP/AND/OR/EOR. 38035 new binary cases pass release and
@@ -124,7 +142,7 @@ parallel memory moves. It has exact budgets, numerical mode keys, deferred P
 invalidation, bounded executable storage and immutable RX mappings. Shared
 fixtures cover all three backends; host tests check ABI/boundary behavior and
 native/helper counters expose actual lowered execution. See doc/jit.txt for
-instrumentation scope and remaining native work. All twelve CTests pass in release
+instrumentation scope and remaining native work. All sixteen CTests pass in release
 and strict builds, including exact fixture regeneration. SIMD is not implemented.
 Earlier isolated arithmetic experiments do not establish emulator speed.
 More source-built workloads, register-bank SIMD
@@ -161,6 +179,8 @@ i5-10400. This is a warm-call comparison on those cases, not a whole-device or
 final-core performance result.
 
 Integration: basic header/library target and memory/I/O contract exist.
+doc/io.txt defines the synchronous word/atomic-bit callback contract, P mutation,
+fault context and stopped execution boundaries.
 Installed package consumption and integration fixtures remain pending.
 The complete objective remains active. No full ISA/device/performance claim
 follows from the narrow initial checks.

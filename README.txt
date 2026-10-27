@@ -43,6 +43,7 @@ mutation. Core is owned by one execution thread; callbacks run synchronously.
 Unimplemented instructions/modes, unmapped accesses and rejected I/O stop the
 core with explicit context. Faulted execution requires reset. Register views
 are not complete checkpoints of REP/interrupt continuation.
+See doc/io.txt for synchronous word/atomic-bit callbacks and mutation boundaries.
 
 The host supplies derivative interrupt arbitration and admits an interrupt at
 a stopped boundary. Hardware clocks, memory aliases, boot ROM, DMA, timers,

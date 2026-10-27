@@ -18,3 +18,6 @@ Subsequent user clarifications (preserving the original objective above):
 - The user subsequently explicitly requested commit and push again. The existing
   private Weichwolf/dsp56300 origin/main is the authorized destination.
 - Organize implementation files in concern-specific subdirectories under src/.
+- Construct additional demanding tests from complete Blofeld DSP source routines.
+  Reverb is one example, not a user-imposed priority. Select priorities according
+  to their value for validation and optimization.

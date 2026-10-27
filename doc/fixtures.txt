@@ -44,6 +44,22 @@ it does not include the executor's register, address or decoding helpers.
 Scripted host tests separately check successful MOVEP callbacks, all 128 ports
 in each space, callback contexts, repeated transfers and guest P invalidation.
 
+test/fixtures/bit-access.d56 and bit-branches.d56 are generated together:
+
+  build/release/dsp56300_generate_bit_access build/bit-access.d56 build/bit-branches.d56
+
+The 30539 access and 55012 branch cases use independent bit arithmetic, raw
+register fields, quotient/remainder bus conversion and explicit call frames.
+The split keeps each file within the D56F case limit. All 24 bit positions,
+three scaling modes, old Carry states, SR self-modification, SSH read/modification,
+ordinary EAs, return addresses, wrapping displacements and directed faults are
+checked. DO/REP sequences verify repeated actions and loop restoration. No
+emulator decoder or executor is used to create expectations. Host callbacks
+stay in C++ tests and use explicit scripted responses as described in doc/io.txt.
+Reproducibility checks regenerate both binary files and retain the previous
+transfer fixture bytes after extracting their shared independent register model.
+Hardware/timing qualification limits are recorded in doc/coverage.txt.
+
 The generic runner executes each case through reference, cached and JIT backends.
 Successful cases compare all visible registers, all supplied P/X/Y words,
 dispatch/instruction counts, estimated base cycles and interrupt admission.

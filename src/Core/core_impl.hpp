@@ -2,6 +2,7 @@
 #pragma once
 
 #include "architecture.hpp"
+#include "bit_instruction.hpp"
 #include "dsp56300/core.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
@@ -31,6 +32,11 @@ struct Core::Impl {
   void execute_immediate(const detail::Instruction &decoded);
   void execute_jump(const detail::Instruction &decoded);
   void execute_branch(const detail::Instruction &decoded);
+  void execute_bit(const detail::Instruction &decoded);
+  [[nodiscard]] bool access_bit(const detail::Instruction &decoded, BitAction action);
+  [[nodiscard]] bool register_bit(const detail::BitAccess &access);
+  [[nodiscard]] Word bit_address(const detail::BitOperand &operand,
+                                 const detail::Instruction &decoded);
   void conditional_transfer(Word opcode);
   void conditional_alu(Word opcode);
   [[nodiscard]] Word control_address(const detail::Instruction &decoded);

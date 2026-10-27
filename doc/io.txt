@@ -1,0 +1,42 @@
+Host I/O contract
+
+The embedder supplies derivative peripherals through Io. Guest X/Y accesses in
+0xffff80..0xffffff are dispatched to that interface; P accesses use the supplied
+program RAM. The CPU library supplies no peripheral register values or board
+behavior. Without an accepting host callback, guest I/O stops with an explicit
+fault and the instruction does not retire.
+
+read/write exchange a 24-bit word. Returned read data is masked to 24 bits and
+outgoing writes contain only 24 significant bits. The pc argument identifies
+the accessing guest instruction, including each iteration of a REP body.
+
+bit performs one host bit action. The CPU calls it once with the space, address,
+instruction PC, bit index in [0,23] and BitAction. previous receives the bit's
+value before the action. test observes without modification; clear, set and
+change request read/modify/write as one indivisible action owned by the host.
+The CPU does not synthesize this operation from separate read/write callbacks.
+Conditional bit jumps and branches request test. Their tested bit does not
+replace the DSP Carry flag. A rejected bit callback reports FaultKind::io_bit;
+Fault.value contains the requested bit index. Invalid bit numbers fault before
+address updates or callbacks.
+
+All callbacks run synchronously on the CPU execution thread. The host can inspect
+state and read/write/load supplied RAM, including P, or clear code caches.
+Host Core::read/write/load access the supplied spans directly. Program mutations
+must use Core::write/load so decoded and native caches are invalidated. A P
+change in a callback finishes the already fetched instruction, then fetches its
+successor from the modified program. Register views during a callback can
+reflect an in-flight instruction; they are not complete checkpoints.
+
+run, reset, set_registers and interrupt admission require stopped execution;
+callback reentry into these operations is rejected. Io methods are noexcept;
+the host must handle its own failures and return false to reject an access.
+Core is owned by one execution thread. Synchronization with other host threads
+and atomicity of peripheral/shared-memory operations belong to the embedder.
+
+Instruction budgets count retired guest instructions on every backend. Progress
+reports retired instructions and documented base costs, excluding calibrated
+pipeline, IRQ-entry and external wait timing. The host admits interrupts at
+stopped instruction boundaries; derivative arbitration and timed peripheral
+events remain host responsibilities. Exact pipeline/event timing and a complete
+checkpoint format remain open parts of the core objective.

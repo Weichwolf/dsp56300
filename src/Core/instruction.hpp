@@ -38,7 +38,11 @@ enum class Operation : std::uint8_t {
   move_program_short,
   move_peripheral_register,
   move_peripheral_memory,
-  move_peripheral_program
+  move_peripheral_program,
+  bit_register,
+  bit_memory,
+  bit_jump,
+  bit_branch
 };
 
 [[nodiscard]] constexpr bool repeatable(const Operation operation) noexcept {
@@ -59,7 +63,9 @@ enum class Operation : std::uint8_t {
     case Operation::move_program_short:
     case Operation::move_peripheral_register:
     case Operation::move_peripheral_memory:
-    case Operation::move_peripheral_program: return true;
+    case Operation::move_peripheral_program:
+    case Operation::bit_register:
+    case Operation::bit_memory: return true;
     case Operation::unsupported:
     case Operation::jump_short:
     case Operation::jump_effective:
@@ -74,6 +80,8 @@ enum class Operation : std::uint8_t {
     case Operation::conditional_jump:
     case Operation::relative_branch:
     case Operation::end_loop:
+    case Operation::bit_jump:
+    case Operation::bit_branch:
     default: return false;
   }
 }

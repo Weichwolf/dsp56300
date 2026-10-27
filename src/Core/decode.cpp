@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "bit_instruction.hpp"
 #include "dsp56300/core.hpp"
 #include "fields.hpp"
 #include "instruction.hpp"
@@ -20,6 +21,66 @@ struct Rule {
 
 // Family manual instruction encodings and documented base costs (appendix A).
 constexpr std::array rules{
+    Rule{.bits = encoding("0000101k01MMMRRR0Stbbbbb"),
+         .operation = Operation::bit_memory,
+         .words = 1,
+         .cycles = 2},
+    Rule{.bits = encoding("0000101k00aaaaaa0Stbbbbb"),
+         .operation = Operation::bit_memory,
+         .words = 1,
+         .cycles = 2},
+    Rule{.bits = encoding("0000101k10pppppp0Stbbbbb"),
+         .operation = Operation::bit_memory,
+         .words = 1,
+         .cycles = 2},
+    Rule{.bits = encoding("000000010kqqqqqq0Stbbbbb"),
+         .operation = Operation::bit_memory,
+         .words = 1,
+         .cycles = 2},
+    Rule{.bits = encoding("0000101k11DDDDDD01tbbbbb"),
+         .operation = Operation::bit_register,
+         .words = 1,
+         .cycles = 2},
+    Rule{.bits = encoding("0000101k01MMMRRR1Stbbbbb"),
+         .operation = Operation::bit_jump,
+         .words = 2,
+         .cycles = 4},
+    Rule{.bits = encoding("0000101k00aaaaaa1Stbbbbb"),
+         .operation = Operation::bit_jump,
+         .words = 2,
+         .cycles = 4},
+    Rule{.bits = encoding("0000101k10pppppp1Stbbbbb"),
+         .operation = Operation::bit_jump,
+         .words = 2,
+         .cycles = 4},
+    Rule{.bits = encoding("0000101k11DDDDDD00tbbbbb"),
+         .operation = Operation::bit_jump,
+         .words = 2,
+         .cycles = 4},
+    Rule{.bits = encoding("000000011kqqqqqq1Stbbbbb"),
+         .operation = Operation::bit_jump,
+         .words = 2,
+         .cycles = 4},
+    Rule{.bits = encoding("0000110k10MMMRRR0Stbbbbb"),
+         .operation = Operation::bit_branch,
+         .words = 2,
+         .cycles = 5},
+    Rule{.bits = encoding("0000110k10aaaaaa1Stbbbbb"),
+         .operation = Operation::bit_branch,
+         .words = 2,
+         .cycles = 5},
+    Rule{.bits = encoding("0000110k11pppppp0Stbbbbb"),
+         .operation = Operation::bit_branch,
+         .words = 2,
+         .cycles = 5},
+    Rule{.bits = encoding("0000110k11DDDDDD10tbbbbb"),
+         .operation = Operation::bit_branch,
+         .words = 2,
+         .cycles = 5},
+    Rule{.bits = encoding("0000010010qqqqqqkStbbbbb"),
+         .operation = Operation::bit_branch,
+         .words = 2,
+         .cycles = 5},
     Rule{.bits = encoding("00000101W1MMMRRR0S1ddddd"),
          .operation = Operation::move_control_effective,
          .words = 1},
@@ -272,6 +333,11 @@ bool transfer_address(const Operation operation) noexcept {
 }
 
 bool rule_penalty(const Rule &rule, const Word opcode) noexcept {
+  if (rule.operation == Operation::bit_memory || rule.operation == Operation::bit_jump ||
+      rule.operation == Operation::bit_branch) {
+    const auto operand = bit_operand({.opcode = opcode, .operation = rule.operation});
+    return operand.location == BitLocation::effective && address_penalty(opcode);
+  }
   if (transfer_address(rule.operation)) {
     const auto mode = (opcode >> 11) & 7;
     const bool immediate_peripheral = rule.operation == Operation::move_peripheral_memory &&
@@ -297,6 +363,9 @@ Instruction decode(const Word opcode) noexcept {
     auto words = rule.words;
     if ((rule.operation == Operation::jump_effective ||
          rule.operation == Operation::call_effective || transfer_address(rule.operation) ||
+         (rule.operation == Operation::bit_memory &&
+          bit_operand({.opcode = opcode, .operation = rule.operation}).location ==
+              BitLocation::effective) ||
          (rule.operation == Operation::conditional_jump && (opcode & short_jump_bit) == 0)) &&
         ((opcode >> 11) & 7) == 6) {
       words = 2;
