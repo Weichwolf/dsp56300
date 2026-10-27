@@ -45,12 +45,17 @@ std::uint64_t Core::Impl::transfer_long(const std::uint64_t value) {
   return static_cast<std::uint64_t>(std::clamp(scaled, minimum, maximum)) & long_mask;
 }
 
-void Core::Impl::parallel(const Instruction &decoded) {
+bool Core::Impl::numeric_mode_supported() {
   if ((cpu.reg.sr & unsupported_numeric_modes) != 0 ||
       (cpu.reg.sr & (scale_up | scale_down)) == (scale_up | scale_down)) {
     fail(FaultKind::unsupported_mode, Space::program, current_pc, cpu.reg.sr);
-    return;
+    return false;
   }
+  return true;
+}
+
+void Core::Impl::parallel(const Instruction &decoded) {
+  if (!numeric_mode_supported()) { return; }
   latched = {cpu.reg.a, cpu.reg.b, cpu.reg.x, cpu.reg.y};
   moves(decoded);
   if (fault.kind == FaultKind::none) { alu(decoded.opcode & byte_mask); }

@@ -22,7 +22,7 @@ find_program(BLOFELD_CLANG_FORMAT NAMES clang-format-19 REQUIRED)
 set(CMAKE_CXX_CLANG_TIDY "${BLOFELD_CLANG_TIDY};--warnings-as-errors=*")
 
 add_library(dsp56300_core STATIC src/core.cpp src/core_state.cpp src/memory_arena.cpp
-  src/arithmetic.cpp src/decode.cpp src/moves.cpp src/registers.cpp src/agu.cpp src/control.cpp)
+  src/arithmetic.cpp src/shifts.cpp src/decode.cpp src/moves.cpp src/registers.cpp src/agu.cpp src/control.cpp)
 add_library(dsp56300::core ALIAS dsp56300_core)
 target_include_directories(dsp56300_core PUBLIC include)
 target_link_libraries(dsp56300_core PUBLIC blofeld_quality)
@@ -45,12 +45,21 @@ if(BUILD_TESTING)
   target_link_libraries(dsp56300_fixture_format PUBLIC blofeld_quality)
   add_executable(dsp56300_generate_arithmetic test/generate_arithmetic.cpp)
   target_link_libraries(dsp56300_generate_arithmetic PRIVATE dsp56300_fixture_format)
+  add_executable(dsp56300_generate_bits test/generate_bit_operations.cpp)
+  target_link_libraries(dsp56300_generate_bits PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_fixture_test test/fixture_test.cpp)
   target_link_libraries(dsp56300_fixture_test PRIVATE dsp56300::core dsp56300_fixture_format)
   add_executable(dsp56300_fixture_bench test/fixture_bench.cpp)
   target_link_libraries(dsp56300_fixture_bench PRIVATE dsp56300::core dsp56300_fixture_format)
   add_test(NAME arithmetic-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/arithmetic.d56")
+  add_test(NAME bit-operation-fixtures COMMAND dsp56300_fixture_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/bit-operations.d56")
+  add_test(NAME bit-fixture-reproducibility COMMAND "${CMAKE_COMMAND}"
+    "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_bits>"
+    "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/bits-regenerated.d56"
+    "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/bit-operations.d56"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
   add_test(NAME fixture-reproducibility COMMAND "${CMAKE_COMMAND}"
     "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_arithmetic>"
     "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/arithmetic-regenerated.d56"

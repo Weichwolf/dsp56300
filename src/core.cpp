@@ -109,8 +109,7 @@ void Core::Impl::step() {
       cpu.repeat_remaining != 0 && cpu.repeat_loaded ? repeated : instruction(current_pc);
   if (fault.kind != FaultKind::none) { return; }
   const bool repeating = cpu.repeat_remaining != 0;
-  if (repeating && (decoded.words != 1 || (decoded.operation != detail::Operation::parallel &&
-                                           decoded.operation != detail::Operation::nop))) {
+  if (repeating && (decoded.words != 1 || !detail::repeatable(decoded.operation))) {
     fail(FaultKind::invalid_instruction, Space::program, current_pc, decoded.opcode);
     return;
   }

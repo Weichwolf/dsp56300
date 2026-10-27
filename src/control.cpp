@@ -66,6 +66,10 @@ void Core::Impl::execute(const Instruction &decoded) {
   switch (decoded.operation) {
     case Operation::nop: return;
     case Operation::parallel: parallel(decoded); return;
+    case Operation::arithmetic_shift_immediate:
+    case Operation::arithmetic_shift_register:
+    case Operation::logical_shift_immediate:
+    case Operation::logical_shift_register: execute_shift(decoded); return;
     case Operation::jump_short: reg.pc = opcode & short_address_mask; return;
     case Operation::jump_effective:
       reg.pc = effective(

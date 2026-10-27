@@ -18,6 +18,16 @@ struct AddressUpdate {
   std::int32_t offset = 0;
 };
 
+struct ShiftControl {
+  unsigned count = 1;
+  bool destination_b = false, left = false;
+};
+
+struct AddOperands {
+  std::uint64_t left = 0, right = 0, carry_in = 0;
+  bool destination_b = false, subtract = false, compare = false, shift_overflow = false;
+};
+
 inline constexpr unsigned word_bits = 24;
 inline constexpr unsigned double_word_bits = 48;
 inline constexpr unsigned accumulator_bits = 56;

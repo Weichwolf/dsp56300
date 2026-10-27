@@ -34,6 +34,13 @@ struct Core::Impl {
   [[nodiscard]] bool unary(Word opcode);
   [[nodiscard]] bool logic(Word opcode);
   [[nodiscard]] bool addition(Word opcode);
+  [[nodiscard]] bool shifted_addition(Word opcode);
+  void add_operands(detail::AddOperands input);
+  [[nodiscard]] bool word_shift(Word opcode);
+  [[nodiscard]] bool numeric_mode_supported();
+  void execute_shift(const detail::Instruction &decoded);
+  void arithmetic_shift(std::uint64_t value, detail::ShiftControl control);
+  void logical_shift(detail::ShiftControl control, bool rotate = false);
   [[nodiscard]] Word read_register(unsigned number);
   void write_register(unsigned number, Word value);
   [[nodiscard]] Word effective(detail::AddressForm form);

@@ -28,6 +28,19 @@ latched REP body after a P-memory write, sequential REP interrupt exclusion
 and rejection of a control-flow body. Broader move, AGU, loop and interrupt
 expectations remain required. See doc/fixtures.txt for format and local assets.
 
+Bit/integer instruction extension: single-bit and immediate/register-controlled
+ASL/ASR and LSL/LSR, ROL/ROR, shifted ADDL/ADDR/SUBL/SUBR, and CMPM now have
+implementations. 4175 additional synthetic binary cases pass both backends in
+release and ASan/UBSan builds, with byte-for-byte regeneration. A separate
+finite-width bit model generates directed binary
+expectations for both accumulators, zero and boundary shift counts, aliased
+control/source registers, discarded bits, intermediate sign changes, scaling
+flags and preserved state. Defined shifts use constant-time host operations;
+out-of-range counts and currently unsupported numerical modes fault explicitly.
+REP can execute these single-word shifts and reevaluates register shift counts.
+The model uses wrapped 56-bit magnitudes for CMPM; its minimum-negative corner
+still needs independent hardware qualification. No hardware reference was used.
+
 Local source-built workload qualification: 512 binary fixtures for the ordinary
 and wide/rounded Blofeld sixteen-sample filter routines pass both backends in
 release and ASan/UBSan builds. Directed inputs cover both RM values, in-place

@@ -25,8 +25,6 @@ enum AluCode : std::uint8_t {
   op_negate = 0x36,
   op_asr = 0x22,
   op_asl = 0x32,
-  op_lsr = 0x23,
-  op_lsl = 0x33,
   op_not = 0x17,
   op_tfr_x0 = 0x41,
   op_tfr_y0 = 0x51,
@@ -205,17 +203,10 @@ bool Core::Impl::unary(const Word opcode) {
       arithmetic_flags(destination, before == (std::uint64_t{1} << host_sign_bit));
       return true;
     case op_asr:
-      destination =
-          static_cast<std::uint64_t>(std::bit_cast<std::int64_t>(before) >> 1) & padding_mask;
-      arithmetic_flags(destination, false);
-      cpu.reg.sr = (cpu.reg.sr & ~carry) | (((before >> padding_bits) & 1) != 0 ? carry : 0);
-      return true;
     case op_asl:
-      destination = before << 1;
-      arithmetic_flags(destination, ((before ^ destination) >> host_sign_bit) != 0);
-      cpu.reg.sr = (cpu.reg.sr & ~carry) | ((before >> host_sign_bit) != 0 ? carry : 0);
+      arithmetic_shift(before, {.destination_b = destination_b, .left = operation == op_asl});
       return true;
-    default: return false;
+    default: return word_shift(opcode);
   }
 }
 
@@ -223,26 +214,62 @@ bool Core::Impl::addition(const Word opcode) {
   const unsigned group = (opcode >> 4) & 7;
   const unsigned kind = opcode & 7;
   const bool with_carry = (group == 2 || group == 3) && (kind == 1 || kind == 5);
-  const bool compare = kind == 5 && (group == 0 || group >= 4);
+  const bool compare_magnitude = kind == 7 && (group == 0 || group >= 4);
+  const bool compare = compare_magnitude || (kind == 5 && (group == 0 || group >= 4));
   const bool add = (group >= 1 && kind == 0) || (with_carry && kind == 1);
   const bool subtract = (group >= 1 && kind == 4) || compare || (with_carry && kind == 5);
   if (!add && !subtract) { return false; }
   const bool destination_b = (opcode & 8U) != 0;
-  auto &destination = destination_b ? cpu.reg.b : cpu.reg.a;
-  const auto before = latched[destination_b ? 1 : 0];
-  const auto operand = source(group, destination_b);
-  const auto carry_in =
-      with_carry && (cpu.reg.sr & carry) != 0 ? std::uint64_t{1} << padding_bits : 0;
-  const auto intermediate = subtract ? wrapped_sub(before, operand) : wrapped_add(before, operand);
-  const auto result =
-      subtract ? wrapped_sub(intermediate, carry_in) : wrapped_add(intermediate, carry_in);
-  const bool overflowed = subtract ? ((before ^ operand) & (before ^ result)) >> host_sign_bit != 0
-                                   : signed_overflow(before, operand, result);
-  const bool carried = subtract ? (before < operand || intermediate < carry_in)
-                                : (intermediate < before || result < intermediate);
-  arithmetic_flags(result, overflowed);
+  const auto original = latched[destination_b ? 1 : 0];
+  const auto input = source(group, destination_b);
+  add_operands(
+      {.left = compare_magnitude ? magnitude(original) : original,
+       .right = compare_magnitude ? magnitude(input) : input,
+       .carry_in = with_carry && (cpu.reg.sr & carry) != 0 ? std::uint64_t{1} << padding_bits : 0,
+       .destination_b = destination_b,
+       .subtract = subtract,
+       .compare = compare});
+  return true;
+}
+
+void Core::Impl::add_operands(const AddOperands input) {
+  const auto before = input.left;
+  const auto operand = input.right;
+  const auto intermediate =
+      input.subtract ? wrapped_sub(before, operand) : wrapped_add(before, operand);
+  const auto result = input.subtract ? wrapped_sub(intermediate, input.carry_in)
+                                     : wrapped_add(intermediate, input.carry_in);
+  const bool overflowed = input.subtract
+                              ? ((before ^ operand) & (before ^ result)) >> host_sign_bit != 0
+                              : signed_overflow(before, operand, result);
+  const bool carried = input.subtract ? (before < operand || intermediate < input.carry_in)
+                                      : (intermediate < before || result < intermediate);
+  arithmetic_flags(result, input.shift_overflow || overflowed);
   cpu.reg.sr = (cpu.reg.sr & ~carry) | (carried ? carry : 0);
-  if (!compare) { destination = result; }
+  if (!input.compare) { (input.destination_b ? cpu.reg.b : cpu.reg.a) = result; }
+}
+
+bool Core::Impl::shifted_addition(const Word opcode) {
+  const auto operation = opcode & 0xf7U;
+  constexpr Word add_right = 0x02;
+  constexpr Word subtract_right = 0x06;
+  constexpr Word add_left = 0x12;
+  constexpr Word subtract_left = 0x16;
+  if (operation != add_right && operation != subtract_right && operation != add_left &&
+      operation != subtract_left) {
+    return false;
+  }
+  const bool destination_b = (opcode & 8U) != 0;
+  const bool left = (opcode & 16U) != 0;
+  const auto before = latched[destination_b ? 1 : 0];
+  const auto shifted =
+      left ? before << 1
+           : static_cast<std::uint64_t>(std::bit_cast<std::int64_t>(before) >> 1) & padding_mask;
+  add_operands({.left = shifted,
+                .right = latched[destination_b ? 0 : 1],
+                .destination_b = destination_b,
+                .subtract = (opcode & 4U) != 0,
+                .shift_overflow = left && ((before ^ shifted) >> host_sign_bit) != 0});
   return true;
 }
 
@@ -263,7 +290,7 @@ void Core::Impl::alu(const Word opcode) {
     cpu.reg.sr = (cpu.reg.sr & ~carry) | (transfer ? 0 : carry);
     return;
   }
-  if (unary(opcode) || logic(opcode) || addition(opcode)) { return; }
+  if (unary(opcode) || logic(opcode) || addition(opcode) || shifted_addition(opcode)) { return; }
   fail(FaultKind::unsupported_instruction, Space::program, current_pc, opcode);
 }
 } // namespace dsp56300

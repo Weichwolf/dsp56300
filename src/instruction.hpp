@@ -21,8 +21,36 @@ enum class Operation : std::uint8_t {
   or_control,
   repeat_immediate,
   loop_immediate,
-  end_loop
+  end_loop,
+  arithmetic_shift_immediate,
+  arithmetic_shift_register,
+  logical_shift_immediate,
+  logical_shift_register
 };
+
+[[nodiscard]] constexpr bool repeatable(const Operation operation) noexcept {
+  switch (operation) {
+    case Operation::parallel:
+    case Operation::nop:
+    case Operation::arithmetic_shift_immediate:
+    case Operation::arithmetic_shift_register:
+    case Operation::logical_shift_immediate:
+    case Operation::logical_shift_register: return true;
+    case Operation::unsupported:
+    case Operation::jump_short:
+    case Operation::jump_effective:
+    case Operation::call_short:
+    case Operation::call_effective:
+    case Operation::return_subroutine:
+    case Operation::return_interrupt:
+    case Operation::and_control:
+    case Operation::or_control:
+    case Operation::repeat_immediate:
+    case Operation::loop_immediate:
+    case Operation::end_loop:
+    default: return false;
+  }
+}
 
 struct Instruction {
   Word opcode = 0, extension = 0;
