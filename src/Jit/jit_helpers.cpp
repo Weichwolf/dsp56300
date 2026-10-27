@@ -3,6 +3,7 @@
 #include "core_impl.hpp"
 #include "dsp56300/core.hpp"
 #include "jit.hpp"
+#include "translation.hpp"
 
 #include <cstdint>
 
@@ -15,7 +16,8 @@ std::uint32_t Core::Impl::jit_execute(void *const owner,
   self.jit->helper_retired();
   const auto next = (operation->pc + operation->instruction.words) & word_mask;
   return self.cpu.reg.pc == next && self.cpu.repeat_remaining == 0 && !self.jit->dirty() &&
-                 (self.cpu.reg.sr & detail::numeric_mode_mask) == operation->mode
+                 (self.cpu.reg.sr & detail::numeric_mode_mask) == operation->mode &&
+                 detail::active_loop_address(self.cpu.reg) == operation->loop_address
              ? 2U
              : 1U;
 }

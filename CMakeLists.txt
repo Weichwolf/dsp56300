@@ -57,6 +57,9 @@ if(BUILD_TESTING)
   add_executable(dsp56300_native_dataflow_test test/native_dataflow_test.cpp)
   target_link_libraries(dsp56300_native_dataflow_test PRIVATE dsp56300::core)
   add_test(NAME native-dataflow-boundaries COMMAND dsp56300_native_dataflow_test)
+  add_executable(dsp56300_native_loop_test test/native_loop_test.cpp)
+  target_link_libraries(dsp56300_native_loop_test PRIVATE dsp56300::core)
+  add_test(NAME native-loop-boundaries COMMAND dsp56300_native_loop_test)
   add_executable(dsp56300_transfer_test test/transfer_test.cpp)
   target_link_libraries(dsp56300_transfer_test PRIVATE dsp56300::core)
   add_test(NAME transfer-boundaries COMMAND dsp56300_transfer_test)
@@ -92,6 +95,8 @@ if(BUILD_TESTING)
   target_link_libraries(dsp56300_generate_parallel_moves PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_dataflow test/generate_dataflow.cpp)
   target_link_libraries(dsp56300_generate_dataflow PRIVATE dsp56300_fixture_format)
+  add_executable(dsp56300_generate_loops test/generate_loops.cpp)
+  target_link_libraries(dsp56300_generate_loops PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_fixture_test test/fixture_test.cpp)
   target_link_libraries(dsp56300_fixture_test PRIVATE dsp56300::core dsp56300_fixture_format)
   add_executable(dsp56300_fixture_bench test/fixture_bench.cpp)
@@ -121,6 +126,13 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/parallel-moves.d56")
   add_test(NAME native-dataflow-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/native-dataflow.d56")
+  add_test(NAME loop-fixtures COMMAND dsp56300_fixture_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/loops.d56")
+  add_test(NAME loop-reproducibility COMMAND "${CMAKE_COMMAND}"
+    "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_loops>"
+    "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/loops-regenerated.d56"
+    "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/loops.d56"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
   add_test(NAME native-dataflow-reproducibility COMMAND "${CMAKE_COMMAND}"
     "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_dataflow>"
     "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/native-dataflow-regenerated.d56"

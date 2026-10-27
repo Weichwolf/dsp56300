@@ -45,8 +45,9 @@ std::uint64_t Core::Impl::pop() {
 
 void Core::Impl::finish_loop() {
   auto &reg = cpu.reg;
-  if ((reg.sr & loop_flag) == 0 || current_pc + current_words != reg.la + 1 ||
-      reg.pc != reg.la + 1 || cpu.repeat_remaining != 0) {
+  const auto last = (current_pc + current_words - 1) & word_mask;
+  const auto next = (reg.la + 1) & word_mask;
+  if ((reg.sr & loop_flag) == 0 || last != reg.la || reg.pc != next || cpu.repeat_remaining != 0) {
     return;
   }
   if (reg.lc > 1) {

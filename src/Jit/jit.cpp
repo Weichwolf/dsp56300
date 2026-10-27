@@ -5,6 +5,7 @@
 #include "dsp56300/core.hpp"
 #include "instruction.hpp"
 #include "jit_emitter.hpp"
+#include "translation.hpp"
 
 #include <algorithm>
 #include <cerrno>
@@ -24,7 +25,6 @@
 namespace dsp56300::detail {
 namespace {
 constexpr std::size_t cache_limit = std::size_t{8} << 20;
-constexpr unsigned mode_key_shift = 24;
 
 // A SysV tail bridge enters untyped generated code without pretending it has
 // Clang's compiler-emitted function-type metadata. No sanitizer is disabled.
@@ -124,12 +124,14 @@ std::unique_ptr<Block> Jit::Impl::compile(const Word block_limit) const {
   block->requested_limit = block_limit;
   auto pc = cpu.reg.pc;
   const auto mode = cpu.reg.sr & numeric_mode_mask;
+  const auto loop_address = active_loop_address(cpu.reg);
   for (Word index = 0; index < block_limit && pc < program.size(); ++index) {
     auto decoded = decode(program[pc] & word_mask);
     if (decoded.words > program.size() - pc) { break; }
     if (decoded.words == 2) { decoded.extension = program[pc + 1] & word_mask; }
-    block->operations.push_back({.instruction = decoded, .pc = pc, .mode = mode});
-    if (terminates(decoded.operation)) {
+    block->operations.push_back(
+        {.instruction = decoded, .pc = pc, .mode = mode, .loop_address = loop_address});
+    if (terminates(decoded.operation) || at_loop_end(block->operations.back())) {
       block->terminated = true;
       break;
     }
@@ -196,8 +198,7 @@ std::uint32_t Jit::run(const std::uint32_t budget) {
     self.statistics.executable_bytes = 0;
     self.invalidated = false;
   }
-  const auto key =
-      (std::uint64_t{self.cpu.reg.sr & numeric_mode_mask} << mode_key_shift) | self.cpu.reg.pc;
+  const auto key = translation_key(self.cpu.reg);
   auto found = self.blocks.find(key);
   const auto block_limit = std::min(budget, self.options.instructions_per_block);
   if (found == self.blocks.end() ||

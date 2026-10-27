@@ -97,8 +97,12 @@ and at every exit,
 so callbacks, fault exits and partial budgets observe complete canonical state.
 Conservative helper invalidation, dirty-mask epilogues and fast/slow merge rules
 precede wider
-allocation. These are foundations for lifted regions, not full SSA, flag
-liveness, native loop control, SIMD batching or hardware-isolated execution.
+allocation. Active LA/LF keys now permit native LC>1 loop continuation and remove
+per-instruction LF/LA tests away from a known ending. LC/SP/frame reads remain
+dynamic, helpers recheck loop context and final cleanup stays general. These are
+foundations for lifted regions, not full SSA, flag liveness, native final loop
+cleanup, SIMD batching or hardware-isolated execution. PC/progress batching
+remains a future experiment; it must preserve callback and fault observations.
 
 Evaluate joules per audio block using actual energy counters when accessible.
 Core count and GHz alone cannot establish energy: voltage, static power, cache

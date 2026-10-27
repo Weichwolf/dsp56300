@@ -65,14 +65,23 @@ void Code::rex(const Width width, const unsigned reg, const unsigned base, const
 
 void Code::indexed(const unsigned reg, const IndexedAddress address) {
   if (address.index == Reg::sp) { throw std::logic_error("RSP cannot index a guest word"); }
-  byte(mod_small | ((reg & 7U) << 3) | 4U);
+  if (!std::in_range<std::int32_t>(address.offset)) {
+    throw std::logic_error("x64 indexed displacement overflow");
+  }
+  constexpr std::size_t maximum_small = 127;
+  const bool small = address.offset <= maximum_small;
+  byte((small ? mod_small : mod_large) | ((reg & 7U) << 3) | 4U);
   byte((word_scale << 6) | ((static_cast<unsigned>(address.index) & 7U) << 3) |
        (static_cast<unsigned>(address.base) & 7U));
-  byte(0);
+  if (small) {
+    byte(static_cast<std::uint32_t>(address.offset));
+  } else {
+    u32(static_cast<std::uint32_t>(address.offset));
+  }
 }
 
-void Code::load_indexed(const Reg destination, const IndexedAddress address) {
-  rex(Width::dword,
+void Code::load_indexed(const Reg destination, const IndexedAddress address, const Width width) {
+  rex(width,
       static_cast<unsigned>(destination),
       static_cast<unsigned>(address.base),
       static_cast<unsigned>(address.index));

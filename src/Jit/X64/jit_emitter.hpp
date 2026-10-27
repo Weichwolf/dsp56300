@@ -50,6 +50,7 @@ private:
   void exit_if(x64::Branch condition);
   void finish();
   void loop_guard(const NativeOp &operation);
+  void loop_continue();
   void retire(const NativeOp &operation);
   x64::Code code_;
   JitRuntime runtime_;

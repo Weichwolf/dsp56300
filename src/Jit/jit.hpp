@@ -3,6 +3,7 @@
 #include "architecture.hpp"
 #include "dsp56300/core.hpp"
 #include "instruction.hpp"
+#include "translation.hpp"
 
 #include <array>
 #include <cstddef>
@@ -13,8 +14,12 @@
 namespace dsp56300::detail {
 struct NativeOp {
   Instruction instruction;
-  Word pc = 0, mode = 0;
+  Word pc = 0, mode = 0, loop_address = inactive_loop;
 };
+
+constexpr bool at_loop_end(const NativeOp &operation) noexcept {
+  return operation.loop_address == ((operation.pc + operation.instruction.words - 1) & word_mask);
+}
 
 using JitHelper = std::uint32_t (*)(void *, const NativeOp *) noexcept;
 

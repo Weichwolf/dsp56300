@@ -65,8 +65,12 @@ Exact four-byte guest words avoid overreads and mask raw caller-owned data to
 24 bits. A native_move_instructions diagnostic counts each successful fast
 transfer instruction once, including paired and immediate forms. Pure move
 instructions can retire natively too. Overwritten ALU inputs use the old snapshot.
-Loop-ending native instructions return to the general executor
-before any side effects, so its DO cleanup and fault rules remain authoritative.
+Continuing DO endings execute natively when the current LC exceeds one: decrement
+LC, read the saved 48-bit frame through the current masked SP and select its
+24-bit loop-start PC. No frame is popped on a continuing iteration. Final LC=1
+and malformed LC=0 cleanup return to general execution before any side effects,
+so stack cleanup and fault rules remain authoritative. Each native continuation
+returns at a normal instruction/budget boundary; there is no hidden loop batching.
 REP bodies use their original latched general execution path.
 
 Within a native block, RBP/RBX retain A/B. Native ALU writes update these host
@@ -100,9 +104,17 @@ Bit access and bit control-flow instructions currently use general helpers too.
 Bit SR writes and I/O-bit callback program changes use the same mode/invalidation
 exits; no new native-ALU or SIMD performance claim follows from this ISA extension.
 
-Blocks are keyed by guest PC and numerical mode. Planning reads only available
-P RAM and causes no guest fetch fault for instructions not executed. A helper
-exits its block on changed PC/mode, REP entry, a fault or P invalidation. All host
+Blocks are keyed by guest PC, seven numeric mode bits and active loop address.
+An inactive-loop sentinel distinguishes LF=0 from active LA=0. These coordinates
+fit injectively in 56 key bits; LC, SP and stack data stay dynamic. Planning stops
+at a known loop end. Native instructions away from that end need no repeated
+LF/LA loads; the ending instruction checks current LC. Every full helper exits
+on a changed LF/LA context before another specialized instruction can execute.
+The general loop boundary test masks both the last word and sequential PC to
+24 bits, including an extension word wrapped through P:0.
+Planning reads only available P RAM and causes no guest fetch fault for
+instructions not executed. A helper exits its block on changed PC/mode/loop
+context, REP entry, a fault or P invalidation. All host
 P mutations must use Core::load/write. Program changes from a synchronous I/O
 callback finish the already fetched instruction, then discard the successor
 translation. Invalidation defers destruction until executing code and embedded

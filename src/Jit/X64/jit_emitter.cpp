@@ -25,7 +25,7 @@ using x64::Reg;
 using x64::Width;
 constexpr auto status_offset = offsetof(Cpu, reg) + offsetof(Registers, sr);
 constexpr auto pc_offset = offsetof(Cpu, reg) + offsetof(Registers, pc);
-constexpr auto la_offset = offsetof(Cpu, reg) + offsetof(Registers, la);
+constexpr auto lc_offset = offsetof(Cpu, reg) + offsetof(Registers, lc);
 constexpr std::array register_offsets{
     offsetof(Registers, a), offsetof(Registers, b), offsetof(Registers, x), offsetof(Registers, y)};
 constexpr unsigned op_add = 0x01, op_sub = 0x29, op_or = 0x09, op_xor = 0x31;
@@ -37,8 +37,6 @@ constexpr unsigned product_shift = padding_bits + 1, carry_overflow_multiplier =
 constexpr Word unsupported_modes =
     compatibility_mode | multiply_mode | arithmetic_16 | arithmetic_saturation;
 constexpr std::array<std::uint8_t, 2> call_ax{0xff, 0xd0};
-constexpr std::array<std::uint8_t, 3> compare_ax_one{0x83, 0xf8, 0x01};
-constexpr std::array<std::uint8_t, 2> borrow_ax_ax{0x19, 0xc0};
 constexpr std::array<std::uint8_t, 3> increment_retired{0x41, 0xff, 0xc7};
 constexpr std::array<std::uint8_t, 4> entry_landing{0xf3, 0x0f, 0x1e, 0xfa};
 constexpr std::array<std::uint8_t, 14> save_nonvolatile{
@@ -193,15 +191,25 @@ void JitEmitter::helper(const JitHelper function, const NativeOp &operation) {
 }
 
 void JitEmitter::loop_guard(const NativeOp &operation) {
-  code_.load(Reg::ax, Reg::r12, status_offset, Width::dword);
-  code_.immediate(group_and, Reg::ax, loop_flag, Width::dword);
-  // An inactive loop gets an impossible LA value, avoiding an extra branch.
-  code_.raw(compare_ax_one); // CMP EAX,1; inactive gives CF=1.
-  code_.raw(borrow_ax_ax);   // SBB EAX,EAX: inactive=-1, active=0.
-  code_.load(Reg::dx, Reg::r12, la_offset, Width::dword);
-  code_.binary(op_or, {.destination = Reg::ax, .source = Reg::dx}, Width::dword);
-  code_.immediate(group_cmp, Reg::ax, operation.pc + operation.instruction.words - 1, Width::dword);
-  exit_if(Branch::equal);
+  if (!at_loop_end(operation)) { return; }
+  // Final iteration and malformed cleanup remain authoritative general execution.
+  code_.load(Reg::ax, Reg::r12, lc_offset, Width::dword);
+  code_.immediate(group_cmp, Reg::ax, 1, Width::dword);
+  exit_if(Branch::below_equal);
+}
+
+void JitEmitter::loop_continue() {
+  constexpr auto stack_offset = offsetof(Cpu, reg) + offsetof(Registers, stack);
+  constexpr auto sp_offset = offsetof(Cpu, reg) + offsetof(Registers, sp);
+  code_.load(Reg::ax, Reg::r12, sp_offset, Width::dword);
+  code_.immediate(group_and, Reg::ax, stack_entries - 1, Width::dword);
+  // Indexed addresses scale by four; a frame contains two stored host words.
+  code_.shift(shift_left, Reg::ax, 1, Width::dword);
+  code_.load_indexed(
+      Reg::dx, {.base = Reg::r12, .index = Reg::ax, .offset = stack_offset}, Width::qword);
+  code_.shift(shift_right, Reg::dx, word_bits);
+  code_.store(Reg::r12, pc_offset, Reg::dx, Width::dword);
+  code_.memory_immediate(group_sub, Reg::r12, lc_offset, Width::dword, 1);
 }
 
 void JitEmitter::arithmetic_flags(const Word mode, const bool carry_changed) {
@@ -336,13 +344,23 @@ void JitEmitter::native(const NativeOp &operation) {
 }
 
 void JitEmitter::retire(const NativeOp &operation) {
-  code_.store_constant(
-      Reg::r12, pc_offset, Width::dword, (operation.pc + operation.instruction.words) & word_mask);
+  if (at_loop_end(operation)) {
+    loop_continue();
+  } else {
+    code_.store_constant(Reg::r12,
+                         pc_offset,
+                         Width::dword,
+                         (operation.pc + operation.instruction.words) & word_mask);
+  }
   code_.store_constant(Reg::r12, offsetof(Cpu, repeat_completed), Width::word, 0);
   code_.memory_immediate(group_add, Reg::r12, offsetof(Cpu, instructions), Width::qword, 1);
   code_.memory_immediate(
       group_add, Reg::r12, offsetof(Cpu, cycles), Width::qword, operation.instruction.cycles);
   code_.raw(increment_retired); // INC R15D (retired instructions).
+  if (at_loop_end(operation)) {
+    code_.jump(exits_.at(dirty_accumulators()));
+    return;
+  }
   if (has_moves(operation)) {
     code_.load(Reg::ax, Reg::r13, offsetof(NativeContext, dirty));
     code_.memory_immediate(group_cmp, Reg::ax, 0, Width::byte, 0);

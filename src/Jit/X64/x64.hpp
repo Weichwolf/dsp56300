@@ -27,7 +27,12 @@ enum class Reg : std::uint8_t {
   r15
 };
 enum class Width : std::uint8_t { byte = 1, word = 2, dword = 4, qword = 8 };
-enum class Branch : std::uint8_t { above_equal = 0x83, equal = 0x84, not_equal = 0x85 };
+enum class Branch : std::uint8_t {
+  above_equal = 0x83,
+  equal = 0x84,
+  not_equal = 0x85,
+  below_equal = 0x86
+};
 
 struct RegisterPair {
   Reg destination, source;
@@ -35,6 +40,7 @@ struct RegisterPair {
 
 struct IndexedAddress {
   Reg base, index;
+  std::size_t offset = 0;
 };
 
 struct Label {
@@ -54,7 +60,7 @@ public:
   void constant(Reg destination, std::uint64_t value);
   void load(Reg destination, Reg base, std::size_t offset, Width width = Width::qword);
   void store(Reg base, std::size_t offset, Reg source, Width width = Width::qword);
-  void load_indexed(Reg destination, IndexedAddress address);
+  void load_indexed(Reg destination, IndexedAddress address, Width width = Width::dword);
   void store_indexed(IndexedAddress address, Reg source);
   void store_constant(Reg base, std::size_t offset, Width width, std::uint32_t value);
   void

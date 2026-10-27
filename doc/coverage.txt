@@ -223,6 +223,47 @@ snapshots, but per-instruction flags/PC/progress, guards and general helpers
 remain in the execution path. Native loop/control and wider region lowering
 remain required; the 270-million-instruction and whole-device goals are unmet.
 
+Guarded native DO continuation: translation keys now distinguish active LA/LF
+alongside PC and the seven numeric mode bits in 56 collision-free key bits.
+LC, SP and saved frame contents remain dynamic. Planning stops at a known loop
+end, and full helpers exit on changed LF/LA before specialized code continues.
+Instructions away from that ending no longer reload/test LF and LA individually.
+For LC>1, admitted native instructions execute their arithmetic/transfers,
+decrement LC, read the current 48-bit frame and return with its loop-start PC.
+Final LC=1 and malformed LC=0 cleanup remain on the general path before current
+instruction effects, preserving stack faults. No extra guest iteration is batched.
+3072 independent binary cases cover counts, three scaling modes/both RM choices,
+different one/two-word bodies, SP wrap positions and partial/full budgets.
+1968 host checks cover warm context changes, all SP positions, guest LA/LF/LC/SP
+writes, unsupported numeric modes, executing-code changes and 24-bit endpoints.
+The endpoint tests exposed and fixed an unwrapped sequential-PC comparison in
+general DO cleanup: LA=$FFFFFF and an extension at P:0 now compare wrapped word
+and next-PC coordinates. All backends use the same 24-bit boundary rule.
+These checks extend existing nested-loop FFT and real Blofeld workload coverage;
+full loop/interrupt timing, native final cleanup and complete ISA remain open.
+All 34 CTests pass in release and ASan/UBSan strict builds, including byte-exact
+fixture regeneration, complete FFT states and source-built Blofeld routines. The final
+additional loop-ending memory-fault checks also pass in both builds; they retain
+LC/SP/frames and exclude failed arithmetic from retirement.
+
+Native loop measurement: three alternating runs against d74dbd1 on the same
+single-core i5-10400/CPU2 warm-replay protocol reduce the four filter/LP12 medians
+by about 19-30%, or 1.23-1.43 times faster. Direct filters reach about 94-95 MIPS;
+complete LP12 cases reach 79-82 MIPS. Their executable mappings and compiled block
+counts are unchanged; seven additional instructions per call retire natively.
+The ready-state effect case falls from 55.72 to 47.38 microseconds, about 15%
+lower latency or 1.18 times faster, with 206 fewer full helpers per call. Its
+published executable mappings shrink from 112 to 100 KiB.
+Own DSP FFT programs improve by 1.12-1.22 times. The 1024-point case falls from
+1.920 to 1.578 ms, about 100 million retired guest instructions/s. Its guest
+instruction count remains 157810; full helper retirement falls from 44176 to
+39026. More active-loop contexts increase compiled blocks from 44 to 54 and
+published mappings from 224 to 256 KiB. These mappings include cold code and are
+not measured hot I-cache occupancy. The same fixed-point/full-state expectations
+remain mandatory. Raw trials, counters, executable/fixture hashes and protocol
+records stay local. This is initialized emulator replay, not a native-algorithm,
+continuous-audio, whole-device or energy claim. The 270-MIPS target remains unmet.
+
 Timing: documented base costs are being added for implemented forms. Pipeline
 interlocks, IRQ entry/return qualification, exact event admission and external
 waits remain open. A complete checkpoint API is pending; Registers omits hidden
