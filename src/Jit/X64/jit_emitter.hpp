@@ -16,6 +16,7 @@ struct NativeContext {
   JitRuntime runtime;
   bool *dirty = nullptr;
   std::uint64_t *native_moves = nullptr;
+  std::uint32_t budget = 0;
 };
 
 class JitEmitter {
@@ -51,6 +52,7 @@ private:
   void finish();
   void loop_guard(const NativeOp &operation);
   void loop_continue();
+  void loop_backedge();
   void retire(const NativeOp &operation);
   x64::Code code_;
   JitRuntime runtime_;
@@ -59,5 +61,7 @@ private:
   // Only native writes establish a live host value; dirty also implies valid.
   std::array<bool, 2> accumulator_dirty_{};
   std::array<x64::Label, 4> exits_;
+  x64::Label loop_header_;
+  Word loop_size_ = 0, loop_pc_ = 0;
 };
 } // namespace dsp56300::detail

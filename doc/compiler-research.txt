@@ -117,7 +117,12 @@ Conservative helper invalidation, dirty-mask epilogues and fast/slow merge rules
 precede wider
 allocation. Active LA/LF keys now permit native LC>1 loop continuation and remove
 per-instruction LF/LA tests away from a known ending. LC/SP/frame reads remain
-dynamic, helpers recheck loop context and final cleanup stays general. These are
+dynamic, helpers recheck loop context and final cleanup stays general. Guarded
+native self-loop backedges now repeat an eligible body without dispatcher
+reentry when its saved start PC matches and enough exact instruction budget
+remains. Full helpers inside the body retain continuation-context checks;
+ending transfers exit on invalidation. Accumulators materialize at each header
+backedge; no loop-carried register phi is assumed. These are
 foundations for lifted regions, not full SSA, flag liveness, native final loop
 cleanup, SIMD batching or hardware-isolated execution. PC/progress batching
 remains a future experiment; it must preserve callback and fault observations.

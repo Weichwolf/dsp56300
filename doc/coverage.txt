@@ -231,7 +231,9 @@ Instructions away from that ending no longer reload/test LF and LA individually.
 For LC>1, admitted native instructions execute their arithmetic/transfers,
 decrement LC, read the current 48-bit frame and return with its loop-start PC.
 Final LC=1 and malformed LC=0 cleanup remain on the general path before current
-instruction effects, preserving stack faults. No extra guest iteration is batched.
+instruction effects, preserving stack faults. This initial continuation step
+returned at each ending; the subsequent native backedge step below batches
+guarded repetitions within the same exact host budget.
 3072 independent binary cases cover counts, three scaling modes/both RM choices,
 different one/two-word bodies, SP wrap positions and partial/full budgets.
 1968 host checks cover warm context changes, all SP positions, guest LA/LF/LC/SP
@@ -241,7 +243,7 @@ general DO cleanup: LA=$FFFFFF and an extension at P:0 now compare wrapped word
 and next-PC coordinates. All backends use the same 24-bit boundary rule.
 These checks extend existing nested-loop FFT and real Blofeld workload coverage;
 full loop/interrupt timing, native final cleanup and complete ISA remain open.
-All 34 CTests pass in release and ASan/UBSan strict builds, including byte-exact
+That stage passed all 34 CTests in release and ASan/UBSan strict builds, including byte-exact
 fixture regeneration, complete FFT states and source-built Blofeld routines. The final
 additional loop-ending memory-fault checks also pass in both builds; they retain
 LC/SP/frames and exclude failed arithmetic from retirement.
@@ -263,6 +265,47 @@ not measured hot I-cache occupancy. The same fixed-point/full-state expectations
 remain mandatory. Raw trials, counters, executable/fixture hashes and protocol
 records stay local. This is initialized emulator replay, not a native-algorithm,
 continuous-audio, whole-device or energy claim. The 270-MIPS target remains unmet.
+
+Budgeted native loop backedges: bodies ending in an admitted native instruction
+now jump directly to their generated header when the dynamic saved loop-start
+PC equals the block's first PC and enough instruction budget remains for a full
+body. Ending transfers check invalidation before jumping. Full helpers inside
+the body retain sequential-PC, mode, LF/LA, REP and dirty-code continuation
+guards; a changed context/fault exits before stale execution. Final LC=1/0
+cleanup remains general. A/B materialize before each backedge so the existing
+empty-header-cache contract is preserved. This removes repeated dispatcher and
+entry/exit work without skipping guest state, callbacks or retirement.
+19104 direct native-entry checks verify actual multi-iteration execution,
+six numeric modes, one/two-word bodies, LC/SP/frame changes, short/maximum-32-bit
+budgets and cache reuse. Expanded host loop checks total 2202, including code
+invalidation at an ending with several iterations left, memory faults after
+successful iterations and a mixed helper/native loop that reloads LC forever
+but stops at every exact host budget. The original independent binary loop
+fixtures and full FFT/Blofeld state comparisons remain mandatory.
+Both release and ASan/UBSan strict suites pass all 35 executable tests; the
+separate KVM experiment is explicitly skipped for inaccessible /dev/kvm
+(36 registered tests, zero failures). Format/tidy/warning policies remain intact.
+This is guarded scalar loop execution, not SSA loop allocation, flag liveness,
+SIMD batching, multicore DSP execution, full ISA or calibrated device timing.
+
+Native backedge measurement: three alternating runs against the saved 93b9b01
+binary use the same CPU2/i5-10400 warm single-instance replay protocol, 64
+warmups and nine trials per run. Four filter/LP12 call medians fall by 7-14%
+(1.08-1.16 times faster). The ordinary/wide direct filters fall from 1269.56/
+1422.32 ns to 1104.76/1226.88 ns, or 94.14/97.81 million guest instructions/s.
+LP12 falls from 1944.65/2038.11 ns to 1803.69/1845.45 ns. The ready-state
+effect falls from 53.390 to 49.378 microseconds, 7.5% lower latency. Own DSP
+FFT medians fall by 3-7%; 1024 points falls from 1.780 to 1.663 ms, 94.89 MIPS.
+Retired guest instructions, native/helper/move mixes, compiled block counts and
+page-rounded executable mappings are unchanged for all nine scenarios. Added
+guards still occupy code bytes inside those mappings; hot I-cache occupancy
+was not measured. The benefit is dispatcher/entry/exit reduction, not discarded
+guest work. Frequency remains unfixed under powersave; absolute values must not
+be compared as fixed-frequency results with earlier sessions. One unusually
+slow first ordinary-filter baseline run is retained in the raw record; the
+reported value is the median of all three run medians. Fixture/executable hashes,
+raw logs and qualification records stay local. There is still no sustained
+270-MIPS, fixed-load CPU consumption, whole-device realtime or energy proof.
 
 Timing: documented base costs are being added for implemented forms. Pipeline
 interlocks, IRQ entry/return qualification, exact event admission and external

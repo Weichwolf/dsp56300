@@ -150,10 +150,11 @@ class Writer final : public Io {
 public:
   Core *core = nullptr;
   bool observed = false;
+  Word expected_count = 2;
 
   bool read(const Space space, const Word address, const Word pc, Word &value) noexcept override {
     observed = space == Space::x && address == port && pc == start && core != nullptr &&
-               core->registers().lc == 2 && core->progress().instructions == 0;
+               core->registers().lc == expected_count && core->progress().instructions == 0;
     if (!observed) { return false; }
     core->write(Space::program, start, clear_a);
     value = 1;
@@ -176,10 +177,11 @@ public:
   static constexpr Word port = 0xffff80, clear_a = 0x200013;
 };
 
-void callback_change(const Options options) {
+void callback_change(const Options options, const Word count) {
   Writer writer;
   Machine machine(options, &writer);
   writer.core = &machine.core;
+  writer.expected_count = count;
   constexpr Word read_x_negate_a = 0x44e036;
   machine.core.write(Space::program, start, read_x_negate_a);
   auto initial = seeded(loop_flag);
@@ -187,7 +189,7 @@ void callback_change(const Options options) {
   initial.a = 3;
   initial.x = 0;
   initial.r[0] = Writer::port;
-  initial.lc = 2;
+  initial.lc = count;
   initial.la = start;
   initial.stack[2] = std::uint64_t{start} << word_bits;
   auto expected = initial;
@@ -200,7 +202,7 @@ void callback_change(const Options options) {
   expected.sp = 0;
   expected.sc = 0;
   machine.core.set_registers(initial);
-  require(machine.core.run(2).dispatches == 2 && writer.observed &&
+  require(machine.core.run(count).dispatches == count && writer.observed &&
               machine.core.registers() == expected,
           "A loop-ending callback completes its fetched instruction before modified code executes");
 }
@@ -283,6 +285,66 @@ void ending_fault(const Options options) {
               actual.a == initial.a && actual.stack == initial.stack,
           "A loop-ending transfer fault cannot decrement LC or read/pop a continuation frame");
 }
+
+void fault_after_iterations(const Options options) {
+  Machine machine(options);
+  constexpr Word load_x_postincrement_negate_a = 0x44d836;
+  machine.core.write(Space::program, start, load_x_postincrement_negate_a);
+  machine.x[memory_words - 2] = 7;
+  machine.x[memory_words - 1] = 11;
+  auto initial = seeded(loop_flag);
+  initial.a = 3;
+  initial.la = start;
+  initial.lc = 4;
+  initial.r[0] = memory_words - 2;
+  initial.stack[2] = std::uint64_t{start} << word_bits;
+  machine.core.set_registers(initial);
+  const auto result = machine.core.run(4);
+  require(result.dispatches == 2 &&
+              result.progress == Progress{.instructions = 2, .estimated_cycles = 2} &&
+              result.fault.kind == FaultKind::memory_read && result.fault.pc == start &&
+              result.fault.address == memory_words,
+          "A memory guard can fail after earlier iterations retired through native backedges");
+  const auto actual = machine.core.registers();
+  require(actual.a == initial.a && actual.lc == 2 && actual.sp == initial.sp &&
+              actual.sc == initial.sc && actual.stack == initial.stack,
+          "A later fault materializes previous iterations without advancing the failing ending");
+}
+
+void bounded_lc_reload(const Options options) {
+  constexpr Word write_lc = 0x04c4bf;
+  constexpr std::array program{write_lc, mac_a};
+  Machine machine(options);
+  machine.core.load(Space::program, start, program);
+  for (const auto mode : modes) {
+    for (const Word budget : {2U, 3U, 6U, 7U, 128U, 129U}) {
+      auto initial = seeded(loop_flag | mode);
+      initial.la = start + 1;
+      initial.lc = 0;
+      initial.x = (initial.x & ~std::uint64_t{word_mask}) | 3;
+      initial.stack[2] = std::uint64_t{start} << word_bits;
+      auto expected = initial;
+      for (Word index = 0; index < budget; ++index) {
+        if (index % 2 == 0) {
+          expected.lc = 3;
+          ++expected.pc;
+        } else {
+          model(expected, mac_a);
+          --expected.lc;
+          expected.pc = start;
+        }
+      }
+      machine.core.set_registers(initial);
+      const auto before = machine.core.progress();
+      const auto result = machine.core.run(budget);
+      require(result.dispatches == budget && result.fault.kind == FaultKind::none &&
+                  machine.core.registers() == expected &&
+                  result.progress.instructions - before.instructions == budget &&
+                  result.progress.estimated_cycles - before.estimated_cycles == budget,
+              "A loop reloading LC through a full helper remains bounded by every host budget");
+    }
+  }
+}
 } // namespace
 } // namespace dsp56300::test
 
@@ -295,10 +357,13 @@ int main() {
         dsp56300::test::warm_contexts(options);
         dsp56300::test::stack_slots(options);
         for (unsigned kind = 0; kind < 5; ++kind) { dsp56300::test::guest_changes(options, kind); }
-        dsp56300::test::callback_change(options);
+        dsp56300::test::callback_change(options, 2);
+        dsp56300::test::callback_change(options, 4);
         dsp56300::test::invalid_modes(options);
         dsp56300::test::high_addresses(options);
         dsp56300::test::ending_fault(options);
+        dsp56300::test::fault_after_iterations(options);
+        dsp56300::test::bounded_lc_reload(options);
       }
     }
     std::cout << dsp56300::test::checks << " native loop boundary checks passed\n";

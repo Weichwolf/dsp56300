@@ -28,6 +28,7 @@ add_library(dsp56300_core STATIC
   src/Core/bits.cpp
   src/Jit/jit.cpp src/Jit/jit_helpers.cpp src/Jit/X64/jit_emitter.cpp src/Jit/X64/x64.cpp
   src/Jit/X64/jit_addition.cpp
+  src/Jit/X64/jit_loops.cpp
   src/Jit/native_moves.cpp src/Jit/dataflow.cpp src/Jit/X64/jit_moves.cpp
   src/Jit/X64/jit_move_address.cpp src/Jit/X64/jit_move_register.cpp
   src/Memory/memory_arena.cpp)
@@ -68,6 +69,10 @@ if(BUILD_TESTING)
   add_executable(dsp56300_native_loop_test test/native_loop_test.cpp)
   target_link_libraries(dsp56300_native_loop_test PRIVATE dsp56300::core)
   add_test(NAME native-loop-boundaries COMMAND dsp56300_native_loop_test)
+  add_executable(dsp56300_native_backedge_test test/native_backedge_test.cpp)
+  target_link_libraries(dsp56300_native_backedge_test PRIVATE dsp56300::core)
+  target_include_directories(dsp56300_native_backedge_test PRIVATE src/Core src/Jit)
+  add_test(NAME native-backedge-boundaries COMMAND dsp56300_native_backedge_test)
   add_executable(dsp56300_transfer_test test/transfer_test.cpp)
   target_link_libraries(dsp56300_transfer_test PRIVATE dsp56300::core)
   add_test(NAME transfer-boundaries COMMAND dsp56300_transfer_test)

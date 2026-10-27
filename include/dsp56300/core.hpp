@@ -68,6 +68,7 @@ struct RunResult {
 struct Options {
   Backend backend = Backend::cached;
   // Maximum straight-line translation length, bounded to [1,256].
+  // A native hardware-loop backedge can repeat the body within the run budget.
   Word instructions_per_block = 64;
   // False keeps generated blocks but executes every operation through the helpers.
   bool optimize = true;

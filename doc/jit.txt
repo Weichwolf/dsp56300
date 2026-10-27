@@ -69,8 +69,22 @@ Continuing DO endings execute natively when the current LC exceeds one: decremen
 LC, read the saved 48-bit frame through the current masked SP and select its
 24-bit loop-start PC. No frame is popped on a continuing iteration. Final LC=1
 and malformed LC=0 cleanup return to general execution before any side effects,
-so stack cleanup and fault rules remain authoritative. Each native continuation
-returns at a normal instruction/budget boundary; there is no hidden loop batching.
+so stack cleanup and fault rules remain authoritative. An admitted body ending
+in a native instruction can branch directly back to its generated header. The
+saved loop-start PC must equal the block's first PC, code must remain valid and
+the remaining call budget must cover another complete body. Otherwise execution
+returns with the canonical continuation state. Short tails keep the general
+fallback. A loop that reloads LC cannot exceed the host instruction budget.
+Full instruction helpers inside the body retain their sequential-PC, numeric
+mode, LA/LF, REP and invalidation checks before generated execution continues;
+faults or changed context exit immediately. The ending instruction's transfer
+also checks invalidation before any native backedge. Bodies ending in a general
+instruction still return through the existing helper path.
+Each backedge materializes dirty A/B before reentering a header compiled with
+empty caches. This avoids assuming loop-carried register allocation that has
+not been proven. Flags, PC, progress, dynamic LC/SP/frame reads, callback ordering
+and fault observations keep their per-instruction semantics. The optimization
+reduces dispatcher/entry/exit work, not guest retirement or elapsed DSP time.
 REP bodies use their original latched general execution path.
 
 Within a native block, RBP/RBX retain A/B. Native ALU writes update these host

@@ -25,7 +25,6 @@ using x64::Reg;
 using x64::Width;
 constexpr auto status_offset = offsetof(Cpu, reg) + offsetof(Registers, sr);
 constexpr auto pc_offset = offsetof(Cpu, reg) + offsetof(Registers, pc);
-constexpr auto lc_offset = offsetof(Cpu, reg) + offsetof(Registers, lc);
 constexpr std::array register_offsets{
     offsetof(Registers, a), offsetof(Registers, b), offsetof(Registers, x), offsetof(Registers, y)};
 constexpr unsigned op_add = 0x01, op_sub = 0x29, op_or = 0x09, op_xor = 0x31;
@@ -190,28 +189,6 @@ void JitEmitter::helper(const JitHelper function, const NativeOp &operation) {
   code_.raw(call_ax);
 }
 
-void JitEmitter::loop_guard(const NativeOp &operation) {
-  if (!at_loop_end(operation)) { return; }
-  // Final iteration and malformed cleanup remain authoritative general execution.
-  code_.load(Reg::ax, Reg::r12, lc_offset, Width::dword);
-  code_.immediate(group_cmp, Reg::ax, 1, Width::dword);
-  exit_if(Branch::below_equal);
-}
-
-void JitEmitter::loop_continue() {
-  constexpr auto stack_offset = offsetof(Cpu, reg) + offsetof(Registers, stack);
-  constexpr auto sp_offset = offsetof(Cpu, reg) + offsetof(Registers, sp);
-  code_.load(Reg::ax, Reg::r12, sp_offset, Width::dword);
-  code_.immediate(group_and, Reg::ax, stack_entries - 1, Width::dword);
-  // Indexed addresses scale by four; a frame contains two stored host words.
-  code_.shift(shift_left, Reg::ax, 1, Width::dword);
-  code_.load_indexed(
-      Reg::dx, {.base = Reg::r12, .index = Reg::ax, .offset = stack_offset}, Width::qword);
-  code_.shift(shift_right, Reg::dx, word_bits);
-  code_.store(Reg::r12, pc_offset, Reg::dx, Width::dword);
-  code_.memory_immediate(group_sub, Reg::r12, lc_offset, Width::dword, 1);
-}
-
 void JitEmitter::arithmetic_flags(const Word mode, const bool carry_changed) {
   constexpr unsigned normal_integer_shift = 55;
   constexpr unsigned negative_shift = 60;
@@ -357,24 +334,34 @@ void JitEmitter::retire(const NativeOp &operation) {
   code_.memory_immediate(
       group_add, Reg::r12, offsetof(Cpu, cycles), Width::qword, operation.instruction.cycles);
   code_.raw(increment_retired); // INC R15D (retired instructions).
-  if (at_loop_end(operation)) {
-    code_.jump(exits_.at(dirty_accumulators()));
-    return;
-  }
-  if (has_moves(operation)) {
+  if (has_moves(operation) && (!at_loop_end(operation) || loop_size_ != 0)) {
     code_.load(Reg::ax, Reg::r13, offsetof(NativeContext, dirty));
     code_.memory_immediate(group_cmp, Reg::ax, 0, Width::byte, 0);
     exit_if(Branch::not_equal);
   }
+  if (at_loop_end(operation)) {
+    if (loop_size_ != 0) {
+      loop_backedge();
+    } else {
+      code_.jump(exits_.at(dirty_accumulators()));
+    }
+  }
 }
 
 std::vector<std::uint8_t> JitEmitter::generate(const std::span<const NativeOp> operations) {
+  // Full helpers continue only after checking sequential PC, numeric/loop
+  // context, REP state and code validity. The ending itself must be native.
+  if (!operations.empty() && at_loop_end(operations.back()) && lowerable(operations.back())) {
+    loop_size_ = static_cast<Word>(operations.size());
+    loop_pc_ = operations.front().pc;
+  }
   code_.raw(entry_landing); // ENDBR64.
   code_.raw(save_nonvolatile);
   code_.mov({.destination = Reg::r12, .source = Reg::di});
   code_.mov({.destination = Reg::r13, .source = Reg::si});
   code_.binary(op_xor, {.destination = Reg::r15, .source = Reg::r15}, Width::dword);
   code_.load(Reg::r14, Reg::r13, offsetof(NativeContext, runtime) + offsetof(JitRuntime, latched));
+  code_.bind(loop_header_);
   for (const auto &operation : operations) {
     dataflow_ = analyze_dataflow(operation.instruction);
     if (lowerable(operation)) {

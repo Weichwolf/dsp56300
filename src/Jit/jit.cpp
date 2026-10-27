@@ -221,6 +221,7 @@ std::uint32_t Jit::run(const std::uint32_t budget) {
   const auto &block = *found->second;
   if (block.operations.size() > budget) { return 0; }
   const auto helpers = self.statistics.helper_instructions;
+  self.context.budget = budget;
   const auto retired = block.code->enter(self.cpu, self.context);
   self.statistics.native_alu_instructions +=
       retired - (self.statistics.helper_instructions - helpers);
