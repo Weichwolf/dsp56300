@@ -40,6 +40,7 @@ inline constexpr unsigned main_shift = 32;
 inline constexpr Word byte_mask = 0xff, five_bit_mask = 31, six_bit_mask = 63;
 inline constexpr Word modifier_mask = 0xffff, multiple_wrap_bit = 0x8000;
 inline constexpr Word multiple_wrap_mask = 0x3fff;
+inline constexpr Word multiple_reserved_bit = 0x4000;
 inline constexpr unsigned high_register_mask = 0x18;
 inline constexpr Word parallel_group_mask = 0xe00000, immediate_group = 0x200000;
 inline constexpr Word register_group_mask = 0xfc0000, update_group_mask = 0xffe000;

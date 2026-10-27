@@ -142,6 +142,19 @@ moves use ordinary numeric modes; other modes remain explicitly restricted.
 Updated-address/source aliases, extended hardware stack operation, pipeline
 interlocks and undefined instruction sequences remain unqualified.
 
+AGU extension: 31656 independent synthetic binary cases qualify directed linear,
+reverse-carry, normal-modulo and multiple-wrap calculations on all eight address
+registers. They include ignored modifier high bytes, 24-bit boundaries, signed
+normal offsets, whole-buffer strides beyond the modulo length, the positive
+reverse-carry N=$800000 endpoint, X/Y effective-address accesses, guest modifier
+replacement and repeated updates. The reference model uses integer ring
+coordinates and a serial carry/borrow circuit rather than the executor's address
+algorithm. Whole-buffer strides now move linearly to the corresponding position
+in another buffer; reserved multiple-wrap encodings fault explicitly. No hardware
+reference was used. Normal-modulo offsets beyond the length which are not whole
+buffer strides, initial pointers in gaps between modulo regions, and timing of
+address-register/source aliases remain unqualified.
+
 Timing: documented base costs are being added for implemented forms. Pipeline
 interlocks, IRQ entry/return qualification, exact event admission and external
 waits remain open. A complete checkpoint API is pending; Registers omits hidden
@@ -162,7 +175,7 @@ parallel memory moves. It has exact budgets, numerical mode keys, deferred P
 invalidation, bounded executable storage and immutable RX mappings. Shared
 fixtures cover all three backends; host tests check ABI/boundary behavior and
 native/helper counters expose actual lowered execution. See doc/jit.txt for
-instrumentation scope and remaining native work. All sixteen CTests pass in release
+instrumentation scope and remaining native work. All eighteen CTests pass in release
 and strict builds, including exact fixture regeneration. SIMD is not implemented.
 Earlier isolated arithmetic experiments do not establish emulator speed.
 More source-built workloads, register-bank SIMD

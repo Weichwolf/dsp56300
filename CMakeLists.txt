@@ -67,6 +67,8 @@ if(BUILD_TESTING)
   target_link_libraries(dsp56300_generate_transfers PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_bit_access test/generate_bit_access.cpp)
   target_link_libraries(dsp56300_generate_bit_access PRIVATE dsp56300_fixture_format)
+  add_executable(dsp56300_generate_addressing test/generate_addressing.cpp)
+  target_link_libraries(dsp56300_generate_addressing PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_fixture_test test/fixture_test.cpp)
   target_link_libraries(dsp56300_fixture_test PRIVATE dsp56300::core dsp56300_fixture_format)
   add_executable(dsp56300_fixture_bench test/fixture_bench.cpp)
@@ -81,6 +83,13 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/bit-access.d56")
   add_test(NAME bit-branch-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/bit-branches.d56")
+  add_test(NAME addressing-fixtures COMMAND dsp56300_fixture_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/addressing.d56")
+  add_test(NAME addressing-reproducibility COMMAND "${CMAKE_COMMAND}"
+    "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_addressing>"
+    "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/addressing-regenerated.d56"
+    "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/addressing.d56"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
   add_test(NAME bit-access-reproducibility COMMAND "${CMAKE_COMMAND}"
     "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_bit_access>"
     "-DACCESS_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/bit-access-regenerated.d56"
