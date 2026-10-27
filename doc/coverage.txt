@@ -71,6 +71,15 @@ do not establish emulator speed. More source-built workloads, register-bank SIMD
 measurements, guarded independent-voice batching and code/cache evidence remain
 required before a final performance claim.
 
+Measured scalar improvement: parallel instructions with a zero ALU byte now
+execute their move without saving unused ALU inputs or calling the no-op ALU
+dispatcher. All nonzero ALU forms retain the general path. Full synthetic and
+local Blofeld fixture checks pass in release/strict builds. Three alternating
+before/after measurements on two directed Blofeld filter cases reduce cached
+execution medians by approximately 9% (ordinary) and 7% (wide/rounded) on the
+i5-10400. This is a warm-call comparison on those cases, not a whole-device or
+final-core performance result.
+
 Integration: basic header/library target and memory/I/O contract exist.
 Installed package consumption and integration fixtures remain pending.
 The complete objective remains active. No full ISA/device/performance claim

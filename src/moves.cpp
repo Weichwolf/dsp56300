@@ -56,6 +56,10 @@ bool Core::Impl::numeric_mode_supported() {
 
 void Core::Impl::parallel(const Instruction &decoded) {
   if (!numeric_mode_supported()) { return; }
+  if ((decoded.opcode & byte_mask) == 0) {
+    moves(decoded);
+    return;
+  }
   latched = {cpu.reg.a, cpu.reg.b, cpu.reg.x, cpu.reg.y};
   moves(decoded);
   if (fault.kind == FaultKind::none) { alu(decoded.opcode & byte_mask); }
