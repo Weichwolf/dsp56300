@@ -1,38 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
+#include "fixture_memory.hpp"
 #include "support.hpp"
 
-#include <algorithm>
-#include <array>
 #include <cstddef>
 #include <exception>
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
 #include <string>
-#include <vector>
 
 namespace dsp56300::test {
 namespace {
-using Memory = std::array<std::vector<Word>, 3>;
-
-void patch(Memory &memory, const std::vector<MemoryBlock> &blocks) {
-  for (const auto &block : blocks) {
-    auto &space = memory.at(static_cast<std::size_t>(block.space));
-    if (block.address > space.size() || block.words.size() > space.size() - block.address) {
-      throw std::runtime_error("Fixture block outside memory span");
-    }
-    std::ranges::copy(block.words, space.begin() + block.address);
-  }
-}
-
 void check(const BinaryCase &item, const Backend backend) {
-  Memory memory;
-  for (std::size_t space = 0; space < memory.size(); ++space) {
-    memory[space].resize(item.memory_words[space]);
-  }
-  patch(memory, item.before);
+  auto memory = initial_memory(item);
   auto expected = memory;
   patch(expected, item.after);
   Core core({.program = memory[0], .x = memory[1], .y = memory[2]}, nullptr, {.backend = backend});

@@ -47,6 +47,8 @@ if(BUILD_TESTING)
   target_link_libraries(dsp56300_generate_arithmetic PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_fixture_test test/fixture_test.cpp)
   target_link_libraries(dsp56300_fixture_test PRIVATE dsp56300::core dsp56300_fixture_format)
+  add_executable(dsp56300_fixture_bench test/fixture_bench.cpp)
+  target_link_libraries(dsp56300_fixture_bench PRIVATE dsp56300::core dsp56300_fixture_format)
   add_test(NAME arithmetic-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/arithmetic.d56")
   add_test(NAME fixture-reproducibility COMMAND "${CMAKE_COMMAND}"

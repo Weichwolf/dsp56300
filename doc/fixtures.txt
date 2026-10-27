@@ -44,6 +44,24 @@ Or register a semicolon-separated list with CTest through a local CMake setting:
 Do not add private fixture paths to tracked presets. Test binaries, generators
 and the fixture format are not part of the installed public CPU interface.
 
+Warm single-instance benchmark
+
+  taskset -c 2 build/release/dsp56300_fixture_bench build/workloads/filter.d56 0
+
+The optional final argument selects a zero-based case. Each backend owns one
+DSP instance. The benchmark warms 64 calls, then reports the median and range
+of nine trials of 4096 calls. It restores host RAM/register initialization
+outside the instruction-execution timer, without flushing program decoding.
+Execution includes the clock-pair and retirement-check overhead, with no
+subtraction. Host preparation is reported separately. Results describe warm
+emulator execution, not arithmetic alone, a continuous audio stream or device
+performance. Calls must end without a fault, outside DO loops, at an admissible
+interrupt boundary with qualified visible state and unchanged program memory.
+Initial and terminal state are checked; progress is checked after each trial.
+ASan/UBSan builds validate the harness but are not performance measurements.
+External perf counts cover the entire process, including host preparation;
+they must not be presented as counters for the timed execution region alone.
+
 Wire format D56F, version 1
 
 Every integer is unsigned little-endian. u32/u64 always occupy 4/8 bytes.

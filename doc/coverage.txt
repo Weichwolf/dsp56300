@@ -28,6 +28,15 @@ latched REP body after a P-memory write, sequential REP interrupt exclusion
 and rejection of a control-flow body. Broader move, AGU, loop and interrupt
 expectations remain required. See doc/fixtures.txt for format and local assets.
 
+Local source-built workload qualification: 512 binary fixtures for the ordinary
+and wide/rounded Blofeld sixteen-sample filter routines pass both backends in
+release and ASan/UBSan builds. Directed inputs cover both RM values, in-place
+and separate output, signed corners and limiting. Independent integer recurrence
+expectations check complete visible state/memory and instruction base costs.
+Manufacturer program bytes, preparation/analysis and fixture manifests remain
+ignored. This does not qualify coefficient preparation, arbitrary aliases,
+interrupted calls, continuous streams or complete audio/device execution.
+
 Modes: ordinary 24-bit arithmetic, three defined transfer-scaling modes and
 two rounding choices have initial code. Compatibility, double precision,
 sixteen-bit arithmetic and arithmetic saturation reject at parallel execution;
@@ -38,11 +47,16 @@ interlocks, IRQ entry/return qualification, exact event admission and external
 waits remain open. A complete checkpoint API is pending; Registers omits hidden
 REP/interrupt continuation.
 
-Performance: no qualified final-core benchmark yet. JIT/SIMD are not implemented.
-Earlier isolated arithmetic experiments remain ignored local files and do not
-establish emulator speed. Real source-built Blofeld benchmarks, register-bank
-SIMD measurements, guarded independent-voice batching and code/cache evidence
-remain required.
+Performance: a binary-fixture replay benchmark now provides a warm scalar
+reference/cached baseline for the qualified source-built Blofeld filters.
+One DSP instance per backend, host restoration outside the execution timer,
+64 warmups and a median/range of nine 4096-call trials. Complete results are
+checked after warmup and each trial. This measures initialized call replay,
+including timer/retirement-check overhead; it is not continuous audio or device
+performance. JIT/SIMD are not implemented. Earlier isolated arithmetic experiments
+do not establish emulator speed. More source-built workloads, register-bank SIMD
+measurements, guarded independent-voice batching and code/cache evidence remain
+required before a final performance claim.
 
 Integration: basic header/library target and memory/I/O contract exist.
 Installed package consumption and integration fixtures remain pending.
