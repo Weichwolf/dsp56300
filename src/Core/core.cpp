@@ -36,6 +36,8 @@ Buffers validate(const Buffers buffers, const Options options) {
 
 Core::Impl::Impl(const Buffers supplied, Io *const host_io, const Options settings)
     : io(host_io), buffers(validate(supplied, settings)), options(settings) {
+  aliases_program[1] = overlaps_program(buffers.x);
+  aliases_program[2] = overlaps_program(buffers.y);
   if (options.backend == Backend::jit) {
     jit = std::make_unique<detail::Jit>(
         cpu,
@@ -44,6 +46,23 @@ Core::Impl::Impl(const Buffers supplied, Io *const host_io, const Options settin
         detail::JitRuntime{
             .owner = this, .latched = &latched, .execute = jit_execute, .moves = jit_moves});
   }
+}
+
+bool Core::Impl::overlaps_program(const std::span<const Word> memory) const {
+  const auto program = reinterpret_cast<std::uintptr_t>(buffers.program.data());
+  const auto other = reinterpret_cast<std::uintptr_t>(memory.data());
+  return other < program ? program - other < memory.size_bytes()
+                         : other - program < buffers.program.size_bytes();
+}
+
+void Core::Impl::invalidate_program_word(const Word *const location) {
+  const auto program = reinterpret_cast<std::uintptr_t>(buffers.program.data());
+  const auto address = reinterpret_cast<std::uintptr_t>(location);
+  if (address < program || address - program >= buffers.program.size_bytes()) { return; }
+  const auto index = (address - program) / sizeof(Word);
+  if (jit) { jit->invalidate(); }
+  pages[index / page_words].reset();
+  if (index != 0) { pages[(index - 1) / page_words].reset(); }
 }
 
 std::span<Word> Core::Impl::area(const Space space) const {
@@ -93,10 +112,8 @@ void Core::Impl::write_memory(const Space space, const Word address, const Word 
     return;
   }
   memory[address] = value & word_mask;
-  if (space == Space::program) {
-    if (jit) { jit->invalidate(); }
-    pages[address / page_words].reset();
-    if (address != 0) { pages[(address - 1) / page_words].reset(); }
+  if (aliases_program[static_cast<std::size_t>(space)]) {
+    invalidate_program_word(&memory[address]);
   }
 }
 
@@ -214,7 +231,13 @@ void Core::load(const Space space, const Word address, const std::span<const Wor
   for (std::size_t index = 0; index < words.size(); ++index) {
     memory[address + index] = words[index];
   }
-  if (space == Space::program) { clear_code_cache(); }
+  if (space == Space::program) {
+    clear_code_cache();
+  } else if (impl_->aliases_program[static_cast<std::size_t>(space)]) {
+    for (std::size_t index = 0; index < words.size(); ++index) {
+      impl_->invalidate_program_word(&memory[address + index]);
+    }
+  }
 }
 
 std::uint32_t Core::Impl::run_general(const std::uint32_t budget) {

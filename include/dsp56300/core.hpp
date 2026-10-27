@@ -98,7 +98,8 @@ public:
 
 // Three RAM address spaces, each word stored in uint32_t; sizes may differ.
 // Memory beyond the supplied spans faults, except I/O routed to the host.
-// The embedder owns contents and lifetime; mutate P only through Core::load/write.
+// Spans may overlap. The embedder owns contents/lifetime; mutate words aliasing
+// P only through Core::load/write, including accesses through X/Y spans.
 struct Buffers {
   std::span<Word> program, x, y;
 };

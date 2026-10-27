@@ -20,6 +20,8 @@ struct Core::Impl {
   void fail(FaultKind kind, Space space, Word address, Word value = 0);
   [[nodiscard]] Word read_memory(Space space, Word address);
   void write_memory(Space space, Word address, Word value);
+  [[nodiscard]] bool overlaps_program(std::span<const Word> memory) const;
+  void invalidate_program_word(const Word *location);
   [[nodiscard]] detail::Instruction instruction(Word pc);
   void step();
   void step_decoded(const detail::Instruction &decoded);
@@ -84,6 +86,7 @@ struct Core::Impl {
   detail::Instruction repeated;
   std::unique_ptr<detail::Jit> jit;
   Buffers buffers;
+  std::array<bool, 3> aliases_program{true, false, false};
   static constexpr std::size_t page_words = 1024;
   static constexpr std::size_t page_count = address_words / page_words;
   using Page = std::array<detail::Instruction, page_words>;

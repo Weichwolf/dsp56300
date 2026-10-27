@@ -183,7 +183,7 @@ for other operations and parallel memory moves. It has exact budgets, numerical 
 invalidation, bounded executable storage and immutable RX mappings. Shared
 fixtures cover all three backends; host tests check ABI/boundary behavior and
 native/helper counters expose actual lowered execution. See doc/jit.txt for
-instrumentation scope and remaining native work. All twenty-one CTests pass in release
+instrumentation scope and remaining native work. All twenty-two CTests pass in release
 and strict builds, including exact fixture regeneration. SIMD is not implemented.
 Earlier isolated arithmetic experiments do not establish emulator speed.
 More source-built workloads, register-bank SIMD
@@ -308,6 +308,12 @@ i5-10400. This is a warm-call comparison on those cases, not a whole-device or
 final-core performance result.
 
 Integration: basic header/library target and memory/I/O contract exist.
+Program-storage alias qualification: guest and host X/Y writes that overlap P
+now invalidate decoded/native caches, including previous-word extension entries.
+Seventy directed host checks cover shared and partially overlapping spans in
+both directions, opcode/extension changes and deferred invalidation while code
+is executing, across all three backends. No board mapping is supplied by this
+behavior. See doc/io.txt for the host mutation contract.
 doc/io.txt defines the synchronous word/atomic-bit callback contract, P mutation,
 fault context and stopped execution boundaries.
 Installed package consumption and integration fixtures remain pending.

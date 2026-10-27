@@ -28,3 +28,14 @@ Subsequent user clarifications (preserving the original objective above):
   semantics and representative Blofeld audio programs; isolated host arithmetic
   or NOP throughput cannot establish the target. Verify sustained realtime CPU
   consumption separately on the complete workload.
+- Treat the work as research into efficient native transpilation of a single
+  DSP program inside a safe VM. Investigate multicore execution and SIMD for
+  proven independent work, including serially expressed polyphonic processing.
+  Preserve dependencies and ordered observable effects, with general fallback.
+- Plan for near-full DSP load; faster host execution and additional headroom
+  are welcome without accelerating emulated time or changing event boundaries.
+  Investigate energy per audio block as well as throughput/latency; frequency
+  alone does not establish the energy benefit of additional host cores.
+- Include FFT as an additional benchmark, with fixed-point correctness and
+  distinct emulator/native-algorithm measurements. Use its dependency structure
+  to evaluate SIMD and multicore opportunities rather than assuming a gain.

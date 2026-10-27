@@ -28,6 +28,14 @@ change in a callback finishes the already fetched instruction, then fetches its
 successor from the modified program. Register views during a callback can
 reflect an in-flight instruction; they are not complete checkpoints.
 
+Supplied RAM spans may overlap. X/Y writes that address the same host word as
+program RAM invalidate both decoded instructions and native translations,
+including an opcode preceding a changed extension word. This applies to guest
+stores and host Core::write/load. A guest alias write finishes its fetched
+instruction before a modified successor is fetched. Direct host mutation of an
+X/Y word that aliases P is a program mutation too and must use Core::write/load.
+The core tracks storage aliases without inventing a derivative memory map.
+
 run, reset, set_registers and interrupt admission require stopped execution;
 callback reentry into these operations is rejected. Io methods are noexcept;
 the host must handle its own failures and return false to reject an access.
