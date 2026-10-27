@@ -1,0 +1,72 @@
+Native x64 execution
+
+Select Options.backend=Backend::jit on Linux x86-64. The default remains cached.
+This is an independent scalar SysV x64 emitter. No external DSP emulator,
+assembler, LLVM runtime or JIT library is linked. SSE/AVX lowering, block linking,
+native guest-RAM/AGU lowering and register allocation across instructions remain
+future work; this first backend is not the final performance objective.
+
+Core::run has the same exact guest-instruction budget on every backend. One REP
+iteration counts as one guest instruction. RunResult.dispatches retains its
+legacy field name but counts retired guest instructions, never native blocks.
+Progress excludes a failed instruction, including failed DO cleanup. A short
+budget tail may use the general executor. Block length is bounded by
+Options.instructions_per_block in [1,256]. The former unused prototype options
+for block links and DO dispatch batching have been removed.
+
+The emitter translates unrounded signed MPY/MAC variants, CLR, ABS, NEG, internal
+TFR and NOP retirement. Native flags use full left-aligned 56-bit accumulator
+coordinates, with distinct ordinary/down/up scaling specializations and sticky
+state preservation. Other supported instructions execute through the general
+executor. Options.optimize=false exercises generated helper-only blocks without
+native ALU lowering. Unsupported ISA/modes still report the existing explicit
+faults; selecting this backend does not implement the remaining ISA.
+
+Parallel moves use the same instrumented C++ path as the interpreters. They latch
+old A/B/X/Y before transfers and retain transfer scaling/limiting, AGU behavior,
+span checks, callback ordering and fault context. Emitted ALU inputs then read
+that old register snapshot. PCU register transfers and conditional IFcc forms
+remain on the general path. Emitted memory accesses are constant offsets into
+the CPU/register snapshot; guest RAM and peripheral accesses are not unchecked
+native loads. Loop-ending native instructions return to the general executor
+before any side effects, so its DO cleanup and fault rules remain authoritative.
+REP bodies use their original latched general execution path.
+
+Blocks are keyed by guest PC and numerical mode. Planning reads only available
+P RAM and causes no guest fetch fault for instructions not executed. A helper
+exits its block on changed PC/mode, REP entry, a fault or P invalidation. All host
+P mutations must use Core::load/write. Program changes from a synchronous I/O
+callback finish the already fetched instruction, then discard the successor
+translation. Invalidation defers destruction until executing code and embedded
+instruction metadata have returned. Callbacks may inspect state and read/write
+memory, but cannot reenter run/reset/set_registers/interrupt. Host initialization
+and interrupt admission require stopped execution.
+
+Executable mappings are written as RW and published as RX; published code is
+immutable and never RWX. The current cache caps published executable storage at
+8 MiB and drops cached translations when full. Metadata is separate host storage.
+Code generation and cold compilation can allocate; warm replay reuses blocks.
+Native entry/return preserves SysV nonvolatile registers and stack alignment.
+The entry has ENDBR64. A small assembly tail bridge enters generated code without
+inventing compiler-emitted UBSan function-type metadata.
+
+In strict builds, all project C++ (including code generation, allocation and
+memory/I/O helpers) keeps the ASan/UBSan options. No checks or functions are suppressed.
+Generated machine instructions and the assembly bridge are not compiler
+instrumented; constant-offset accesses, ABI boundaries and emitted arithmetic
+require their own validation. Clang's function check applies to compiler-typed
+indirect calls; the bridge uses the explicitly implemented native calling ABI.
+Reference: https://clang.llvm.org/docs/UndefinedBehaviorSanitizer.html
+
+JitStatistics reports compiled blocks, published executable bytes, P
+invalidations and successful native-ALU/helper retirement. The native ALU count
+can include instructions whose parallel transfers still call the move helper;
+it must not be interpreted as fully native RAM/I/O execution. These counters
+make fallback use visible in correctness tests and benchmarks.
+
+The shared binary fixtures run through reference, cached and native backends.
+Directed host tests verify exact/partitioned budgets, numeric mode changes,
+stale-code replacement, I/O invalidation of executing code, failed memory moves,
+DO restoration, failed cleanup and callback reentry rejection. Manufacturer
+programs/fixtures stay local. Benchmarks distinguish initialized warm calls
+from arithmetic-only experiments, continuous streams and whole-device behavior.

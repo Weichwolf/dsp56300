@@ -67,6 +67,8 @@ public:
             "Benchmark reproduces the qualified fixture at a quiescent boundary");
   }
 
+  [[nodiscard]] JitStatistics statistics() const noexcept { return core_.jit_statistics(); }
+
   Timing trial() {
     Timing timing;
     const auto before = core_.progress();
@@ -114,11 +116,17 @@ void benchmark(const BinaryCase &item, const Backend backend) {
   std::ranges::sort(execution);
   std::ranges::sort(preparation);
   constexpr auto middle = trial_count / 2;
-  std::cout << (backend == Backend::reference ? "reference" : "cached") << ": median execution "
-            << execution[middle] << " ns/call ("
+  std::cout << backend_name(backend) << ": median execution " << execution[middle] << " ns/call ("
             << execution[middle] / static_cast<double>(item.progress.instructions)
             << " ns/instruction), trial range " << execution.front() << ".." << execution.back()
             << "; host preparation " << preparation[middle] << " ns/call\n";
+  if (backend == Backend::jit) {
+    const auto statistics = replay.statistics();
+    std::cout << "  native ALU/retirement: " << statistics.native_alu_instructions
+              << ", full helpers: " << statistics.helper_instructions
+              << ", compiled blocks: " << statistics.compiled_blocks
+              << ", executable bytes: " << statistics.executable_bytes << '\n';
+  }
 }
 
 std::size_t case_index(const std::string_view text) {
@@ -144,7 +152,8 @@ int main(const int argc, const char *const *const argv) {
               << "One DSP instance per backend, 64 warmups, median of 9 x 4096 replays.\n"
               << "Execution includes timer/retirement-check overhead; no overhead subtraction.\n"
               << "Host RAM/register restoration is timed separately; no cold-load/device claim.\n";
-    for (const auto backend : {dsp56300::Backend::reference, dsp56300::Backend::cached}) {
+    for (const auto backend :
+         {dsp56300::Backend::reference, dsp56300::Backend::cached, dsp56300::Backend::jit}) {
       dsp56300::test::benchmark(item, backend);
     }
   } catch (const std::exception &error) {

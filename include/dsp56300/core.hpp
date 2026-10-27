@@ -59,6 +59,7 @@ struct Fault {
 };
 
 struct RunResult {
+  // Legacy name: the number of retired guest instructions, on every backend.
   std::uint32_t dispatches = 0;
   Progress progress;
   Fault fault;
@@ -66,15 +67,21 @@ struct RunResult {
 
 struct Options {
   Backend backend = Backend::cached;
-  // Bounds generated code size; a DO/REP can execute more guest instructions.
+  // Maximum straight-line translation length, bounded to [1,256].
   Word instructions_per_block = 64;
-  Word do_iterations_per_dispatch = 16;
-  bool link_blocks = true;
+  // False keeps generated blocks but executes every operation through the helpers.
   bool optimize = true;
+};
+
+struct JitStatistics {
+  std::uint64_t compiled_blocks = 0, native_alu_instructions = 0, helper_instructions = 0;
+  std::uint64_t executable_bytes = 0, invalidations = 0;
 };
 
 // No derivative peripherals are implemented by this CPU library. False means a
 // visible fail-stop error. Callbacks run synchronously on the execution thread.
+// Callbacks may read state and read/write memory, including P invalidation. They
+// must not reenter run/reset/register initialization/interrupt admission.
 class Io {
 public:
   Io() = default;
@@ -130,13 +137,15 @@ public:
   void set_registers(const Registers &state);
   [[nodiscard]] Progress progress() const noexcept;
   [[nodiscard]] Fault fault() const noexcept;
+  // Native ALU instructions may still use an instrumented parallel-move helper.
+  [[nodiscard]] JitStatistics jit_statistics() const noexcept;
   [[nodiscard]] Word read(Space space, Word address) const;
   void write(Space space, Word address, Word value);
   void load(Space space, Word address, std::span<const Word> words);
-  // Reference/cached dispatches retire one instruction, including one REP iteration.
-  // A future JIT dispatch may execute a compiled block; JIT selection currently rejects.
+  // Exact guest-instruction budget on every backend, including each REP iteration.
+  // Translated blocks never exceed the budget; a short tail can use the interpreter.
   // Faults require reset. CPU state after a failed dispatch is not committed evidence.
-  [[nodiscard]] RunResult run(std::uint32_t dispatches);
+  [[nodiscard]] RunResult run(std::uint32_t instruction_budget);
   [[nodiscard]] bool interruptible() const;
   // Host-admitted vector/priority at a stopped boundary, not an on-chip IRQ controller.
   // The kernel verifies mask/REP constraints. Derivative arbitration stays with the host.

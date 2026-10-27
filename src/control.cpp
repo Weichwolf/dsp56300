@@ -2,6 +2,7 @@
 #include "architecture.hpp"
 #include "core_impl.hpp"
 #include "dsp56300/core.hpp"
+#include "execution_guard.hpp"
 #include "instruction.hpp"
 
 #include <cstdint>
@@ -139,6 +140,7 @@ void Core::Impl::execute(const Instruction &decoded) {
 }
 
 void Core::interrupt(const Word vector, const unsigned level) {
+  const ExecutionGuard guard(impl_->executing);
   auto &state = impl_->cpu.reg;
   const auto mask = (state.sr >> interrupt_level_shift) & interrupt_level_mask;
   if (vector > word_mask || (vector & 1U) != 0 || level > maximum_level || level < mask ||

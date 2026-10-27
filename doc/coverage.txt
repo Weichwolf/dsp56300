@@ -18,9 +18,11 @@ ISA: partial. Selected multiply/MAC, add/subtract, logical/unary operations,
 parallel moves, AGU paths, basic control, DO/REP and admitted interrupts have
 initial code. Coded forms are not all qualified. Independent tests currently
 cover the manual MAC example, old-register latching on a parallel move,
-REP/LC restore and fail-stop diagnostics through both execution paths.
-567 synthetic binary cases independently cover MAC, NEG, ADC/SBC carry and
-RND ties in all three scaling modes and both rounding modes. Cases compare
+REP/LC restore and fail-stop diagnostics through all three execution paths.
+3369 synthetic binary cases independently cover all eight signed product input
+pairs with MPY/MAC sign/accumulation variants, A/B destinations, ABS/NEG and
+internal transfer sources, ADC/SBC carry and RND ties. They cover all three
+scaling modes and both rounding modes where relevant. Cases compare
 complete visible register and memory state, progress and interrupt admission.
 The expectation generator does not link or execute the emulator; generated
 bytes must match the checked-in fixture. Host-sequence tests also cover a
@@ -30,7 +32,7 @@ expectations remain required. See doc/fixtures.txt for format and local assets.
 
 Bit/integer instruction extension: single-bit and immediate/register-controlled
 ASL/ASR and LSL/LSR, ROL/ROR, shifted ADDL/ADDR/SUBL/SUBR, and CMPM now have
-implementations. 4175 additional synthetic binary cases pass both backends in
+implementations. 4175 additional synthetic binary cases pass all three backends in
 release and ASan/UBSan builds, with byte-for-byte regeneration. A separate
 finite-width bit model generates directed binary
 expectations for both accumulators, zero and boundary shift counts, aliased
@@ -54,7 +56,7 @@ Parallel encodings have a statically checked disjoint fast decode before the
 more specific rules. This does not establish complete control/interrupt timing.
 
 Local source-built workload qualification: 512 binary fixtures for the ordinary
-and wide/rounded Blofeld sixteen-sample filter routines pass both backends in
+and wide/rounded Blofeld sixteen-sample filter routines pass all three backends in
 release and ASan/UBSan builds. Directed inputs cover both RM values, in-place
 and separate output, signed corners and limiting. Independent integer recurrence
 expectations check complete visible state/memory and instruction base costs.
@@ -64,7 +66,7 @@ arbitrary aliases, interrupted calls, continuous streams or complete device
 execution.
 
 Additional complete LP12 workload qualification: 2400 local source-built calls
-pass both backends in release and ASan/UBSan builds. Independent equations
+pass all three backends in release and ASan/UBSan builds. Independent equations
 prepare coefficients from directed cutoff/resonance and synthetic curve pairs,
 then evaluate the fixed-point recurrence. Cases include both RM choices, linear
 modifiers, N0=1/3, negative damping, the cutoff-dependent floor, the strict wide
@@ -81,7 +83,10 @@ these required modes remain to be implemented and tested.
 Timing: documented base costs are being added for implemented forms. Pipeline
 interlocks, IRQ entry/return qualification, exact event admission and external
 waits remain open. A complete checkpoint API is pending; Registers omits hidden
-REP/interrupt continuation.
+REP/interrupt continuation. Instruction budgets now have identical guest
+retirement semantics on all backends; failed DO cleanup does not consume
+instructions or base cycles. Host callback execution/reset/register/interrupt
+reentry is rejected while memory access and P invalidation remain permitted.
 
 Performance: a binary-fixture replay benchmark now provides a warm scalar
 reference/cached baseline for the qualified source-built Blofeld filters.
@@ -89,10 +94,27 @@ One DSP instance per backend, host restoration outside the execution timer,
 64 warmups and a median/range of nine 4096-call trials. Complete results are
 checked after warmup and each trial. This measures initialized call replay,
 including timer/retirement-check overhead; it is not continuous audio or device
-performance. JIT/SIMD are not implemented. Earlier isolated arithmetic experiments
-do not establish emulator speed. More source-built workloads, register-bank SIMD
+performance. An initial independent scalar x64 JIT now emits unrounded MPY/MAC,
+CLR/ABS/NEG/TFR and NOP, with guarded general helpers for other operations and
+parallel memory moves. It has exact budgets, numerical mode keys, deferred P
+invalidation, bounded executable storage and immutable RX mappings. Shared
+fixtures cover all three backends; host tests check ABI/boundary behavior and
+native/helper counters expose actual lowered execution. See doc/jit.txt for
+instrumentation scope and remaining native work. All nine CTests pass in release
+and strict builds, including exact fixture regeneration. SIMD is not implemented.
+Earlier isolated arithmetic experiments do not establish emulator speed.
+More source-built workloads, register-bank SIMD
 measurements, guarded independent-voice batching and code/cache evidence remain
 required before a final performance claim.
+
+Measured native improvement: on four directed ordinary/wide filter and complete
+LP12 cases, the first scalar JIT reduces warm execution medians by 23-24%
+relative to cached execution in the same release binary on the i5-10400.
+Three runs per case use the replay protocol above; compare the median of run
+medians. The published executable working set is 16-20 KiB for these cases.
+Native ALU still calls parallel-move helpers, and cold compilation is excluded.
+These measurements qualify those initialized calls only. Exact local inputs,
+artifact hashes and raw measurements remain in ignored workload/analysis files.
 
 Measured scalar improvement: parallel instructions with a zero ALU byte now
 execute their move without saving unused ALU inputs or calling the no-op ALU

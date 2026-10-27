@@ -1,0 +1,44 @@
+// SPDX-License-Identifier: GPL-3.0-only
+#pragma once
+#include "architecture.hpp"
+#include "dsp56300/core.hpp"
+#include "instruction.hpp"
+
+#include <array>
+#include <cstdint>
+#include <memory>
+#include <span>
+
+namespace dsp56300::detail {
+struct NativeOp {
+  Instruction instruction;
+  Word pc = 0, mode = 0;
+};
+
+using JitHelper = std::uint32_t (*)(void *, const NativeOp *) noexcept;
+
+struct JitRuntime {
+  void *owner = nullptr;
+  std::array<std::uint64_t, 4> *latched = nullptr;
+  JitHelper execute = nullptr, moves = nullptr;
+};
+
+class Jit {
+public:
+  Jit(Cpu &cpu, std::span<const Word> program, Options options, JitRuntime runtime);
+  ~Jit();
+  Jit(const Jit &) = delete;
+  Jit &operator=(const Jit &) = delete;
+  [[nodiscard]] static bool available() noexcept;
+  [[nodiscard]] std::uint32_t run(std::uint32_t budget);
+  [[nodiscard]] bool dirty() const noexcept;
+  void invalidate() noexcept;
+  void reset();
+  void helper_retired() noexcept;
+  [[nodiscard]] JitStatistics statistics() const noexcept;
+
+private:
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
+};
+} // namespace dsp56300::detail

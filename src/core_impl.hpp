@@ -4,6 +4,7 @@
 #include "architecture.hpp"
 #include "dsp56300/core.hpp"
 #include "instruction.hpp"
+#include "jit.hpp"
 
 #include <array>
 #include <cstddef>
@@ -20,6 +21,12 @@ struct Core::Impl {
   void write_memory(Space space, Word address, Word value);
   [[nodiscard]] detail::Instruction instruction(Word pc);
   void step();
+  void step_decoded(const detail::Instruction &decoded);
+  [[nodiscard]] std::uint32_t run_general(std::uint32_t budget);
+  [[nodiscard]] static std::uint32_t jit_execute(void *owner,
+                                                 const detail::NativeOp *operation) noexcept;
+  [[nodiscard]] static std::uint32_t jit_moves(void *owner,
+                                               const detail::NativeOp *operation) noexcept;
   void execute(const detail::Instruction &decoded);
   void execute_immediate(const detail::Instruction &decoded);
   void execute_jump(const detail::Instruction &decoded);
@@ -64,6 +71,7 @@ struct Core::Impl {
   Io *io;
   std::array<std::uint64_t, 4> latched{};
   detail::Instruction repeated;
+  std::unique_ptr<detail::Jit> jit;
   Buffers buffers;
   static constexpr std::size_t page_words = 1024;
   static constexpr std::size_t page_count = address_words / page_words;
@@ -73,5 +81,6 @@ struct Core::Impl {
   unsigned current_words = 1;
   Options options;
   Fault fault;
+  bool executing = false;
 };
 } // namespace dsp56300

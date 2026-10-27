@@ -62,7 +62,8 @@ void append(std::vector<BinaryCase> &cases, const ArithmeticCase &input) {
   item.initial = input.initial;
   item.expected = input.initial;
   item.expected.pc = start + 1;
-  item.expected.a = static_cast<std::uint64_t>(input.full) & accumulator_mask;
+  ((input.opcode & 8U) != 0 ? item.expected.b : item.expected.a) =
+      static_cast<std::uint64_t>(input.full) & accumulator_mask;
   item.expected.sr = input.status;
   item.before.push_back({.words = {parallel_none | input.opcode}, .address = start});
   cases.push_back(std::move(item));
@@ -198,6 +199,150 @@ void round_cases(std::vector<BinaryCase> &cases) {
     }
   }
 }
+
+constexpr Word x0 = 0x123456, x1 = 0xfedcba, y0 = 0x345678, y1 = 0x876543;
+constexpr std::uint64_t initial_x = (std::uint64_t{x1} << word_bits) | x0;
+constexpr std::uint64_t initial_y = (std::uint64_t{y1} << word_bits) | y0;
+constexpr Word changed_flags = flag_n | flag_z | flag_e | flag_u | flag_v;
+
+struct ProductInput {
+  Registers state;
+  Word left = 0, right = 0, opcode = 0;
+};
+
+void product_case(std::vector<BinaryCase> &cases, const ProductInput &input) {
+  const auto before = (input.opcode & 8U) != 0 ? input.state.b : input.state.a;
+  const auto initial = (input.opcode & 2U) != 0 ? signed56(before) : 0;
+  const auto term = 2 * signed24(input.left) * signed24(input.right);
+  const auto full = initial + ((input.opcode & 4U) != 0 ? -term : term);
+  const auto raw = static_cast<std::uint64_t>(full) & accumulator_mask;
+  const auto status = (input.state.sr & ~changed_flags) |
+                      flags({.raw = raw,
+                             .mode = input.state.sr & (mode_down | mode_up),
+                             .overflowed = full < minimum56 || full > maximum56});
+  append(cases, {.initial = input.state, .full = full, .opcode = input.opcode, .status = status});
+}
+
+struct ProductConfig {
+  std::uint64_t accumulator = 0;
+  Word mode = 0;
+  bool destination_b = false, carry = false;
+};
+
+void product_variants(std::vector<BinaryCase> &cases, const ProductConfig input) {
+  // Table 12-16, with distinct words so bank/high/low selector mistakes are visible.
+  struct Pair {
+    Word selector, left, right;
+  };
+
+  constexpr std::array<Pair, 8> pairs{{{.selector = 0, .left = x0, .right = x0},
+                                       {.selector = 1, .left = y0, .right = y0},
+                                       {.selector = 2, .left = x1, .right = x0},
+                                       {.selector = 3, .left = y1, .right = y0},
+                                       {.selector = 4, .left = x0, .right = y1},
+                                       {.selector = 5, .left = y0, .right = x0},
+                                       {.selector = 6, .left = x1, .right = y0},
+                                       {.selector = 7, .left = y1, .right = x1}}};
+  auto state = initial_state();
+  state.a = input.accumulator;
+  state.b = input.accumulator;
+  state.x = initial_x;
+  state.y = initial_y;
+  state.sr = input.mode | flag_s | changed_flags | (input.carry ? flag_c | flag_l : 0);
+  const Word base = 0x80U | (input.destination_b ? 8U : 0U);
+  for (const auto pair : pairs) {
+    for (const bool negative : {false, true}) {
+      for (const bool accumulate : {false, true}) {
+        product_case(cases,
+                     {.state = state,
+                      .left = pair.left,
+                      .right = pair.right,
+                      .opcode = base | (pair.selector << 4) | (negative ? 4U : 0U) |
+                                (accumulate ? 2U : 0U)});
+      }
+    }
+  }
+}
+
+void product_matrix(std::vector<BinaryCase> &cases) {
+  for (const auto accumulator : accumulators) {
+    for (const Word mode : {Word{0}, mode_down, mode_up}) {
+      for (const bool destination_b : {false, true}) {
+        for (const bool carry : {false, true}) {
+          product_variants(cases,
+                           {.accumulator = accumulator,
+                            .mode = mode,
+                            .destination_b = destination_b,
+                            .carry = carry});
+        }
+      }
+    }
+  }
+}
+
+void absolute_case(std::vector<BinaryCase> &cases, const ProductConfig input) {
+  auto state = initial_state();
+  state.a = input.accumulator;
+  state.b = input.accumulator;
+  state.sr = input.mode | flag_s | changed_flags | (input.carry ? flag_c | flag_l : 0);
+  const auto value = signed56(input.accumulator);
+  const auto full = value < 0 ? -value : value;
+  const auto raw = static_cast<std::uint64_t>(full) & accumulator_mask;
+  const auto status =
+      (state.sr & ~changed_flags) |
+      flags({.raw = raw, .mode = input.mode, .overflowed = input.accumulator == sign56});
+  constexpr Word absolute = 0x26;
+  append(cases,
+         {.initial = state,
+          .full = full,
+          .opcode = absolute | (input.destination_b ? 8U : 0U),
+          .status = status});
+}
+
+void absolute_matrix(std::vector<BinaryCase> &cases) {
+  for (const auto accumulator : accumulators) {
+    for (const Word mode : {Word{0}, mode_down, mode_up}) {
+      for (const bool destination_b : {false, true}) {
+        for (const bool carry : {false, true}) {
+          absolute_case(cases,
+                        {.accumulator = accumulator,
+                         .mode = mode,
+                         .destination_b = destination_b,
+                         .carry = carry});
+        }
+      }
+    }
+  }
+}
+
+void transfer_case(std::vector<BinaryCase> &cases, const ProductConfig input, const Word selector) {
+  auto state = initial_state();
+  state.a = accumulators[3];
+  state.b = accumulators[5];
+  state.x = initial_x;
+  state.y = initial_y;
+  state.sr = input.mode | status_byte;
+  std::int64_t value = signed56(input.destination_b ? state.a : state.b);
+  if (selector != 0) {
+    constexpr std::array<Word, 4> inputs{x0, y0, x1, y1};
+    value = signed24(inputs.at(selector - 4)) * (std::int64_t{1} << word_bits);
+  }
+  append(cases,
+         {.initial = state,
+          .full = value,
+          .opcode = (selector << 4) | (input.destination_b ? 8U : 0U) | 1U,
+          .status = state.sr});
+}
+
+void transfer_matrix(std::vector<BinaryCase> &cases) {
+  for (const Word mode : {Word{0}, mode_down, mode_up}) {
+    for (const bool destination_b : {false, true}) {
+      for (const Word selector : {0U, 4U, 5U, 6U, 7U}) {
+        transfer_case(cases, {.mode = mode, .destination_b = destination_b}, selector);
+      }
+    }
+  }
+}
 } // namespace
 } // namespace dsp56300::test
 
@@ -209,6 +354,9 @@ int main(const int argc, const char *const *const argv) {
     dsp56300::test::negate_cases(cases);
     dsp56300::test::carry_cases(cases);
     dsp56300::test::round_cases(cases);
+    dsp56300::test::product_matrix(cases);
+    dsp56300::test::absolute_matrix(cases);
+    dsp56300::test::transfer_matrix(cases);
     const auto count = cases.size();
     dsp56300::test::write_fixture(argv[1], std::move(cases));
     std::cout << count << " independent arithmetic cases written\n";

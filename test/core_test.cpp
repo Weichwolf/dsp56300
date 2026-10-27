@@ -134,7 +134,8 @@ void check_repeat_restriction(const dsp56300::Backend backend) {
 
 int main() {
   try {
-    for (const auto backend : {dsp56300::Backend::reference, dsp56300::Backend::cached}) {
+    for (const auto backend :
+         {dsp56300::Backend::reference, dsp56300::Backend::cached, dsp56300::Backend::jit}) {
       check_mac(backend);
       check_parallel_latch(backend);
       check_loop(backend);

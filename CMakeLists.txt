@@ -23,7 +23,8 @@ set(CMAKE_CXX_CLANG_TIDY "${BLOFELD_CLANG_TIDY};--warnings-as-errors=*")
 
 add_library(dsp56300_core STATIC src/core.cpp src/core_state.cpp src/memory_arena.cpp
   src/arithmetic.cpp src/shifts.cpp src/conditional.cpp src/immediate.cpp src/decode.cpp
-  src/moves.cpp src/registers.cpp src/agu.cpp src/control.cpp)
+  src/moves.cpp src/registers.cpp src/agu.cpp src/control.cpp src/jit.cpp src/jit_helpers.cpp
+  src/jit_emitter.cpp src/x64.cpp)
 add_library(dsp56300::core ALIAS dsp56300_core)
 target_include_directories(dsp56300_core PUBLIC include)
 target_link_libraries(dsp56300_core PUBLIC blofeld_quality)
@@ -41,6 +42,9 @@ if(BUILD_TESTING)
   add_executable(dsp56300_core_test test/core_test.cpp)
   target_link_libraries(dsp56300_core_test PRIVATE dsp56300::core)
   add_test(NAME core-instructions COMMAND dsp56300_core_test)
+  add_executable(dsp56300_jit_test test/jit_test.cpp)
+  target_link_libraries(dsp56300_jit_test PRIVATE dsp56300::core)
+  add_test(NAME native-boundaries COMMAND dsp56300_jit_test)
   add_library(dsp56300_fixture_format STATIC test/binary_fixture.cpp)
   target_include_directories(dsp56300_fixture_format PUBLIC test include)
   target_link_libraries(dsp56300_fixture_format PUBLIC blofeld_quality)

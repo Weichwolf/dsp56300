@@ -13,3 +13,5 @@ Subsequent user clarifications (preserving the original objective above):
 - Use binary test fixtures for reproducible instruction/program inputs and
   independently derived expectations. Keep manufacturer workloads local.
 - Consider C++ concepts for portable, compile-time-checked internal interfaces.
+- Current workspace instructions supersede the earlier publication instruction:
+  commit verified increments locally; no publication destination is authorized.

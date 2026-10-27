@@ -43,6 +43,9 @@ Registers Core::registers() const {
 }
 
 void Core::set_registers(const Registers &state) {
+  if (impl_->executing) {
+    throw std::logic_error("Register initialization requires stopped DSP execution");
+  }
   validate(state);
   impl_->cpu.reg = state;
   impl_->cpu.reg.a <<= detail::padding_bits;

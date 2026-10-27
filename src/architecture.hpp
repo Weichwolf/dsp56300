@@ -47,6 +47,8 @@ inline constexpr Word compatibility_mode = Word{1} << 13;
 inline constexpr Word multiply_mode = Word{1} << 14;
 inline constexpr Word arithmetic_16 = Word{1} << 17, arithmetic_saturation = Word{1} << 20;
 inline constexpr Word io_begin = 0xffff80;
+inline constexpr Word numeric_mode_mask = scale_up | scale_down | compatibility_mode |
+                                          multiply_mode | arithmetic_16 | arithmetic_saturation;
 inline constexpr unsigned stack_word_shift = 24;
 
 constexpr std::int32_t signed_word(const Word word) noexcept {

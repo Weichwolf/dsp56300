@@ -1,0 +1,219 @@
+// SPDX-License-Identifier: GPL-3.0-only
+#include "x64.hpp"
+
+#include <cstddef>
+#include <cstdint>
+#include <initializer_list>
+#include <limits>
+#include <span>
+#include <stdexcept>
+#include <utility>
+
+namespace dsp56300::detail::x64 {
+namespace {
+enum EncodingByte : std::uint8_t {
+  low_byte_mask = 0xff,
+  operand_prefix = 0x66,
+  stack_index = 0x24,
+  store_byte = 0xc6,
+  store_other = 0xc7,
+  multiply_opcode = 0xaf,
+  unary_opcode = 0xf7,
+  extend_byte = 0xb6
+};
+
+constexpr unsigned byte_bits = 8, rex_prefix = 0x40, wide_bit = 8, register_bit = 4;
+constexpr unsigned mov_register = 0x89, mov_load = 0x8b, mov_immediate = 0xb8;
+constexpr unsigned mod_register = 0xc0, mod_small = 0x40, mod_large = 0x80;
+constexpr unsigned alu_immediate = 0x81, shift_immediate = 0xc1;
+}
+
+void Code::byte(const std::uint32_t value) {
+  if (value > std::numeric_limits<std::uint8_t>::max()) {
+    throw std::logic_error("Invalid x64 byte");
+  }
+  bytes_.push_back(static_cast<std::uint8_t>(value));
+}
+
+void Code::u32(const std::uint32_t value) {
+  for (unsigned shift = 0; shift < sizeof(value) * byte_bits; shift += byte_bits) {
+    byte((value >> shift) & low_byte_mask);
+  }
+}
+
+void Code::u64(const std::uint64_t value) {
+  for (unsigned shift = 0; shift < sizeof(value) * byte_bits; shift += byte_bits) {
+    byte(static_cast<std::uint32_t>((value >> shift) & low_byte_mask));
+  }
+}
+
+void Code::raw(const std::span<const std::uint8_t> bytes) {
+  bytes_.insert(bytes_.end(), bytes.begin(), bytes.end());
+}
+
+void Code::raw(const std::initializer_list<std::uint8_t> bytes) {
+  bytes_.insert(bytes_.end(), bytes);
+}
+
+void Code::rex(const Width width, const unsigned reg, const unsigned base) {
+  if (width == Width::word) { byte(operand_prefix); }
+  const auto prefix = rex_prefix | (width == Width::qword ? wide_bit : 0U) |
+                      ((reg >> 3) * register_bit) | (base >> 3);
+  if (prefix != rex_prefix || (width == Width::byte && base >= 4)) { byte(prefix); }
+}
+
+void Code::memory(const unsigned reg, const Reg base, const std::size_t offset) {
+  if (!std::in_range<std::int32_t>(offset)) { throw std::logic_error("x64 displacement overflow"); }
+  constexpr std::size_t maximum_small = 127;
+  const bool small = offset <= maximum_small;
+  const auto address = static_cast<unsigned>(base) & 7;
+  byte((small ? mod_small : mod_large) | ((reg & 7) << 3) | address);
+  if (address == 4) { byte(stack_index); }
+  if (small) {
+    byte(static_cast<std::uint32_t>(offset));
+  } else {
+    u32(static_cast<std::uint32_t>(offset));
+  }
+}
+
+void Code::mov(const RegisterPair registers, const Width width) {
+  const auto src = static_cast<unsigned>(registers.source);
+  const auto dst = static_cast<unsigned>(registers.destination);
+  rex(width, src, dst);
+  byte(mov_register);
+  byte(mod_register | ((src & 7) << 3) | (dst & 7));
+}
+
+void Code::constant(const Reg destination, const std::uint64_t value) {
+  const auto dst = static_cast<unsigned>(destination);
+  rex(Width::qword, 0, dst);
+  byte(mov_immediate + (dst & 7));
+  u64(value);
+}
+
+void Code::load(const Reg destination,
+                const Reg base,
+                const std::size_t offset,
+                const Width width) {
+  rex(width, static_cast<unsigned>(destination), static_cast<unsigned>(base));
+  byte(mov_load);
+  memory(static_cast<unsigned>(destination), base, offset);
+}
+
+void Code::store(const Reg base, const std::size_t offset, const Reg source, const Width width) {
+  rex(width, static_cast<unsigned>(source), static_cast<unsigned>(base));
+  byte(mov_register);
+  memory(static_cast<unsigned>(source), base, offset);
+}
+
+void Code::store_constant(const Reg base,
+                          const std::size_t offset,
+                          const Width width,
+                          const std::uint32_t value) {
+  rex(width, 0, static_cast<unsigned>(base));
+  byte(width == Width::byte ? store_byte : store_other);
+  memory(0, base, offset);
+  if (width == Width::byte) {
+    byte(value);
+  } else if (width == Width::word) {
+    byte(value & low_byte_mask);
+    byte((value >> byte_bits) & low_byte_mask);
+  } else {
+    u32(value);
+  }
+}
+
+void Code::memory_immediate(const unsigned group,
+                            const Reg base,
+                            const std::size_t offset,
+                            const Width width,
+                            const std::uint32_t value) {
+  rex(width, group, static_cast<unsigned>(base));
+  byte(width == Width::byte ? 0x80 : alu_immediate);
+  memory(group, base, offset);
+  if (width == Width::byte) {
+    byte(value);
+  } else {
+    u32(value);
+  }
+}
+
+void Code::binary(const std::uint32_t opcode, const RegisterPair registers, const Width width) {
+  const auto dst = static_cast<unsigned>(registers.destination);
+  const auto src = static_cast<unsigned>(registers.source);
+  rex(width, src, dst);
+  byte(opcode);
+  byte(mod_register | ((src & 7) << 3) | (dst & 7));
+}
+
+void Code::immediate(const unsigned group,
+                     const Reg destination,
+                     const std::uint32_t value,
+                     const Width width) {
+  const auto dst = static_cast<unsigned>(destination);
+  rex(width, group, dst);
+  byte(alu_immediate);
+  byte(mod_register | (group << 3) | (dst & 7));
+  u32(value);
+}
+
+void Code::shift(const unsigned group,
+                 const Reg destination,
+                 const unsigned count,
+                 const Width width) {
+  const auto dst = static_cast<unsigned>(destination);
+  rex(width, group, dst);
+  byte(shift_immediate);
+  byte(mod_register | (group << 3) | (dst & 7));
+  byte(count);
+}
+
+void Code::multiply(const RegisterPair registers) {
+  const auto dst = static_cast<unsigned>(registers.destination);
+  const auto src = static_cast<unsigned>(registers.source);
+  rex(Width::qword, dst, src);
+  raw({0x0f, multiply_opcode});
+  byte(mod_register | ((dst & 7) << 3) | (src & 7));
+}
+
+void Code::unary(const unsigned group, const Reg destination) {
+  const auto dst = static_cast<unsigned>(destination);
+  rex(Width::qword, group, dst);
+  byte(unary_opcode);
+  byte(mod_register | (group << 3) | (dst & 7));
+}
+
+void Code::set(const unsigned condition, const Reg destination) {
+  const auto dst = static_cast<unsigned>(destination);
+  rex(Width::byte, 0, dst);
+  byte(0x0f);
+  byte(condition);
+  byte(mod_register | (dst & 7));
+  // MOVZX r32,r8 leaves the condition flags intact.
+  rex(Width::byte, dst, dst);
+  raw({0x0f, extend_byte});
+  byte(mod_register | ((dst & 7) << 3) | (dst & 7));
+}
+
+void Code::exit_if(const Branch condition) {
+  byte(0x0f);
+  byte(static_cast<unsigned>(condition));
+  exits_.push_back(bytes_.size());
+  u32(0);
+}
+
+void Code::bind_exit() {
+  for (const auto offset : exits_) {
+    const auto delta = static_cast<std::int64_t>(bytes_.size()) -
+                       static_cast<std::int64_t>(offset + sizeof(std::uint32_t));
+    if (!std::in_range<std::int32_t>(delta)) {
+      throw std::logic_error("x64 branch displacement overflow");
+    }
+    const auto displacement = static_cast<std::uint32_t>(delta);
+    for (unsigned i = 0; i < sizeof(displacement); ++i) {
+      bytes_.at(offset + i) =
+          static_cast<std::uint8_t>((displacement >> (i * byte_bits)) & low_byte_mask);
+    }
+  }
+}
+} // namespace dsp56300::detail::x64

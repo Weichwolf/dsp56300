@@ -31,13 +31,15 @@ internal transfers, conditional ALU updates and short/long immediate arithmetic.
 Multi-instruction cases verify real returns and condition reevaluation during
 REP; prohibited control-flow bodies and immediate-data jump EAs must fault.
 
-The generic runner executes each case through reference and cached backends.
+The generic runner executes each case through reference, cached and JIT backends.
 Successful cases compare all visible registers, all supplied P/X/Y words,
 dispatch/instruction counts, estimated base cycles and interrupt admission.
 Expected memory starts as a copy of initial memory; only explicit after-blocks
 change it. This detects unintended writes outside expected output ranges.
 Fault cases compare diagnostics and progress but do not assert partially
 committed register/memory state. No peripherals are fabricated by the runner.
+Native/helper retirement accounting is checked separately; native moves may
+still call the instrumented helper as described in doc/jit.txt.
 API sequences involving host writes or interrupts between execution steps stay
 in C++ tests. Registers alone do not capture hidden REP/IRQ continuation, so
 these files describe initialization and expectations, not resumable CPU snapshots.
@@ -89,7 +91,7 @@ Header:
 Each case, in order:
   u32 name_length, name bytes;
   three u32 memory sizes in words (P, X, Y), initially zero-filled;
-  u32 dispatch budget, u32 expected retired dispatches;
+  u32 guest-instruction budget, u32 expected retired instructions (legacy dispatch fields);
   u64 expected retired instructions, u64 expected estimated base cycles;
   five u32 expected fault fields (kind, space, address, value, pc);
   u32 expected interruptible (0 or 1);
