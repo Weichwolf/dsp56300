@@ -58,3 +58,11 @@ Subsequent user clarifications (preserving the original objective above):
 - Latest user instruction reauthorizes pushing every verified commit to the
   existing private Weichwolf/dsp56300 origin, including accumulated local
   progress. This supersedes the earlier local-only publication restriction.
+- 270 MIPS is a reference workload and baseline, not an optimization ceiling
+  or stopping criterion. Continue maximizing real guest throughput and minimizing
+  host CPU time/load and latency required to sustain 270 MIPS on representative
+  full-semantics workloads. Qualify energy separately when measurable.
+- The VMX/KVM approach must be tried concretely, not left as an optional design
+  idea. Preserve the transparent consumer API and required-isolation guarantee;
+  compare direct JIT and protected execution with the same architectural tests
+  and actual DSP workload, including boundary/exit overhead.

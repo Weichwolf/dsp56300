@@ -462,6 +462,9 @@ final-core performance result.
 
 Integration: basic header/library target and memory/I/O contract exist.
 Transparent hardware VM execution is a user requirement under investigation.
+The user explicitly requires a concrete VMX/KVM trial. The initial host API
+probe currently fails with EACCES opening /dev/kvm; no VM or vCPU was created.
+This access prerequisite is pending, not a completed protected-execution test.
 Consumers must use the same DSP headers, caller-owned shared memory, events and
 I/O contracts without managing VM machinery. KVM mapping, host-span alignment,
 helper placement, deterministic exits and execution qualification are pending;
@@ -475,5 +478,8 @@ behavior. See doc/io.txt for the host mutation contract.
 doc/io.txt defines the synchronous word/atomic-bit callback contract, P mutation,
 fault context and stopped execution boundaries.
 Installed package consumption and integration fixtures remain pending.
+270 MIPS is a reference workload/baseline, not a cap or stopping criterion.
+Maximum throughput and minimum measured host CPU load at that fixed workload
+remain optimization objectives even after the baseline is reached.
 The complete objective remains active. No full ISA/device/performance claim
 follows from the narrow initial checks.
