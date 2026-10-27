@@ -43,12 +43,12 @@ Word Core::Impl::update_address(const AddressUpdate update) {
     return (original & ~mask) | (address_add(original, offset) & mask);
   }
   const Word length = modifier + 1;
-  const auto aligned_size = std::bit_ceil(length);
+  const auto span_mask = std::bit_ceil(length) - 1;
   const auto magnitude = offset < 0 ? -static_cast<std::int64_t>(offset) : offset;
-  if (magnitude > length && (static_cast<Word>(offset) & (aligned_size - 1)) == 0) {
+  if (magnitude > length && (static_cast<Word>(offset) & span_mask) == 0) {
     return address_add(original, offset);
   }
-  const auto lower = original & ~(aligned_size - 1);
+  const auto lower = original & ~span_mask;
   auto result = static_cast<std::int64_t>(original) + offset;
   if (result >= static_cast<std::int64_t>(lower) + length) {
     result -= length;
@@ -63,27 +63,34 @@ Word Core::Impl::effective(const AddressForm form) {
   const auto index = form.index;
   const auto extra = form.extra;
   const auto original = cpu.reg.r[index];
-  // Reverse carry reverses the raw operand before applying the addressing sign.
-  // In particular N=$800000 is a positive reverse-carry operand, not -2^23.
-  const auto offset = (cpu.reg.m[index] & modifier_mask) == 0
-                          ? static_cast<std::int32_t>(cpu.reg.n[index])
-                          : signed_word(cpu.reg.n[index]);
   switch (mode) {
-    case 0: cpu.reg.r[index] = update_address({.index = index, .offset = -offset}); return original;
-    case 1: cpu.reg.r[index] = update_address({.index = index, .offset = offset}); return original;
-    case 2: cpu.reg.r[index] = update_address({.index = index, .offset = -1}); return original;
-    case 3: cpu.reg.r[index] = update_address({.index = index, .offset = 1}); return original;
     case 4: return original;
-    case 5: return update_address({.index = index, .offset = offset});
     case 6:
       if (index == 0 || index == 4) { return extra; }
       fail(FaultKind::invalid_instruction, Space::program, current_pc, index);
       return 0;
-    case 7:
-      cpu.reg.r[index] = update_address({.index = index, .offset = -1});
-      return cpu.reg.r[index];
+    case 0:
+    case 1:
+    case 2:
+    case 3:
+    case 5:
+    case 7: break;
     default: fail(FaultKind::invalid_instruction, Space::program, current_pc, mode); return 0;
   }
+  const auto modifier = cpu.reg.m[index] & modifier_mask;
+  std::int32_t offset = 1;
+  if (mode == 0 || mode == 1 || mode == 5) {
+    // Reverse carry reverses the raw operand before applying the addressing sign.
+    // In particular N=$800000 is a positive reverse-carry operand, not -2^23.
+    offset =
+        modifier == 0 ? static_cast<std::int32_t>(cpu.reg.n[index]) : signed_word(cpu.reg.n[index]);
+  }
+  if (mode == 0 || mode == 2 || mode == 7) { offset = -offset; }
+  const auto result = modifier == modifier_mask
+                          ? address_add(original, offset)
+                          : update_address({.index = index, .offset = offset});
+  if (mode != 5) { cpu.reg.r[index] = result; }
+  return mode == 5 || mode == 7 ? result : original;
 }
 
 } // namespace dsp56300

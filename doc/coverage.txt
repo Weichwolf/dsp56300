@@ -155,6 +155,14 @@ reference was used. Normal-modulo offsets beyond the length which are not whole
 buffer strides, initial pointers in gaps between modulo regions, and timing of
 address-register/source aliases remain unqualified.
 
+Guarded AGU optimization: linear effective-address arithmetic now avoids the
+general update call. The guard checks the current low sixteen M bits; nonlinear
+modifiers use the general calculator. N is read only for offset forms. No-update
+and absolute/immediate forms return before address arithmetic. 2904 additional
+host checks exercise changing modifiers/offsets/pointers through set_registers,
+code-cache clearing and reset, across all three backends. Guest modifier
+replacement and REP sequences remain covered by the independent binary fixtures.
+
 Timing: documented base costs are being added for implemented forms. Pipeline
 interlocks, IRQ entry/return qualification, exact event admission and external
 waits remain open. A complete checkpoint API is pending; Registers omits hidden
@@ -175,7 +183,7 @@ parallel memory moves. It has exact budgets, numerical mode keys, deferred P
 invalidation, bounded executable storage and immutable RX mappings. Shared
 fixtures cover all three backends; host tests check ABI/boundary behavior and
 native/helper counters expose actual lowered execution. See doc/jit.txt for
-instrumentation scope and remaining native work. All eighteen CTests pass in release
+instrumentation scope and remaining native work. All nineteen CTests pass in release
 and strict builds, including exact fixture regeneration. SIMD is not implemented.
 Earlier isolated arithmetic experiments do not establish emulator speed.
 More source-built workloads, register-bank SIMD
@@ -193,9 +201,22 @@ The benchmark now permits selecting one backend for separate profiling.
 An isolated JIT process profile identifies address generation, parallel moves
 and dispatch among visible execution costs. It also includes substantial host
 RAM-restoration time outside the execution timer, so its sample percentages
-must not be interpreted as execution-region percentages. Address/move helpers
-and dispatch are the next optimization candidates, subject to guarded semantic
-coverage and before/after measurements across multiple qualified workloads.
+must not be interpreted as execution-region percentages. Parallel moves,
+native address lowering and dispatch remain optimization candidates, subject
+to guarded semantic coverage and before/after measurements across multiple
+qualified workloads.
+
+Measured linear-address improvement: three alternating before/after runs on
+four directed ordinary/wide filter and complete LP12 cases reduce JIT warm-call
+medians by approximately 4-10% versus the qualified general AGU at 88fd77e.
+Cached execution medians fall by about 12-14% on those cases. A ready-state effect
+case changes by only about 1% in JIT execution, with no broad effect-speed claim.
+All use the same i5-10400/LLVM19 replay protocol above, including independent
+terminal-state validation. Native/helper instruction counts, compiled blocks and
+executable mapping sizes are unchanged. The release effective-address function
+grows from 300 to 324 bytes; there is no additional per-core state. Exact local
+artifacts, hashes, raw trials and an isolated modifier-cache experiment remain
+ignored. This is a directed warm emulator measurement, not whole-device speed.
 
 Measured native improvement: on four directed ordinary/wide filter and complete
 LP12 cases, the first scalar JIT reduces warm execution medians by 23-24%

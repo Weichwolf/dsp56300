@@ -70,6 +70,9 @@ X/Y load cases check effective addresses and pre/post/indexed writeback;
 sequences replace modifiers from guest code and repeat updates through REP.
 Reserved modifiers must fail explicitly when address arithmetic is requested.
 Expectations never include or execute the emulator's address calculation.
+Host-sequence tests separately reuse a live core across register initialization,
+code-cache clearing and reset, checking that address arithmetic follows the
+current modifier and that guest memory remains unchanged.
 
 The generic runner executes each case through reference, cached and JIT backends.
 Successful cases compare all visible registers, all supplied P/X/Y words,
