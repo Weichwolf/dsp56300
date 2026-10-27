@@ -74,10 +74,12 @@ bool JitEmitter::lowerable(const NativeOp &operation) const {
   if (!optimize_) { return false; }
   const auto &decoded = operation.instruction;
   if (decoded.operation == Operation::nop) { return true; }
-  if (decoded.operation != Operation::parallel || (operation.mode & unsupported_modes) != 0 ||
+  if ((operation.mode & unsupported_modes) != 0 ||
       (operation.mode & (scale_up | scale_down)) == (scale_up | scale_down)) {
     return false;
   }
+  if (decoded.operation == Operation::immediate_alu) { return is_addition(operation); }
+  if (decoded.operation != Operation::parallel) { return false; }
   const auto opcode = decoded.opcode;
   if ((opcode & if_mask) == if_group) { return false; }
   // Exclude all PCU register operands: they can modify control/stack state.
@@ -86,6 +88,7 @@ bool JitEmitter::lowerable(const NativeOp &operation) const {
     if (reg >= m_register_base) { return false; }
   }
   const auto alu = opcode & byte_mask;
+  if (is_addition(operation)) { return true; }
   if ((alu & 0x80U) != 0) { return true; }
   const auto operation_code = alu & alu_mask;
   return operation_code == alu_clear || operation_code == 0x01 || operation_code == alu_x0 ||
@@ -235,6 +238,10 @@ void JitEmitter::round(const Word mode) {
 
 void JitEmitter::native(const NativeOp &operation) {
   if (operation.instruction.operation == Operation::nop) { return; }
+  if (is_addition(operation)) {
+    addition(operation);
+    return;
+  }
   const auto opcode = operation.instruction.opcode & byte_mask;
   const auto kind = opcode & alu_mask;
   const bool destination_b = (opcode & 8U) != 0;

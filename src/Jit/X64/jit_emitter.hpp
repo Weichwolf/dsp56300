@@ -22,9 +22,11 @@ public:
 private:
   [[nodiscard]] bool lowerable(const NativeOp &operation) const;
   [[nodiscard]] static bool has_moves(const NativeOp &operation);
+  [[nodiscard]] static bool is_addition(const NativeOp &operation);
   void helper(JitHelper function, const NativeOp &operation);
   void native(const NativeOp &operation);
   void multiply(const NativeOp &operation);
+  void addition(const NativeOp &operation);
   void round(Word mode);
   void arithmetic_flags(Word mode, bool carry_changed = false);
   void input(x64::Reg destination, unsigned selector, bool destination_b, bool latched);

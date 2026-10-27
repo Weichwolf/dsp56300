@@ -27,6 +27,7 @@ add_library(dsp56300_core STATIC
   src/Core/transfers.cpp src/Core/registers.cpp src/Core/agu.cpp src/Core/control.cpp
   src/Core/bits.cpp
   src/Jit/jit.cpp src/Jit/jit_helpers.cpp src/Jit/X64/jit_emitter.cpp src/Jit/X64/x64.cpp
+  src/Jit/X64/jit_addition.cpp
   src/Memory/memory_arena.cpp)
 add_library(dsp56300::core ALIAS dsp56300_core)
 target_include_directories(dsp56300_core PUBLIC include)
@@ -72,6 +73,8 @@ if(BUILD_TESTING)
   target_link_libraries(dsp56300_generate_bit_access PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_addressing test/generate_addressing.cpp)
   target_link_libraries(dsp56300_generate_addressing PRIVATE dsp56300_fixture_format)
+  add_executable(dsp56300_generate_addition test/generate_addition.cpp)
+  target_link_libraries(dsp56300_generate_addition PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_fixture_test test/fixture_test.cpp)
   target_link_libraries(dsp56300_fixture_test PRIVATE dsp56300::core dsp56300_fixture_format)
   add_executable(dsp56300_fixture_bench test/fixture_bench.cpp)
@@ -88,6 +91,13 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/bit-branches.d56")
   add_test(NAME addressing-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/addressing.d56")
+  add_test(NAME addition-fixtures COMMAND dsp56300_fixture_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/addition.d56")
+  add_test(NAME addition-reproducibility COMMAND "${CMAKE_COMMAND}"
+    "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_addition>"
+    "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/addition-regenerated.d56"
+    "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/addition.d56"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
   add_test(NAME addressing-reproducibility COMMAND "${CMAKE_COMMAND}"
     "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_addressing>"
     "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/addressing-regenerated.d56"

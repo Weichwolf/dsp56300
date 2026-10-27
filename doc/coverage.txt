@@ -178,12 +178,12 @@ One DSP instance per backend, host restoration outside the execution timer,
 checked after warmup and each trial. This measures initialized call replay,
 including timer/retirement-check overhead; it is not continuous audio or device
 performance. An initial independent scalar x64 JIT now emits MPY/MPYR/MAC/MACR,
-RND/CLR/ABS/NEG/TFR and NOP, with guarded general helpers for other operations and
-parallel memory moves. It has exact budgets, numerical mode keys, deferred P
+RND/CLR/ABS/NEG/TFR, ADD/SUB/CMP, ADC/SBC and NOP, with guarded general helpers
+for other operations and parallel memory moves. It has exact budgets, numerical mode keys, deferred P
 invalidation, bounded executable storage and immutable RX mappings. Shared
 fixtures cover all three backends; host tests check ABI/boundary behavior and
 native/helper counters expose actual lowered execution. See doc/jit.txt for
-instrumentation scope and remaining native work. All nineteen CTests pass in release
+instrumentation scope and remaining native work. All twenty-one CTests pass in release
 and strict builds, including exact fixture regeneration. SIMD is not implemented.
 Earlier isolated arithmetic experiments do not establish emulator speed.
 More source-built workloads, register-bank SIMD
@@ -205,6 +205,66 @@ must not be interpreted as execution-region percentages. Parallel moves,
 native address lowering and dispatch remain optimization candidates, subject
 to guarded semantic coverage and before/after measurements across multiple
 qualified workloads.
+
+Native addition extension: ADD/SUB/CMP register and short/long immediate forms,
+plus ADC/SBC with X/Y long operands, now use emitted x64 arithmetic in supported
+numerical modes. Host flags match the aligned 56-bit result, including Carry
+injected through low padding for ADC/SBC. 51612 additional independent binary
+cases check both accumulators, every admitted register source, scaling,
+carry/borrow, signed overflow, extension/normalization boundaries, sticky state
+and parallel transfers that overwrite sources or destinations. The generator
+uses signed sums and unsigned raw-56 inequalities rather than host flags or
+padding injection. Comparison preserves a parallel transfer to its accumulator.
+Existing condition fixtures qualify immediate forms. Expanded native-boundary
+tests perform 793 checks, including actual native/helper-only retirement for
+every addition form, unsupported modes, I/O program changes, failed moves,
+DO restoration and repeated ADC with reevaluated Carry. Native carry/borrow
+chains also cross a general budget tail and a subsequent native block with
+identical final state and exact accounting. All twenty-one CTests
+pass in release and strict builds, including exact fixture regeneration and the
+source-built workload expectations. CMPM, shifted additions and REP bodies
+retain general execution; no new ISA/mode completeness claim follows.
+
+Measured native-addition benefit: three runs compare the qualified parent at
+6a2d341, the final emitter, and a local control with exactly the final hot host
+layout but the new arithmetic lowering disabled. Retirement counters verify
+the control, and all replay outputs/state remain independently checked.
+The ready effect case improves JIT medians by about 10% against either baseline;
+259 additional arithmetic instructions per call use native execution. Published
+executable mappings grow from 52 to 64 KiB and compiled blocks from 13 to 15.
+Complete LP12 cases improve by about 2-3% against the matched-layout control,
+with three additional native operations and one extra executable page per call
+shape. Their cross-build parent comparison establishes no clear improvement.
+Direct filter mixes/code sizes are unchanged; their final cross-build medians
+regress by about 2%, while matched-layout differences are below 1%. Host code
+placement remains a performance concern. An initial inlined-classifier control
+was rejected by its unchanged retirement counters and is excluded from evidence.
+Artifacts, controls, hashes and raw runs remain local. The replay protocol and
+its warm-call/device limitations above apply; no general speedup follows.
+
+Realtime capacity is not established for a fully loaded DSP or complete synth.
+The user's throughput target is now 270 million emulated DSP instructions/s per
+host core. This is unachieved: current directed cases require approximately
+8-10 times higher throughput to reach it. Qualification must retain full state,
+precision, memory/event boundaries and representative workload execution.
+Current directed JIT cases execute about 26-35 million guest instructions/s on
+the i5-10400. At an explicitly assumed 48000 frames/s, a 16-frame LP12 call at
+4.35 microseconds projects to about 1.3% of one host core; 24 identical calls to
+about 31%. A 59.2-microsecond effect stereo block projects to about 18%. These
+are arithmetic projections from isolated initialized fixtures, not measured
+continuous audio or whole-device CPU consumption. Other voice stages, mixing,
+I/O and scheduling are excluded. Comparing estimated guest base-cost throughput
+with a nominal 216-MHz target suggests roughly 6-8 host-core equivalents for a
+fully busy DSP at these instruction mixes. Guest costs are not calibrated
+pipeline time, and a single DSP cannot simply use that many host cores. Full
+original-program execution, physical clocks and sustained load measurements
+are required for an actual realtime-capacity claim.
+The 216-MHz comparison is a local setup assumption, not a confirmed board clock
+or device specification. NXP's DSP56371 Rev.4.1 datasheet specifies 181 MIPS at
+181 MHz. The family also includes the DSP56321, specified at 275 MHz/275 MMACS;
+neither a family peak nor our throughput target proves whole-device realtime.
+References: https://www.nxp.com/docs/en/data-sheet/DSP56371.pdf
+            https://www.nxp.com/docs/en/data-sheet/DSP56321.pdf
 
 Measured linear-address improvement: three alternating before/after runs on
 four directed ordinary/wide filter and complete LP12 cases reduce JIT warm-call

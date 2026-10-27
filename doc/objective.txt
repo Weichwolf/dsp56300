@@ -23,3 +23,8 @@ Subsequent user clarifications (preserving the original objective above):
   to their value for validation and optimization.
 - The latest workspace instructions supersede the previous push authorization:
   commit verified increments locally; no publication destination is authorized.
+- Performance target: 270 million emulated DSP instructions per second on one
+  host core. Qualify throughput with actual guest retirement, complete instruction
+  semantics and representative Blofeld audio programs; isolated host arithmetic
+  or NOP throughput cannot establish the target. Verify sustained realtime CPU
+  consumption separately on the complete workload.

@@ -12,6 +12,8 @@ namespace dsp56300::test {
 namespace {
 constexpr Word mac = 0x2000d2, clear = 0x200013, negate = 0x200036;
 constexpr Word io_load_clear = 0x44e013, io_load = 0x44e000;
+constexpr Word io_load_add = 0x44e040, io_load_subtract = 0x44e044;
+constexpr Word io_load_compare = 0x44e045, io_load_adc = 0x44e021, io_load_sbc = 0x44e025;
 constexpr Word io_address = 0xffff80;
 
 struct Machine {
@@ -84,6 +86,127 @@ void rounding_modes() {
   require(statistics.compiled_blocks == 2 && statistics.native_alu_instructions == 2 &&
               statistics.helper_instructions == 0,
           "Both rounding modes execute their separately keyed native translation");
+}
+
+struct NativeSum {
+  Word opcode = 0, status = 0;
+  bool extended = false, optimize = true;
+};
+
+void check_sum(Machine &machine, const NativeSum input) {
+  const auto words = input.extended ? 2U : 1U;
+  const std::array program{input.opcode, Word{0}};
+  machine.core.load(Space::program, start, program);
+  auto state = initial_state();
+  state.sr = input.status | flag_l | flag_s;
+  auto expected = state;
+  expected.sr |= flag_u | flag_z;
+  expected.pc = start + words;
+  machine.core.set_registers(state);
+  const auto before = machine.core.jit_statistics();
+  const auto result = machine.core.run(1);
+  require(result.dispatches == 1 && result.fault.kind == FaultKind::none &&
+              machine.core.registers() == expected,
+          "All addition forms execute with qualified zero-result flags");
+  const auto after = machine.core.jit_statistics();
+  require(after.native_alu_instructions ==
+                  before.native_alu_instructions + (input.optimize ? 1U : 0U) &&
+              after.helper_instructions == before.helper_instructions + (input.optimize ? 0U : 1U),
+          "Each addition form uses the selected native or helper-only lowering");
+}
+
+void native_sums(const bool optimize) {
+  Machine machine({.backend = Backend::jit, .instructions_per_block = 1, .optimize = optimize});
+  constexpr std::array<Word, 23> opcodes{0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x14,
+                                         0x24, 0x34, 0x44, 0x54, 0x64, 0x74, 0x05, 0x45,
+                                         0x55, 0x65, 0x75, 0x21, 0x31, 0x25, 0x35};
+  constexpr std::array<Word, 6> immediates{
+      0x014080, 0x014084, 0x014085, 0x0140c0, 0x0140c4, 0x0140c5};
+  constexpr Word long_immediate_bit = 0x40;
+  for (const Word destination : {Word{0}, Word{8}}) {
+    for (const Word mode : {Word{0}, mode_down, mode_up}) {
+      for (const auto opcode : opcodes) {
+        check_sum(
+            machine,
+            {.opcode = parallel_none | opcode | destination, .status = mode, .optimize = optimize});
+      }
+      for (const auto opcode : immediates) {
+        check_sum(machine,
+                  {.opcode = opcode | destination,
+                   .status = mode,
+                   .extended = (opcode & long_immediate_bit) != 0,
+                   .optimize = optimize});
+      }
+    }
+  }
+}
+
+void unsupported_sum_modes() {
+  constexpr std::array<Word, 5> modes{0x2000, 0x4000, 0x20000, 0x100000, mode_up | mode_down};
+  constexpr std::array<Word, 4> opcodes{0x200040, 0x200025, 0x014080, 0x014085};
+  for (const auto mode : modes) {
+    for (const auto opcode : opcodes) {
+      Machine machine({.backend = Backend::jit});
+      machine.core.write(Space::program, start, opcode);
+      auto state = initial_state();
+      state.sr = mode;
+      machine.core.set_registers(state);
+      const auto result = machine.core.run(1);
+      require(result.dispatches == 0 && result.progress == Progress{} &&
+                  result.fault.kind == FaultKind::unsupported_mode && result.fault.pc == start &&
+                  machine.core.jit_statistics().native_alu_instructions == 0,
+              "Unsupported addition modes fail through the general guard before retirement");
+    }
+  }
+}
+
+void native_carry_chains() {
+  constexpr Word adc_x_a = 0x200021;
+  constexpr Word adc_y_b = 0x200039;
+  constexpr Word adc_x_b = 0x200029;
+  constexpr Word sbc_x_b = 0x20002d;
+  constexpr Word sbc_y_b = 0x20003d;
+  constexpr Word sbc_x_a = 0x200025;
+
+  struct Chain {
+    std::array<Word, 4> program;
+    std::uint64_t initial_a = 0, expected_a = 0, expected_b = 0;
+    Word y = 0;
+  };
+
+  const std::array chains{
+      Chain{.program = {adc_x_a, adc_y_b, sbc_x_b, sbc_y_b}, .initial_a = accumulator_mask, .y = 1},
+      Chain{.program = {sbc_x_a, sbc_y_b, adc_x_b, adc_y_b},
+            .expected_a = accumulator_mask,
+            .expected_b = 2}};
+  for (const auto &chain : chains) {
+    Machine machine({.backend = Backend::jit, .instructions_per_block = 4});
+    machine.core.load(Space::program, start, chain.program);
+    auto state = initial_state();
+    state.a = chain.initial_a;
+    state.x = 1;
+    state.y = chain.y;
+    state.sr = flag_s | flag_l;
+    auto expected = state;
+    expected.a = chain.expected_a;
+    expected.b = chain.expected_b;
+    expected.pc = start + 4;
+    expected.sr |= flag_u | (chain.expected_b == 0 ? flag_z : 0);
+    machine.core.set_registers(state);
+    require(machine.core.run(4).dispatches == 4 && machine.core.registers() == expected,
+            "Native multi-precision chains consume the preceding instruction's Carry/Borrow");
+    require(machine.core.jit_statistics().native_alu_instructions == 4 &&
+                machine.core.jit_statistics().helper_instructions == 0,
+            "Carry chains execute entirely through emitted arithmetic");
+    machine.core.set_registers(state);
+    require(machine.core.run(1).dispatches == 1 && machine.core.run(3).dispatches == 3 &&
+                machine.core.registers() == expected,
+            "Partitioned carry chains retain flags across general and native execution");
+    require(machine.core.jit_statistics().native_alu_instructions == 7 &&
+                machine.core.jit_statistics().helper_instructions == 1 &&
+                machine.core.progress() == Progress{.instructions = 8, .estimated_cycles = 8},
+            "A short carry-chain budget uses one general tail and exact retirement accounting");
+  }
 }
 
 void host_program_write() {
@@ -164,17 +287,60 @@ void callback_program_write(const Word opcode) {
 }
 
 void memory_fault() {
+  for (const auto opcode :
+       {io_load_clear, io_load_add, io_load_subtract, io_load_compare, io_load_adc, io_load_sbc}) {
+    Machine machine({.backend = Backend::jit});
+    machine.core.write(Space::program, start, opcode);
+    auto state = initial_state();
+    state.r[0] = memory_words;
+    machine.core.set_registers(state);
+    const auto result = machine.core.run(1);
+    require(result.dispatches == 0 && result.fault.kind == FaultKind::memory_read &&
+                result.fault.address == memory_words && result.fault.pc == start,
+            "The instrumented move helper retains span checks before native retirement");
+    require(machine.core.jit_statistics().native_alu_instructions == 0,
+            "A failed move never executes or retires its ALU");
+  }
+}
+
+void sum_loop_boundary() {
   Machine machine({.backend = Backend::jit});
-  machine.core.write(Space::program, start, io_load_clear);
+  constexpr Word do_three = 0x060380;
+  constexpr Word add_x0 = 0x200040;
+  const std::array program{do_three, start + 3, add_x0, add_x0};
+  machine.core.load(Space::program, start, program);
   auto state = initial_state();
-  state.r[0] = memory_words;
+  state.x = 1;
+  state.la = 7;
+  state.lc = 9;
   machine.core.set_registers(state);
-  const auto result = machine.core.run(1);
-  require(result.dispatches == 0 && result.fault.kind == FaultKind::memory_read &&
-              result.fault.address == memory_words && result.fault.pc == start,
-          "The instrumented move helper retains span checks before native retirement");
+  require(machine.core.run(7).dispatches == 7, "DO and six additions retire");
+  const auto actual = machine.core.registers();
+  require(actual.a == (std::uint64_t{6} << word_bits) && actual.sr == flag_u &&
+              actual.la == state.la && actual.lc == state.lc && actual.sp == 0 && actual.sc == 0 &&
+              actual.pc == start + 4,
+          "Native addition preserves DO cleanup and full-precision result flags");
+  require(machine.core.jit_statistics().native_alu_instructions != 0,
+          "DO additions actually exercise emitted arithmetic");
+}
+
+void sum_repeat() {
+  Machine machine({.backend = Backend::jit});
+  constexpr Word repeat_four = 0x0604a0;
+  constexpr Word adc_x = 0x200021;
+  const std::array program{repeat_four, adc_x};
+  machine.core.load(Space::program, start, program);
+  auto state = initial_state();
+  state.x = 1;
+  state.lc = 7;
+  state.sr = flag_c;
+  machine.core.set_registers(state);
+  require(machine.core.run(5).dispatches == 5 && machine.core.registers().a == 5 &&
+              machine.core.registers().sr == flag_u && machine.core.registers().lc == state.lc &&
+              machine.core.registers().pc == start + 2 && machine.core.interruptible(),
+          "Repeated ADC reevaluates Carry and restores LC through the general REP path");
   require(machine.core.jit_statistics().native_alu_instructions == 0,
-          "A failed move never executes or retires its ALU");
+          "REP retains its qualified general instruction continuation");
 }
 
 void interrupt_callback_boundary() {
@@ -242,12 +408,21 @@ int main() {
     dsp56300::test::exact_budget(true);
     dsp56300::test::numeric_modes();
     dsp56300::test::rounding_modes();
+    dsp56300::test::native_sums(false);
+    dsp56300::test::native_sums(true);
+    dsp56300::test::unsupported_sum_modes();
+    dsp56300::test::native_carry_chains();
     dsp56300::test::host_program_write();
     dsp56300::test::callback_program_write(dsp56300::test::io_load_clear);
     dsp56300::test::callback_program_write(dsp56300::test::io_load);
+    dsp56300::test::callback_program_write(dsp56300::test::io_load_add);
+    dsp56300::test::callback_program_write(dsp56300::test::io_load_subtract);
+    dsp56300::test::callback_program_write(dsp56300::test::io_load_compare);
     dsp56300::test::memory_fault();
     dsp56300::test::interrupt_callback_boundary();
     dsp56300::test::loop_boundary();
+    dsp56300::test::sum_loop_boundary();
+    dsp56300::test::sum_repeat();
     dsp56300::test::loop_cleanup_fault();
     std::cout << dsp56300::test::checks << " native boundary checks passed\n";
   } catch (const std::exception &error) {

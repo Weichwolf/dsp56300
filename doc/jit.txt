@@ -15,7 +15,8 @@ Options.instructions_per_block in [1,256]. The former unused prototype options
 for block links and DO dispatch batching have been removed.
 
 The emitter translates signed MPY/MPYR/MAC/MACR variants, RND, CLR, ABS, NEG,
-internal TFR and NOP retirement. Native flags use full left-aligned 56-bit
+ADD/SUB/CMP, ADC/SBC, internal TFR and NOP retirement. ADD/SUB/CMP include
+short/long immediate forms. Native flags use full left-aligned 56-bit
 accumulator coordinates, with distinct ordinary/down/up scaling specializations
 and sticky state preservation. Other supported instructions execute through the general
 executor. Options.optimize=false exercises generated helper-only blocks without
@@ -28,6 +29,17 @@ toward positive infinity. MACR combines accumulation and rounding overflow for
 V/L while preserving C and previous sticky state. The independent fixture model
 uses signed quotient/remainder rounding instead of the emitted bias-and-mask
 sequence. Mode keys include RM, so a host RM change cannot reuse stale code.
+
+Addition uses x64 ADD/SUB flags at the left-aligned accumulator's bit boundaries.
+ADC/SBC must apply guest Carry at host bit eight. With C=1, the emitter fills
+the addition destination's or subtraction source's eight low padding bits with
+ones and sets x64 CF. ADC/SBB then produces the required extra +/-256, leaving
+zero padding and exact full-operation OF/CF. Input signs remain unchanged by
+the padding fill. CMP updates flags from old operands while preserving any
+parallel transfer to the compared accumulator. Independent signed integer sums
+and unsigned 56-bit inequalities qualify carry, overflow and scaling flags;
+they do not reproduce the emitted padding technique. CMPM and shifted additions
+still use the general executor.
 
 Parallel moves use the same instrumented C++ path as the interpreters. They latch
 old A/B/X/Y before transfers and retain transfer scaling/limiting, AGU behavior,
