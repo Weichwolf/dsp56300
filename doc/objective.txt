@@ -69,3 +69,8 @@ Subsequent user clarifications (preserving the original objective above):
 - The latest user-supplied AGENTS.md instructions again supersede prior push
   authorization: commit verified increments locally; no publication destination
   is authorized. Keep the on-disk workspace instructions consistent with this.
+- The user explicitly reiterates that the complete DSP56300 instruction set must
+  be implemented and tested. Representative workloads, native subsets and a
+  passing current test suite do not replace full ISA qualification. Audit every
+  instruction, encoding/operand form, numerical mode, flag and observable effect;
+  keep unimplemented and unqualified cases visible until closed independently.

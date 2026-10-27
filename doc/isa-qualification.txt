@@ -1,0 +1,59 @@
+Complete DSP56300 ISA qualification
+
+Complete support and independent tests are a mandatory completion criterion.
+The current implementation is partial. A passing CTest suite and successful
+Blofeld/FFT routines prove only their tested subsets. Performance work does not
+waive missing instructions, operand forms, numerical modes or observable effects.
+
+doc/isa-coverage.tsv inventories the 117 distinct entries in the DSP56300FM
+Rev.5 instruction summary (including MOVE subforms and mixed multiply forms),
+plus the LEA alias identified with LUA in appendix A. These are catalogue rows,
+not a count of disjoint opcodes or a percentage of full ISA support. The table
+contains original project assessments and source/test pointers, not copied
+manual descriptions or manufacturer programs. Detailed format expansion is
+still required; a mnemonic-level list alone cannot prove encoding coverage.
+
+Reference: DSP56300 Family Manual, Rev.5 (April 2005), chapters 3/4/5/12/13
+and appendix A. Copies/extracts and private analysis remain in doc/local/.
+Manufacturer URL: https://www.nxp.com/docs/en/reference-manual/DSP56300FM.pdf
+
+Statuses:
+  missing: no implementation for this instruction/family/form.
+  untested: code exists, but dedicated independent qualification is absent.
+  partial: linked tests cover some semantics/forms; the listed gaps remain.
+  complete: all required forms/modes/effects independently qualified; no gaps.
+No entry currently claims complete support. Existence of a test source is
+evidence to inspect, not proof that every row/form it mentions is covered.
+
+Audit commands:
+  python3 tools/isa_audit.py
+  python3 tools/isa_audit.py --require-complete
+The first validates catalogue structure/evidence paths and reports the backlog.
+The second deliberately fails while any row is incomplete. It is an additional
+necessary completion gate, not a substitute for the semantic witnesses below.
+It is not hidden behind a passing current-subset CTest result.
+
+Before marking an entry complete, expand and qualify:
+- Every documented encoding, extension width, condition and legal operand set;
+  reserved selectors/opcodes remain explicitly distinguished from valid forms.
+- All legal numerical modes/combinations, precision, rounding, saturation,
+  flags written/preserved and old-input ordering with every parallel move class.
+- Addressing and aliases, word/address wrap, short/long/immediate forms,
+  register-field effects and fault/transfer boundaries without duplicate I/O.
+- REP, DO/DOR/FOREVER/ENDDO/BRKcc, nesting, subroutines, stack/extension behavior,
+  exact partial budgets and admitted IRQ/exception sequences.
+- Core cache/control/STOP/WAIT/RESET/debug/trap behavior with explicit host/event
+  contracts. Such instructions cannot be silently replaced by NOPs or invented
+  peripheral replies just to pass a program.
+- Documented instruction costs and architectural sequence restrictions; retain
+  explicit limitations for uncalibrated pipeline/external-bus timing.
+- Reproducible independently modeled binary fixtures and boundary/interaction
+  tests on reference, cached and native backends in release and ASan/UBSan.
+  Differential agreement alone cannot prove correctness of shared semantics.
+
+Current closure increment: INC/DEC now change the raw accumulator's least
+significant bit (not its A1/B1 word), and CMPU compares zero-extended unsigned
+48-bit operands while ignoring accumulator EXP bytes. CMPU preserves S/L/E/U,
+clears V, uses arithmetic bit 55 for N, and tests low 48 bits for Z. Arithmetic
+saturation is explicitly bypassed for CMPU as specified in section 3.2.3.
+These additions still do not close all numerical modes or full ISA qualification.

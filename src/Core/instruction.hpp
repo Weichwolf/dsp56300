@@ -27,6 +27,9 @@ enum class Operation : std::uint8_t {
   logical_shift_immediate,
   logical_shift_register,
   immediate_alu,
+  increment,
+  decrement,
+  compare_unsigned,
   conditional_jump,
   relative_branch,
   conditional_transfer,
@@ -54,6 +57,9 @@ enum class Operation : std::uint8_t {
     case Operation::logical_shift_immediate:
     case Operation::logical_shift_register:
     case Operation::immediate_alu:
+    case Operation::increment:
+    case Operation::decrement:
+    case Operation::compare_unsigned:
     case Operation::conditional_transfer:
     case Operation::move_control_effective:
     case Operation::move_control_short:

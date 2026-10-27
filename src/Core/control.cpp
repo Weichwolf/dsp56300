@@ -86,6 +86,9 @@ void Core::Impl::execute(const Instruction &decoded) {
     case Operation::logical_shift_immediate:
     case Operation::logical_shift_register: execute_shift(decoded); return;
     case Operation::immediate_alu: execute_immediate(decoded); return;
+    case Operation::increment:
+    case Operation::decrement: execute_unit(decoded); return;
+    case Operation::compare_unsigned: compare_unsigned(opcode); return;
     case Operation::conditional_transfer: conditional_transfer(opcode); return;
     case Operation::relative_branch: execute_branch(decoded); return;
     case Operation::conditional_jump:

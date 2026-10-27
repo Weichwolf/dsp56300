@@ -1,5 +1,38 @@
 Objective audit: incomplete
 
+Full-ISA completion requirement: the complete DSP56300 instruction set must be
+implemented and independently tested, as explicitly reiterated by the user.
+Neither a passing current CTest suite nor successful Blofeld workloads is a
+replacement. doc/isa-coverage.tsv inventories 118 instruction/family/MOVE-form
+and alias entries against DSP56300FM Rev.5. The current audit records 38 missing,
+12 without dedicated independent tests and 68 partially tested entries; none
+claims complete support. These counts are catalogue rows, not disjoint opcode
+counts or an ISA-support percentage. Detailed format/mode/sequence expansion
+remains mandatory. python3 tools/isa_audit.py --require-complete deliberately
+returns failure while any entry remains incomplete; see doc/isa-qualification.txt.
+
+Integer ISA closure increment: INC/DEC and CMPU now decode and execute through
+the common general executor on all backends. INC/DEC change raw bit zero of the
+56-bit accumulator, with exact carry/borrow, overflow/sticky L and scaled E/U
+flags. CMPU zero-extends unsigned 24/48-bit operands, ignores EXP inputs, preserves
+S/L/E/U, clears V, uses arithmetic bit 55 for N and low 48 bits for Z. Its
+arithmetic saturation bypass is supported explicitly. Other restricted numerical
+modes remain visible gaps rather than silently using ordinary semantics.
+9556 independently modeled binary cases check both destinations, every legal
+CMPU register selector and reserved-selector rejection, poisoned EXP bytes,
+24/48/56-bit endpoints, six numeric modes, initial flags, CMPU with SM, explicit
+unimplemented-mode errors, REP including zero/65536, continuing/final DO endings,
+saved LF/LA/LC and stack wrap, and every prefix of mixed native/helper chains.
+All visible registers/RAM, retirement/base costs and interrupt admission are
+checked on reference, cached and native execution. Both release and ASan/UBSan
+strict suites pass 39 executable tests with one explicit inaccessible-KVM skip
+(40 registered, zero failures), including byte-exact integer fixture regeneration.
+All 14 legal register opcode forms were also checked with the separate authoring
+assembler; it is not a project build/test/runtime dependency or execution oracle.
+The old fail-stop test now accurately labels PFLUSHUN as an unimplemented valid
+instruction, not a reserved opcode. This increment does not close full ISA,
+pipeline/IRQ/exception/cache/control qualification or establish a speedup.
+
 Build/setup: C++23, CMake/Ninja, LLVM19, inherited strict diagnostics,
 clang-format/clang-tidy and ASan/UBSan setup. Release and strict builds/tests pass
 for the current instruction and binary fixtures, including REP base-cost checks.

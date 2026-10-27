@@ -32,6 +32,8 @@ struct Core::Impl {
                                                const detail::NativeOp *operation) noexcept;
   void execute(const detail::Instruction &decoded);
   void execute_immediate(const detail::Instruction &decoded);
+  void execute_unit(const detail::Instruction &decoded);
+  void compare_unsigned(Word opcode);
   void execute_jump(const detail::Instruction &decoded);
   void execute_branch(const detail::Instruction &decoded);
   void execute_bit(const detail::Instruction &decoded);
