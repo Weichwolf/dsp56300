@@ -12,6 +12,7 @@
 #include <exception>
 #include <iomanip>
 #include <iostream>
+#include <optional>
 #include <ratio>
 #include <stdexcept>
 #include <string_view>
@@ -137,16 +138,25 @@ std::size_t case_index(const std::string_view text) {
   }
   return value;
 }
+
+std::optional<Backend> selected_backend(const std::string_view name) {
+  if (name == "all") { return std::nullopt; }
+  for (const auto backend : {Backend::reference, Backend::cached, Backend::jit}) {
+    if (name == backend_name(backend)) { return backend; }
+  }
+  throw std::invalid_argument("Invalid backend: use all, reference, cached or jit");
+}
 } // namespace
 } // namespace dsp56300::test
 
 int main(const int argc, const char *const *const argv) {
   try {
-    if (argc < 2 || argc > 3) {
-      throw std::runtime_error("Usage: dsp56300_fixture_bench FILE.d56 [CASE_INDEX]");
+    if (argc < 2 || argc > 4) {
+      throw std::runtime_error("Usage: dsp56300_fixture_bench FILE.d56 [CASE_INDEX [BACKEND]]");
     }
+    const auto selected = dsp56300::test::selected_backend(argc == 4 ? argv[3] : "all");
     const auto cases = dsp56300::test::read_fixture(argv[1]);
-    const auto index = argc == 3 ? dsp56300::test::case_index(argv[2]) : std::size_t{0};
+    const auto index = argc >= 3 ? dsp56300::test::case_index(argv[2]) : std::size_t{0};
     const auto &item = cases.at(index);
     std::cout << std::fixed << std::setprecision(2) << item.name << '\n'
               << "One DSP instance per backend, 64 warmups, median of 9 x 4096 replays.\n"
@@ -154,6 +164,7 @@ int main(const int argc, const char *const *const argv) {
               << "Host RAM/register restoration is timed separately; no cold-load/device claim.\n";
     for (const auto backend :
          {dsp56300::Backend::reference, dsp56300::Backend::cached, dsp56300::Backend::jit}) {
+      if (selected.has_value() && *selected != backend) { continue; }
       dsp56300::test::benchmark(item, backend);
     }
   } catch (const std::exception &error) {

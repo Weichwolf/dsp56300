@@ -21,3 +21,5 @@ Subsequent user clarifications (preserving the original objective above):
 - Construct additional demanding tests from complete Blofeld DSP source routines.
   Reverb is one example, not a user-imposed priority. Select priorities according
   to their value for validation and optimization.
+- The latest workspace instructions supersede the previous push authorization:
+  commit verified increments locally; no publication destination is authorized.

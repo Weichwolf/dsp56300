@@ -93,9 +93,14 @@ Warm single-instance benchmark
 
   taskset -c 2 build/release/dsp56300_fixture_bench build/workloads/filter.d56 0
 
-The optional final argument selects a zero-based case. Each backend owns one
-DSP instance. The benchmark warms 64 calls, then reports the median and range
-of nine trials of 4096 calls. It restores host RAM/register initialization
+The optional case argument selects a zero-based case. An additional backend
+argument selects all (the default), reference, cached or jit. For example:
+
+  taskset -c 2 build/release/dsp56300_fixture_bench build/workloads/filter.d56 0 jit
+
+Select one backend when profiling its execution independently. Each backend
+owns one DSP instance. The benchmark warms 64 calls, then reports the median
+and range of nine trials of 4096 calls. It restores host RAM/register initialization
 outside the instruction-execution timer, without flushing program decoding.
 Execution includes the clock-pair and retirement-check overhead, with no
 subtraction. Host preparation is reported separately. Results describe warm
@@ -106,6 +111,8 @@ Initial and terminal state are checked; progress is checked after each trial.
 ASan/UBSan builds validate the harness but are not performance measurements.
 External perf counts cover the entire process, including host preparation;
 they must not be presented as counters for the timed execution region alone.
+One replay is one fixture execution: a fixture may contain several complete
+DSP routine calls. Report that count when comparing per-call or per-sample costs.
 
 Wire format D56F, version 1
 

@@ -99,6 +99,26 @@ all visible registers and RAM, exact output/history words, original return,
 instruction counts and estimated base costs match. Other coefficient callbacks,
 arbitrary entry modes, interrupted calls and device behavior remain unqualified.
 
+Demanding effect-stream qualification: 94 additional local source-built Reverb
+fixtures pass reference, cached and JIT execution in release and ASan/UBSan builds.
+90 successful fixtures describe 2700 complete ready-state calls per backend;
+four required memory-read faults check the declared host-memory boundary.
+An independent integer model checks complete visible registers, hardware stack,
+all supplied RAM, exact retirement and estimated base costs. Directed cases
+cover both rounding modes, limiting and sticky flags, circular-buffer wrapping,
+diffusion and feedback stages, retained feeds, aliased parallel moves,
+and streams up to 256 blocks with independently witnessed prior-block feedback.
+Compact and unrolled callers have independently derived stack/loop expectations
+and matching audio results. Metamorphic cases check overwritten read values and
+retained workspace, while forced ties and clipping exercise transfer precision.
+Fixtures explicitly provide ordinary host X/Y RAM. Restricting X memory must
+fault at an actual unused source read; no peripheral result is synthesized.
+This qualifies initialized CPU execution, not board mapping, setup/clear-to-ready,
+interruptions, acoustic quality or complete device behavior. Source assets,
+models, witness counts, hashes and reproduction manifests remain ignored.
+Reverb is one validation example; further workload selection follows semantic
+coverage and measured optimization value rather than an effect priority.
+
 Modes: ordinary 24-bit arithmetic, three defined transfer-scaling modes and
 two rounding choices have initial code. Compatibility, double precision,
 sixteen-bit arithmetic and arithmetic saturation reject at parallel execution;
@@ -148,6 +168,21 @@ Earlier isolated arithmetic experiments do not establish emulator speed.
 More source-built workloads, register-bank SIMD
 measurements, guarded independent-voice batching and code/cache evidence remain
 required before a final performance claim.
+
+Demanding effect baseline: one warm replay run on the i5-10400 measures about
+79/70/67 microseconds per initialized sixteen-sample stereo block for
+reference/cached/JIT execution. A sixteen-block JIT fixture measures about
+66 microseconds per block. Each run uses the nine-trial protocol above; these
+are baselines, not an established optimization gain or device-capacity result.
+About 40% of retired guest instructions use native ALU code in this case;
+the remainder use general helpers. Native parallel transfers still use helpers.
+The benchmark now permits selecting one backend for separate profiling.
+An isolated JIT process profile identifies address generation, parallel moves
+and dispatch among visible execution costs. It also includes substantial host
+RAM-restoration time outside the execution timer, so its sample percentages
+must not be interpreted as execution-region percentages. Address/move helpers
+and dispatch are the next optimization candidates, subject to guarded semantic
+coverage and before/after measurements across multiple qualified workloads.
 
 Measured native improvement: on four directed ordinary/wide filter and complete
 LP12 cases, the first scalar JIT reduces warm execution medians by 23-24%
