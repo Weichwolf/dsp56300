@@ -39,6 +39,7 @@ enum class Operation : std::uint8_t {
   load_updated_address,
   divide_iteration,
   normalize_iteration,
+  normalize_fast,
   product_immediate,
   product_power,
   product_mixed,
@@ -81,6 +82,7 @@ enum class Operation : std::uint8_t {
     case Operation::load_updated_address:
     case Operation::divide_iteration:
     case Operation::normalize_iteration:
+    case Operation::normalize_fast:
     case Operation::product_immediate:
     case Operation::product_power:
     case Operation::product_mixed:

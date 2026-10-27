@@ -21,7 +21,7 @@ BSET	13-34	partial	src/Core/bits.cpp	test/generate_bit_access.cpp;test/bit_acces
 BSR	13-37	partial	src/Core/conditional.cpp	test/generate_conditions.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 BSSET	13-38	partial	src/Core/bits.cpp	test/generate_bit_access.cpp;test/bit_access_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 BTST	13-40	partial	src/Core/bits.cpp	test/generate_bit_access.cpp;test/bit_access_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
-CLB	13-42	partial	src/Core/bit_fields.cpp	test/generate_bit_fields.cpp;test/fixtures/bit-fields.d56	SB/SC/DM semantics; complete event/sequence and pipeline timing qualification
+CLB	13-42	partial	src/Core/bit_fields.cpp	test/generate_bit_fields.cpp;test/fixtures/bit-fields.d56;test/generate_normalization.cpp;test/fixtures/normalization.d56	SB/SC/DM semantics; complete event/sequence and pipeline timing qualification
 CLR	13-44	partial	src/Core/arithmetic.cpp	test/generate_flags.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 CMP	13-45	partial	src/Core/arithmetic.cpp	test/generate_addition.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 CMPM	13-47	partial	src/Core/arithmetic.cpp	test/generate_bit_operations.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
@@ -87,7 +87,7 @@ MPYRI	13-143	partial	src/Core/products.cpp	test/generate_products.cpp;test/fixtu
 NEG	13-144	partial	src/Core/arithmetic.cpp	test/generate_arithmetic.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 NOP	13-145	partial	src/Core/control.cpp	test/core_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 NORM	13-146	partial	src/Core/iteration.cpp	test/generate_iteration.cpp;test/fixtures/iteration.d56	Other numeric modes; full operand/sequence, pipeline and IRQ qualification; hardware confirmation of NOP-branch status retention
-NORMF	13-147	missing	-	-	Instruction decoding and semantics; all operand/mode/sequence tests
+NORMF	13-147;13-148	partial	src/Core/iteration.cpp	test/generate_normalization.cpp;test/fixtures/normalization.d56	SB/SC/DM/SM; out-of-domain source semantics; complete sequence/IRQ/pipeline qualification; hardware confirmation of V bit-index typo
 NOT	13-149	untested	src/Core/arithmetic.cpp	-	Dedicated independent instruction/operand tests; other modes and sequences
 OR	13-150	partial	src/Core/arithmetic.cpp	test/generate_conditions.cpp	Register/parallel logic matrices; other numerical modes and sequence timing
 ORI	13-152	untested	src/Core/control.cpp	-	Dedicated independent instruction/operand tests; other modes and sequences

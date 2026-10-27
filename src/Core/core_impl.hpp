@@ -33,6 +33,7 @@ struct Core::Impl {
   void execute(const detail::Instruction &decoded);
   void execute_immediate(const detail::Instruction &decoded);
   void execute_iteration(const detail::Instruction &decoded);
+  void normalize_fast(Word opcode);
   void execute_address_calculation(const detail::Instruction &decoded);
   void execute_product(const detail::Instruction &decoded);
   void execute_unit(const detail::Instruction &decoded);

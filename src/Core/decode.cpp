@@ -21,6 +21,9 @@ struct Rule {
 
 // Family manual instruction encodings and documented base costs (appendix A).
 constexpr std::array rules{
+    Rule{.bits = encoding("00001100000111100010sssD"),
+         .operation = Operation::normalize_fast,
+         .words = 1},
     Rule{.bits = encoding("0000010011000RRR000ddddd"),
          .operation = Operation::load_relative_address,
          .words = 1,

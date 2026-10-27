@@ -4,14 +4,41 @@ Full-ISA completion requirement: the complete DSP56300 instruction set must be
 implemented and independently tested, as explicitly reiterated by the user.
 Neither a passing current CTest suite nor successful Blofeld workloads is a
 replacement. doc/isa-coverage.tsv inventories 118 instruction/family/MOVE-form
-and alias entries against DSP56300FM Rev.5. The current audit records 17 missing,
-11 without dedicated independent tests and 90 partially tested entries; none
+and alias entries against DSP56300FM Rev.5. The current audit records 16 missing,
+11 without dedicated independent tests and 91 partially tested entries; none
 claims complete support. These counts are catalogue rows, not disjoint opcode
 counts or an ISA-support percentage. Detailed format/mode/sequence expansion
 remains mandatory. python3 tools/isa_audit.py --require-complete deliberately
 returns failure while any entry remains incomplete; see doc/isa-qualification.txt.
 
-Address/iteration ISA increment: LRA, LUA/LEA, DIV and NORM now decode and
+Fast-normalization ISA increment: NORMF now decodes and executes on all three
+backends with every documented source register and both destinations. Counts
+-55..+56 are explicit; the raw old source is captured before a possible aliased
+accumulator write. Count zero recomputes arithmetic flags, and the full-width
+right shift yields zero or sign fill. C/S are preserved, L remains sticky, and
+V records any left-shift sign change. The manual's bit-39 V index conflicts
+with its stated 56-bit operation; this implementation follows bit-55 sign
+changes as for 56-bit ASL, pending hardware confirmation. Out-of-domain source
+values report an unsupported-mode boundary rather than invented hardware
+behavior. SB/SC/DM/SM and full pipeline/IRQ/event qualification remain open.
+28517 new binary cases use an independent per-bit shift model, covering every
+admitted count, old CCR combinations, six supported numeric modes, raw partial
+source aliases, full-width shifts and sticky flags. 1368 additional mathematical
+witnesses inside the corpus check the signed normalized interval after CLB/NORMF;
+they independently calculate leading runs and include both polarities and zero.
+Separate CLB self-alias chains, REP partial budgets with changing current counts,
+DO-end stack wrapping/saved LF/FV and native/helper/native prefixes verify
+ordering and Carry consumers. These counts describe synthetic test cases, not
+source-built Blofeld routines or measured workload throughput. All twelve NORMF
+and four CLB encodings match the optional authoring assembler. NORMF remains
+partial in the full-ISA catalogue; no row claims completeness.
+Release and ASan/UBSan strict suites pass all 53 executable tests, including
+private Blofeld routines; 54 are registered and KVM is the sole skip because
+its device is inaccessible. Both builds regenerate normalization.d56 byte-identically. LLVM 19
+strict diagnostics, clang-tidy, formatting and structural ISA audit pass. The
+mandatory --require-complete gate continues to fail on the documented backlog.
+
+Previous address/iteration ISA increment: LRA, LUA/LEA, DIV and NORM now decode and
 execute through the general executor on reference/cached/JIT backends. LRA adds
 a register or long displacement to the opcode PC using linear 24-bit arithmetic,
 ignoring N/M. LUA uses its selected modifier and old source operands while only

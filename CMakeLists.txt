@@ -122,6 +122,8 @@ if(BUILD_TESTING)
   target_link_libraries(dsp56300_generate_address_calc PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_iteration test/generate_iteration.cpp)
   target_link_libraries(dsp56300_generate_iteration PRIVATE dsp56300_fixture_format)
+  add_executable(dsp56300_generate_normalization test/generate_normalization.cpp)
+  target_link_libraries(dsp56300_generate_normalization PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_products test/generate_products.cpp)
   target_link_libraries(dsp56300_generate_products PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_loop_control test/generate_loop_control.cpp)
@@ -167,6 +169,13 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/address-calculations.d56")
   add_test(NAME iteration-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/iteration.d56")
+  add_test(NAME normalization-fixtures COMMAND dsp56300_fixture_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/normalization.d56")
+  add_test(NAME normalization-reproducibility COMMAND "${CMAKE_COMMAND}"
+    "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_normalization>"
+    "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/normalization-regenerated.d56"
+    "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/normalization.d56"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
   add_test(NAME address-calculation-reproducibility COMMAND "${CMAKE_COMMAND}"
     "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_address_calc>"
     "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/address-calculations-regenerated.d56"

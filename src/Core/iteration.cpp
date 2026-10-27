@@ -13,6 +13,36 @@ using namespace detail;
 
 namespace {
 constexpr std::array divisors{x0_register, y0_register, x1_register, y1_register};
+constexpr std::array shift_sources{
+    a1_register, b1_register, x0_register, y0_register, x1_register, y1_register};
+}
+
+void Core::Impl::normalize_fast(const Word opcode) {
+  if (!numeric_mode_supported()) { return; }
+  const auto selector = (opcode >> 1) & 7U;
+  if (selector < 2) {
+    fail(FaultKind::invalid_instruction, Space::program, current_pc, opcode);
+    return;
+  }
+  const auto shift = signed_word(read_register(shift_sources[selector - 2]));
+  if (shift < -static_cast<int>(accumulator_bits - 1) ||
+      shift > static_cast<int>(accumulator_bits)) {
+    fail(FaultKind::unsupported_mode, Space::program, current_pc, opcode);
+    return;
+  }
+  const bool destination_b = (opcode & 1U) != 0;
+  auto &destination = destination_b ? cpu.reg.b : cpu.reg.a;
+  const auto saved_carry = cpu.reg.sr & carry;
+  if (shift == static_cast<int>(accumulator_bits)) {
+    destination = (destination >> host_sign_bit) != 0 ? padding_mask : 0;
+    arithmetic_flags(destination, false);
+  } else {
+    arithmetic_shift(destination,
+                     {.count = static_cast<unsigned>(shift < 0 ? -shift : shift),
+                      .destination_b = destination_b,
+                      .left = shift < 0});
+  }
+  cpu.reg.sr = (cpu.reg.sr & ~carry) | saved_carry;
 }
 
 void Core::Impl::execute_iteration(const Instruction &decoded) {

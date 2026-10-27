@@ -106,3 +106,21 @@ discussion pages correct summary-table page references for DIV/NORM/LUA. Other
 modes and full pipeline/restriction/IRQ/event qualification remain mandatory.
 No affected entry is complete. Section 3.2.3's SM bypass for mixed MPY/MAC and
 DMACsu/uu also remains a specific unimplemented-mode gap in the previous increment.
+
+Fast-normalization increment: NORMF now accepts all six documented source
+registers and both accumulator destinations for signed counts -55..+56. It
+reads the raw old source before writing the destination, performs a 56-bit
+arithmetic shift, preserves C/S and sticky L, and updates the other arithmetic
+flags even at count zero. The full-width right shift produces zero or sign
+fill. Values outside the manual's stated source domain report unsupported_mode;
+this is an explicit qualification boundary, not a claimed hardware exception.
+The V description's bit-39 index is inconsistent with the stated 56-bit
+operation. The implementation uses bit-55 sign changes, as for 56-bit ASL;
+hardware confirmation remains required. Scaling affects E/U flag definitions
+but not the raw shift width. SB/SC/DM/SM remain unsupported.
+Independent per-bit fixtures cover every admitted count and raw source/dest
+alias. CLB-to-NORMF chains calculate the leading run independently and assert
+the final signed normalized interval, with separate aliased CLB chains. Partial
+REP budgets, current-count rereads, DO-end saved LF/FV, Carry consumers and
+native/helper/native prefixes exercise integration. This row remains partial;
+no full-ISA, workload-performance or hardware-timing claim follows.
