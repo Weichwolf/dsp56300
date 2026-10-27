@@ -46,6 +46,7 @@ constexpr std::array<std::uint8_t, 10> restore_and_return{
 
 enum AluByte : std::uint8_t {
   alu_clear = 0x13,
+  alu_round = 0x11,
   alu_x0 = 0x41,
   alu_y0 = 0x51,
   alu_x1 = 0x61,
@@ -85,11 +86,11 @@ bool JitEmitter::lowerable(const NativeOp &operation) const {
     if (reg >= m_register_base) { return false; }
   }
   const auto alu = opcode & byte_mask;
-  if ((alu & 0x80U) != 0) { return (alu & 1U) == 0; }
+  if ((alu & 0x80U) != 0) { return true; }
   const auto operation_code = alu & alu_mask;
   return operation_code == alu_clear || operation_code == 0x01 || operation_code == alu_x0 ||
          operation_code == alu_y0 || operation_code == alu_x1 || operation_code == alu_y1 ||
-         operation_code == alu_abs || operation_code == alu_neg;
+         operation_code == alu_abs || operation_code == alu_neg || operation_code == alu_round;
 }
 
 void JitEmitter::value(const Reg destination, const unsigned index, const bool latched) {
@@ -206,8 +207,30 @@ void JitEmitter::multiply(const NativeOp &operation) {
   } else {
     code_.binary(op_xor, {.destination = Reg::r10, .source = Reg::r10}, Width::dword);
   }
+  if ((opcode & 1U) != 0) { round(operation.mode); }
   code_.store(Reg::r12, register_offsets.at((opcode & 8U) != 0 ? 1U : 0U), Reg::ax);
   arithmetic_flags(operation.mode);
+}
+
+void JitEmitter::round(const Word mode) {
+  const unsigned cleared =
+      main_shift + ((mode & scale_down) != 0 ? 1U : 0U) - ((mode & scale_up) != 0 ? 1U : 0U);
+  const auto half = std::uint64_t{1} << (cleared - 1);
+  if ((mode & rounding_mode) != 0) {
+    code_.constant(Reg::r11, half);
+  } else {
+    code_.mov({.destination = Reg::dx, .source = Reg::ax});
+    code_.shift(shift_right, Reg::dx, cleared);
+    code_.immediate(group_and, Reg::dx, 1, Width::dword);
+    code_.shift(shift_left, Reg::dx, padding_bits);
+    code_.constant(Reg::r11, half - (std::uint64_t{1} << padding_bits));
+    code_.binary(op_add, {.destination = Reg::r11, .source = Reg::dx});
+  }
+  code_.binary(op_add, {.destination = Reg::ax, .source = Reg::r11});
+  code_.set(condition_overflow, Reg::dx);
+  code_.binary(op_or, {.destination = Reg::r10, .source = Reg::dx}, Width::dword);
+  code_.shift(shift_right, Reg::ax, cleared);
+  code_.shift(shift_left, Reg::ax, cleared);
 }
 
 void JitEmitter::native(const NativeOp &operation) {
@@ -223,6 +246,10 @@ void JitEmitter::native(const NativeOp &operation) {
   if (kind == alu_clear) {
     code_.binary(op_xor, {.destination = Reg::ax, .source = Reg::ax}, Width::dword);
     code_.binary(op_xor, {.destination = Reg::r10, .source = Reg::r10}, Width::dword);
+  } else if (kind == alu_round) {
+    value(Reg::ax, destination_b ? 1U : 0U, has_moves(operation));
+    code_.binary(op_xor, {.destination = Reg::r10, .source = Reg::r10}, Width::dword);
+    round(operation.mode);
   } else if ((kind & 7U) == 1) {
     input(Reg::ax, (opcode >> 4) & 7, destination_b, has_moves(operation));
     code_.store(Reg::r12, destination, Reg::ax);

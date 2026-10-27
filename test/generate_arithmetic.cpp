@@ -19,6 +19,7 @@ constexpr Word mac = 0xd2, negate = 0x36, adc_x = 0x21, sbc_x = 0x25, rnd = 0x11
 constexpr unsigned fractional_bits = 47;
 constexpr auto maximum56 = static_cast<std::int64_t>(sign56 - 1);
 constexpr auto minimum56 = -static_cast<std::int64_t>(sign56);
+constexpr Word changed_flags = flag_n | flag_z | flag_e | flag_u | flag_v;
 constexpr std::array<Word, 7> words{0, 1, 2, sign24 - 1, sign24, word_mask - 1, word_mask};
 constexpr std::array<std::uint64_t, 7> accumulators{0,
                                                     1,
@@ -168,7 +169,7 @@ struct RoundCase {
   std::int64_t whole = 0;
   Word mode = 0;
   int offset = 0;
-  bool rm = false;
+  bool rm = false, destination_b = false;
 };
 
 void round_case(std::vector<BinaryCase> &cases, const RoundCase input) {
@@ -177,14 +178,14 @@ void round_case(std::vector<BinaryCase> &cases, const RoundCase input) {
   const auto unit = std::int64_t{1} << bits;
   const auto value = (input.whole * unit) + (unit / 2) + input.offset;
   auto state = initial_state();
-  state.a = static_cast<std::uint64_t>(value) & accumulator_mask;
+  (input.destination_b ? state.b : state.a) = static_cast<std::uint64_t>(value) & accumulator_mask;
   state.sr = input.mode | (input.rm ? mode_rm : 0) | flag_c;
   const auto full = rounded({.value = value, .bits = bits, .rm = input.rm});
   const auto raw = static_cast<std::uint64_t>(full) & accumulator_mask;
   append(cases,
          {.initial = state,
           .full = full,
-          .opcode = rnd,
+          .opcode = rnd | (input.destination_b ? 8U : 0U),
           .status = state.sr | flags({.raw = raw, .mode = input.mode})});
 }
 
@@ -193,7 +194,14 @@ void round_cases(std::vector<BinaryCase> &cases) {
     for (const bool rm : {false, true}) {
       for (std::int64_t whole = -3; whole <= 3; ++whole) {
         for (const auto offset : {-1, 0, 1}) {
-          round_case(cases, {.whole = whole, .mode = mode, .offset = offset, .rm = rm});
+          for (const bool destination_b : {false, true}) {
+            round_case(cases,
+                       {.whole = whole,
+                        .mode = mode,
+                        .offset = offset,
+                        .rm = rm,
+                        .destination_b = destination_b});
+          }
         }
       }
     }
@@ -203,7 +211,6 @@ void round_cases(std::vector<BinaryCase> &cases) {
 constexpr Word x0 = 0x123456, x1 = 0xfedcba, y0 = 0x345678, y1 = 0x876543;
 constexpr std::uint64_t initial_x = (std::uint64_t{x1} << word_bits) | x0;
 constexpr std::uint64_t initial_y = (std::uint64_t{y1} << word_bits) | y0;
-constexpr Word changed_flags = flag_n | flag_z | flag_e | flag_u | flag_v;
 
 struct ProductInput {
   Registers state;
@@ -214,19 +221,27 @@ void product_case(std::vector<BinaryCase> &cases, const ProductInput &input) {
   const auto before = (input.opcode & 8U) != 0 ? input.state.b : input.state.a;
   const auto initial = (input.opcode & 2U) != 0 ? signed56(before) : 0;
   const auto term = 2 * signed24(input.left) * signed24(input.right);
-  const auto full = initial + ((input.opcode & 4U) != 0 ? -term : term);
+  auto full = initial + ((input.opcode & 4U) != 0 ? -term : term);
+  bool overflowed = full < minimum56 || full > maximum56;
+  if ((input.opcode & 1U) != 0) {
+    const auto wrapped = static_cast<std::uint64_t>(full) & accumulator_mask;
+    const auto mode = input.state.sr;
+    const unsigned bits =
+        word_bits + ((mode & mode_down) != 0 ? 1U : 0U) - ((mode & mode_up) != 0 ? 1U : 0U);
+    full = rounded({.value = signed56(wrapped), .bits = bits, .rm = (mode & mode_rm) != 0});
+    overflowed = overflowed || full < minimum56 || full > maximum56;
+  }
   const auto raw = static_cast<std::uint64_t>(full) & accumulator_mask;
-  const auto status = (input.state.sr & ~changed_flags) |
-                      flags({.raw = raw,
-                             .mode = input.state.sr & (mode_down | mode_up),
-                             .overflowed = full < minimum56 || full > maximum56});
+  const auto status =
+      (input.state.sr & ~changed_flags) |
+      flags({.raw = raw, .mode = input.state.sr & (mode_down | mode_up), .overflowed = overflowed});
   append(cases, {.initial = input.state, .full = full, .opcode = input.opcode, .status = status});
 }
 
 struct ProductConfig {
   std::uint64_t accumulator = 0;
   Word mode = 0;
-  bool destination_b = false, carry = false;
+  bool destination_b = false, carry = false, rounded = false;
 };
 
 void product_variants(std::vector<BinaryCase> &cases, const ProductConfig input) {
@@ -249,7 +264,7 @@ void product_variants(std::vector<BinaryCase> &cases, const ProductConfig input)
   state.x = initial_x;
   state.y = initial_y;
   state.sr = input.mode | flag_s | changed_flags | (input.carry ? flag_c | flag_l : 0);
-  const Word base = 0x80U | (input.destination_b ? 8U : 0U);
+  const Word base = 0x80U | (input.destination_b ? 8U : 0U) | (input.rounded ? 1U : 0U);
   for (const auto pair : pairs) {
     for (const bool negative : {false, true}) {
       for (const bool accumulate : {false, true}) {
@@ -264,19 +279,78 @@ void product_variants(std::vector<BinaryCase> &cases, const ProductConfig input)
   }
 }
 
-void product_matrix(std::vector<BinaryCase> &cases) {
+void product_matrix(std::vector<BinaryCase> &cases, const bool round_result) {
   for (const auto accumulator : accumulators) {
-    for (const Word mode : {Word{0}, mode_down, mode_up}) {
-      for (const bool destination_b : {false, true}) {
-        for (const bool carry : {false, true}) {
-          product_variants(cases,
-                           {.accumulator = accumulator,
-                            .mode = mode,
-                            .destination_b = destination_b,
-                            .carry = carry});
+    for (const Word scaling : {Word{0}, mode_down, mode_up}) {
+      for (const Word rm : {Word{0}, mode_rm}) {
+        if (!round_result && rm != 0) { continue; }
+        for (const bool destination_b : {false, true}) {
+          for (const bool carry : {false, true}) {
+            product_variants(cases,
+                             {.accumulator = accumulator,
+                              .mode = scaling | rm,
+                              .destination_b = destination_b,
+                              .carry = carry,
+                              .rounded = round_result});
+          }
         }
       }
     }
+  }
+}
+
+void round_boundary(std::vector<BinaryCase> &cases, const ProductConfig input) {
+  auto state = initial_state();
+  state.a = input.accumulator;
+  state.b = input.accumulator;
+  state.sr = input.mode | changed_flags | (input.carry ? flag_c | flag_s | flag_l : 0);
+  const unsigned bits = word_bits + ((input.mode & mode_down) != 0 ? 1U : 0U) -
+                        ((input.mode & mode_up) != 0 ? 1U : 0U);
+  const auto full = rounded(
+      {.value = signed56(input.accumulator), .bits = bits, .rm = (input.mode & mode_rm) != 0});
+  const auto raw = static_cast<std::uint64_t>(full) & accumulator_mask;
+  const auto status =
+      (state.sr & ~changed_flags) |
+      flags({.raw = raw, .mode = input.mode, .overflowed = full < minimum56 || full > maximum56});
+  const Word destination = input.destination_b ? 8U : 0U;
+  append(cases, {.initial = state, .full = full, .opcode = rnd | destination, .status = status});
+  // Zero-product MACR isolates rounding from multiplication for the same values.
+  product_case(cases, {.state = state, .opcode = mac | 1U | destination});
+}
+
+void round_boundary_variants(std::vector<BinaryCase> &cases, const Word mode) {
+  const unsigned bits =
+      word_bits + ((mode & mode_down) != 0 ? 1U : 0U) - ((mode & mode_up) != 0 ? 1U : 0U);
+  const auto unit = std::uint64_t{1} << bits;
+  const auto half = unit / 2;
+  const std::array<std::uint64_t, 12> values{0,
+                                             1,
+                                             half - 1,
+                                             half,
+                                             half + 1,
+                                             unit + half,
+                                             sign56 - 1,
+                                             sign56 - half,
+                                             sign56 - half - 1,
+                                             sign56,
+                                             sign56 + 1,
+                                             accumulator_mask};
+  for (const auto accumulator : values) {
+    for (const bool destination_b : {false, true}) {
+      for (const bool carry : {false, true}) {
+        round_boundary(cases,
+                       {.accumulator = accumulator,
+                        .mode = mode,
+                        .destination_b = destination_b,
+                        .carry = carry});
+      }
+    }
+  }
+}
+
+void round_boundary_matrix(std::vector<BinaryCase> &cases) {
+  for (const Word scaling : {Word{0}, mode_down, mode_up}) {
+    for (const Word rm : {Word{0}, mode_rm}) { round_boundary_variants(cases, scaling | rm); }
   }
 }
 
@@ -354,7 +428,9 @@ int main(const int argc, const char *const *const argv) {
     dsp56300::test::negate_cases(cases);
     dsp56300::test::carry_cases(cases);
     dsp56300::test::round_cases(cases);
-    dsp56300::test::product_matrix(cases);
+    dsp56300::test::product_matrix(cases, false);
+    dsp56300::test::product_matrix(cases, true);
+    dsp56300::test::round_boundary_matrix(cases);
     dsp56300::test::absolute_matrix(cases);
     dsp56300::test::transfer_matrix(cases);
     const auto count = cases.size();

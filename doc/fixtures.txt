@@ -2,8 +2,12 @@ Binary instruction fixtures
 
 test/fixtures/arithmetic.d56 contains only synthetic instruction cases authored
 for this project. It contains no Blofeld program or extracted manufacturer data.
-The checked-in generator uses signed integer arithmetic and quotient/remainder
-rounding expectations; it does not link or execute the emulator implementation.
+The 9447 checked-in arithmetic cases include all eight signed product selectors
+with MPY/MPYR/MAC/MACR variants, both accumulator destinations, three scaling
+modes and both rounding choices. Directed RND/zero-product MACR cases check
+half ties, adjacent values and 56-bit wrap/overflow with seeded sticky flags.
+The generator uses signed integer arithmetic and quotient/remainder rounding
+expectations; it does not link or execute the emulator implementation.
 Fixture regeneration is explicit, never part of normal test execution:
 
   cmake --preset release

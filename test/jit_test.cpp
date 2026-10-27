@@ -66,6 +66,26 @@ void numeric_modes() {
           "Numeric modes have distinct translation keys");
 }
 
+void rounding_modes() {
+  Machine machine({.backend = Backend::jit});
+  constexpr Word round_accumulator = 0x200011;
+  machine.core.write(Space::program, start, round_accumulator);
+  auto state = initial_state();
+  state.a = std::uint64_t{1} << (word_bits - 1);
+  machine.core.set_registers(state);
+  require(machine.core.run(1).dispatches == 1 && machine.core.registers().a == 0,
+          "Native convergent rounding sends a half tie to even zero");
+  state.sr = mode_rm;
+  machine.core.set_registers(state);
+  require(machine.core.run(1).dispatches == 1 &&
+              machine.core.registers().a == (std::uint64_t{1} << word_bits),
+          "A changed RM selects two's-complement rounding at the same PC");
+  const auto statistics = machine.core.jit_statistics();
+  require(statistics.compiled_blocks == 2 && statistics.native_alu_instructions == 2 &&
+              statistics.helper_instructions == 0,
+          "Both rounding modes execute their separately keyed native translation");
+}
+
 void host_program_write() {
   Machine machine({.backend = Backend::jit});
   machine.core.write(Space::program, start, mac);
@@ -221,6 +241,7 @@ int main() {
     dsp56300::test::exact_budget(false);
     dsp56300::test::exact_budget(true);
     dsp56300::test::numeric_modes();
+    dsp56300::test::rounding_modes();
     dsp56300::test::host_program_write();
     dsp56300::test::callback_program_write(dsp56300::test::io_load_clear);
     dsp56300::test::callback_program_write(dsp56300::test::io_load);

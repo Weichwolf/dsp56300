@@ -15,3 +15,5 @@ Subsequent user clarifications (preserving the original objective above):
 - Consider C++ concepts for portable, compile-time-checked internal interfaces.
 - Current workspace instructions supersede the earlier publication instruction:
   commit verified increments locally; no publication destination is authorized.
+- The user subsequently explicitly requested commit and push again. The existing
+  private Weichwolf/dsp56300 origin/main is the authorized destination.

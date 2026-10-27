@@ -10,7 +10,10 @@ reference and cached paths share an instruction executor and have independent
 numeric expectations in tests. The instruction cache stores decoded words in
 pages allocated on demand. A/B use a left-aligned 56-bit representation so
 ordinary 64-bit wrapping arithmetic discards bits beyond DSP precision.
-JIT selection explicitly rejects until an independent JIT is implemented.
+An independent Linux x86-64 JIT emits selected scalar arithmetic and uses guarded
+general helpers for other implemented forms. Select Options.backend=Backend::jit;
+the cached interpreter remains the default. See doc/jit.txt for supported native
+operations, invalidation, execution budgets and instrumentation boundaries.
 Full ISA/mode/timing qualification and Blofeld performance measurements remain
 open; see doc/coverage.txt and the complete objective in doc/objective.txt.
 

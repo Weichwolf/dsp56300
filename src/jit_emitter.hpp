@@ -25,6 +25,7 @@ private:
   void helper(JitHelper function, const NativeOp &operation);
   void native(const NativeOp &operation);
   void multiply(const NativeOp &operation);
+  void round(Word mode);
   void arithmetic_flags(Word mode, bool carry_changed = false);
   void input(x64::Reg destination, unsigned selector, bool destination_b, bool latched);
   void value(x64::Reg destination, unsigned index, bool latched);

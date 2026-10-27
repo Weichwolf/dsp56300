@@ -19,8 +19,8 @@ parallel moves, AGU paths, basic control, DO/REP and admitted interrupts have
 initial code. Coded forms are not all qualified. Independent tests currently
 cover the manual MAC example, old-register latching on a parallel move,
 REP/LC restore and fail-stop diagnostics through all three execution paths.
-3369 synthetic binary cases independently cover all eight signed product input
-pairs with MPY/MAC sign/accumulation variants, A/B destinations, ABS/NEG and
+9447 synthetic binary cases independently cover all eight signed product input
+pairs with MPY/MPYR/MAC/MACR sign/accumulation variants, A/B destinations, ABS/NEG and
 internal transfer sources, ADC/SBC carry and RND ties. They cover all three
 scaling modes and both rounding modes where relevant. Cases compare
 complete visible register and memory state, progress and interrupt admission.
@@ -94,8 +94,8 @@ One DSP instance per backend, host restoration outside the execution timer,
 64 warmups and a median/range of nine 4096-call trials. Complete results are
 checked after warmup and each trial. This measures initialized call replay,
 including timer/retirement-check overhead; it is not continuous audio or device
-performance. An initial independent scalar x64 JIT now emits unrounded MPY/MAC,
-CLR/ABS/NEG/TFR and NOP, with guarded general helpers for other operations and
+performance. An initial independent scalar x64 JIT now emits MPY/MPYR/MAC/MACR,
+RND/CLR/ABS/NEG/TFR and NOP, with guarded general helpers for other operations and
 parallel memory moves. It has exact budgets, numerical mode keys, deferred P
 invalidation, bounded executable storage and immutable RX mappings. Shared
 fixtures cover all three backends; host tests check ABI/boundary behavior and
@@ -115,6 +115,17 @@ medians. The published executable working set is 16-20 KiB for these cases.
 Native ALU still calls parallel-move helpers, and cold compilation is excluded.
 These measurements qualify those initialized calls only. Exact local inputs,
 artifact hashes and raw measurements remain in ignored workload/analysis files.
+
+Native rounding extension: MPYR/MACR/RND now execute emitted arithmetic with RM
+in the mode key. Directed cases check accumulation and rounding overflow, ties,
+sticky flags and both accumulators. All nine release/strict tests pass with the
+expanded 9447-case arithmetic fixture. Three alternating before/after runs on
+the wide direct filter and complete wide LP12 reduce JIT call medians by about
+12% and 9%, respectively, versus the first JIT. Sixteen additional operations
+per call use native arithmetic; their parallel transfers still use the helper.
+Executable mappings grow by one page for these cases (20/24 KiB respectively).
+Ordinary cases keep the same native/helper instruction mix. This remains a
+directed warm-call measurement, with the same limitations stated above.
 
 Measured scalar improvement: parallel instructions with a zero ALU byte now
 execute their move without saving unused ALU inputs or calling the no-op ALU
