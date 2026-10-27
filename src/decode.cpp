@@ -20,6 +20,55 @@ struct Rule {
 
 // Family manual instruction encodings and documented base costs (appendix A).
 constexpr std::array rules{
+    Rule{.bits = encoding("00000101W1MMMRRR0S1ddddd"),
+         .operation = Operation::move_control_effective,
+         .words = 1},
+    Rule{.bits = encoding("00000101W0aaaaaa0S1ddddd"),
+         .operation = Operation::move_control_short,
+         .words = 1},
+    Rule{.bits = encoding("00000100W1eeeeee101ddddd"),
+         .operation = Operation::move_control_register,
+         .words = 1},
+    Rule{.bits = encoding("00000101iiiiiiii101ddddd"),
+         .operation = Operation::move_control_immediate,
+         .words = 1},
+    Rule{.bits = encoding("00000111W1MMMRRR10dddddd"),
+         .operation = Operation::move_program_effective,
+         .words = 1,
+         .cycles = 6},
+    Rule{.bits = encoding("00000111W0aaaaaa00dddddd"),
+         .operation = Operation::move_program_short,
+         .words = 1,
+         .cycles = 6},
+    Rule{.bits = encoding("0000100sW1dddddd00pppppp"),
+         .operation = Operation::move_peripheral_register,
+         .words = 1},
+    Rule{.bits = encoding("00000100W1dddddd1q0qqqqq"),
+         .operation = Operation::move_peripheral_register,
+         .words = 1},
+    Rule{.bits = encoding("00000100W1dddddd0q1qqqqq"),
+         .operation = Operation::move_peripheral_register,
+         .words = 1},
+    Rule{.bits = encoding("0000100sW1MMMRRR1Spppppp"),
+         .operation = Operation::move_peripheral_memory,
+         .words = 1,
+         .cycles = 2},
+    Rule{.bits = encoding("00000111W1MMMRRR0Sqqqqqq"),
+         .operation = Operation::move_peripheral_memory,
+         .words = 1,
+         .cycles = 2},
+    Rule{.bits = encoding("00000111W0MMMRRR1Sqqqqqq"),
+         .operation = Operation::move_peripheral_memory,
+         .words = 1,
+         .cycles = 2},
+    Rule{.bits = encoding("0000100sW1MMMRRR01pppppp"),
+         .operation = Operation::move_peripheral_program,
+         .words = 1,
+         .cycles = 6},
+    Rule{.bits = encoding("000000001WMMMRRR0Sqqqqqq"),
+         .operation = Operation::move_peripheral_program,
+         .words = 1,
+         .cycles = 6},
     Rule{.bits = encoding("00000001010000001100dkkk"),
          .operation = Operation::immediate_alu,
          .words = 2,
@@ -214,6 +263,25 @@ bool parallel_address(const Word opcode) noexcept {
   return memory || (opcode & pair_group_mask) == pair_group ||
          (opcode & class_two_mask) == class_two;
 }
+
+bool transfer_address(const Operation operation) noexcept {
+  return operation == Operation::move_control_effective ||
+         operation == Operation::move_program_effective ||
+         operation == Operation::move_peripheral_memory ||
+         operation == Operation::move_peripheral_program;
+}
+
+bool rule_penalty(const Rule &rule, const Word opcode) noexcept {
+  if (transfer_address(rule.operation)) {
+    const auto mode = (opcode >> 11) & 7;
+    const bool immediate_peripheral = rule.operation == Operation::move_peripheral_memory &&
+                                      mode == 6 && ((opcode >> 8) & 7) == 4;
+    return (mode == 5 || mode == 6 || mode == 7) && !immediate_peripheral;
+  }
+  return (rule.operation == Operation::jump_effective ||
+          rule.operation == Operation::call_effective) &&
+         address_penalty(opcode);
+}
 }
 
 Instruction decode(const Word opcode) noexcept {
@@ -228,18 +296,16 @@ Instruction decode(const Word opcode) noexcept {
     if (!rule.bits.matches(opcode)) { continue; }
     auto words = rule.words;
     if ((rule.operation == Operation::jump_effective ||
-         rule.operation == Operation::call_effective ||
+         rule.operation == Operation::call_effective || transfer_address(rule.operation) ||
          (rule.operation == Operation::conditional_jump && (opcode & short_jump_bit) == 0)) &&
         ((opcode >> 11) & 7) == 6) {
       words = 2;
     }
-    const bool penalty = (rule.operation == Operation::jump_effective ||
-                          rule.operation == Operation::call_effective) &&
-                         address_penalty(opcode);
     return {.opcode = opcode,
             .operation = rule.operation,
             .words = words,
-            .cycles = static_cast<std::uint8_t>(rule.cycles + (penalty ? 1 : 0))};
+            .cycles =
+                static_cast<std::uint8_t>(rule.cycles + (rule_penalty(rule, opcode) ? 1 : 0))};
   }
 
   return {.opcode = opcode};

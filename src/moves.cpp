@@ -216,11 +216,16 @@ void Core::Impl::mixed_move(const Instruction &decoded) {
 
 void Core::Impl::class_two_move(const Instruction &decoded) {
   const auto opcode = decoded.opcode;
+  const auto form = address_form(decoded);
+  if (form.mode == 6) {
+    fail(FaultKind::invalid_instruction, Space::program, current_pc, opcode);
+    return;
+  }
   const bool yspace = (opcode & store_to_register) != 0;
   const unsigned accumulator = (opcode & (1U << 16)) != 0 ? b_register : a_register;
   const auto value = read_register(accumulator);
   const auto operand = read_register(yspace ? y0_register : x0_register);
-  write_memory(yspace ? Space::y : Space::x, effective(address_form(decoded)), value);
+  write_memory(yspace ? Space::y : Space::x, effective(form), value);
   write_register(accumulator, operand);
 }
 

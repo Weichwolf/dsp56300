@@ -95,7 +95,11 @@ void Core::Impl::write_register(const unsigned number, const Word value) {
     case sp_register: reg.sp = value & (stack_entries * 4 - 1); break;
     case la_register: reg.la = value; break;
     case lc_register: reg.lc = value; break;
-    case ssh_register: push(value, 0); break;
+    case ssh_register: {
+      const auto next = (reg.sp + 1) & (stack_entries - 1);
+      push(value, static_cast<Word>(reg.stack[next]) & word_mask);
+      break;
+    }
     case ssl_register:
       reg.stack[reg.sp & (stack_entries - 1)] =
           (reg.stack[reg.sp & (stack_entries - 1)] & ~std::uint64_t{word_mask}) | value;

@@ -38,6 +38,9 @@ the CPU/register snapshot; guest RAM and peripheral accesses are not unchecked
 native loads. Loop-ending native instructions return to the general executor
 before any side effects, so its DO cleanup and fault rules remain authoritative.
 REP bodies use their original latched general execution path.
+MOVEC/MOVEM/MOVEP use the general helpers. Guest SR writes exit on changed
+numerical mode, and guest P writes exit on invalidation before executing a
+previously planned successor. Directed host sequences exercise both boundaries.
 
 Blocks are keyed by guest PC and numerical mode. Planning reads only available
 P RAM and causes no guest fetch fault for instructions not executed. A helper

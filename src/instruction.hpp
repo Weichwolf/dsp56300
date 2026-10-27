@@ -29,7 +29,16 @@ enum class Operation : std::uint8_t {
   immediate_alu,
   conditional_jump,
   relative_branch,
-  conditional_transfer
+  conditional_transfer,
+  move_control_effective,
+  move_control_short,
+  move_control_register,
+  move_control_immediate,
+  move_program_effective,
+  move_program_short,
+  move_peripheral_register,
+  move_peripheral_memory,
+  move_peripheral_program
 };
 
 [[nodiscard]] constexpr bool repeatable(const Operation operation) noexcept {
@@ -41,7 +50,16 @@ enum class Operation : std::uint8_t {
     case Operation::logical_shift_immediate:
     case Operation::logical_shift_register:
     case Operation::immediate_alu:
-    case Operation::conditional_transfer: return true;
+    case Operation::conditional_transfer:
+    case Operation::move_control_effective:
+    case Operation::move_control_short:
+    case Operation::move_control_register:
+    case Operation::move_control_immediate:
+    case Operation::move_program_effective:
+    case Operation::move_program_short:
+    case Operation::move_peripheral_register:
+    case Operation::move_peripheral_memory:
+    case Operation::move_peripheral_program: return true;
     case Operation::unsupported:
     case Operation::jump_short:
     case Operation::jump_effective:

@@ -46,6 +46,6 @@ inline constexpr Word register_group_mask = 0xfc0000, update_group_mask = 0xffe0
 inline constexpr Word update_group = 0x204000, no_move_group = 0x200000;
 inline constexpr Word upper_move_mask = 0xffff00, pair_group_mask = 0xf00000;
 inline constexpr Word pair_group = 0x100000, memory_group_mask = 0xc00000, memory_group = 0x400000;
-inline constexpr Word class_two_mask = 0xfe0000, class_two = 0x080000;
+inline constexpr Word class_two_mask = 0xfe4000, class_two = 0x080000;
 inline constexpr Word long_selector_mask = 0x340000;
 } // namespace dsp56300::detail

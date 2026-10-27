@@ -42,6 +42,11 @@ struct Core::Impl {
   void long_move(const detail::Instruction &decoded);
   void mixed_move(const detail::Instruction &decoded);
   void class_two_move(const detail::Instruction &decoded);
+  void control_move(const detail::Instruction &decoded);
+  void control_register_move(Word opcode);
+  void program_move(const detail::Instruction &decoded);
+  void peripheral_move(const detail::Instruction &decoded);
+  void peripheral_register_move(const detail::Instruction &decoded);
   void alu(Word opcode);
   void multiply(Word opcode);
   [[nodiscard]] bool unary(Word opcode);

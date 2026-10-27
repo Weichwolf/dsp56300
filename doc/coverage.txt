@@ -84,6 +84,24 @@ two rounding choices have initial code. Compatibility, double precision,
 sixteen-bit arithmetic and arithmetic saturation reject at parallel execution;
 these required modes remain to be implemented and tested.
 
+Nonparallel transfers: MOVEC short/long immediate, register and X/Y short/EA
+forms, MOVEM short/EA and MOVEP register/X/Y/P forms now execute through the
+general executor on all three backends. 20158 independently generated binary
+cases cover the 47 register selectors, 19 control selectors, ordinary scaling,
+raw accumulator fields, transfer limiting, preserved flags, SSH/SSL effects,
+linear address updates, base costs and directed rejection/fault cases.
+Writing SSH preserves the other half of the newly selected stack entry.
+The Class-II mask now excludes MOVEP encodings, and its forbidden long
+address/immediate forms fault before performing a transfer. Directed Class-II
+cases verify the remaining parallel transfers.
+1607 synthetic host-boundary checks exercise every high/low X/Y port, masking,
+memory and immediate transfers, REP, guest SR changes and guest MOVEM/MOVEP P
+writes that invalidate a planned JIT successor. I/O uses explicit scripted host
+responses; no peripheral state or device results are fabricated. Qualified data
+moves use ordinary numeric modes; other modes remain explicitly restricted.
+Updated-address/source aliases, extended hardware stack operation, pipeline
+interlocks and undefined instruction sequences remain unqualified.
+
 Timing: documented base costs are being added for implemented forms. Pipeline
 interlocks, IRQ entry/return qualification, exact event admission and external
 waits remain open. A complete checkpoint API is pending; Registers omits hidden
@@ -104,7 +122,7 @@ parallel memory moves. It has exact budgets, numerical mode keys, deferred P
 invalidation, bounded executable storage and immutable RX mappings. Shared
 fixtures cover all three backends; host tests check ABI/boundary behavior and
 native/helper counters expose actual lowered execution. See doc/jit.txt for
-instrumentation scope and remaining native work. All nine CTests pass in release
+instrumentation scope and remaining native work. All twelve CTests pass in release
 and strict builds, including exact fixture regeneration. SIMD is not implemented.
 Earlier isolated arithmetic experiments do not establish emulator speed.
 More source-built workloads, register-bank SIMD

@@ -23,7 +23,7 @@ set(CMAKE_CXX_CLANG_TIDY "${BLOFELD_CLANG_TIDY};--warnings-as-errors=*")
 
 add_library(dsp56300_core STATIC Core/core.cpp src/core_state.cpp src/memory_arena.cpp
   src/arithmetic.cpp src/shifts.cpp src/conditional.cpp src/immediate.cpp src/decode.cpp
-  src/moves.cpp src/registers.cpp src/agu.cpp src/control.cpp src/jit.cpp src/jit_helpers.cpp
+  src/moves.cpp src/transfers.cpp src/registers.cpp src/agu.cpp src/control.cpp src/jit.cpp src/jit_helpers.cpp
   src/jit_emitter.cpp src/x64.cpp)
 add_library(dsp56300::core ALIAS dsp56300_core)
 target_include_directories(dsp56300_core PUBLIC include)
@@ -46,6 +46,9 @@ if(BUILD_TESTING)
   add_executable(dsp56300_jit_test test/jit_test.cpp)
   target_link_libraries(dsp56300_jit_test PRIVATE dsp56300::core)
   add_test(NAME native-boundaries COMMAND dsp56300_jit_test)
+  add_executable(dsp56300_transfer_test test/transfer_test.cpp)
+  target_link_libraries(dsp56300_transfer_test PRIVATE dsp56300::core)
+  add_test(NAME transfer-boundaries COMMAND dsp56300_transfer_test)
   add_library(dsp56300_fixture_format STATIC test/binary_fixture.cpp)
   target_include_directories(dsp56300_fixture_format PUBLIC test include)
   target_link_libraries(dsp56300_fixture_format PUBLIC blofeld_quality)
@@ -55,6 +58,8 @@ if(BUILD_TESTING)
   target_link_libraries(dsp56300_generate_bits PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_conditions test/generate_conditions.cpp)
   target_link_libraries(dsp56300_generate_conditions PRIVATE dsp56300_fixture_format)
+  add_executable(dsp56300_generate_transfers test/generate_transfers.cpp)
+  target_link_libraries(dsp56300_generate_transfers PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_fixture_test test/fixture_test.cpp)
   target_link_libraries(dsp56300_fixture_test PRIVATE dsp56300::core dsp56300_fixture_format)
   add_executable(dsp56300_fixture_bench test/fixture_bench.cpp)
@@ -63,6 +68,13 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/arithmetic.d56")
   add_test(NAME condition-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/conditions.d56")
+  add_test(NAME transfer-fixtures COMMAND dsp56300_fixture_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/transfers.d56")
+  add_test(NAME transfer-fixture-reproducibility COMMAND "${CMAKE_COMMAND}"
+    "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_transfers>"
+    "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/transfers-regenerated.d56"
+    "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/transfers.d56"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
   add_test(NAME condition-fixture-reproducibility COMMAND "${CMAKE_COMMAND}"
     "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_conditions>"
     "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/conditions-regenerated.d56"
