@@ -25,7 +25,7 @@ add_library(dsp56300_core STATIC
   src/Core/core.cpp src/Core/core_state.cpp src/Core/arithmetic.cpp src/Core/shifts.cpp
   src/Core/conditional.cpp src/Core/immediate.cpp src/Core/integer.cpp src/Core/decode.cpp src/Core/moves.cpp
   src/Core/transfers.cpp src/Core/registers.cpp src/Core/agu.cpp src/Core/control.cpp
-  src/Core/bits.cpp src/Core/bit_fields.cpp src/Core/loops.cpp src/Core/products.cpp
+  src/Core/bits.cpp src/Core/bit_fields.cpp src/Core/loops.cpp src/Core/products.cpp src/Core/iteration.cpp
   src/Jit/jit.cpp src/Jit/jit_helpers.cpp src/Jit/X64/jit_emitter.cpp src/Jit/X64/x64.cpp
   src/Jit/X64/jit_addition.cpp
   src/Jit/X64/jit_loops.cpp
@@ -118,6 +118,10 @@ if(BUILD_TESTING)
   target_link_libraries(dsp56300_generate_flags PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_integer test/generate_integer.cpp)
   target_link_libraries(dsp56300_generate_integer PRIVATE dsp56300_fixture_format)
+  add_executable(dsp56300_generate_address_calc test/generate_address_calc.cpp)
+  target_link_libraries(dsp56300_generate_address_calc PRIVATE dsp56300_fixture_format)
+  add_executable(dsp56300_generate_iteration test/generate_iteration.cpp)
+  target_link_libraries(dsp56300_generate_iteration PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_products test/generate_products.cpp)
   target_link_libraries(dsp56300_generate_products PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_loop_control test/generate_loop_control.cpp)
@@ -159,6 +163,20 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/flags.d56")
   add_test(NAME integer-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/integer.d56")
+  add_test(NAME address-calculation-fixtures COMMAND dsp56300_fixture_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/address-calculations.d56")
+  add_test(NAME iteration-fixtures COMMAND dsp56300_fixture_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/iteration.d56")
+  add_test(NAME address-calculation-reproducibility COMMAND "${CMAKE_COMMAND}"
+    "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_address_calc>"
+    "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/address-calculations-regenerated.d56"
+    "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/address-calculations.d56"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
+  add_test(NAME iteration-reproducibility COMMAND "${CMAKE_COMMAND}"
+    "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_iteration>"
+    "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/iteration-regenerated.d56"
+    "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/iteration.d56"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
   add_test(NAME immediate-product-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/products-immediate.d56")
   add_test(NAME mixed-product-fixtures COMMAND dsp56300_fixture_test

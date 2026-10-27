@@ -3,6 +3,7 @@
 #include "core_impl.hpp"
 #include "dsp56300/core.hpp"
 #include "fields.hpp"
+#include "instruction.hpp"
 
 #include <bit>
 #include <cstdint>
@@ -18,6 +19,22 @@ Word reverse_word(Word value) noexcept {
     value >>= 1;
   }
   return result;
+}
+
+std::int32_t calculation_offset(const Registers &state, const Word opcode) {
+  const auto index = (opcode >> 8) & 7U;
+  const bool reverse = (state.m[index] & modifier_mask) == 0;
+  if ((opcode & (1U << 14)) == 0) {
+    constexpr Word upper_displacement = 0x70;
+    const auto raw = ((opcode >> 7) & upper_displacement) | ((opcode >> 4) & 15U);
+    const auto expanded = (raw & 64U) != 0 ? raw | (word_mask & ~Word{127}) : raw;
+    return reverse ? static_cast<std::int32_t>(expanded) : signed_word(expanded);
+  }
+  const auto mode = (opcode >> 11) & 3U;
+  if (mode >= 2) { return mode == 2 ? -1 : 1; }
+  const auto offset =
+      reverse ? static_cast<std::int32_t>(state.n[index]) : signed_word(state.n[index]);
+  return mode == 0 ? -offset : offset;
 }
 }
 
@@ -91,6 +108,27 @@ Word Core::Impl::effective(const AddressForm form) {
                           : update_address({.index = index, .offset = offset});
   if (mode != 5) { cpu.reg.r[index] = result; }
   return mode == 5 || mode == 7 ? result : original;
+}
+
+void Core::Impl::execute_address_calculation(const Instruction &decoded) {
+  if (!numeric_mode_supported()) { return; }
+  const auto opcode = decoded.opcode;
+  const auto index = (opcode >> 8) & 7U;
+  const bool relative = decoded.operation == Operation::load_relative_address;
+  const bool displacement = !relative && (opcode & (1U << 14)) == 0;
+  const auto destination = displacement ? r_register_base + (opcode & 15U) : opcode & five_bit_mask;
+  if (destination < x0_register) {
+    fail(FaultKind::invalid_instruction, Space::program, current_pc, opcode);
+    return;
+  }
+  Word result = 0;
+  if (relative) {
+    const auto offset = decoded.words == 2 ? decoded.extension : cpu.reg.r[index];
+    result = address_add(current_pc, signed_word(offset));
+  } else {
+    result = update_address({.index = index, .offset = calculation_offset(cpu.reg, opcode)});
+  }
+  if (fault.kind == FaultKind::none) { write_register(destination, result); }
 }
 
 } // namespace dsp56300

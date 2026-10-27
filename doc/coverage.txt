@@ -4,14 +4,60 @@ Full-ISA completion requirement: the complete DSP56300 instruction set must be
 implemented and independently tested, as explicitly reiterated by the user.
 Neither a passing current CTest suite nor successful Blofeld workloads is a
 replacement. doc/isa-coverage.tsv inventories 118 instruction/family/MOVE-form
-and alias entries against DSP56300FM Rev.5. The current audit records 22 missing,
-11 without dedicated independent tests and 85 partially tested entries; none
+and alias entries against DSP56300FM Rev.5. The current audit records 17 missing,
+11 without dedicated independent tests and 90 partially tested entries; none
 claims complete support. These counts are catalogue rows, not disjoint opcode
 counts or an ISA-support percentage. Detailed format/mode/sequence expansion
 remains mandatory. python3 tools/isa_audit.py --require-complete deliberately
 returns failure while any entry remains incomplete; see doc/isa-qualification.txt.
 
-Extended-product ISA increment: MPYI/MPYRI/MACI/MACRI, MPYsu/MPYuu and
+Address/iteration ISA increment: LRA, LUA/LEA, DIV and NORM now decode and
+execute through the general executor on reference/cached/JIT backends. LRA adds
+a register or long displacement to the opcode PC using linear 24-bit arithmetic,
+ignoring N/M. LUA uses its selected modifier and old source operands while only
+the explicit destination changes. All four update forms and every signed
+seven-bit displacement are decoded, including sign extension before reverse-carry
+addition. The seven-bit form ignores N; source/destination aliases, raw partial
+accumulator fields and full accumulator destinations are explicit. The legal
+five-bit destination list follows the encoding fields, which disagree with some
+prose notes. LEA is the binary alias of LUA; the optional authoring assembler
+supports the LUA spelling, not LEA. Catalogue references now point to actual
+DIV/NORM/LUA discussion pages rather than inconsistent summary-table page labels.
+DIV uses old operand signs, a 56-bit shift with Carry insertion, and aligned
+signed addition/subtraction. C follows the result sign; V follows the shift
+sign change, L is sticky and N/Z/E/U/S are preserved. Raw-operation fixtures
+include zero divisors without inventing an arithmetic exception; they do not
+claim mathematical division outside the manual's valid dividend/divisor domain.
+NORM selects its step from old E/U/Z, preserves Carry, updates other arithmetic
+flags on a shift and increments/decrements R linearly while ignoring N/M. Its
+stated NOP branch retains state. Status retention on that branch still needs
+hardware confirmation, given the less explicit condition-code table.
+53435 address-calculation and 31150 DIV/NORM independent binary cases check
+all legal register selectors/destinations, 24-bit value/address boundaries,
+modifiers, aliases, six numeric modes, CCR preservation, partial/full
+A/B writes, REP prefixes, loop endings and saved LF/FV. An LSB-first boolean
+adder/subtractor circuit models DIV; 36 completed quotient cases additionally
+agree with ordinary integer division, including the next Carry bit. Valid NORM
+inputs derive E/U/Z/N from their operand; separate control-bit cases exercise
+branch selection without claiming mathematically valid normalization inputs.
+Native/helper/native prefixes consume changed R/X/Y/A/B and Carry, including
+a real native X-memory load after explicit LUA pointer writeback. LRA P-extension
+wrap and truncated-word faults are explicit. Address-only high results require
+no operand transfer or fabricated peripheral result. The independent AGU model
+is now shared between fixture generators, without executing/linking the core;
+existing addressing.d56 regenerates byte-identically after extraction.
+All 17556 opcode forms (17584 words) match the separate optional authoring
+assembler. Remaining numerical modes, complete pipeline/restriction/IRQ/event
+interactions and manual inconsistencies remain explicit qualification gaps.
+This is semantic/coverage progress, not a workload speedup or whole-device claim.
+Release and ASan/UBSan strict suites pass all 51 executable tests, including the
+84585 new cases per backend, existing AGU byte reproduction and private Blofeld
+workloads. Both new archives regenerate byte-identically in both builds. LLVM 19
+strict diagnostics, formatting and the structural ISA audit pass. The mandatory
+--require-complete gate still fails on documented ISA gaps. KVM remains an explicit
+inaccessible-device skip (52 registered, zero failures), not VM qualification.
+
+Previous extended-product ISA increment: MPYI/MPYRI/MACI/MACRI, MPYsu/MPYuu and
 MACsu/MACuu, and DMACss/DMACsu/DMACuu now execute in the general executor on
 all backends. MPY/MPYR/MAC/MACR also accept the separate positive-power-of-two
 forms for n=1..23. Distinct immediate, power and four-bit pair selector layouts
@@ -23,6 +69,8 @@ before accumulation; the short operation notation's 16-bit shift is inconsistent
 Power n=0 remains an explicit unsupported-mode qualification gap; undefined
 out-of-range powers and the reserved DMAC sign code are rejected rather than
 given invented hardware behavior. SB/SC/DM/SM remain explicitly unsupported.
+Section 3.2.3 specifies SM bypass for mixed MPY/MAC and DMACsu/uu. Their current
+SM rejection remains a gap; DMACss instead requires ordinary saturation semantics.
 62157 immediate/power and 55487 mixed/DMAC independent cases use signed
 raw-width products, quotient/remainder rounding, a differently ordered inverse
 pair-encoding model, arithmetic boundaries and raw saved loop frames. The corpus

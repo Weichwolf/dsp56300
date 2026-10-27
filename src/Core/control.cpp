@@ -65,6 +65,10 @@ void Core::Impl::execute(const Instruction &decoded) {
     case Operation::logical_shift_immediate:
     case Operation::logical_shift_register: execute_shift(decoded); return;
     case Operation::immediate_alu: execute_immediate(decoded); return;
+    case Operation::load_relative_address:
+    case Operation::load_updated_address: execute_address_calculation(decoded); return;
+    case Operation::divide_iteration:
+    case Operation::normalize_iteration: execute_iteration(decoded); return;
     case Operation::product_immediate:
     case Operation::product_power:
     case Operation::product_mixed:

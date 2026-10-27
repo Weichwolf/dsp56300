@@ -29,8 +29,8 @@ CMPU	13-48	partial	src/Core/integer.cpp	test/generate_integer.cpp	SB/SC/DM quali
 DEBUG	13-49	missing	-	-	Instruction decoding and semantics; all operand/mode/sequence tests
 DEBUGcc	13-50	missing	-	-	Instruction decoding and semantics; all operand/mode/sequence tests
 DEC	13-51	partial	src/Core/integer.cpp	test/generate_integer.cpp	SM/SB/SC/DM semantics and combinations; pipeline/IRQ/stack-extension sequences
-DIV	13-51	missing	-	-	Instruction decoding and semantics; all operand/mode/sequence tests
-DMAC	13-55	partial	src/Core/products.cpp	test/generate_products.cpp;test/fixtures/products-mixed.d56	SB/SC/DM/SM semantics; complete operand/sequence/IRQ and pipeline timing qualification; hardware confirmation of documented 24-bit shift versus short-notation typo
+DIV	13-52	partial	src/Core/iteration.cpp	test/generate_iteration.cpp;test/fixtures/iteration.d56	Other numeric modes; full operand/sequence, pipeline and IRQ qualification
+DMAC	13-55	partial	src/Core/products.cpp	test/generate_products.cpp;test/fixtures/products-mixed.d56	SB/SC/DM; SM for ss and specified SM-bypass for su/uu; full sequence/IRQ/timing and hardware shift confirmation
 DO	13-56	partial	src/Core/loops.cpp;src/Core/core.cpp	test/generate_loop_control.cpp;test/loop_control_test.cpp;test/fixtures/loop-control.d56	SC and count-transfer modes; zero-count stack exposure; complete AGU/nesting/pipeline qualification
 DO FOREVER	13-59	partial	src/Core/loops.cpp;src/Core/core.cpp	test/generate_loop_control.cpp;test/loop_control_test.cpp;test/fixtures/loop-control.d56	SC and stack-extension semantics; complete IRQ/event, nesting and pipeline qualification
 DOR	13-61	partial	src/Core/loops.cpp;src/Core/core.cpp	test/generate_loop_control.cpp;test/loop_control_test.cpp;test/fixtures/loop-control.d56	SC and count-transfer modes; zero-count stack exposure; complete AGU/nesting/pipeline qualification
@@ -52,13 +52,13 @@ JSCLR	13-85	partial	src/Core/bits.cpp	test/generate_bit_access.cpp;test/bit_acce
 JSET	13-87	partial	src/Core/bits.cpp	test/generate_bit_access.cpp;test/bit_access_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 JSR	13-89	partial	src/Core/conditional.cpp	test/generate_conditions.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 JSSET	13-90	partial	src/Core/bits.cpp	test/generate_bit_access.cpp;test/bit_access_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
-LEA	13-98;A-5	missing	-	-	Instruction decoding and semantics; all operand/mode/sequence tests
-LRA	13-92	missing	-	-	Instruction decoding and semantics; all operand/mode/sequence tests
+LEA	13-98;A-5	partial	src/Core/agu.cpp	test/generate_address_calc.cpp;test/address_model.hpp;test/fixtures/address-calculations.d56	Other numeric modes; complete AGU/alias/sequence, pipeline and IRQ qualification; manual destination-note inconsistencies
+LRA	13-92	partial	src/Core/agu.cpp	test/generate_address_calc.cpp;test/address_model.hpp;test/fixtures/address-calculations.d56	Other numeric modes; complete AGU/alias/sequence, pipeline and IRQ qualification; manual destination-note inconsistencies
 LSL	13-93	partial	src/Core/shifts.cpp	test/generate_bit_operations.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 LSR	13-96	partial	src/Core/shifts.cpp	test/generate_bit_operations.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
-LUA	13-98	missing	-	-	Instruction decoding and semantics; all operand/mode/sequence tests
+LUA	13-97;13-98	partial	src/Core/agu.cpp	test/generate_address_calc.cpp;test/address_model.hpp;test/fixtures/address-calculations.d56	Other numeric modes; complete AGU/alias/sequence, pipeline and IRQ qualification; manual destination-note inconsistencies
 MAC	13-99	partial	src/Core/arithmetic.cpp;src/Core/products.cpp	test/generate_arithmetic.cpp;test/generate_products.cpp;test/fixtures/products-immediate.d56	Power-of-two n=0 semantics; other numerical modes; complete operand/alias/sequence and timing qualification
-MAC(su,uu)	13-102	partial	src/Core/products.cpp	test/generate_products.cpp;test/fixtures/products-mixed.d56	SB/SC/DM/SM semantics; complete operand/sequence/IRQ and pipeline timing qualification
+MAC(su,uu)	13-102	partial	src/Core/products.cpp	test/generate_products.cpp;test/fixtures/products-mixed.d56	SB/SC/DM and specified SM-bypass qualification; complete operand/sequence/IRQ and pipeline timing
 MACI	13-101	partial	src/Core/products.cpp	test/generate_products.cpp;test/fixtures/products-immediate.d56	SB/SC/DM/SM semantics; complete operand/sequence/IRQ and pipeline timing qualification
 MACR	13-103	partial	src/Core/arithmetic.cpp;src/Core/products.cpp	test/generate_arithmetic.cpp;test/generate_products.cpp;test/fixtures/products-immediate.d56	Power-of-two n=0 semantics; other numerical modes; complete operand/alias/sequence and timing qualification
 MACRI	13-105	partial	src/Core/products.cpp	test/generate_products.cpp;test/fixtures/products-immediate.d56	SB/SC/DM/SM semantics; complete operand/sequence/IRQ and pipeline timing qualification
@@ -80,13 +80,13 @@ MOVEC	13-130	partial	src/Core/transfers.cpp	test/generate_transfers.cpp;test/tra
 MOVEM	13-132	partial	src/Core/transfers.cpp	test/generate_transfers.cpp;test/transfer_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 MOVEP	13-134	partial	src/Core/transfers.cpp	test/generate_transfers.cpp;test/transfer_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 MPY	13-137	partial	src/Core/arithmetic.cpp;src/Core/products.cpp	test/generate_arithmetic.cpp;test/generate_products.cpp;test/fixtures/products-immediate.d56	Power-of-two n=0 semantics; other numerical modes; complete operand/alias/sequence and timing qualification
-MPY(su,uu)	13-139	partial	src/Core/products.cpp	test/generate_products.cpp;test/fixtures/products-mixed.d56	SB/SC/DM/SM semantics; complete operand/sequence/IRQ and pipeline timing qualification
+MPY(su,uu)	13-139	partial	src/Core/products.cpp	test/generate_products.cpp;test/fixtures/products-mixed.d56	SB/SC/DM and specified SM-bypass qualification; complete operand/sequence/IRQ and pipeline timing
 MPYI	13-140	partial	src/Core/products.cpp	test/generate_products.cpp;test/fixtures/products-immediate.d56	SB/SC/DM/SM semantics; complete operand/sequence/IRQ and pipeline timing qualification
 MPYR	13-141	partial	src/Core/arithmetic.cpp;src/Core/products.cpp	test/generate_arithmetic.cpp;test/generate_products.cpp;test/fixtures/products-immediate.d56	Power-of-two n=0 semantics; other numerical modes; complete operand/alias/sequence and timing qualification
 MPYRI	13-143	partial	src/Core/products.cpp	test/generate_products.cpp;test/fixtures/products-immediate.d56	SB/SC/DM/SM semantics; complete operand/sequence/IRQ and pipeline timing qualification
 NEG	13-144	partial	src/Core/arithmetic.cpp	test/generate_arithmetic.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 NOP	13-145	partial	src/Core/control.cpp	test/core_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
-NORM	13-147	missing	-	-	Instruction decoding and semantics; all operand/mode/sequence tests
+NORM	13-146	partial	src/Core/iteration.cpp	test/generate_iteration.cpp;test/fixtures/iteration.d56	Other numeric modes; full operand/sequence, pipeline and IRQ qualification; hardware confirmation of NOP-branch status retention
 NORMF	13-147	missing	-	-	Instruction decoding and semantics; all operand/mode/sequence tests
 NOT	13-149	untested	src/Core/arithmetic.cpp	-	Dedicated independent instruction/operand tests; other modes and sequences
 OR	13-150	partial	src/Core/arithmetic.cpp	test/generate_conditions.cpp	Register/parallel logic matrices; other numerical modes and sequence timing

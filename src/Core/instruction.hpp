@@ -35,6 +35,10 @@ enum class Operation : std::uint8_t {
   logical_shift_immediate,
   logical_shift_register,
   immediate_alu,
+  load_relative_address,
+  load_updated_address,
+  divide_iteration,
+  normalize_iteration,
   product_immediate,
   product_power,
   product_mixed,
@@ -73,6 +77,10 @@ enum class Operation : std::uint8_t {
     case Operation::logical_shift_immediate:
     case Operation::logical_shift_register:
     case Operation::immediate_alu:
+    case Operation::load_relative_address:
+    case Operation::load_updated_address:
+    case Operation::divide_iteration:
+    case Operation::normalize_iteration:
     case Operation::product_immediate:
     case Operation::product_power:
     case Operation::product_mixed:

@@ -93,3 +93,16 @@ and rounding overflow, negative discarded bits and cross-helper state are tested
 Power n=0 is still explicitly unqualified. SB/SC/DM/SM, hardware confirmation of
 manual inconsistencies, full pipeline/event and other listed qualification gaps
 remain open. No affected catalogue row is complete.
+
+Address/iteration increment: LRA register/long, LUA/LEA updated/short-displacement,
+DIV and NORM have independently modeled fixtures. The general AGU coordinate
+and serial reverse-carry model is shared only between test generators. DIV has
+a separate serial LSB-first arithmetic circuit and integer-division witnesses;
+NORM has signed-coordinate shifts, flag boundaries and linear exponent updates.
+The stated NORM NOP branch retains state; hardware confirmation of its complete
+CCR behavior remains open. LRA/LUA destination fields are implemented according
+to the explicit five-bit operand lists despite inconsistent notes. Actual manual
+discussion pages correct summary-table page references for DIV/NORM/LUA. Other
+modes and full pipeline/restriction/IRQ/event qualification remain mandatory.
+No affected entry is complete. Section 3.2.3's SM bypass for mixed MPY/MAC and
+DMACsu/uu also remains a specific unimplemented-mode gap in the previous increment.
