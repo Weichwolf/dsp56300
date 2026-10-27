@@ -21,12 +21,7 @@ void Core::Impl::execute_unit(const Instruction &decoded) {
 void Core::Impl::compare_unsigned(const Word opcode) {
   // CMPU explicitly bypasses arithmetic saturation. Other unimplemented data
   // modes remain rejected rather than silently applying 24-bit semantics.
-  constexpr Word unsupported = compatibility_mode | multiply_mode | arithmetic_16;
-  if ((cpu.reg.sr & unsupported) != 0 ||
-      (cpu.reg.sr & (scale_up | scale_down)) == (scale_up | scale_down)) {
-    fail(FaultKind::unsupported_mode, Space::program, current_pc, cpu.reg.sr);
-    return;
-  }
+  if (!numeric_mode_supported(arithmetic_saturation)) { return; }
   const auto selector = (opcode >> 1) & 7U;
   if (selector >= 1 && selector <= 3) {
     fail(FaultKind::invalid_instruction, Space::program, current_pc, opcode);

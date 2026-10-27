@@ -25,7 +25,7 @@ add_library(dsp56300_core STATIC
   src/Core/core.cpp src/Core/core_state.cpp src/Core/arithmetic.cpp src/Core/shifts.cpp
   src/Core/conditional.cpp src/Core/immediate.cpp src/Core/integer.cpp src/Core/decode.cpp src/Core/moves.cpp
   src/Core/transfers.cpp src/Core/registers.cpp src/Core/agu.cpp src/Core/control.cpp
-  src/Core/bits.cpp
+  src/Core/bits.cpp src/Core/bit_fields.cpp
   src/Jit/jit.cpp src/Jit/jit_helpers.cpp src/Jit/X64/jit_emitter.cpp src/Jit/X64/x64.cpp
   src/Jit/X64/jit_addition.cpp
   src/Jit/X64/jit_loops.cpp
@@ -115,6 +115,8 @@ if(BUILD_TESTING)
   target_link_libraries(dsp56300_generate_flags PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_integer test/generate_integer.cpp)
   target_link_libraries(dsp56300_generate_integer PRIVATE dsp56300_fixture_format)
+  add_executable(dsp56300_generate_bit_fields test/generate_bit_fields.cpp)
+  target_link_libraries(dsp56300_generate_bit_fields PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_fixture_test test/fixture_test.cpp)
   target_link_libraries(dsp56300_fixture_test PRIVATE dsp56300::core dsp56300_fixture_format)
   add_executable(dsp56300_fixture_bench test/fixture_bench.cpp)
@@ -150,6 +152,13 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/flags.d56")
   add_test(NAME integer-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/integer.d56")
+  add_test(NAME bit-field-fixtures COMMAND dsp56300_fixture_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/bit-fields.d56")
+  add_test(NAME bit-field-reproducibility COMMAND "${CMAKE_COMMAND}"
+    "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_bit_fields>"
+    "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/bit-fields-regenerated.d56"
+    "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/bit-fields.d56"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
   add_test(NAME integer-reproducibility COMMAND "${CMAKE_COMMAND}"
     "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_integer>"
     "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/integer-regenerated.d56"

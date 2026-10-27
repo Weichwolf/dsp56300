@@ -30,6 +30,10 @@ enum class Operation : std::uint8_t {
   increment,
   decrement,
   compare_unsigned,
+  bit_field_extract,
+  bit_field_insert,
+  bit_field_merge,
+  count_leading_bits,
   conditional_jump,
   relative_branch,
   conditional_transfer,
@@ -60,6 +64,10 @@ enum class Operation : std::uint8_t {
     case Operation::increment:
     case Operation::decrement:
     case Operation::compare_unsigned:
+    case Operation::bit_field_extract:
+    case Operation::bit_field_insert:
+    case Operation::bit_field_merge:
+    case Operation::count_leading_bits:
     case Operation::conditional_transfer:
     case Operation::move_control_effective:
     case Operation::move_control_short:

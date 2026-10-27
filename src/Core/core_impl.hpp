@@ -34,6 +34,12 @@ struct Core::Impl {
   void execute_immediate(const detail::Instruction &decoded);
   void execute_unit(const detail::Instruction &decoded);
   void compare_unsigned(Word opcode);
+  void execute_bit_field(const detail::Instruction &decoded);
+  [[nodiscard]] Word bit_field_control(const detail::Instruction &decoded);
+  void extract_field(const detail::Instruction &decoded, Word control);
+  void insert_field(const detail::Instruction &decoded, Word control);
+  void merge_field(const detail::Instruction &decoded, Word source);
+  void count_leading_bits(Word opcode);
   void execute_jump(const detail::Instruction &decoded);
   void execute_branch(const detail::Instruction &decoded);
   void execute_bit(const detail::Instruction &decoded);
@@ -65,7 +71,7 @@ struct Core::Impl {
   [[nodiscard]] bool shifted_addition(Word opcode);
   void add_operands(detail::AddOperands input);
   [[nodiscard]] bool word_shift(Word opcode);
-  [[nodiscard]] bool numeric_mode_supported();
+  [[nodiscard]] bool numeric_mode_supported(Word ignored_modes = 0);
   void execute_shift(const detail::Instruction &decoded);
   void arithmetic_shift(std::uint64_t value, detail::ShiftControl control);
   void logical_shift(detail::ShiftControl control, bool rotate = false);

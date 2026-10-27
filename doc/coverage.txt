@@ -4,16 +4,40 @@ Full-ISA completion requirement: the complete DSP56300 instruction set must be
 implemented and independently tested, as explicitly reiterated by the user.
 Neither a passing current CTest suite nor successful Blofeld workloads is a
 replacement. doc/isa-coverage.tsv inventories 118 instruction/family/MOVE-form
-and alias entries against DSP56300FM Rev.5. The current audit records 38 missing,
-12 without dedicated independent tests and 68 partially tested entries; none
+and alias entries against DSP56300FM Rev.5. The current audit records 33 missing,
+12 without dedicated independent tests and 73 partially tested entries; none
 claims complete support. These counts are catalogue rows, not disjoint opcode
 counts or an ISA-support percentage. Detailed format/mode/sequence expansion
 remains mandatory. python3 tools/isa_audit.py --require-complete deliberately
 returns failure while any entry remains incomplete; see doc/isa-qualification.txt.
 
-Integer ISA closure increment: INC/DEC and CMPU now decode and execute through
-the common general executor on all backends. INC/DEC change raw bit zero of the
-56-bit accumulator, with exact carry/borrow, overflow/sticky L and scaled E/U
+Bit-field ISA closure increment: EXTRACT/EXTRACTU, INSERT, MERGE and CLB now
+execute through the general executor on all three backends. Ordinary 56-bit
+fields and the specified SM bypass are supported; MERGE changes only the
+middle word using twelve-bit halves, and CLB uses bit-55 polarity with the
+explicit all-zero special case. The implementation uses bounded host shifts
+and count-leading intrinsics, without adding CPU state or claiming native SIMD.
+54488 independently generated binary cases use a per-bit boolean model,
+covering all nonempty EXTRACT ranges and all EXTRACTU/INSERT ranges, selectors
+and aliases, six numerical modes, saturation bypass, flags and preserved words. They also
+check operand rereads under REP, DO endings at instruction/extension words,
+wrapped saved frames, all prefixes across native/helper transitions, truncated
+extensions and prohibited two-word REP bodies. All 156 legal opcode forms match
+a separate optional authoring assembler, without depending on it at build/test
+or runtime. Signed empty-field EXTRACT remains explicitly unqualified and faults
+with unsupported_mode; this does not assert hardware exception behavior.
+SB/SC/DM, complete pipeline/event interactions and full ISA closure remain open.
+This increment establishes no workload speedup or full-device qualification.
+Release and ASan/UBSan complete suites pass 41 executable tests with one
+inaccessible-KVM skip (42 registered, zero failures), including private Blofeld
+workloads. The final expanded 54488-case matrix and byte-exact regeneration
+also pass focused release/strict checks after adding directed INSERT zero/sign
+boundaries. Formatting, strict diagnostics and the structural ISA audit pass;
+the mandatory --require-complete gate still fails on the explicit ISA backlog.
+
+Previous integer ISA closure increment: INC/DEC and CMPU now decode and execute
+through the common general executor on all backends. INC/DEC change raw bit zero
+of the 56-bit accumulator, with exact carry/borrow, overflow/sticky L and scaled E/U
 flags. CMPU zero-extends unsigned 24/48-bit operands, ignores EXP inputs, preserves
 S/L/E/U, clears V, uses arithmetic bit 55 for N and low 48 bits for Z. Its
 arithmetic saturation bypass is supported explicitly. Other restricted numerical

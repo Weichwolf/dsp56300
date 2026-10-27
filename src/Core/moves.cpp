@@ -45,8 +45,8 @@ std::uint64_t Core::Impl::transfer_long(const std::uint64_t value) {
   return static_cast<std::uint64_t>(std::clamp(scaled, minimum, maximum)) & long_mask;
 }
 
-bool Core::Impl::numeric_mode_supported() {
-  if ((cpu.reg.sr & unsupported_numeric_modes) != 0 ||
+bool Core::Impl::numeric_mode_supported(const Word ignored_modes) {
+  if ((cpu.reg.sr & (unsupported_numeric_modes & ~ignored_modes)) != 0 ||
       (cpu.reg.sr & (scale_up | scale_down)) == (scale_up | scale_down)) {
     fail(FaultKind::unsupported_mode, Space::program, current_pc, cpu.reg.sr);
     return false;

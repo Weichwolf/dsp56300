@@ -51,9 +51,23 @@ Before marking an entry complete, expand and qualify:
   tests on reference, cached and native backends in release and ASan/UBSan.
   Differential agreement alone cannot prove correctness of shared semantics.
 
-Current closure increment: INC/DEC now change the raw accumulator's least
+Previous closure increment: INC/DEC now change the raw accumulator's least
 significant bit (not its A1/B1 word), and CMPU compares zero-extended unsigned
 48-bit operands while ignoring accumulator EXP bytes. CMPU preserves S/L/E/U,
 clears V, uses arithmetic bit 55 for N, and tests low 48 bits for Z. Arithmetic
 saturation is explicitly bypassed for CMPU as specified in section 3.2.3.
 These additions still do not close all numerical modes or full ISA qualification.
+
+Bit-field closure increment: EXTRACT/EXTRACTU, INSERT, MERGE and CLB now have
+ordinary-mode implementations, including the specified saturation bypass.
+Register and immediate control fields, aliases, extension/low-word preservation,
+scaled status flags and all defined field-width/offset pairs have independent
+per-bit fixtures. MERGE uses the described and diagrammed twelve-bit halves;
+CLB uses the description's bit-55 polarity and explicit all-zero special case.
+These resolve conflicting pseudocode indices using the manual's prose and
+examples; independent hardware confirmation remains desirable. Signed EXTRACT
+with zero width has no unambiguous sign bit in Rev.5 and currently returns an
+explicit unsupported-mode diagnostic. This is a documented qualification gap,
+not a claim that the hardware traps on this input. Undefined field ranges are
+also rejected explicitly. SB/SC/DM operation, precise pipeline/event interactions
+and complete ISA coverage remain open. None of these five rows is complete.

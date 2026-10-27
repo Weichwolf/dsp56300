@@ -21,7 +21,7 @@ BSET	13-34	partial	src/Core/bits.cpp	test/generate_bit_access.cpp;test/bit_acces
 BSR	13-37	partial	src/Core/conditional.cpp	test/generate_conditions.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 BSSET	13-38	partial	src/Core/bits.cpp	test/generate_bit_access.cpp;test/bit_access_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 BTST	13-40	partial	src/Core/bits.cpp	test/generate_bit_access.cpp;test/bit_access_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
-CLB	13-42	missing	-	-	Instruction decoding and semantics; all operand/mode/sequence tests
+CLB	13-42	partial	src/Core/bit_fields.cpp	test/generate_bit_fields.cpp;test/fixtures/bit-fields.d56	SB/SC/DM semantics; complete event/sequence and pipeline timing qualification
 CLR	13-44	partial	src/Core/arithmetic.cpp	test/generate_flags.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 CMP	13-45	partial	src/Core/arithmetic.cpp	test/generate_addition.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 CMPM	13-47	partial	src/Core/arithmetic.cpp	test/generate_bit_operations.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
@@ -37,13 +37,13 @@ DOR	13-61	missing	-	-	Instruction decoding and semantics; all operand/mode/seque
 DOR FOREVER	13-65	missing	-	-	Instruction decoding and semantics; all operand/mode/sequence tests
 ENDDO	13-67	untested	src/Core/control.cpp	-	Dedicated independent instruction/operand tests; other modes and sequences
 EOR	13-68	partial	src/Core/arithmetic.cpp	test/generate_conditions.cpp	Register/parallel logic matrices; other numerical modes and sequence timing
-EXTRACT	13-70	missing	-	-	Instruction decoding and semantics; all operand/mode/sequence tests
-EXTRACTU	13-72	missing	-	-	Instruction decoding and semantics; all operand/mode/sequence tests
+EXTRACT	13-70	partial	src/Core/bit_fields.cpp	test/generate_bit_fields.cpp;test/fixtures/bit-fields.d56	SB/SC/DM semantics; complete event/sequence and pipeline timing qualification; signed empty-field behavior unresolved
+EXTRACTU	13-72	partial	src/Core/bit_fields.cpp	test/generate_bit_fields.cpp;test/fixtures/bit-fields.d56	SB/SC/DM semantics; complete event/sequence and pipeline timing qualification
 IFcc	13-74	partial	src/Core/conditional.cpp	test/generate_conditions.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 IFcc.U	13-75	partial	src/Core/conditional.cpp	test/generate_conditions.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 ILLEGAL	13-76	missing	-	-	Instruction decoding and semantics; all operand/mode/sequence tests
 INC	13-77	partial	src/Core/integer.cpp	test/generate_integer.cpp	SM/SB/SC/DM semantics and combinations; pipeline/IRQ/stack-extension sequences
-INSERT	13-78	missing	-	-	Instruction decoding and semantics; all operand/mode/sequence tests
+INSERT	13-78	partial	src/Core/bit_fields.cpp	test/generate_bit_fields.cpp;test/fixtures/bit-fields.d56	SB/SC/DM semantics; complete event/sequence and pipeline timing qualification
 Jcc	13-80	partial	src/Core/conditional.cpp	test/generate_conditions.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 JCLR	13-81	partial	src/Core/bits.cpp	test/generate_bit_access.cpp;test/bit_access_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 JMP	13-83	partial	src/Core/conditional.cpp	test/generate_conditions.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
@@ -64,7 +64,7 @@ MACR	13-103	partial	src/Core/arithmetic.cpp	test/generate_arithmetic.cpp	Other n
 MACRI	13-105	missing	-	-	Instruction decoding and semantics; all operand/mode/sequence tests
 MAX	13-106	untested	src/Core/arithmetic.cpp	-	Dedicated independent instruction/operand tests; other modes and sequences
 MAXM	13-107	untested	src/Core/arithmetic.cpp	-	Dedicated independent instruction/operand tests; other modes and sequences
-MERGE	13-108	missing	-	-	Instruction decoding and semantics; all operand/mode/sequence tests
+MERGE	13-108	partial	src/Core/bit_fields.cpp	test/generate_bit_fields.cpp;test/fixtures/bit-fields.d56	SB/SC/DM semantics; complete event/sequence and pipeline timing qualification
 MOVE	13-110	partial	src/Core/moves.cpp	test/generate_parallel_moves.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 MOVE.I	13-113	untested	src/Core/moves.cpp	-	Dedicated independent instruction/operand tests; other modes and sequences
 MOVE.L	13-126	untested	src/Core/moves.cpp	-	Dedicated independent instruction/operand tests; other modes and sequences

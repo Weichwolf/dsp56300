@@ -89,6 +89,10 @@ void Core::Impl::execute(const Instruction &decoded) {
     case Operation::increment:
     case Operation::decrement: execute_unit(decoded); return;
     case Operation::compare_unsigned: compare_unsigned(opcode); return;
+    case Operation::bit_field_extract:
+    case Operation::bit_field_insert:
+    case Operation::bit_field_merge:
+    case Operation::count_leading_bits: execute_bit_field(decoded); return;
     case Operation::conditional_transfer: conditional_transfer(opcode); return;
     case Operation::relative_branch: execute_branch(decoded); return;
     case Operation::conditional_jump:
