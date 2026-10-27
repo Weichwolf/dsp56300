@@ -3,11 +3,14 @@
 #include "fields.hpp"
 #include "instruction.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 
 namespace dsp56300::detail {
 namespace {
+constexpr Word short_jump_bit = Word{1} << 18;
+
 struct Rule {
   Encoding bits;
   Operation operation;
@@ -15,8 +18,93 @@ struct Rule {
   std::uint8_t cycles = 1;
 };
 
-// Instruction Set appendix A: JMP, JSR, RTS/RTI, ANDI/ORI, REP and DO.
+// Family manual instruction encodings and documented base costs (appendix A).
 constexpr std::array rules{
+    Rule{.bits = encoding("00000001010000001100dkkk"),
+         .operation = Operation::immediate_alu,
+         .words = 2,
+         .cycles = 2},
+    Rule{.bits = encoding("0000000101iiiiii1000dkkk"),
+         .operation = Operation::immediate_alu,
+         .words = 1,
+         .cycles = 1},
+    Rule{.bits = encoding("00001110CCCCaaaaaaaaaaaa"),
+         .operation = Operation::conditional_jump,
+         .words = 1,
+         .cycles = 4},
+    Rule{.bits = encoding("00001111CCCCaaaaaaaaaaaa"),
+         .operation = Operation::conditional_jump,
+         .words = 1,
+         .cycles = 4},
+    Rule{.bits = encoding("0000101011MMMRRR1010CCCC"),
+         .operation = Operation::conditional_jump,
+         .words = 1,
+         .cycles = 4},
+    Rule{.bits = encoding("0000101111MMMRRR1010CCCC"),
+         .operation = Operation::conditional_jump,
+         .words = 1,
+         .cycles = 4},
+    Rule{.bits = encoding("00000010CCCC00000JJJd000"),
+         .operation = Operation::conditional_transfer,
+         .words = 1,
+         .cycles = 1},
+    Rule{.bits = encoding("00000011CCCC0ttt0JJJdTTT"),
+         .operation = Operation::conditional_transfer,
+         .words = 1,
+         .cycles = 1},
+    Rule{.bits = encoding("00000010CCCC1ttt00000TTT"),
+         .operation = Operation::conditional_transfer,
+         .words = 1,
+         .cycles = 1},
+    Rule{.bits = encoding("00000101000011aaaa0aaaaa"),
+         .operation = Operation::relative_branch,
+         .words = 1,
+         .cycles = 4},
+    Rule{.bits = encoding("00000101000010aaaa0aaaaa"),
+         .operation = Operation::relative_branch,
+         .words = 1,
+         .cycles = 4},
+    Rule{.bits = encoding("00000101CCCC01aaaa0aaaaa"),
+         .operation = Operation::relative_branch,
+         .words = 1,
+         .cycles = 4},
+    Rule{.bits = encoding("00000101CCCC00aaaa0aaaaa"),
+         .operation = Operation::relative_branch,
+         .words = 1,
+         .cycles = 4},
+    Rule{.bits = encoding("000011010001000011000000"),
+         .operation = Operation::relative_branch,
+         .words = 2,
+         .cycles = 4},
+    Rule{.bits = encoding("000011010001000010000000"),
+         .operation = Operation::relative_branch,
+         .words = 2,
+         .cycles = 5},
+    Rule{.bits = encoding("00001101000100000100CCCC"),
+         .operation = Operation::relative_branch,
+         .words = 2,
+         .cycles = 5},
+    Rule{.bits = encoding("00001101000100000000CCCC"),
+         .operation = Operation::relative_branch,
+         .words = 2,
+         .cycles = 4},
+    Rule{.bits = encoding("0000110100011RRR11000000"),
+         .operation = Operation::relative_branch,
+         .words = 1,
+         .cycles = 4},
+    Rule{.bits = encoding("0000110100011RRR10000000"),
+         .operation = Operation::relative_branch,
+         .words = 1,
+         .cycles = 4},
+    Rule{.bits = encoding("0000110100011RRR0100CCCC"),
+         .operation = Operation::relative_branch,
+         .words = 1,
+         .cycles = 4},
+    Rule{.bits = encoding("0000110100011RRR0000CCCC"),
+         .operation = Operation::relative_branch,
+         .words = 1,
+         .cycles = 4},
+
     Rule{.bits = encoding("0000110000011100SiiiiiiD"),
          .operation = Operation::arithmetic_shift_immediate,
          .words = 1},
@@ -86,6 +174,29 @@ constexpr std::array rules{
          .cycles = 5},
 };
 
+constexpr std::array parallel_groups{
+    Encoding{.mask = 0x800000, .value = 0x800000},
+    Encoding{.mask = memory_group_mask, .value = memory_group},
+    Encoding{.mask = parallel_group_mask, .value = immediate_group},
+    Encoding{.mask = pair_group_mask, .value = pair_group},
+    Encoding{.mask = class_two_mask, .value = class_two}};
+
+consteval bool parallel_rules_disjoint() {
+  for (const auto &rule : rules) {
+    for (const auto group : parallel_groups) {
+      if (((rule.bits.value ^ group.value) & rule.bits.mask & group.mask) == 0) { return false; }
+    }
+  }
+  return true;
+}
+
+static_assert(parallel_rules_disjoint(), "Prioritize overlapping specific instruction encodings");
+
+constexpr bool parallel_encoding(const Word opcode) {
+  return std::ranges::any_of(parallel_groups,
+                             [opcode](const Encoding group) { return group.matches(opcode); });
+}
+
 bool has_extension(const Word opcode) noexcept {
   const unsigned mode = (opcode >> 11) & 7;
   if ((opcode & memory_group_mask) == 0x400000U) { return (opcode & 0x4000U) != 0 && mode == 6; }
@@ -106,11 +217,19 @@ bool parallel_address(const Word opcode) noexcept {
 }
 
 Instruction decode(const Word opcode) noexcept {
+  if (parallel_encoding(opcode)) {
+    return {.opcode = opcode,
+            .operation = Operation::parallel,
+            .words = static_cast<std::uint8_t>(has_extension(opcode) ? 2 : 1),
+            .cycles = static_cast<std::uint8_t>(
+                1 + (parallel_address(opcode) && address_penalty(opcode) ? 1 : 0))};
+  }
   for (const auto &rule : rules) {
     if (!rule.bits.matches(opcode)) { continue; }
     auto words = rule.words;
     if ((rule.operation == Operation::jump_effective ||
-         rule.operation == Operation::call_effective) &&
+         rule.operation == Operation::call_effective ||
+         (rule.operation == Operation::conditional_jump && (opcode & short_jump_bit) == 0)) &&
         ((opcode >> 11) & 7) == 6) {
       words = 2;
     }
@@ -122,15 +241,7 @@ Instruction decode(const Word opcode) noexcept {
             .words = words,
             .cycles = static_cast<std::uint8_t>(rule.cycles + (penalty ? 1 : 0))};
   }
-  if ((opcode & 0x800000U) != 0 || (opcode & memory_group_mask) == 0x400000U ||
-      (opcode & parallel_group_mask) == 0x200000U || (opcode & pair_group_mask) == 0x100000U ||
-      (opcode & class_two_mask) == 0x080000U) {
-    return {.opcode = opcode,
-            .operation = Operation::parallel,
-            .words = static_cast<std::uint8_t>(has_extension(opcode) ? 2 : 1),
-            .cycles = static_cast<std::uint8_t>(
-                1 + (parallel_address(opcode) && address_penalty(opcode) ? 1 : 0))};
-  }
+
   return {.opcode = opcode};
 }
 } // namespace dsp56300::detail

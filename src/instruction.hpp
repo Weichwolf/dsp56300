@@ -25,7 +25,11 @@ enum class Operation : std::uint8_t {
   arithmetic_shift_immediate,
   arithmetic_shift_register,
   logical_shift_immediate,
-  logical_shift_register
+  logical_shift_register,
+  immediate_alu,
+  conditional_jump,
+  relative_branch,
+  conditional_transfer
 };
 
 [[nodiscard]] constexpr bool repeatable(const Operation operation) noexcept {
@@ -35,7 +39,9 @@ enum class Operation : std::uint8_t {
     case Operation::arithmetic_shift_immediate:
     case Operation::arithmetic_shift_register:
     case Operation::logical_shift_immediate:
-    case Operation::logical_shift_register: return true;
+    case Operation::logical_shift_register:
+    case Operation::immediate_alu:
+    case Operation::conditional_transfer: return true;
     case Operation::unsupported:
     case Operation::jump_short:
     case Operation::jump_effective:
@@ -47,6 +53,8 @@ enum class Operation : std::uint8_t {
     case Operation::or_control:
     case Operation::repeat_immediate:
     case Operation::loop_immediate:
+    case Operation::conditional_jump:
+    case Operation::relative_branch:
     case Operation::end_loop:
     default: return false;
   }

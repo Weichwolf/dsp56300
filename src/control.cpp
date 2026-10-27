@@ -70,22 +70,14 @@ void Core::Impl::execute(const Instruction &decoded) {
     case Operation::arithmetic_shift_register:
     case Operation::logical_shift_immediate:
     case Operation::logical_shift_register: execute_shift(decoded); return;
-    case Operation::jump_short: reg.pc = opcode & short_address_mask; return;
+    case Operation::immediate_alu: execute_immediate(decoded); return;
+    case Operation::conditional_transfer: conditional_transfer(opcode); return;
+    case Operation::relative_branch: execute_branch(decoded); return;
+    case Operation::conditional_jump:
+    case Operation::jump_short:
     case Operation::jump_effective:
-      reg.pc = effective(
-          {.mode = (opcode >> 11) & 7, .index = (opcode >> 8) & 7, .extra = decoded.extension});
-      return;
     case Operation::call_short:
-      push(reg.pc, reg.sr);
-      reg.pc = opcode & short_address_mask;
-      return;
-    case Operation::call_effective: {
-      const auto address = effective(
-          {.mode = (opcode >> 11) & 7, .index = (opcode >> 8) & 7, .extra = decoded.extension});
-      push(reg.pc, reg.sr);
-      reg.pc = address;
-      return;
-    }
+    case Operation::call_effective: execute_jump(decoded); return;
     case Operation::return_subroutine: reg.pc = static_cast<Word>(pop() >> word_bits); return;
     case Operation::return_interrupt: {
       const auto frame = pop();

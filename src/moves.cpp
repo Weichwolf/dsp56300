@@ -55,6 +55,12 @@ bool Core::Impl::numeric_mode_supported() {
 }
 
 void Core::Impl::parallel(const Instruction &decoded) {
+  constexpr Word condition_mask = 0xffe000;
+  constexpr Word condition_group = 0x202000;
+  if ((decoded.opcode & condition_mask) == condition_group) {
+    conditional_alu(decoded.opcode);
+    return;
+  }
   if (!numeric_mode_supported()) { return; }
   if ((decoded.opcode & byte_mask) == 0) {
     moves(decoded);

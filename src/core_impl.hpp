@@ -21,6 +21,12 @@ struct Core::Impl {
   [[nodiscard]] detail::Instruction instruction(Word pc);
   void step();
   void execute(const detail::Instruction &decoded);
+  void execute_immediate(const detail::Instruction &decoded);
+  void execute_jump(const detail::Instruction &decoded);
+  void execute_branch(const detail::Instruction &decoded);
+  void conditional_transfer(Word opcode);
+  void conditional_alu(Word opcode);
+  [[nodiscard]] Word control_address(const detail::Instruction &decoded);
   void parallel(const detail::Instruction &decoded);
   void moves(const detail::Instruction &decoded);
   void register_move(Word opcode);

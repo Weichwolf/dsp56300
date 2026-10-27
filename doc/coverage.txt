@@ -41,14 +41,37 @@ REP can execute these single-word shifts and reevaluates register shift counts.
 The model uses wrapped 56-bit magnitudes for CMPM; its minimum-negative corner
 still needs independent hardware qualification. No hardware reference was used.
 
+Conditional/immediate extension: Jcc/JScc, BRA/BSR/Bcc/BScc (short, long,
+register-relative), Tcc and IFcc/IFcc.U now execute alongside short/long
+immediate ADD/SUB/CMP/AND/OR/EOR. 38035 new binary cases pass release and
+ASan/UBSan execution with exact fixture regeneration. Independent truth-table fixtures cover all
+16 conditions and all 128 combinations of the seven relevant flags. They
+check always-updated jump address registers, return frames, signed/wrapping
+displacements, internal full-width transfers, conditional CCR preservation,
+partial logical writes, immediate sign extension and numerical flags. Directed
+sequences also check real subroutine returns and condition reevaluation in REP.
+Parallel encodings have a statically checked disjoint fast decode before the
+more specific rules. This does not establish complete control/interrupt timing.
+
 Local source-built workload qualification: 512 binary fixtures for the ordinary
 and wide/rounded Blofeld sixteen-sample filter routines pass both backends in
 release and ASan/UBSan builds. Directed inputs cover both RM values, in-place
 and separate output, signed corners and limiting. Independent integer recurrence
 expectations check complete visible state/memory and instruction base costs.
 Manufacturer program bytes, preparation/analysis and fixture manifests remain
-ignored. This does not qualify coefficient preparation, arbitrary aliases,
-interrupted calls, continuous streams or complete audio/device execution.
+ignored. These direct-core cases do not qualify coefficient preparation,
+arbitrary aliases, interrupted calls, continuous streams or complete device
+execution.
+
+Additional complete LP12 workload qualification: 2400 local source-built calls
+pass both backends in release and ASan/UBSan builds. Independent equations
+prepare coefficients from directed cutoff/resonance and synthetic curve pairs,
+then evaluate the fixed-point recurrence. Cases include both RM choices, linear
+modifiers, N0=1/3, negative damping, the cutoff-dependent floor, the strict wide
+branch and equality at its boundary. Poisoned initial coefficient scratch,
+all visible registers and RAM, exact output/history words, original return,
+instruction counts and estimated base costs match. Other coefficient callbacks,
+arbitrary entry modes, interrupted calls and device behavior remain unqualified.
 
 Modes: ordinary 24-bit arithmetic, three defined transfer-scaling modes and
 two rounding choices have initial code. Compatibility, double precision,
