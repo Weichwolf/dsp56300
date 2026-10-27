@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "architecture.hpp"
 #include "dsp56300/core.hpp"
-#include "fields.hpp"
 #include "jit.hpp"
 #include "jit_emitter.hpp"
 #include "native_moves.hpp"
@@ -25,7 +24,9 @@ constexpr std::array register_offsets{
 void JitEmitter::general_moves(const NativeOp &operation) {
   helper(runtime_.moves, operation);
   code_.binary(op_test, {.destination = Reg::ax, .source = Reg::ax}, Width::dword);
-  code_.exit_if(Branch::equal);
+  // helper() materialized all previous results. Preserve the helper's own
+  // partial fault state rather than flushing pre-transfer cached operands.
+  code_.jump_if(Branch::equal, exits_[0]);
 }
 
 void JitEmitter::move_capture(const NativeMove &move, const Word mode) {
@@ -36,7 +37,7 @@ void JitEmitter::move_capture(const NativeMove &move, const Word mode) {
     const auto &memory = runtime_.memory.at(move.space == Space::x ? 0 : 1);
     code_.constant(Reg::r11, reinterpret_cast<std::uintptr_t>(memory.data));
     code_.load_indexed(value,
-                       {.base = Reg::r11, .index = move.space == Space::x ? Reg::cx : Reg::r14});
+                       {.base = Reg::r11, .index = move.space == Space::x ? Reg::cx : Reg::r8});
     code_.immediate(group_and, value, word_mask, Width::dword);
   } else {
     move_read_register(value, move, mode);
@@ -50,7 +51,7 @@ void JitEmitter::move_commit(const NativeMove &move) {
   } else {
     const auto &memory = runtime_.memory.at(move.space == Space::x ? 0 : 1);
     code_.constant(Reg::r11, reinterpret_cast<std::uintptr_t>(memory.data));
-    code_.store_indexed({.base = Reg::r11, .index = move.space == Space::x ? Reg::cx : Reg::r14},
+    code_.store_indexed({.base = Reg::r11, .index = move.space == Space::x ? Reg::cx : Reg::r8},
                         value);
   }
 }
@@ -71,10 +72,11 @@ void JitEmitter::moves(const NativeOp &operation) {
   x64::Label slow;
   x64::Label done;
   for (const auto &move : transfers) { move_guard(move, slow); }
-  if ((operation.instruction.opcode & byte_mask) != 0) {
+  if (dataflow_.old_inputs != 0) {
     for (unsigned index = 0; index < register_offsets.size(); ++index) {
-      code_.load(Reg::ax, Reg::r12, offsetof(Cpu, reg) + register_offsets.at(index));
-      code_.store(Reg::bp, index * sizeof(std::uint64_t), Reg::ax);
+      if ((dataflow_.old_inputs & (Word{1} << index)) == 0) { continue; }
+      current_value(Reg::ax, index);
+      code_.store(Reg::r14, index * sizeof(std::uint64_t), Reg::ax);
     }
   }
   for (const auto &move : transfers) { move_update(move); }

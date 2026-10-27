@@ -3,7 +3,7 @@ Native x64 execution
 Select Options.backend=Backend::jit on Linux x86-64. The default remains cached.
 This is an independent scalar SysV x64 emitter. No external DSP emulator,
 assembler, LLVM runtime or JIT library is linked. SSE/AVX lowering, block linking,
-nonlinear native AGU lowering and register allocation across instructions remain
+nonlinear native AGU lowering and general register allocation across instructions remain
 future work; this first backend is not the final performance objective.
 
 Core::run has the same exact guest-instruction budget on every backend. One REP
@@ -52,17 +52,47 @@ address updates, callbacks or writes. Stores to any bank overlapping P use that
 helper conservatively, preserving program invalidation. Other transfer classes,
 PCU register transfers and conditional IFcc forms retain general execution.
 
-Native moves latch old A/B/X/Y for nonzero ALU operations, update both AGUs, capture
-both port values, then commit X before Y. Physical X/Y storage overlap and shared
+Native moves preserve old register banks that an ALU reads and a transfer can
+overwrite, update both AGUs, capture both port values, then commit X before Y.
+The host-independent dataflow analysis describes A/B/X/Y effects; unknown move
+classes conservatively clobber all banks, and unknown ALU forms read all banks.
+Unmodified ALU inputs read current state without an old-value snapshot. This
+analysis does not discard flags or assume independent loop iterations.
+Physical X/Y storage overlap and shared
 register destinations retain the existing ordering. Full A/B stores implement
 scaling, clipping and sticky S/L directly; accumulator loads sign-extend correctly.
 Exact four-byte guest words avoid overreads and mask raw caller-owned data to
 24 bits. A native_move_instructions diagnostic counts each successful fast
 transfer instruction once, including paired and immediate forms. Pure move
-instructions can retire natively too. Native ALU inputs still use the old snapshot.
+instructions can retire natively too. Overwritten ALU inputs use the old snapshot.
 Loop-ending native instructions return to the general executor
 before any side effects, so its DO cleanup and fault rules remain authoritative.
 REP bodies use their original latched general execution path.
+
+Within a native block, RBP/RBX retain A/B. Native ALU writes update these host
+registers and mark them dirty instead of storing every result to Cpu. Reads do
+not warm a cache speculatively: only native writes establish live host values.
+Native
+transfer sources and old-input snapshots read the current cached values when
+present. Transfer writes invalidate affected copies after fast/fallback merging.
+Unclassified/full helpers conservatively invalidate both copies. Fast transfer
+branches do not establish new cache-valid values, so their slow branches cannot
+skip initialization. Each new native entry starts with no cached values.
+
+Every helper call materializes all preceding dirty results before C++ execution
+or callbacks. Loop guards, invalidation exits and normal/partial-budget returns
+use shared epilogues for the four possible dirty A/B combinations. This restores
+complete canonical accumulator state before the host or general executor can
+observe it. A failed move helper exits through an already-materialized epilogue
+and preserves the helper's own partial fault state; it never writes stale cached
+operands over that state. Flags, PC and retirement remain materialized per
+instruction. No deferred result survives a native block return.
+
+Native entry preserves the extra nonvolatile register and SysV stack alignment.
+R14 keeps the old-input pointer; R8 is the Y address during transfers and becomes
+available to ALU flag code after transfers finish. X/Y and old overwritten inputs
+remain memory-backed. This is bounded accumulator allocation/materialization,
+not a general SSA register allocator or flag-liveness optimization.
 MOVEC/MOVEM/MOVEP use the general helpers. Guest SR writes exit on changed
 numerical mode, and guest P writes exit on invalidation before executing a
 previously planned successor. Directed host sequences exercise both boundaries.

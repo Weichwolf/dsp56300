@@ -217,7 +217,7 @@ void exact_word_access() {
   const GuardedWord y;
   std::array<Word, memory_words> p{};
   Core core({.program = p, .x = x.words(), .y = y.words()}, nullptr, {.backend = Backend::jit});
-  // Read/write both address registers, exercising REX.X on the Y-port index R14.
+  // Read/write both address registers, exercising REX.X on the Y-port index R8.
   const std::array program{Word{0xc08000}, Word{0x800000}};
   core.load(Space::program, start, program);
   auto state = initial_state();

@@ -23,7 +23,7 @@ constexpr auto m_offset = offsetof(Cpu, reg) + offsetof(Registers, m);
 
 void JitEmitter::move_guard(const NativeMove &move, x64::Label &slow) {
   if (move.immediate()) { return; }
-  const auto address = move.space == Space::x ? Reg::cx : Reg::r14;
+  const auto address = move.space == Space::x ? Reg::cx : Reg::r8;
   const auto &form = move.address;
   const auto offset = form.index * sizeof(Word);
   if (form.mode != 4 && form.mode != 6) {
@@ -56,7 +56,7 @@ void JitEmitter::move_update(const NativeMove &move) {
   const auto offset = form.index * sizeof(Word);
   if (form.mode == 7) {
     code_.store(
-        Reg::r12, r_offset + offset, move.space == Space::x ? Reg::cx : Reg::r14, Width::dword);
+        Reg::r12, r_offset + offset, move.space == Space::x ? Reg::cx : Reg::r8, Width::dword);
     return;
   }
   code_.load(Reg::ax, Reg::r12, r_offset + offset, Width::dword);

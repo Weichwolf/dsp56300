@@ -2,6 +2,7 @@
 #include "jit_emitter.hpp"
 
 #include "architecture.hpp"
+#include "dataflow.hpp"
 #include "dsp56300/core.hpp"
 #include "fields.hpp"
 #include "instruction.hpp"
@@ -40,10 +41,10 @@ constexpr std::array<std::uint8_t, 3> compare_ax_one{0x83, 0xf8, 0x01};
 constexpr std::array<std::uint8_t, 2> borrow_ax_ax{0x19, 0xc0};
 constexpr std::array<std::uint8_t, 3> increment_retired{0x41, 0xff, 0xc7};
 constexpr std::array<std::uint8_t, 4> entry_landing{0xf3, 0x0f, 0x1e, 0xfa};
-constexpr std::array<std::uint8_t, 9> save_nonvolatile{
-    0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57, 0x55};
-constexpr std::array<std::uint8_t, 10> restore_and_return{
-    0x5d, 0x41, 0x5f, 0x41, 0x5e, 0x41, 0x5d, 0x41, 0x5c, 0xc3};
+constexpr std::array<std::uint8_t, 14> save_nonvolatile{
+    0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57, 0x55, 0x53, 0x48, 0x83, 0xec, 0x08};
+constexpr std::array<std::uint8_t, 15> restore_and_return{
+    0x48, 0x83, 0xc4, 0x08, 0x5b, 0x5d, 0x41, 0x5f, 0x41, 0x5e, 0x41, 0x5d, 0x41, 0x5c, 0xc3};
 
 enum AluByte : std::uint8_t {
   alu_clear = 0x13,
@@ -99,10 +100,64 @@ bool JitEmitter::lowerable(const NativeOp &operation) const {
 }
 
 void JitEmitter::value(const Reg destination, const unsigned index, const bool latched) {
-  code_.load(destination,
-             latched ? Reg::bp : Reg::r12,
-             latched ? index * sizeof(std::uint64_t)
-                     : offsetof(Cpu, reg) + register_offsets.at(index));
+  if (latched && (dataflow_.old_inputs & (Word{1} << index)) != 0) {
+    code_.load(destination, Reg::r14, index * sizeof(std::uint64_t));
+    return;
+  }
+  current_value(destination, index);
+}
+
+void JitEmitter::current_value(const Reg destination, const unsigned index) {
+  if (index < accumulator_dirty_.size() && accumulator_dirty_.at(index)) {
+    code_.mov({.destination = destination, .source = index == 0 ? Reg::bp : Reg::bx});
+  } else {
+    code_.load(destination, Reg::r12, offsetof(Cpu, reg) + register_offsets.at(index));
+  }
+}
+
+void JitEmitter::store_accumulator(const bool destination_b, const Reg source) {
+  const auto index = destination_b ? 1U : 0U;
+  code_.mov({.destination = destination_b ? Reg::bx : Reg::bp, .source = source});
+  accumulator_dirty_.at(index) = true;
+}
+
+Word JitEmitter::dirty_accumulators() const {
+  return (accumulator_dirty_[0] ? 1U : 0U) | (accumulator_dirty_[1] ? 2U : 0U);
+}
+
+void JitEmitter::flush_accumulators(const Word mask) {
+  for (unsigned index = 0; index < accumulator_dirty_.size(); ++index) {
+    if ((mask & (Word{1} << index)) != 0) {
+      code_.store(Reg::r12,
+                  offsetof(Cpu, reg) + register_offsets.at(index),
+                  index == 0 ? Reg::bp : Reg::bx);
+    }
+  }
+}
+
+void JitEmitter::exit_if(const Branch condition) {
+  code_.jump_if(condition, exits_.at(dirty_accumulators()));
+}
+
+void JitEmitter::finish() {
+  const auto normal = dirty_accumulators();
+  code_.bind(exits_.at(normal));
+  flush_accumulators(normal);
+  x64::Label returned;
+  bool branched = false;
+  for (Word mask = 0; mask < exits_.size(); ++mask) {
+    if (mask == normal || exits_.at(mask).references.empty()) { continue; }
+    if (!branched) {
+      code_.jump(returned);
+      branched = true;
+    }
+    code_.bind(exits_.at(mask));
+    flush_accumulators(mask);
+    code_.jump(returned);
+  }
+  if (branched) { code_.bind(returned); }
+  code_.mov({.destination = Reg::ax, .source = Reg::r15}, Width::dword);
+  code_.raw(restore_and_return);
 }
 
 void JitEmitter::input(const Reg destination,
@@ -130,6 +185,7 @@ void JitEmitter::input(const Reg destination,
 }
 
 void JitEmitter::helper(const JitHelper function, const NativeOp &operation) {
+  flush_accumulators(dirty_accumulators());
   code_.load(Reg::di, Reg::r13, offsetof(NativeContext, runtime) + offsetof(JitRuntime, owner));
   code_.constant(Reg::si, reinterpret_cast<std::uintptr_t>(&operation));
   code_.constant(Reg::ax, std::bit_cast<std::uintptr_t>(function));
@@ -145,7 +201,7 @@ void JitEmitter::loop_guard(const NativeOp &operation) {
   code_.load(Reg::dx, Reg::r12, la_offset, Width::dword);
   code_.binary(op_or, {.destination = Reg::ax, .source = Reg::dx}, Width::dword);
   code_.immediate(group_cmp, Reg::ax, operation.pc + operation.instruction.words - 1, Width::dword);
-  code_.exit_if(Branch::equal);
+  exit_if(Branch::equal);
 }
 
 void JitEmitter::arithmetic_flags(const Word mode, const bool carry_changed) {
@@ -213,7 +269,7 @@ void JitEmitter::multiply(const NativeOp &operation) {
     code_.binary(op_xor, {.destination = Reg::r10, .source = Reg::r10}, Width::dword);
   }
   if ((opcode & 1U) != 0) { round(operation.mode); }
-  code_.store(Reg::r12, register_offsets.at((opcode & 8U) != 0 ? 1U : 0U), Reg::ax);
+  store_accumulator((opcode & 8U) != 0, Reg::ax);
   arithmetic_flags(operation.mode);
 }
 
@@ -248,7 +304,6 @@ void JitEmitter::native(const NativeOp &operation) {
   if (opcode == 0) { return; }
   const auto kind = opcode & alu_mask;
   const bool destination_b = (opcode & 8U) != 0;
-  const auto destination = register_offsets.at(destination_b ? 1U : 0U);
   if ((opcode & 0x80U) != 0) {
     multiply(operation);
     return;
@@ -262,7 +317,7 @@ void JitEmitter::native(const NativeOp &operation) {
     round(operation.mode);
   } else if ((kind & 7U) == 1) {
     input(Reg::ax, (opcode >> 4) & 7, destination_b, has_moves(operation));
-    code_.store(Reg::r12, destination, Reg::ax);
+    store_accumulator(destination_b, Reg::ax);
     return;
   } else {
     value(Reg::ax, destination_b ? 1U : 0U, has_moves(operation));
@@ -276,7 +331,7 @@ void JitEmitter::native(const NativeOp &operation) {
     }
     code_.set(condition_overflow, Reg::r10);
   }
-  code_.store(Reg::r12, destination, Reg::ax);
+  store_accumulator(destination_b, Reg::ax);
   arithmetic_flags(operation.mode);
 }
 
@@ -291,7 +346,7 @@ void JitEmitter::retire(const NativeOp &operation) {
   if (has_moves(operation)) {
     code_.load(Reg::ax, Reg::r13, offsetof(NativeContext, dirty));
     code_.memory_immediate(group_cmp, Reg::ax, 0, Width::byte, 0);
-    code_.exit_if(Branch::not_equal);
+    exit_if(Branch::not_equal);
   }
 }
 
@@ -301,25 +356,30 @@ std::vector<std::uint8_t> JitEmitter::generate(const std::span<const NativeOp> o
   code_.mov({.destination = Reg::r12, .source = Reg::di});
   code_.mov({.destination = Reg::r13, .source = Reg::si});
   code_.binary(op_xor, {.destination = Reg::r15, .source = Reg::r15}, Width::dword);
-  code_.load(Reg::bp, Reg::r13, offsetof(NativeContext, runtime) + offsetof(JitRuntime, latched));
+  code_.load(Reg::r14, Reg::r13, offsetof(NativeContext, runtime) + offsetof(JitRuntime, latched));
   for (const auto &operation : operations) {
+    dataflow_ = analyze_dataflow(operation.instruction);
     if (lowerable(operation)) {
       loop_guard(operation);
       if (has_moves(operation)) { moves(operation); }
+      for (unsigned index = 0; index < accumulator_dirty_.size(); ++index) {
+        if ((dataflow_.move_writes & (Word{1} << index)) != 0) {
+          accumulator_dirty_.at(index) = false;
+        }
+      }
       native(operation);
       retire(operation);
     } else {
       helper(runtime_.execute, operation);
+      accumulator_dirty_.fill(false);
       code_.binary(op_test, {.destination = Reg::ax, .source = Reg::ax}, Width::dword);
-      code_.exit_if(Branch::equal);
+      exit_if(Branch::equal);
       code_.raw(increment_retired);
       code_.immediate(group_cmp, Reg::ax, 2, Width::dword);
-      code_.exit_if(Branch::not_equal);
+      exit_if(Branch::not_equal);
     }
   }
-  code_.bind_exit();
-  code_.mov({.destination = Reg::ax, .source = Reg::r15}, Width::dword);
-  code_.raw(restore_and_return);
+  finish();
   return code_.bytes();
 }
 } // namespace dsp56300::detail

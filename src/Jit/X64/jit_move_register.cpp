@@ -32,7 +32,11 @@ std::size_t bank_offset(const unsigned reg) {
 
 void JitEmitter::move_read_register(const Reg value, const NativeMove &move, const Word mode) {
   const auto reg = move.reg;
-  code_.load(value, Reg::r12, bank_offset(reg));
+  if (reg >= a_register) {
+    current_value(value, reg == a_register ? 0U : 1U);
+  } else {
+    code_.load(value, Reg::r12, bank_offset(reg));
+  }
   if (reg < a_register) {
     if ((reg & 1U) != 0) { code_.shift(shift_right, value, word_bits); }
     code_.immediate(group_and, value, word_mask, Width::dword);

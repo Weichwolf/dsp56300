@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
+#include "dataflow.hpp"
 #include "jit.hpp"
 #include "native_moves.hpp"
 #include "x64.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -41,10 +43,20 @@ private:
   void arithmetic_flags(Word mode, bool carry_changed = false);
   void input(x64::Reg destination, unsigned selector, bool destination_b, bool latched);
   void value(x64::Reg destination, unsigned index, bool latched);
+  void current_value(x64::Reg destination, unsigned index);
+  void store_accumulator(bool destination_b, x64::Reg source);
+  [[nodiscard]] Word dirty_accumulators() const;
+  void flush_accumulators(Word mask);
+  void exit_if(x64::Branch condition);
+  void finish();
   void loop_guard(const NativeOp &operation);
   void retire(const NativeOp &operation);
   x64::Code code_;
   JitRuntime runtime_;
   bool optimize_;
+  NativeDataflow dataflow_;
+  // Only native writes establish a live host value; dirty also implies valid.
+  std::array<bool, 2> accumulator_dirty_{};
+  std::array<x64::Label, 4> exits_;
 };
 } // namespace dsp56300::detail

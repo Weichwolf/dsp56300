@@ -184,6 +184,45 @@ Native code remains uninstrumented machine code; project C++ retains all strict
 sanitizer/diagnostic checks. No additional ISA support, hardware isolation,
 register allocation, SIMD or completeness claim follows from this extension.
 
+Native dataflow and accumulator allocation extension: old-value dependencies
+are explicit A/B/X/Y masks.
+Only banks read by the native ALU and overwritten by a move require snapshots;
+unknown ALU/move forms remain conservative. RBP/RBX retain A/B inside a block,
+with dirty results materialized before helpers and every exit. Four dirty-mask
+epilogues preserve canonical state at loop, fault, invalidation and budget exits.
+Move writes invalidate affected cached accumulators after fast/fallback merging;
+unclassified/full helpers invalidate both. Cache validity starts empty at each
+native entry and is not retained across run calls. Helper ABI preservation and
+call alignment include the additional nonvolatile host register. Fast transfer
+branches cannot introduce cache-valid values skipped by their slow branches.
+50688 independent binary sequences cover every currently native ALU byte with
+single/paired transfers and subsequent consumers, qualifying old operands,
+arithmetic precision/flags, final RAM and complete visible state. 794 host checks
+exercise warm prefixes, partitioned budgets, helper partial/full A/B writes,
+callback observations, rejected accesses, executing-code invalidation, every
+accumulator-write combination at DO cleanup and partial helper fault state.
+All 31 CTests pass in release and ASan/UBSan strict builds, including byte-exact
+fixture regeneration and source-built Blofeld workloads. No fuzz tests were run.
+This does not implement deferred flags, arbitrary register allocation, native
+loop control, SIMD, hardware VM isolation or complete ISA/event timing.
+
+Accumulator allocation measurement: three alternating warm replay runs against
+3627835 on the same i5-10400/CPU2 show only small cross-build timing changes.
+The four directed filter/LP12 medians fall by about 0.6-2.9%, reaching roughly
+63-69 million guest instructions/s. The ready-state effect case falls by about
+1.4%. FFT changes range from about 0.2% lower to 1.9% higher latency, so no FFT
+speedup is established; the 1024-point transform remains around 1.91 ms and
+82 million guest instructions/s. Host code placement and unlocked frequency
+remain possible influences; these are not isolated per-transformation gains.
+The wide filter and wide LP12 executable mappings each shrink by 4 KiB; all
+other measured mapping sizes, guest native/helper counts and block counts are
+unchanged. Initial dependent-pointer and write-through-cache experiments showed
+no broad gain and remain local alongside the final raw trials and artifact
+hashes. The final implementation removes repeated accumulator stores and unused
+snapshots, but per-instruction flags/PC/progress, guards and general helpers
+remain in the execution path. Native loop/control and wider region lowering
+remain required; the 270-million-instruction and whole-device goals are unmet.
+
 Timing: documented base costs are being added for implemented forms. Pipeline
 interlocks, IRQ entry/return qualification, exact event admission and external
 waits remain open. A complete checkpoint API is pending; Registers omits hidden

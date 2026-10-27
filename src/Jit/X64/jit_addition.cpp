@@ -66,12 +66,7 @@ void JitEmitter::addition(const NativeOp &operation) {
   }
   code_.set(condition_overflow, Reg::r10);
   code_.set(condition_below, Reg::dx);
-  if (!compare) {
-    code_.store(Reg::r12,
-                offsetof(Cpu, reg) +
-                    (destination_b ? offsetof(Registers, b) : offsetof(Registers, a)),
-                Reg::ax);
-  }
+  if (!compare) { store_accumulator(destination_b, Reg::ax); }
   arithmetic_flags(operation.mode, true);
 }
 

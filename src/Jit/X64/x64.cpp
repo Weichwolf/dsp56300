@@ -274,14 +274,4 @@ void Code::bind(Label &label) {
   label.references.clear();
 }
 
-void Code::exit_if(const Branch condition) {
-  byte(0x0f);
-  byte(static_cast<unsigned>(condition));
-  exits_.push_back(bytes_.size());
-  u32(0);
-}
-
-void Code::bind_exit() {
-  for (const auto offset : exits_) { patch(offset, bytes_.size()); }
-}
 } // namespace dsp56300::detail::x64

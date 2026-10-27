@@ -89,6 +89,17 @@ loop exits, code changes, aliased memory and mode changes with a general fallbac
 Keep compilation/planning cost separate from warm execution and measure actual
 fallback frequency, hot code/data size, latency and complete-workload throughput.
 
+Implemented compiler steps now include guarded native ordinary X/Y transfers,
+host-independent old-input/clobber masks and A/B allocation in two host
+registers. Unmodified ALU operands avoid snapshot traffic; overwritten inputs
+retain their old values. Dirty accumulators materialize before every helper
+and at every exit,
+so callbacks, fault exits and partial budgets observe complete canonical state.
+Conservative helper invalidation, dirty-mask epilogues and fast/slow merge rules
+precede wider
+allocation. These are foundations for lifted regions, not full SSA, flag
+liveness, native loop control, SIMD batching or hardware-isolated execution.
+
 Evaluate joules per audio block using actual energy counters when accessible.
 Core count and GHz alone cannot establish energy: voltage, static power, cache
 traffic, synchronization, idle policy and latency windows matter. No systemwide

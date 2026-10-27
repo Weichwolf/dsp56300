@@ -69,8 +69,6 @@ public:
   void jump_if(Branch condition, Label &label);
   void jump(Label &label);
   void bind(Label &label);
-  void exit_if(Branch condition);
-  void bind_exit();
 
   [[nodiscard]] const std::vector<std::uint8_t> &bytes() const noexcept { return bytes_; }
 
@@ -81,6 +79,5 @@ private:
   void reference(Label &label);
   void patch(std::size_t offset, std::size_t target);
   std::vector<std::uint8_t> bytes_;
-  std::vector<std::size_t> exits_;
 };
 } // namespace dsp56300::detail::x64
