@@ -10,3 +10,6 @@ Subsequent user clarifications (preserving the original objective above):
   Preserve shared-state dependencies, quantization, output order and interrupt
   boundaries, with a general fallback when batching is inadmissible.
 - Commit and push each verified increment to private Weichwolf/dsp56300.
+- Use binary test fixtures for reproducible instruction/program inputs and
+  independently derived expectations. Keep manufacturer workloads local.
+- Consider C++ concepts for portable, compile-time-checked internal interfaces.

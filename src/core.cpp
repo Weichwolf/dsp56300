@@ -105,12 +105,15 @@ detail::Instruction Core::Impl::instruction(const Word pc) {
 
 void Core::Impl::step() {
   current_pc = cpu.reg.pc;
-  auto decoded = instruction(current_pc);
-  if (cpu.repeat_remaining != 0 && cpu.repeat_loaded) {
-    decoded = detail::decode(cpu.repeat_opcode);
-  }
+  const auto decoded =
+      cpu.repeat_remaining != 0 && cpu.repeat_loaded ? repeated : instruction(current_pc);
   if (fault.kind != FaultKind::none) { return; }
   const bool repeating = cpu.repeat_remaining != 0;
+  if (repeating && (decoded.words != 1 || (decoded.operation != detail::Operation::parallel &&
+                                           decoded.operation != detail::Operation::nop))) {
+    fail(FaultKind::invalid_instruction, Space::program, current_pc, decoded.opcode);
+    return;
+  }
   current_words = decoded.words;
   cpu.interrupt_inhibited = false;
   cpu.reg.pc = (current_pc + decoded.words) & word_mask;
@@ -120,6 +123,7 @@ void Core::Impl::step() {
   cpu.cycles += decoded.cycles;
   if (repeating) {
     cpu.repeat_opcode = decoded.opcode;
+    repeated = decoded;
     cpu.repeat_loaded = true;
     --cpu.repeat_remaining;
     if (cpu.repeat_remaining != 0) {
@@ -194,8 +198,15 @@ RunResult Core::run(const std::uint32_t dispatches) {
 }
 
 bool Core::interruptible() const {
-  return fault().kind == FaultKind::none && impl_->cpu.repeat_remaining == 0 &&
-         !impl_->cpu.repeat_completed && !impl_->cpu.interrupt_inhibited;
+  if (fault().kind != FaultKind::none || impl_->cpu.repeat_remaining != 0 ||
+      impl_->cpu.interrupt_inhibited) {
+    return false;
+  }
+  if (!impl_->cpu.repeat_completed) { return true; }
+  const auto pc = impl_->cpu.reg.pc;
+  if (pc >= impl_->buffers.program.size()) { return false; }
+  return detail::decode(impl_->buffers.program[pc] & word_mask).operation !=
+         detail::Operation::repeat_immediate;
 }
 
 void Core::clear_code_cache() {

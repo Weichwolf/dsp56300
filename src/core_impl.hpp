@@ -50,6 +50,7 @@ struct Core::Impl {
   detail::Cpu cpu;
   Io *io;
   std::array<std::uint64_t, 4> latched{};
+  detail::Instruction repeated;
   Buffers buffers;
   static constexpr std::size_t page_words = 1024;
   static constexpr std::size_t page_count = address_words / page_words;

@@ -40,4 +40,22 @@ if(BUILD_TESTING)
   add_executable(dsp56300_core_test test/core_test.cpp)
   target_link_libraries(dsp56300_core_test PRIVATE dsp56300::core)
   add_test(NAME core-instructions COMMAND dsp56300_core_test)
+  add_library(dsp56300_fixture_format STATIC test/binary_fixture.cpp)
+  target_include_directories(dsp56300_fixture_format PUBLIC test include)
+  target_link_libraries(dsp56300_fixture_format PUBLIC blofeld_quality)
+  add_executable(dsp56300_generate_arithmetic test/generate_arithmetic.cpp)
+  target_link_libraries(dsp56300_generate_arithmetic PRIVATE dsp56300_fixture_format)
+  add_executable(dsp56300_fixture_test test/fixture_test.cpp)
+  target_link_libraries(dsp56300_fixture_test PRIVATE dsp56300::core dsp56300_fixture_format)
+  add_test(NAME arithmetic-fixtures COMMAND dsp56300_fixture_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/arithmetic.d56")
+  add_test(NAME fixture-reproducibility COMMAND "${CMAKE_COMMAND}"
+    "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_arithmetic>"
+    "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/arithmetic-regenerated.d56"
+    "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/arithmetic.d56"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
+  set(DSP56300_PRIVATE_FIXTURES "" CACHE STRING "Semicolon-separated paths to local .d56 fixtures")
+  if(DSP56300_PRIVATE_FIXTURES)
+    add_test(NAME private-fixtures COMMAND dsp56300_fixture_test ${DSP56300_PRIVATE_FIXTURES})
+  endif()
 endif()

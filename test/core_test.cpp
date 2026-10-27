@@ -96,6 +96,40 @@ void check_fail_stop(const dsp56300::Backend backend) {
           "Unsupported opcode reports context");
   require(fixture.core.run(1).dispatches == 0, "Failed core does not resume");
 }
+
+void check_repeat_latch(const dsp56300::Backend backend) {
+  Fixture fixture(backend);
+  constexpr Word repeat_four = 0x0604a0;
+  constexpr Word repeat_two = 0x0602a0;
+  constexpr std::array program{repeat_four, mac_x0_y0_a, Word{0}, Word{0}};
+  fixture.core.load(dsp56300::Space::program, start, program);
+  auto state = fixture.core.registers();
+  state.x = 1;
+  state.y = 1;
+  fixture.core.set_registers(state);
+  require(fixture.core.run(2).dispatches == 2, "REP and first iteration retire");
+  require(!fixture.core.interruptible(), "Interrupts wait for REP completion");
+  fixture.core.write(dsp56300::Space::program, start + 1, 0);
+  require(fixture.core.run(3).dispatches == 3 && fixture.core.registers().a == 8,
+          "REP executes its latched opcode after a host program-memory change");
+  require(fixture.core.interruptible(), "Interrupts are admitted before a non-REP successor");
+  fixture.core.write(dsp56300::Space::program, start + 2, repeat_two);
+  require(!fixture.core.interruptible(), "Adjacent REP instructions form one interrupt exclusion");
+  require(fixture.core.run(3).dispatches == 3 && fixture.core.interruptible(),
+          "Interrupt exclusion ends after the final adjacent REP body");
+}
+
+void check_repeat_restriction(const dsp56300::Backend backend) {
+  Fixture fixture(backend);
+  constexpr Word repeat_two = 0x0602a0;
+  constexpr Word jump = 0x0c0100;
+  constexpr std::array program{repeat_two, jump};
+  fixture.core.load(dsp56300::Space::program, start, program);
+  const auto result = fixture.core.run(2);
+  require(result.dispatches == 1 && result.fault.kind == dsp56300::FaultKind::invalid_instruction &&
+              result.fault.pc == start + 1,
+          "REP rejects a control-flow instruction instead of repeating it");
+}
 }
 
 int main() {
@@ -105,6 +139,8 @@ int main() {
       check_parallel_latch(backend);
       check_loop(backend);
       check_fail_stop(backend);
+      check_repeat_latch(backend);
+      check_repeat_restriction(backend);
     }
     std::cout << "Independent DSP instruction checks passed\n";
   } catch (const std::exception &error) {

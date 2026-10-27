@@ -1,0 +1,83 @@
+Binary instruction fixtures
+
+test/fixtures/arithmetic.d56 contains only synthetic instruction cases authored
+for this project. It contains no Blofeld program or extracted manufacturer data.
+The checked-in generator uses signed integer arithmetic and quotient/remainder
+rounding expectations; it does not link or execute the emulator implementation.
+Fixture regeneration is explicit, never part of normal test execution:
+
+  cmake --preset release
+  cmake --build --preset release
+  build/release/dsp56300_generate_arithmetic build/arithmetic.d56
+  cmp build/arithmetic.d56 test/fixtures/arithmetic.d56
+  ctest --preset release
+
+The reproducibility test independently regenerates the bytes and compares them
+with the checked-in file. Review the model and binary change together when
+updating expectations. Never replace independent expectations with a snapshot
+captured from the emulator under test.
+
+The generic runner executes each case through reference and cached backends.
+Successful cases compare all visible registers, all supplied P/X/Y words,
+dispatch/instruction counts, estimated base cycles and interrupt admission.
+Expected memory starts as a copy of initial memory; only explicit after-blocks
+change it. This detects unintended writes outside expected output ranges.
+Fault cases compare diagnostics and progress but do not assert partially
+committed register/memory state. No peripherals are fabricated by the runner.
+API sequences involving host writes or interrupts between execution steps stay
+in C++ tests. Registers alone do not capture hidden REP/IRQ continuation, so
+these files describe initialization and expectations, not resumable CPU snapshots.
+
+Private workload fixtures
+
+Assemble manufacturer programs outside the tracked tree, then construct local
+.d56 inputs with independently calculated expectations in build/ or doc/local/.
+Preparing these inputs can require an assembler; running them does not.
+Additional fixtures can be passed directly:
+
+  build/release/dsp56300_fixture_test build/workloads/filter.d56
+
+Or register a semicolon-separated list with CTest through a local CMake setting:
+
+  cmake --preset strict -DDSP56300_PRIVATE_FIXTURES=/absolute/path/filter.d56
+
+Do not add private fixture paths to tracked presets. Test binaries, generators
+and the fixture format are not part of the installed public CPU interface.
+
+Wire format D56F, version 1
+
+Every integer is unsigned little-endian. u32/u64 always occupy 4/8 bytes.
+No native structures, pointers, padding, enum layout or SIMD state are dumped.
+Lengths count elements, not bytes, except string lengths. Strings contain their
+literal bytes without a terminator. The file ends immediately after its cases.
+
+Header:
+  u32 magic 0x46363544 (ASCII D56F), u32 version 1, u32 case_count.
+
+Each case, in order:
+  u32 name_length, name bytes;
+  three u32 memory sizes in words (P, X, Y), initially zero-filled;
+  u32 dispatch budget, u32 expected retired dispatches;
+  u64 expected retired instructions, u64 expected estimated base cycles;
+  five u32 expected fault fields (kind, space, address, value, pc);
+  u32 expected interruptible (0 or 1);
+  initial register record, expected register record;
+  before memory-block list, after memory-block list.
+
+Register record:
+  four u64 (X, Y, A, B), with unshifted raw 48-/56-bit values;
+  eight u32 R, eight u32 N, eight u32 M;
+  ten u32 (PC, SR, OMR, LA, LC, SP, SC, SZ, EP, VBA);
+  sixteen u64 stack entries (raw 48-bit values).
+
+Memory-block list:
+  u32 block_count; each block is u32 space, u32 address, u32 word_count,
+  followed by word_count u32 values, each limited to 24 bits.
+  Space numbers are P=0, X=1, Y=2. Blocks apply in listed order.
+  Fault kind numbers follow the documented FaultKind order in core.hpp.
+
+Limits: 65536 cases, 256 name bytes, 1024 blocks per list, and 2^24 words
+per address space/block. Zero-sized address spaces, unknown versions, invalid
+enums, truncated files and trailing bytes are rejected. Files are trusted local
+test assets; the reader is not an untrusted network input service. A schema
+change, including enum numbering, requires a new format version.

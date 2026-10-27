@@ -2,7 +2,7 @@ Objective audit: incomplete
 
 Build/setup: C++23, CMake/Ninja, LLVM19, inherited strict diagnostics,
 clang-format/clang-tidy and ASan/UBSan setup. Release and strict builds/tests pass
-for the initial narrow fixture, including its REP instruction-cost expectation.
+for the current instruction and binary fixtures, including REP base-cost checks.
 The strict executable runs with ASan/UBSan and additional integer/conversion checks.
 
 Independence: production/test targets contain only this project's own DSP
@@ -19,7 +19,14 @@ parallel moves, AGU paths, basic control, DO/REP and admitted interrupts have
 initial code. Coded forms are not all qualified. Independent tests currently
 cover the manual MAC example, old-register latching on a parallel move,
 REP/LC restore and fail-stop diagnostics through both execution paths.
-Broader arithmetic, move, AGU, loop and interrupt expectations are required.
+567 synthetic binary cases independently cover MAC, NEG, ADC/SBC carry and
+RND ties in all three scaling modes and both rounding modes. Cases compare
+complete visible register and memory state, progress and interrupt admission.
+The expectation generator does not link or execute the emulator; generated
+bytes must match the checked-in fixture. Host-sequence tests also cover a
+latched REP body after a P-memory write, sequential REP interrupt exclusion
+and rejection of a control-flow body. Broader move, AGU, loop and interrupt
+expectations remain required. See doc/fixtures.txt for format and local assets.
 
 Modes: ordinary 24-bit arithmetic, three defined transfer-scaling modes and
 two rounding choices have initial code. Compatibility, double precision,
