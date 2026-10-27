@@ -1,0 +1,50 @@
+KVM translation execution experiment
+
+This is a Linux x86-64 test harness, not a public VM backend. It uses the
+existing DSP JIT emitter, not a separate arithmetic implementation, to generate
+native arithmetic regions. No guest OS, board emulation or external emulator
+dependency is involved. The normal library/API is unchanged.
+
+The test creates a VM/vCPU, a 2 MiB shared backing mapping, identity-mapped
+long-mode page tables and a guest stack. Generated code receives guest addresses
+for the ordinary private CPU/runtime ABI and returns to an HLT boundary. All
+runtime pointers remain null: the selected no-move operations require neither
+host helpers nor latched-input storage. Guest addresses are never dereferenced
+by host C++. An unbacked physical read is tested in a separate VM and must exit
+as MMIO; the harness supplies no invented read result and never resumes it.
+
+Qualification matrix: 1500 arithmetic runs cover all ten nonempty prefixes of
+a MPY/MAC/add/negate/absolute/round/compare/transfer chain, three scaling modes,
+two rounding modes and five signed-24 boundary values for each input bank.
+Each run compares all architectural registers with the independent raw-56
+sequence model, checks exact retirement/progress, hidden continuation fields
+and the return/halt boundary. These are intended checks, not evidence of
+successful execution until the real KVM test has run.
+
+Build and run with the ordinary LLVM 19 release/strict presets:
+  cmake --build --preset release --target dsp56300_kvm_translation_test
+  ctest --preset release -R '^kvm-translation-experiment$' -V
+  cmake --build --preset strict --target dsp56300_kvm_translation_test
+  ctest --preset strict -R '^kvm-translation-experiment$' -V
+
+Missing/inaccessible /dev/kvm produces exit 77 and an explicit CTest skip;
+other setup or execution failures fail the test. A skipped test is not a
+successful VM trial. CTest imposes a 60-second external timeout. The host C++
+uses all normal warnings, hardening, format/tidy and strict sanitizers. Generated
+guest instructions are not compiler-instrumented with ASan/UBSan.
+
+Current host evidence (2026-10-27): both configurations build with the normal
+checks. Both executions are skipped because opening /dev/kvm still returns
+EACCES after the user reported arranging access. getfacl still shows lightdm
+as the only named user and no cosmo entry; the current process and group database
+provide no cosmo membership in kvm. No VM/vCPU or translated guest code has
+executed in this session. Device access remains the pending execution prerequisite.
+
+Scope limits: this checks a small helper-free arithmetic region and one memory
+exit only. General DSP programs, RAM-transfer plans, protected code pages,
+helper/event/I/O exits, code invalidation, budgets/interrupts and the transparent
+consumer backend remain unimplemented in KVM. This harness is neither a sandbox
+security qualification nor a realtime/performance benchmark. In particular it
+does not show a KVM speedup or host-load reduction at the 270 MIPS reference load.
+
+API reference: https://docs.kernel.org/virt/kvm/api.html

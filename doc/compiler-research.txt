@@ -67,13 +67,18 @@ exit boundary, so wrapping the current host-pointer JIT is insufficient. DSP
 budgets, interrupts, fixed-point rules and code invalidation remain compiler/VM
 responsibilities. VMX availability alone proves neither access permission nor
 isolation correctness or speed. Benchmark exit overhead and complete execution
-before choosing a default backend. No KVM implementation or isolation claim yet.
+before choosing a default backend. No public KVM backend or isolation claim yet.
 The first concrete host API probe was attempted on 2026-10-27: opening /dev/kvm
 with read/write access failed with EACCES before API/version/VM creation could
 run. The current cosmo session is not in kvm, and the device ACL grants no cosmo
 access. Device access is a pending test prerequisite; this does not establish
 that protected execution works or that its performance is useful. Preparation
-and independent compiler work can continue while access is arranged.
+and independent compiler work can continue while access is arranged. A
+reproducible test harness now generates arithmetic code with the existing DSP
+emitter and sets up a minimal long-mode guest. Both release/strict builds pass
+the project checks, but actual execution still skips on EACCES after the user
+reported arranging access. The visible device ACL still lacks cosmo access.
+See doc/kvm-experiment.txt for the exact test scope and outstanding validation.
 API reference: https://docs.kernel.org/virt/kvm/api.html
 
 Use a compile-time execution-backend concept for the direct JIT reference and

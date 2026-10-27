@@ -465,6 +465,11 @@ Transparent hardware VM execution is a user requirement under investigation.
 The user explicitly requires a concrete VMX/KVM trial. The initial host API
 probe currently fails with EACCES opening /dev/kvm; no VM or vCPU was created.
 This access prerequisite is pending, not a completed protected-execution test.
+A Linux x86-64 KVM translation test harness is now built under the ordinary
+release/strict policies. It uses the existing native emitter for 1500 directed
+arithmetic cases and an unbacked-memory exit test. Both actual runs skip because
+the device ACL still lacks cosmo access after access was reported arranged;
+no guest execution has been qualified. See doc/kvm-experiment.txt.
 Consumers must use the same DSP headers, caller-owned shared memory, events and
 I/O contracts without managing VM machinery. KVM mapping, host-span alignment,
 helper placement, deterministic exits and execution qualification are pending;

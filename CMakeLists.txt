@@ -45,6 +45,14 @@ add_custom_target(format-check
   VERBATIM)
 
 if(BUILD_TESTING)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64)$")
+    add_executable(dsp56300_kvm_translation_test test/Kvm/guest.cpp test/Kvm/translation_test.cpp)
+    target_link_libraries(dsp56300_kvm_translation_test PRIVATE dsp56300::core)
+    target_include_directories(dsp56300_kvm_translation_test PRIVATE
+      src/Core src/Jit src/Jit/X64 test)
+    add_test(NAME kvm-translation-experiment COMMAND dsp56300_kvm_translation_test)
+    set_tests_properties(kvm-translation-experiment PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60)
+  endif()
   add_executable(dsp56300_core_test test/core_test.cpp)
   target_link_libraries(dsp56300_core_test PRIVATE dsp56300::core)
   add_test(NAME core-instructions COMMAND dsp56300_core_test)
