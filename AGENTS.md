@@ -21,4 +21,4 @@
   Distinguish arithmetic experiments, emulator execution and whole-device performance.
 - Keep host memory and event/I/O contracts explicit. Do not silently fabricate peripheral results.
 - Do not run fuzz tests unless the user explicitly requests them.
-- Commit verified increments and push each commit to the private Weichwolf/dsp56300 origin.
+- Commit verified increments locally. No publication destination is authorized.

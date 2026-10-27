@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
+#include "architecture.hpp"
 #include "dataflow.hpp"
 #include "jit.hpp"
 #include "native_moves.hpp"
@@ -42,6 +43,8 @@ private:
   void addition(const NativeOp &operation);
   void round(Word mode);
   void arithmetic_flags(Word mode, bool carry_changed = false);
+  [[nodiscard]] std::vector<Word> plan_flags(std::span<const NativeOp> operations) const;
+  [[nodiscard]] static Word written_flags(const NativeOp &operation);
   void input(x64::Reg destination, unsigned selector, bool destination_b, bool latched);
   void value(x64::Reg destination, unsigned index, bool latched);
   void current_value(x64::Reg destination, unsigned index);
@@ -63,5 +66,6 @@ private:
   std::array<x64::Label, 4> exits_;
   x64::Label loop_header_;
   Word loop_size_ = 0, loop_pc_ = 0;
+  Word live_flags_ = carry | overflow | zero | negative | unnormalized | extension;
 };
 } // namespace dsp56300::detail

@@ -65,7 +65,7 @@ void JitEmitter::addition(const NativeOp &operation) {
     code_.binary(subtract ? op_sub : op_add, {.destination = Reg::ax, .source = Reg::dx});
   }
   code_.set(condition_overflow, Reg::r10);
-  code_.set(condition_below, Reg::dx);
+  if ((live_flags_ & carry) != 0) { code_.set(condition_below, Reg::dx); }
   if (!compare) { store_accumulator(destination_b, Reg::ax); }
   arithmetic_flags(operation.mode, true);
 }

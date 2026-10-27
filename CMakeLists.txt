@@ -29,6 +29,7 @@ add_library(dsp56300_core STATIC
   src/Jit/jit.cpp src/Jit/jit_helpers.cpp src/Jit/X64/jit_emitter.cpp src/Jit/X64/x64.cpp
   src/Jit/X64/jit_addition.cpp
   src/Jit/X64/jit_loops.cpp
+  src/Jit/X64/jit_flags.cpp
   src/Jit/native_moves.cpp src/Jit/dataflow.cpp src/Jit/X64/jit_moves.cpp
   src/Jit/X64/jit_move_address.cpp src/Jit/X64/jit_move_register.cpp
   src/Memory/memory_arena.cpp)
@@ -110,6 +111,8 @@ if(BUILD_TESTING)
   target_link_libraries(dsp56300_generate_dataflow PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_loops test/generate_loops.cpp)
   target_link_libraries(dsp56300_generate_loops PRIVATE dsp56300_fixture_format)
+  add_executable(dsp56300_generate_flags test/generate_flags.cpp)
+  target_link_libraries(dsp56300_generate_flags PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_fixture_test test/fixture_test.cpp)
   target_link_libraries(dsp56300_fixture_test PRIVATE dsp56300::core dsp56300_fixture_format)
   add_executable(dsp56300_fixture_bench test/fixture_bench.cpp)
@@ -141,6 +144,13 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/native-dataflow.d56")
   add_test(NAME loop-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/loops.d56")
+  add_test(NAME flag-fixtures COMMAND dsp56300_fixture_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/flags.d56")
+  add_test(NAME flag-reproducibility COMMAND "${CMAKE_COMMAND}"
+    "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_flags>"
+    "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/flags-regenerated.d56"
+    "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/flags.d56"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
   add_test(NAME loop-reproducibility COMMAND "${CMAKE_COMMAND}"
     "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_loops>"
     "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/loops-regenerated.d56"

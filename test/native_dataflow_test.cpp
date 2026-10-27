@@ -149,7 +149,7 @@ private:
 
 struct CallbackInput {
   Options options;
-  bool invalidate = false, accept = true;
+  bool invalidate = false, accept = true, overflow_first = false;
 };
 
 void callback(const CallbackInput input) {
@@ -161,6 +161,11 @@ void callback(const CallbackInput input) {
   const std::array program{mac_a, mac_b, io_add_load_a, add_a_b};
   machine.core.load(Space::program, start, program);
   auto initial = register_model::seed(flag_s | mode_up);
+  if (input.overflow_first) {
+    initial.a = sign56;
+    initial.x = 1;
+    initial.y = word_mask;
+  }
   initial.r[0] = io_address;
   auto expected = initial;
   model_alu(expected, mac_a);
@@ -260,6 +265,9 @@ void check(const Backend backend, const bool optimize) {
   callback({.options = options});
   callback({.options = options, .invalidate = true});
   callback({.options = options, .accept = false});
+  callback({.options = options, .overflow_first = true});
+  callback({.options = options, .invalidate = true, .overflow_first = true});
+  callback({.options = options, .accept = false, .overflow_first = true});
   for (unsigned written = 0; written < 4; ++written) { loop_exit(options, written); }
   fault_after_native(options);
 }

@@ -122,10 +122,18 @@ native self-loop backedges now repeat an eligible body without dispatcher
 reentry when its saved start PC matches and enough exact instruction budget
 remains. Full helpers inside the body retain continuation-context checks;
 ending transfers exit on invalidation. Accumulators materialize at each header
-backedge; no loop-carried register phi is assumed. These are
-foundations for lifted regions, not full SSA, flag liveness, native final loop
+backedge; no loop-carried register phi is assumed. A backward flag pass now
+omits overwritten ordinary flags inside safe native sequences while preserving
+incoming Carry dependencies and every sticky overflow. Both sides of transfers,
+helpers and ending guards remain full-status boundaries. These are
+foundations for lifted regions, not full SSA, flag liveness across memory guards, native final loop
 cleanup, SIMD batching or hardware-isolated execution. PC/progress batching
 remains a future experiment; it must preserve callback and fault observations.
+
+Next region experiment: consider side-effect-free RAM/AGU preflight guards before
+extending liveness across transfers. A failed preflight must reach the general
+path with the original state, without duplicate address updates or observable
+I/O. Never elide intermediate status merely because a RAM guard usually passes.
 
 Evaluate joules per audio block using actual energy counters when accessible.
 Core count and GHz alone cannot establish energy: voltage, static power, cache

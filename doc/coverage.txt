@@ -219,7 +219,7 @@ other measured mapping sizes, guest native/helper counts and block counts are
 unchanged. Initial dependent-pointer and write-through-cache experiments showed
 no broad gain and remain local alongside the final raw trials and artifact
 hashes. The final implementation removes repeated accumulator stores and unused
-snapshots, but per-instruction flags/PC/progress, guards and general helpers
+snapshots, but per-instruction PC/progress, conservative flag boundaries, guards and general helpers
 remain in the execution path. Native loop/control and wider region lowering
 remain required; the 270-million-instruction and whole-device goals are unmet.
 
@@ -285,7 +285,7 @@ fixtures and full FFT/Blofeld state comparisons remain mandatory.
 Both release and ASan/UBSan strict suites pass all 35 executable tests; the
 separate KVM experiment is explicitly skipped for inaccessible /dev/kvm
 (36 registered tests, zero failures). Format/tidy/warning policies remain intact.
-This is guarded scalar loop execution, not SSA loop allocation, flag liveness,
+This is guarded scalar loop execution, not SSA loop allocation, flag liveness across guards,
 SIMD batching, multicore DSP execution, full ISA or calibrated device timing.
 
 Native backedge measurement: three alternating runs against the saved 93b9b01
@@ -306,6 +306,40 @@ slow first ordinary-filter baseline run is retained in the raw record; the
 reported value is the median of all three run medians. Fixture/executable hashes,
 raw logs and qualification records stay local. There is still no sustained
 270-MIPS, fixed-load CPU consumption, whole-device realtime or energy proof.
+
+Bounded native flag liveness: a backward pass now omits ordinary ALU flags only
+when an admitted native instruction overwrites them before any observer/exit.
+ADC/SBC incoming Carry remains live through MPY/MAC/RND/TFR/NOP as required;
+sticky L still records every early overflow. General helpers, parallel moves,
+loop-ending guards and block exits retain full status on both sides. No pending
+flag computation crosses such a boundary. SR merging now masks in a register
+and performs one store, eliminating a separate memory read/modify/write.
+2880 new independent binary sequences cover all prefixes, six numeric modes,
+four input/accumulator seeds, initial Carry/L choices, early overflow followed
+by CLR, carry/borrow chains, CMP, minimum-56-bit NEG/ABS and a two-word immediate
+addition. Expanded native-dataflow tests total 820 checks, including an early
+overflow observed after a subsequent non-overflowing instruction in successful,
+rejected and code-invalidating callbacks. Existing full FFT, loop/backedge,
+memory-boundary and source-built Blofeld expectations remain mandatory.
+Release and ASan/UBSan strict each pass all 37 executable tests, including
+byte-exact fixture regeneration; inaccessible KVM is explicitly skipped
+(38 registered tests, zero failures). No fuzz or relaxed checks are used.
+
+Flag measurement: three alternating comparisons against saved a8f4624 use the
+same nine scenarios and warm single-instance CPU2 replay protocol. Own DSP FFT
+medians fall by about 6-7% (1.06-1.08 times faster). The 1024-point case falls
+from 1.526465 to 1.419834 ms for 157810 guest instructions, about 111.15 MIPS.
+Direct-filter/LP12 medians change by less than 0.5% in either direction; no
+filter speedup is established. The roughly 1% effect-case difference is also
+too small for a strong claim under unfixed powersave frequency. Guest/native/
+helper/move instruction counts, compiled blocks and page-rounded executable
+mappings are unchanged. An initial flag-assembly order and its raw binary/logs
+are retained locally; the qualified final order removes an unnecessary full-
+status-path register transfer. Neither result is a full-device, fixed-load CPU
+consumption, energy or 270-MIPS qualification. Liveness across RAM/AGU guards
+requires a separate side-effect-free preflight/fallback experiment; full ISA,
+timing, events, checkpoint, SIMD/multicore and transparent KVM execution remain
+incomplete. The full objective remains active.
 
 Timing: documented base costs are being added for implemented forms. Pipeline
 interlocks, IRQ entry/return qualification, exact event admission and external

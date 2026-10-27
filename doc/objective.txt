@@ -66,3 +66,6 @@ Subsequent user clarifications (preserving the original objective above):
   idea. Preserve the transparent consumer API and required-isolation guarantee;
   compare direct JIT and protected execution with the same architectural tests
   and actual DSP workload, including boundary/exit overhead.
+- The latest user-supplied AGENTS.md instructions again supersede prior push
+  authorization: commit verified increments locally; no publication destination
+  is authorized. Keep the on-disk workspace instructions consistent with this.

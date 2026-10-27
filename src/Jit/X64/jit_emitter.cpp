@@ -23,16 +23,15 @@ namespace {
 using x64::Branch;
 using x64::Reg;
 using x64::Width;
-constexpr auto status_offset = offsetof(Cpu, reg) + offsetof(Registers, sr);
 constexpr auto pc_offset = offsetof(Cpu, reg) + offsetof(Registers, pc);
 constexpr std::array register_offsets{
     offsetof(Registers, a), offsetof(Registers, b), offsetof(Registers, x), offsetof(Registers, y)};
 constexpr unsigned op_add = 0x01, op_sub = 0x29, op_or = 0x09, op_xor = 0x31;
-constexpr unsigned group_add = 0, group_and = 4, group_sub = 5, group_cmp = 7;
+constexpr unsigned group_add = 0, group_and = 4, group_cmp = 7;
 constexpr unsigned shift_left = 4, shift_right = 5, shift_arithmetic = 7;
-constexpr unsigned condition_overflow = 0x90, condition_zero = 0x94, condition_below = 0x92;
+constexpr unsigned condition_overflow = 0x90;
 constexpr unsigned low_word_shift = 40, high_word_shift = 16, aligned_shift = 8;
-constexpr unsigned product_shift = padding_bits + 1, carry_overflow_multiplier = overflow | limit;
+constexpr unsigned product_shift = padding_bits + 1;
 constexpr Word unsupported_modes =
     compatibility_mode | multiply_mode | arithmetic_16 | arithmetic_saturation;
 constexpr std::array<std::uint8_t, 2> call_ax{0xff, 0xd0};
@@ -189,48 +188,6 @@ void JitEmitter::helper(const JitHelper function, const NativeOp &operation) {
   code_.raw(call_ax);
 }
 
-void JitEmitter::arithmetic_flags(const Word mode, const bool carry_changed) {
-  constexpr unsigned normal_integer_shift = 55;
-  constexpr unsigned negative_shift = 60;
-  const unsigned shift = normal_integer_shift + ((mode & scale_down) != 0 ? 1U : 0U) -
-                         ((mode & scale_up) != 0 ? 1U : 0U);
-  code_.binary(op_test, {.destination = Reg::ax, .source = Reg::ax}); // TEST result,result.
-  code_.set(condition_zero, Reg::r8);
-  code_.shift(shift_left, Reg::r8, 2, Width::dword);
-  code_.mov({.destination = Reg::r9, .source = Reg::ax});
-  code_.shift(shift_right, Reg::r9, negative_shift);
-  code_.immediate(group_and, Reg::r9, negative, Width::dword);
-  code_.binary(op_or, {.destination = Reg::r8, .source = Reg::r9}, Width::dword);
-  code_.mov({.destination = Reg::r9, .source = Reg::ax});
-  code_.shift(shift_right, Reg::r9, shift);
-  code_.immediate(group_sub, Reg::r9, 1);
-  const auto maximum_integer = static_cast<Word>(~std::uint64_t{0} >> shift);
-  code_.immediate(group_cmp, Reg::r9, maximum_integer - 1);
-  code_.set(condition_below, Reg::r9);
-  code_.shift(shift_left, Reg::r9, 5, Width::dword);
-  code_.binary(op_or, {.destination = Reg::r8, .source = Reg::r9}, Width::dword);
-  code_.mov({.destination = Reg::r9, .source = Reg::ax});
-  code_.shift(shift_left, Reg::r9, 1);
-  code_.binary(op_xor, {.destination = Reg::r9, .source = Reg::ax});
-  code_.shift(shift_right, Reg::r9, shift);
-  code_.immediate(6, Reg::r9, 1, Width::dword); // XOR inverts the U bit.
-  code_.immediate(group_and, Reg::r9, 1, Width::dword);
-  code_.shift(shift_left, Reg::r9, 4, Width::dword);
-  code_.binary(op_or, {.destination = Reg::r8, .source = Reg::r9}, Width::dword);
-  code_.constant(Reg::r11, carry_overflow_multiplier);
-  code_.multiply({.destination = Reg::r10, .source = Reg::r11});
-  code_.binary(op_or, {.destination = Reg::r8, .source = Reg::r10}, Width::dword);
-  if (carry_changed) {
-    code_.binary(op_or, {.destination = Reg::r8, .source = Reg::dx}, Width::dword);
-  }
-  constexpr Word changed = negative | zero | extension | unnormalized | overflow;
-  code_.memory_immediate(
-      group_and, Reg::r12, status_offset, Width::dword, ~(changed | (carry_changed ? carry : 0)));
-  code_.load(Reg::r9, Reg::r12, status_offset, Width::dword);
-  code_.binary(op_or, {.destination = Reg::r8, .source = Reg::r9}, Width::dword);
-  code_.store(Reg::r12, status_offset, Reg::r8, Width::dword);
-}
-
 void JitEmitter::multiply(const NativeOp &operation) {
   const auto opcode = operation.instruction.opcode;
   constexpr std::array<std::array<unsigned, 2>, 8> pairs{
@@ -362,7 +319,10 @@ std::vector<std::uint8_t> JitEmitter::generate(const std::span<const NativeOp> o
   code_.binary(op_xor, {.destination = Reg::r15, .source = Reg::r15}, Width::dword);
   code_.load(Reg::r14, Reg::r13, offsetof(NativeContext, runtime) + offsetof(JitRuntime, latched));
   code_.bind(loop_header_);
-  for (const auto &operation : operations) {
+  const auto flags = plan_flags(operations);
+  for (std::size_t operation_index = 0; operation_index < operations.size(); ++operation_index) {
+    const auto &operation = operations[operation_index];
+    live_flags_ = flags[operation_index];
     dataflow_ = analyze_dataflow(operation.instruction);
     if (lowerable(operation)) {
       loop_guard(operation);

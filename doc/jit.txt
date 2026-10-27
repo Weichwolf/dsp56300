@@ -57,7 +57,8 @@ overwrite, update both AGUs, capture both port values, then commit X before Y.
 The host-independent dataflow analysis describes A/B/X/Y effects; unknown move
 classes conservatively clobber all banks, and unknown ALU forms read all banks.
 Unmodified ALU inputs read current state without an old-value snapshot. This
-analysis does not discard flags or assume independent loop iterations.
+register-bank analysis does not discard flags or assume independent loop iterations;
+a separate bounded flag-liveness pass is described below.
 Physical X/Y storage overlap and shared
 register destinations retain the existing ordering. Full A/B stores implement
 scaling, clipping and sticky S/L directly; accumulator loads sign-extend correctly.
@@ -103,14 +104,32 @@ use shared epilogues for the four possible dirty A/B combinations. This restores
 complete canonical accumulator state before the host or general executor can
 observe it. A failed move helper exits through an already-materialized epilogue
 and preserves the helper's own partial fault state; it never writes stale cached
-operands over that state. Flags, PC and retirement remain materialized per
-instruction. No deferred result survives a native block return.
+operands over that state. PC and retirement remain materialized per instruction.
+No deferred result survives a native block return.
+
+A backward flag-liveness pass now omits ordinary ALU flag values only when a
+later admitted native instruction overwrites them before any possible observer
+or exit. ADC/SBC declare incoming Carry; MPY/MAC, rounding, TFR and NOP retain
+the proper Carry dependencies. Sticky L still records every overflow, including
+an early overflow followed by a non-overflowing result. Sticky S and numeric
+mode bits keep their existing transfer/mode rules. SR merges use register
+masking and one store instead of an additional memory AND followed by a load.
+
+Every general helper, parallel transfer, loop-ending guard and block exit is a
+conservative full-status boundary. Transfers can fault/call observers before
+their ALU or invalidate code after it; loop guards can exit before an ending.
+Both sides retain complete flags. TFR/NOP never count as flag overwriters.
+Short budget tails retain complete prefix state through ordinary compilation
+or the general fallback. There are no deferred flags to reconstruct at an
+exception or callback: only values proven unobservable before replacement are
+omitted. Liveness does not yet cross RAM/AGU guards or general helpers.
 
 Native entry preserves the extra nonvolatile register and SysV stack alignment.
 R14 keeps the old-input pointer; R8 is the Y address during transfers and becomes
 available to ALU flag code after transfers finish. X/Y and old overwritten inputs
 remain memory-backed. This is bounded accumulator allocation/materialization,
-not a general SSA register allocator or flag-liveness optimization.
+not a general SSA register allocator. The bounded flag pass does not establish
+independent iterations or vectorize the guest.
 MOVEC/MOVEM/MOVEP use the general helpers. Guest SR writes exit on changed
 numerical mode, and guest P writes exit on invalidation before executing a
 previously planned successor. Directed host sequences exercise both boundaries.
