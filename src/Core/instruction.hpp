@@ -40,6 +40,7 @@ enum class Operation : std::uint8_t {
   divide_iteration,
   normalize_iteration,
   normalize_fast,
+  viterbi_shift,
   product_immediate,
   product_power,
   product_mixed,
@@ -83,6 +84,7 @@ enum class Operation : std::uint8_t {
     case Operation::divide_iteration:
     case Operation::normalize_iteration:
     case Operation::normalize_fast:
+    case Operation::viterbi_shift:
     case Operation::product_immediate:
     case Operation::product_power:
     case Operation::product_mixed:

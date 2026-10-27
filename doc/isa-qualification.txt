@@ -124,3 +124,14 @@ the final signed normalized interval, with separate aliased CLB chains. Partial
 REP budgets, current-count rereads, DO-end saved LF/FV, Carry consumers and
 native/helper/native prefixes exercise integration. This row remains partial;
 no full-ISA, workload-performance or hardware-timing claim follows.
+
+VSL increment: raw middle-word X stores and shifted low-word Y stores now have
+independent bit-coordinate tests, including full accumulator preservation and
+CCR preservation. Register/absolute EA forms, both sources/inserted bits,
+qualified modifier arithmetic, REP/DO boundaries and native helper transitions
+are explicit. Host tests separately qualify the library's X-then-Y callback and
+partial-failure contract, source/AGU visibility, alias ordering and program-code
+invalidation. This contract supplies no derivative peripheral arbitration or
+atomicity beyond the documented interface; hardware confirmation remains open.
+SB/SC/DM/SM, complete AGU restrictions, event/IRQ sequences and calibrated
+pipeline/external timing remain qualification gaps. VSL is partial, not complete.

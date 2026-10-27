@@ -70,6 +70,7 @@ void Core::Impl::execute(const Instruction &decoded) {
     case Operation::divide_iteration:
     case Operation::normalize_iteration: execute_iteration(decoded); return;
     case Operation::normalize_fast: normalize_fast(opcode); return;
+    case Operation::viterbi_shift: viterbi_shift(decoded); return;
     case Operation::product_immediate:
     case Operation::product_power:
     case Operation::product_mixed:

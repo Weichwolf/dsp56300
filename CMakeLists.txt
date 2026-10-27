@@ -26,6 +26,7 @@ add_library(dsp56300_core STATIC
   src/Core/conditional.cpp src/Core/immediate.cpp src/Core/integer.cpp src/Core/decode.cpp src/Core/moves.cpp
   src/Core/transfers.cpp src/Core/registers.cpp src/Core/agu.cpp src/Core/control.cpp
   src/Core/bits.cpp src/Core/bit_fields.cpp src/Core/loops.cpp src/Core/products.cpp src/Core/iteration.cpp
+  src/Core/viterbi.cpp
   src/Jit/jit.cpp src/Jit/jit_helpers.cpp src/Jit/X64/jit_emitter.cpp src/Jit/X64/x64.cpp
   src/Jit/X64/jit_addition.cpp
   src/Jit/X64/jit_loops.cpp
@@ -80,6 +81,9 @@ if(BUILD_TESTING)
   add_executable(dsp56300_transfer_test test/transfer_test.cpp)
   target_link_libraries(dsp56300_transfer_test PRIVATE dsp56300::core)
   add_test(NAME transfer-boundaries COMMAND dsp56300_transfer_test)
+  add_executable(dsp56300_viterbi_test test/viterbi_test.cpp)
+  target_link_libraries(dsp56300_viterbi_test PRIVATE dsp56300::core)
+  add_test(NAME viterbi-boundaries COMMAND dsp56300_viterbi_test)
   add_executable(dsp56300_bit_access_test test/bit_access_test.cpp)
   target_link_libraries(dsp56300_bit_access_test PRIVATE dsp56300::core)
   add_test(NAME bit-access-boundaries COMMAND dsp56300_bit_access_test)
@@ -124,6 +128,8 @@ if(BUILD_TESTING)
   target_link_libraries(dsp56300_generate_iteration PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_normalization test/generate_normalization.cpp)
   target_link_libraries(dsp56300_generate_normalization PRIVATE dsp56300_fixture_format)
+  add_executable(dsp56300_generate_viterbi test/generate_viterbi.cpp)
+  target_link_libraries(dsp56300_generate_viterbi PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_products test/generate_products.cpp)
   target_link_libraries(dsp56300_generate_products PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_loop_control test/generate_loop_control.cpp)
@@ -171,6 +177,13 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/iteration.d56")
   add_test(NAME normalization-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/normalization.d56")
+  add_test(NAME viterbi-fixtures COMMAND dsp56300_fixture_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/viterbi.d56")
+  add_test(NAME viterbi-reproducibility COMMAND "${CMAKE_COMMAND}"
+    "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_viterbi>"
+    "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/viterbi-regenerated.d56"
+    "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/viterbi.d56"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
   add_test(NAME normalization-reproducibility COMMAND "${CMAKE_COMMAND}"
     "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_normalization>"
     "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/normalization-regenerated.d56"

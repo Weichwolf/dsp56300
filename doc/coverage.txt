@@ -4,14 +4,51 @@ Full-ISA completion requirement: the complete DSP56300 instruction set must be
 implemented and independently tested, as explicitly reiterated by the user.
 Neither a passing current CTest suite nor successful Blofeld workloads is a
 replacement. doc/isa-coverage.tsv inventories 118 instruction/family/MOVE-form
-and alias entries against DSP56300FM Rev.5. The current audit records 16 missing,
-11 without dedicated independent tests and 91 partially tested entries; none
+and alias entries against DSP56300FM Rev.5. The current audit records 15 missing,
+11 without dedicated independent tests and 92 partially tested entries; none
 claims complete support. These counts are catalogue rows, not disjoint opcode
 counts or an ISA-support percentage. Detailed format/mode/sequence expansion
 remains mandatory. python3 tools/isa_audit.py --require-complete deliberately
 returns failure while any entry remains incomplete; see doc/isa-qualification.txt.
 
-Fast-normalization ISA increment: NORMF now decodes and executes on all three
+Viterbi-store ISA increment: VSL now decodes all seven register addressing
+forms and long absolute addressing, both A/B sources and both inserted bits.
+It snapshots raw A1/B1 and A0/B0, stores the unchanged middle word to X and the
+shifted low word with the inserted bit to Y at the same effective address.
+The source accumulator, all CCR bits and other registers remain unchanged,
+except for the selected addressing update and ordinary PC/loop retirement.
+Scaling and transfer saturation do not alter these raw fields. The operation
+uses the general executor on every backend; no CPU state or native dependency
+was added. Base cost is one cycle plus the documented pre-update/absolute
+penalty, without a claim of calibrated pipeline/external-bus timing.
+25875 independent binary cases cover all valid encodings, raw bit coordinates,
+all old CCR bytes, six numeric modes, qualified linear/reverse/modulo/multiple-
+wrap addressing, ignored modifier high bytes, ignored R/N/M for absolute forms,
+REP prefixes, finite DO endings and saved LF/FV, native/helper/native dataflow,
+missing/wrapping P extensions and invalid/immediate-destination boundaries.
+The generator models the stores one bit at a time and uses the independent
+serial-carry/ring-coordinate AGU model; it never links or executes the core.
+6261 host assertions across all three backends qualify all 128 I/O addresses,
+both source/bit choices and absolute/post-increment forms. They also check
+rejected X/Y halves, fail-stop without replay, RAM span failures, callback
+state/reentry, callback P mutation, overlapping X/Y/P buffers and warmed
+extension-cache invalidation across a decode-page boundary. The library's
+explicit contract issues X then Y writes and stops after the first rejection;
+it offers no atomic pair or rollback. Derivative peripheral arbitration still
+requires hardware qualification, rather than inference from these callbacks.
+All 228 valid forms (232 words) match the optional separate authoring assembler.
+The new fixture and host tests pass release and ASan/UBSan strict runs, and the
+archive regenerates byte-identically in each. SB/SC/DM/SM, full AGU and sequence
+qualification, pipeline/IRQ/event behavior and complete ISA support remain open.
+This is semantic and interface progress, not a workload performance claim.
+Release and ASan/UBSan strict suites pass all 56 executable tests, including
+private Blofeld routines. Both builds regenerate viterbi.d56 byte-identically.
+LLVM 19 strict diagnostics, clang-tidy, formatting and the structural ISA audit
+pass. The mandatory --require-complete gate continues to fail on the explicit
+backlog. KVM is the sole inaccessible-device skip (57 registered, zero failures),
+not a protected-execution qualification.
+
+Previous fast-normalization ISA increment: NORMF now decodes and executes on all three
 backends with every documented source register and both destinations. Counts
 -55..+56 are explicit; the raw old source is captured before a possible aliased
 accumulator write. Count zero recomputes arithmetic flags, and the full-width

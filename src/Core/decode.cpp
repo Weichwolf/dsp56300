@@ -21,6 +21,9 @@ struct Rule {
 
 // Family manual instruction encodings and documented base costs (appendix A).
 constexpr std::array rules{
+    Rule{.bits = encoding("0000101S11MMMRRR110i0000"),
+         .operation = Operation::viterbi_shift,
+         .words = 1},
     Rule{.bits = encoding("00001100000111100010sssD"),
          .operation = Operation::normalize_fast,
          .words = 1},
@@ -427,7 +430,7 @@ bool parallel_address(const Word opcode) noexcept {
 }
 
 bool transfer_address(const Operation operation) noexcept {
-  return operation == Operation::move_control_effective ||
+  return operation == Operation::viterbi_shift || operation == Operation::move_control_effective ||
          operation == Operation::move_program_effective ||
          operation == Operation::move_peripheral_memory ||
          operation == Operation::move_peripheral_program;

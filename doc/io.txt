@@ -20,6 +20,17 @@ replace the DSP Carry flag. A rejected bit callback reports FaultKind::io_bit;
 Fault.value contains the requested bit index. Invalid bit numbers fault before
 address updates or callbacks.
 
+VSL snapshots the old raw accumulator fields and requests an X write followed
+by a Y write at the same effective address. It applies the normal per-space I/O
+contract to each half; these are two synchronous callbacks, not an atomic pair.
+Its address update is visible to the first callback. A rejected X half prevents
+the Y request. A rejected Y half does not undo the accepted X write or the
+address update. The instruction does not retire on either failure, and a later
+run call does not replay it. This ordering also defines the final value when
+X/Y spans alias. It is a library transfer/error contract; chip-specific bus
+arbitration and peripheral side effects remain unqualified and must not be
+inferred from it. Ordinary guest stores require no fabricated peripheral data.
+
 All callbacks run synchronously on the CPU execution thread. The host can inspect
 state and read/write/load supplied RAM, including P, or clear code caches.
 Host Core::read/write/load access the supplied spans directly. Program mutations
