@@ -21,7 +21,7 @@ find_program(BLOFELD_CLANG_FORMAT NAMES clang-format-19 REQUIRED)
 
 set(CMAKE_CXX_CLANG_TIDY "${BLOFELD_CLANG_TIDY};--warnings-as-errors=*")
 
-add_library(dsp56300_core STATIC src/core.cpp src/core_state.cpp src/memory_arena.cpp
+add_library(dsp56300_core STATIC Core/core.cpp src/core_state.cpp src/memory_arena.cpp
   src/arithmetic.cpp src/shifts.cpp src/conditional.cpp src/immediate.cpp src/decode.cpp
   src/moves.cpp src/registers.cpp src/agu.cpp src/control.cpp src/jit.cpp src/jit_helpers.cpp
   src/jit_emitter.cpp src/x64.cpp)
@@ -31,6 +31,7 @@ target_link_libraries(dsp56300_core PUBLIC blofeld_quality)
 target_include_directories(dsp56300_core PRIVATE src)
 
 file(GLOB_RECURSE DSP56300_OWN_FILES CONFIGURE_DEPENDS
+  "${CMAKE_CURRENT_SOURCE_DIR}/Core/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/Core/*.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/test/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/test/*.hpp")

@@ -96,7 +96,17 @@ private:
   std::ifstream stream_;
 };
 
-template <typename Archive> void registers(Archive &archive, Registers &state) {
+template <typename Archive>
+concept FixtureArchive =
+    requires(Archive &archive, std::uint32_t &word, std::uint64_t &wide, std::string &text) {
+      { archive.scalar(word) } -> std::same_as<void>;
+      { archive.scalar(wide) } -> std::same_as<void>;
+      { archive.text(text) } -> std::same_as<void>;
+      { archive.count(word, maximum_cases) } -> std::same_as<void>;
+      { archive.finish() } -> std::same_as<void>;
+    };
+
+template <FixtureArchive Archive> void registers(Archive &archive, Registers &state) {
   for (auto *value : {&state.x, &state.y, &state.a, &state.b}) { archive.scalar(*value); }
   for (auto *bank : {&state.r, &state.n, &state.m}) {
     for (auto &value : *bank) { archive.scalar(value); }
@@ -116,7 +126,7 @@ template <typename Archive> void registers(Archive &archive, Registers &state) {
   for (auto &value : state.stack) { archive.scalar(value); }
 }
 
-template <typename Archive> void blocks(Archive &archive, std::vector<MemoryBlock> &memory) {
+template <FixtureArchive Archive> void blocks(Archive &archive, std::vector<MemoryBlock> &memory) {
   auto size = static_cast<std::uint32_t>(memory.size());
   archive.count(size, maximum_blocks);
   memory.resize(size);
@@ -138,7 +148,7 @@ template <typename Archive> void blocks(Archive &archive, std::vector<MemoryBloc
   }
 }
 
-template <typename Archive> void test_case(Archive &archive, BinaryCase &item) {
+template <FixtureArchive Archive> void test_case(Archive &archive, BinaryCase &item) {
   archive.text(item.name);
   for (auto &size : item.memory_words) {
     archive.scalar(size);
@@ -172,7 +182,7 @@ template <typename Archive> void test_case(Archive &archive, BinaryCase &item) {
   blocks(archive, item.after);
 }
 
-template <typename Archive> void contents(Archive &archive, std::vector<BinaryCase> &cases) {
+template <FixtureArchive Archive> void contents(Archive &archive, std::vector<BinaryCase> &cases) {
   auto magic = format_magic;
   auto version = format_version;
   archive.scalar(magic);

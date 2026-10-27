@@ -86,6 +86,11 @@ Wire format D56F, version 1
 
 Every integer is unsigned little-endian. u32/u64 always occupy 4/8 bytes.
 No native structures, pointers, padding, enum layout or SIMD state are dumped.
+An internal FixtureArchive concept constrains the shared reader/writer algorithm
+to explicit u32/u64, text, bounded counts and completion operations at compile
+time. Reader/writer scalar templates accept unsigned integral values. Concrete
+archive types let the compiler resolve calls statically; wire compatibility is
+defined by the explicit encoding below.
 Lengths count elements, not bytes, except string lengths. Strings contain their
 literal bytes without a terminator. The file ends immediately after its cases.
 
