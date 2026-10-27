@@ -71,6 +71,7 @@ bool JitEmitter::has_moves(const NativeOp &operation) {
 bool JitEmitter::lowerable(const NativeOp &operation) const {
   if (!optimize_) { return false; }
   const auto &decoded = operation.instruction;
+  if (at_loop_end(operation) && (operation.mode & compatibility_mode) != 0) { return false; }
   if (decoded.operation == Operation::nop) { return true; }
   if ((operation.mode & unsupported_modes) != 0 ||
       (operation.mode & (scale_up | scale_down)) == (scale_up | scale_down)) {

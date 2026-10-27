@@ -180,7 +180,7 @@ void Core::Impl::step_decoded(const detail::Instruction &decoded) {
     cpu.reg.lc = cpu.repeat_lc;
     cpu.repeat_completed = true;
     cpu.repeat_loaded = false;
-  } else if (decoded.operation != detail::Operation::repeat_immediate) {
+  } else if (!detail::is_repeat(decoded.operation)) {
     cpu.repeat_completed = false;
   }
   finish_loop();
@@ -291,8 +291,7 @@ bool Core::interruptible() const {
   if (!impl_->cpu.repeat_completed) { return true; }
   const auto pc = impl_->cpu.reg.pc;
   if (pc >= impl_->buffers.program.size()) { return false; }
-  return detail::decode(impl_->buffers.program[pc] & word_mask).operation !=
-         detail::Operation::repeat_immediate;
+  return !detail::is_repeat(detail::decode(impl_->buffers.program[pc] & word_mask).operation);
 }
 
 void Core::clear_code_cache() {

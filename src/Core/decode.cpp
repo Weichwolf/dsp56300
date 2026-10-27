@@ -21,6 +21,39 @@ struct Rule {
 
 // Family manual instruction encodings and documented base costs (appendix A).
 constexpr std::array rules{
+    Rule{.bits = encoding("0000011001MMMRRR0S0r0000"),
+         .operation = Operation::loop_effective,
+         .words = 2,
+         .cycles = 5},
+    Rule{.bits = encoding("0000011000aaaaaa0S0r0000"),
+         .operation = Operation::loop_short,
+         .words = 2,
+         .cycles = 5},
+    Rule{.bits = encoding("0000011011DDDDDD000r0000"),
+         .operation = Operation::loop_register,
+         .words = 2,
+         .cycles = 5},
+    Rule{.bits = encoding("00000000000000100000001r"),
+         .operation = Operation::loop_forever,
+         .words = 2,
+         .cycles = 4},
+    Rule{.bits = encoding("00000000000000100001CCCC"),
+         .operation = Operation::break_loop,
+         .words = 1,
+         .cycles = 5},
+    Rule{.bits = encoding("0000011001MMMRRR0S100000"),
+         .operation = Operation::repeat_effective,
+         .words = 1,
+         .cycles = 5},
+    Rule{.bits = encoding("0000011000aaaaaa0S100000"),
+         .operation = Operation::repeat_short,
+         .words = 1,
+         .cycles = 5},
+    Rule{.bits = encoding("0000011011dddddd00100000"),
+         .operation = Operation::repeat_register,
+         .words = 1,
+         .cycles = 5},
+
     Rule{.bits = encoding("0000110000011010u00sSSSD"),
          .operation = Operation::bit_field_extract,
          .words = 1},
@@ -307,7 +340,7 @@ constexpr std::array rules{
          .operation = Operation::repeat_immediate,
          .words = 1,
          .cycles = 5},
-    Rule{.bits = encoding("00000110iiiiiiii1000hhhh"),
+    Rule{.bits = encoding("00000110iiiiiiii100rhhhh"),
          .operation = Operation::loop_immediate,
          .words = 2,
          .cycles = 5},
@@ -366,6 +399,10 @@ bool rule_penalty(const Rule &rule, const Word opcode) noexcept {
       rule.operation == Operation::bit_branch) {
     const auto operand = bit_operand({.opcode = opcode, .operation = rule.operation});
     return operand.location == BitLocation::effective && address_penalty(opcode);
+  }
+  if (rule.operation == Operation::loop_effective ||
+      rule.operation == Operation::repeat_effective) {
+    return address_penalty(opcode);
   }
   if (transfer_address(rule.operation)) {
     const auto mode = (opcode >> 11) & 7;

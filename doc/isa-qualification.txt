@@ -71,3 +71,15 @@ explicit unsupported-mode diagnostic. This is a documented qualification gap,
 not a claim that the hardware traps on this input. Undefined field ranges are
 also rejected explicitly. SB/SC/DM operation, precise pipeline/event interactions
 and complete ISA coverage remain open. None of these five rows is complete.
+
+Loop-control increment: DO/DOR count operand forms, REP register/memory forms,
+DO/DOR FOREVER and BRKcc now have implementations. Dedicated fixtures qualify
+ENDDO too. Independent models exercise raw frames, the sixteen-condition truth
+table, explicit nested execution traces and count/address coordinates. The new
+LC-reading REP-zero cases distinguish architectural LC=0 on entry from the
+private 65536 remaining iterations. SC and restricted count-transfer modes,
+zero-DO scratch-stack hardware confirmation, stack extension, pipeline rules
+and complete interrupt/event qualification remain open. In appendix A the DOR
+FOREVER cost is blank; the implementation currently follows DO FOREVER's four
+base cycles and does not claim independent timing qualification. No affected
+catalogue row is complete.

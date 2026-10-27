@@ -56,8 +56,8 @@ void warm_case(Machine &machine, const Options options, Keys &keys, const LoopIn
   auto expected = initial;
   model(expected, mac_a);
   const bool ending = input.active && input.end == start;
-  if (ending && input.count > 1) {
-    expected.lc = input.count - 1;
+  if (ending && input.count != 1) {
+    expected.lc = input.count == 0 ? word_mask : input.count - 1;
     expected.pc = start + 2;
   } else if (ending) {
     expected.sr &= ~loop_flag;
@@ -74,7 +74,7 @@ void warm_case(Machine &machine, const Options options, Keys &keys, const LoopIn
     const bool native = !ending || input.count > 1;
     const auto after = machine.core.jit_statistics();
     require(after.native_alu_instructions == before.native_alu_instructions + (native ? 1U : 0U),
-            "Continuing loop endings use native code; final cleanup remains general");
+            "LC above one uses native endings; zero/one use the general continuation/cleanup");
     keys.emplace(input.mode, input.active, input.active ? input.end : 0);
     require(after.compiled_blocks == keys.size(), "LC changes reuse the same guarded translation");
   }

@@ -4,23 +4,67 @@ Full-ISA completion requirement: the complete DSP56300 instruction set must be
 implemented and independently tested, as explicitly reiterated by the user.
 Neither a passing current CTest suite nor successful Blofeld workloads is a
 replacement. doc/isa-coverage.tsv inventories 118 instruction/family/MOVE-form
-and alias entries against DSP56300FM Rev.5. The current audit records 33 missing,
-12 without dedicated independent tests and 73 partially tested entries; none
+and alias entries against DSP56300FM Rev.5. The current audit records 29 missing,
+11 without dedicated independent tests and 78 partially tested entries; none
 claims complete support. These counts are catalogue rows, not disjoint opcode
 counts or an ISA-support percentage. Detailed format/mode/sequence expansion
 remains mandatory. python3 tools/isa_audit.py --require-complete deliberately
 returns failure while any entry remains incomplete; see doc/isa-qualification.txt.
 
-Bit-field ISA closure increment: EXTRACT/EXTRACTU, INSERT, MERGE and CLB now
-execute through the general executor on all three backends. Ordinary 56-bit
+Loop-control ISA increment: absolute and PC-relative DO count forms now decode
+immediate, register, short X/Y and single-word indirect X/Y operands; REP adds
+the corresponding register/memory count forms. DO/DOR FOREVER, BRKcc and ENDDO
+execute through the common executor. The first DO stack push precedes count
+sampling, including SP/SC/SSL and synchronous I/O observation. Loop entry saves
+the outer flags; finite entry clears FV, and exit restores LF/FV while preserving
+the remaining SR bits. FOREVER decrements LC modulo 24 bits without testing it
+for termination. A finite active LC zero also decrements modulo 24 bits.
+REP zero still performs 65536 iterations, but now exposes the actual loaded
+zero in LC before the first body execution instead of leaking the private
+65536-iteration bookkeeping value into the architectural register.
+The new 48172-case independent fixture and 7104 host checks include all legal
+register selectors, all short addresses, every linear indirect index/form,
+full-width relative
+addresses, all BRK conditions/flags, nested finite/FOREVER DO/DOR prefixes,
+zero/one/wrapping counters, exact host budgets, saved frames and flag restoration.
+REP body reads qualify visible LC before/after the first iteration and final
+restoration, including a register count source overwritten by the repeated body.
+Callbacks explicitly supply counts, observe the first-push/address-update phase,
+reject reads or replace a translated successor. No peripheral data is fabricated.
+The earlier warm-context test incorrectly expected LC zero to perform final
+cleanup. Its raw-state expectation now checks wrap/continuation instead, while
+retaining complete register/stack comparisons and native/helper count checks.
+Native continuing-loop emission is reused; its dynamic LC guard keeps the
+zero/one cases on general execution. A NOP ending in unimplemented SC mode is
+also forced through the general mode diagnostic rather than bypassing it.
+SC loop operation remains explicitly unsupported. Other unimplemented numeric
+modes remain rejected for register/memory count transfers. The scratch-stack
+exposure of a nulled zero-count DO entry still needs independent hardware
+qualification; the implementation follows the documented first-push ordering.
+DOR FOREVER uses the DO FOREVER base cost (the appendix's corresponding cell
+is blank); independent timing confirmation, pipeline restrictions/interlocks,
+stack extension and complete admitted interrupt/event interactions remain open.
+This increment is not full ISA, device, realtime-load or speedup qualification.
+Release and ASan/UBSan strict suites pass all 44 executable tests, including
+48172 new cases on each backend, 7104 host-boundary checks and all private
+source-built Blofeld fixtures. The KVM experiment remains explicitly skipped
+because /dev/kvm is inaccessible (45 registered, zero failures). Both fixture
+generators reproduce the checked-in bytes. LLVM 19 strict diagnostics and
+formatting pass. A separate optional authoring assembler confirms all 893
+legal loop/count/exit forms (1477 words), without providing execution semantics
+or becoming a project dependency. Structural ISA auditing passes; the required
+--require-complete gate continues to fail on the documented backlog.
+
+Previous bit-field ISA closure increment: EXTRACT/EXTRACTU, INSERT, MERGE and CLB
+now execute through the general executor on all three backends. Ordinary 56-bit
 fields and the specified SM bypass are supported; MERGE changes only the
 middle word using twelve-bit halves, and CLB uses bit-55 polarity with the
 explicit all-zero special case. The implementation uses bounded host shifts
 and count-leading intrinsics, without adding CPU state or claiming native SIMD.
 54488 independently generated binary cases use a per-bit boolean model,
 covering all nonempty EXTRACT ranges and all EXTRACTU/INSERT ranges, selectors
-and aliases, six numerical modes, saturation bypass, flags and preserved words. They also
-check operand rereads under REP, DO endings at instruction/extension words,
+and aliases, six numerical modes, saturation bypass, flags and preserved words.
+They also check operand rereads under REP, DO endings at instruction/extension words,
 wrapped saved frames, all prefixes across native/helper transitions, truncated
 extensions and prohibited two-word REP bodies. All 156 legal opcode forms match
 a separate optional authoring assembler, without depending on it at build/test

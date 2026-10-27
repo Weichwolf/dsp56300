@@ -21,6 +21,14 @@ enum class Operation : std::uint8_t {
   or_control,
   repeat_immediate,
   loop_immediate,
+  loop_register,
+  loop_short,
+  loop_effective,
+  loop_forever,
+  break_loop,
+  repeat_register,
+  repeat_short,
+  repeat_effective,
   end_loop,
   arithmetic_shift_immediate,
   arithmetic_shift_register,
@@ -91,6 +99,14 @@ enum class Operation : std::uint8_t {
     case Operation::or_control:
     case Operation::repeat_immediate:
     case Operation::loop_immediate:
+    case Operation::loop_register:
+    case Operation::loop_short:
+    case Operation::loop_effective:
+    case Operation::loop_forever:
+    case Operation::break_loop:
+    case Operation::repeat_register:
+    case Operation::repeat_short:
+    case Operation::repeat_effective:
     case Operation::conditional_jump:
     case Operation::relative_branch:
     case Operation::end_loop:
@@ -98,6 +114,11 @@ enum class Operation : std::uint8_t {
     case Operation::bit_branch:
     default: return false;
   }
+}
+
+[[nodiscard]] constexpr bool is_repeat(const Operation operation) noexcept {
+  return operation == Operation::repeat_immediate || operation == Operation::repeat_register ||
+         operation == Operation::repeat_short || operation == Operation::repeat_effective;
 }
 
 struct Instruction {

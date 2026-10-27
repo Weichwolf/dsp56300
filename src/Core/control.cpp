@@ -16,10 +16,8 @@ constexpr Word short_address_mask = 0xfff;
 constexpr unsigned control_byte_shift = 8;
 constexpr unsigned interrupt_level_shift = 8;
 constexpr Word interrupt_level_mask = 3;
-constexpr Word forever_flag = Word{1} << 16;
 constexpr Word stack_pointer_mask = 0x3f;
 constexpr unsigned maximum_level = 2;
-constexpr Word repeat_zero_count = 65536;
 }
 
 void Core::Impl::push(const Word high, const Word low) {
@@ -41,25 +39,6 @@ std::uint64_t Core::Impl::pop() {
   cpu.reg.sp = address_add(cpu.reg.sp, -1) & stack_pointer_mask;
   --cpu.reg.sc;
   return value;
-}
-
-void Core::Impl::finish_loop() {
-  auto &reg = cpu.reg;
-  const auto last = (current_pc + current_words - 1) & word_mask;
-  const auto next = (reg.la + 1) & word_mask;
-  if ((reg.sr & loop_flag) == 0 || last != reg.la || reg.pc != next || cpu.repeat_remaining != 0) {
-    return;
-  }
-  if (reg.lc > 1) {
-    --reg.lc;
-    reg.pc = static_cast<Word>(reg.stack[reg.sp & (stack_entries - 1)] >> word_bits);
-    return;
-  }
-  const auto saved = pop();
-  const auto previous = pop();
-  reg.sr = (reg.sr & ~loop_flag) | (static_cast<Word>(saved) & loop_flag);
-  reg.la = static_cast<Word>(previous >> word_bits);
-  reg.lc = static_cast<Word>(previous) & word_mask;
 }
 
 void Core::Impl::execute(const Instruction &decoded) {
@@ -123,36 +102,17 @@ void Core::Impl::execute(const Instruction &decoded) {
                                                            : target | value;
       return;
     }
-    case Operation::repeat_immediate: {
-      const auto count = ((opcode >> 8) & 0xff) | ((opcode & 15) << 8);
-      cpu.repeat_remaining = count == 0 ? repeat_zero_count : count;
-      cpu.repeat_pc = reg.pc;
-      cpu.repeat_lc = reg.lc;
-      cpu.repeat_loaded = false;
-      reg.lc = cpu.repeat_remaining;
-      return;
-    }
-    case Operation::loop_immediate: {
-      const auto count = ((opcode >> 8) & 0xff) | ((opcode & 15) << 8);
-      if (count == 0) {
-        reg.pc = (decoded.extension + 1) & word_mask;
-        return;
-      }
-      push(reg.la, reg.lc);
-      push(reg.pc, reg.sr);
-      reg.lc = count;
-      reg.la = decoded.extension;
-      reg.sr |= loop_flag;
-      return;
-    }
-    case Operation::end_loop: {
-      const auto saved = pop();
-      const auto previous = pop();
-      reg.sr = (reg.sr & ~loop_flag) | (static_cast<Word>(saved) & loop_flag);
-      reg.la = static_cast<Word>(previous >> word_bits);
-      reg.lc = static_cast<Word>(previous) & word_mask;
-      return;
-    }
+    case Operation::repeat_immediate:
+    case Operation::repeat_register:
+    case Operation::repeat_short:
+    case Operation::repeat_effective:
+    case Operation::loop_immediate:
+    case Operation::loop_register:
+    case Operation::loop_short:
+    case Operation::loop_effective:
+    case Operation::loop_forever:
+    case Operation::break_loop:
+    case Operation::end_loop: execute_loop(decoded); return;
     case Operation::unsupported:
       fail(FaultKind::unsupported_instruction, Space::program, current_pc, opcode);
       return;

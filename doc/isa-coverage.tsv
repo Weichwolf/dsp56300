@@ -13,7 +13,7 @@ BCHG	13-19	partial	src/Core/bits.cpp	test/generate_bit_access.cpp;test/bit_acces
 BCLR	13-22	partial	src/Core/bits.cpp	test/generate_bit_access.cpp;test/bit_access_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 BRA	13-25	partial	src/Core/conditional.cpp	test/generate_conditions.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 BRCLR	13-26	partial	src/Core/bits.cpp	test/generate_bit_access.cpp;test/bit_access_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
-BRKcc	13-28	missing	-	-	Instruction decoding and semantics; all operand/mode/sequence tests
+BRKcc	13-28	partial	src/Core/loops.cpp;src/Core/core.cpp	test/generate_loop_control.cpp;test/loop_control_test.cpp;test/fixtures/loop-control.d56	Stack extension, admitted IRQ/event and pipeline restrictions/timing qualification
 BRSET	13-29	partial	src/Core/bits.cpp	test/generate_bit_access.cpp;test/bit_access_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 BScc	13-31	partial	src/Core/conditional.cpp	test/generate_conditions.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 BSCLR	13-32	partial	src/Core/bits.cpp	test/generate_bit_access.cpp;test/bit_access_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
@@ -31,11 +31,11 @@ DEBUGcc	13-50	missing	-	-	Instruction decoding and semantics; all operand/mode/s
 DEC	13-51	partial	src/Core/integer.cpp	test/generate_integer.cpp	SM/SB/SC/DM semantics and combinations; pipeline/IRQ/stack-extension sequences
 DIV	13-51	missing	-	-	Instruction decoding and semantics; all operand/mode/sequence tests
 DMAC	13-55	missing	-	-	Instruction decoding and semantics; all operand/mode/sequence tests
-DO	13-56	partial	src/Core/control.cpp	test/generate_loops.cpp	Register and memory count forms; all counts/modes; complete nesting/IRQ/timing
-DO FOREVER	13-59	missing	-	-	Instruction decoding and semantics; all operand/mode/sequence tests
-DOR	13-61	missing	-	-	Instruction decoding and semantics; all operand/mode/sequence tests
-DOR FOREVER	13-65	missing	-	-	Instruction decoding and semantics; all operand/mode/sequence tests
-ENDDO	13-67	untested	src/Core/control.cpp	-	Dedicated independent instruction/operand tests; other modes and sequences
+DO	13-56	partial	src/Core/loops.cpp;src/Core/core.cpp	test/generate_loop_control.cpp;test/loop_control_test.cpp;test/fixtures/loop-control.d56	SC and count-transfer modes; zero-count stack exposure; complete AGU/nesting/pipeline qualification
+DO FOREVER	13-59	partial	src/Core/loops.cpp;src/Core/core.cpp	test/generate_loop_control.cpp;test/loop_control_test.cpp;test/fixtures/loop-control.d56	SC and stack-extension semantics; complete IRQ/event, nesting and pipeline qualification
+DOR	13-61	partial	src/Core/loops.cpp;src/Core/core.cpp	test/generate_loop_control.cpp;test/loop_control_test.cpp;test/fixtures/loop-control.d56	SC and count-transfer modes; zero-count stack exposure; complete AGU/nesting/pipeline qualification
+DOR FOREVER	13-65	partial	src/Core/loops.cpp;src/Core/core.cpp	test/generate_loop_control.cpp;test/loop_control_test.cpp;test/fixtures/loop-control.d56	SC, stack extension and independent base-cost confirmation; full IRQ/event/pipeline qualification
+ENDDO	13-67	partial	src/Core/loops.cpp;src/Core/core.cpp	test/generate_loop_control.cpp;test/loop_control_test.cpp;test/fixtures/loop-control.d56	Stack extension, admitted IRQ/event and pipeline restrictions/timing qualification
 EOR	13-68	partial	src/Core/arithmetic.cpp	test/generate_conditions.cpp	Register/parallel logic matrices; other numerical modes and sequence timing
 EXTRACT	13-70	partial	src/Core/bit_fields.cpp	test/generate_bit_fields.cpp;test/fixtures/bit-fields.d56	SB/SC/DM semantics; complete event/sequence and pipeline timing qualification; signed empty-field behavior unresolved
 EXTRACTU	13-72	partial	src/Core/bit_fields.cpp	test/generate_bit_fields.cpp;test/fixtures/bit-fields.d56	SB/SC/DM semantics; complete event/sequence and pipeline timing qualification
@@ -98,7 +98,7 @@ PLOCK	13-156	missing	-	-	Instruction decoding and semantics; all operand/mode/se
 PLOCKR	13-157	missing	-	-	Instruction decoding and semantics; all operand/mode/sequence tests
 PUNLOCK	13-158	missing	-	-	Instruction decoding and semantics; all operand/mode/sequence tests
 PUNLOCKR	13-159	missing	-	-	Instruction decoding and semantics; all operand/mode/sequence tests
-REP	13-160	partial	src/Core/control.cpp	test/core_test.cpp;test/generate_integer.cpp	Register and memory count forms; all counts/modes; complete nesting/IRQ/timing
+REP	13-160	partial	src/Core/loops.cpp;src/Core/core.cpp	test/generate_loop_control.cpp;test/loop_control_test.cpp;test/fixtures/loop-control.d56	Unimplemented count-transfer modes; all count/AGU aliases, IRQ/event and pipeline qualification
 RESET	13-162	missing	-	-	Instruction decoding and semantics; all operand/mode/sequence tests
 RND	13-163	partial	src/Core/arithmetic.cpp	test/generate_arithmetic.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 ROL	13-165	partial	src/Core/shifts.cpp	test/generate_bit_operations.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification

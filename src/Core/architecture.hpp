@@ -42,6 +42,7 @@ inline constexpr Word carry = 1, overflow = 2, zero = 4, negative = 8;
 inline constexpr Word unnormalized = 16, extension = 32, limit = 64, growth = 128;
 inline constexpr unsigned scaling_shift = 10;
 inline constexpr Word scale_down = Word{1} << 10, scale_up = Word{1} << 11;
+inline constexpr Word forever_flag = Word{1} << 16;
 inline constexpr Word loop_flag = Word{1} << 15, rounding_mode = Word{1} << 21;
 inline constexpr Word compatibility_mode = Word{1} << 13;
 inline constexpr Word multiply_mode = Word{1} << 14;

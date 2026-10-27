@@ -88,6 +88,9 @@ struct Core::Impl {
   void push(Word high, Word low);
   [[nodiscard]] std::uint64_t pop();
   void finish_loop();
+  void restore_loop();
+  void execute_loop(const detail::Instruction &decoded);
+  [[nodiscard]] Word loop_count(const detail::Instruction &decoded);
   detail::Cpu cpu;
   Io *io;
   std::array<std::uint64_t, 4> latched{};
