@@ -11,7 +11,47 @@ counts or an ISA-support percentage. Detailed format/mode/sequence expansion
 remains mandatory. python3 tools/isa_audit.py --require-complete deliberately
 returns failure while any entry remains incomplete; see doc/isa-qualification.txt.
 
-Viterbi-store ISA increment: VSL now decodes all seven register addressing
+Reverse-carry optimization: the M-low16=0 path now uses a five-stage downward
+carry/borrow prefix instead of three bit reversals. A nonzero-single-bit guard
+selects a shorter stopping-bit mask; zero and dense magnitudes retain the full
+general prefix calculation. Raw N/sign ordering, 24-bit wrap and ignored high
+modifier bits are preserved. The algorithm adds no CPU state, lookup table,
+SIMD alignment or host ISA requirement. LLVM 19 emits ordinary scalar x86-64.
+The release update_address symbol shrinks from 597 to 464 bytes (22.3%); these
+are function bytes, not total emulator/native-cache memory savings. The pure
+prefix experiment used 411 bytes; the selected guard trades 53 bytes for lower
+single-bit update latency. doc/agu.txt states both algorithms and their guards.
+1185660 independent architectural cases compare actual execution against an
+MSB-first serial carry/borrow circuit, including exhaustive byte subdomains,
+full-width chains, both signs, zero/dense/single-bit operands, N=$800000 and all
+three backends. Eight new binary DO-loop cases append to addressing.d56 (31664
+total); all 31656 existing case records remain byte-identical. These cases
+exercise 1024 current-pointer updates and saved loop-frame restoration, and
+provide focused emulator benchmarks. Existing independent LUA/LEA, VSL and FFT
+archives retain coverage of transferred data, aliases, flags and boundaries.
+Three alternating measurements against b7b5299 on i5-10400 CPU2/powersave, with
+64 warmups and nine trials per run, lower median execution latency of the six
+single-bit DO cases by 5.0-6.5%. The runs validate complete fixture state and
+guest retirement, with host preparation outside timing. The guarded variant is
+also faster than the measured pure prefix on these cases. These are helper-
+heavy address-update programs, not arithmetic-only tests or audio routines.
+A separate nine-scenario sweep includes source-built Blofeld filters/LP12/reverb
+and FFT16/64/256/1024. An initial pure-prefix sweep suggested 2-3% smaller-FFT
+gains, but later guarded sweeps show differences below 1%; no general FFT or
+Blofeld workload speedup is established. The final FFT1024 median is 1.586521 ms
+for 157810 guest instructions, about 99.47 MIPS on this unfixed-frequency run.
+Native/helper retirement, block count and mapped executable bytes are unchanged.
+Neither these replay measurements nor the function-size reduction proves CPU
+load at 270 MIPS, energy, continuous-device realtime or full ISA completion.
+The 270-MIPS baseline remains unmet and is not an optimization ceiling.
+Release and ASan/UBSan strict suites pass all 57 executable tests, including
+private Blofeld routines and both byte-identical archive reproductions. LLVM 19
+strict diagnostics, clang-tidy, formatting and structural ISA audit pass. The
+mandatory --require-complete gate still fails on the unchanged ISA backlog.
+KVM is the only inaccessible-device skip (58 registered, zero failures), not
+protected-execution qualification. No fuzz tests were run.
+
+Previous Viterbi-store ISA increment: VSL now decodes all seven register addressing
 forms and long absolute addressing, both A/B sources and both inserted bits.
 It snapshots raw A1/B1 and A0/B0, stores the unchanged middle word to X and the
 shifted low word with the inserted bit to Y at the same effective address.

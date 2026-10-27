@@ -1,0 +1,72 @@
+Reverse-carry address calculation
+
+The general executor selects reverse carry when the low sixteen modifier bits
+are zero. It interprets the raw 24-bit N operand before applying the addressing
+form's plus/minus sign. In particular N=$800000 is a positive reverse-carry
+operand. The caller converts the signed update into a magnitude and a subtract
+flag; the calculation masks the magnitude to 24 bits. It changes no CCR flags,
+reads no operand memory and adds no per-instance state or lookup table.
+
+An explicit guard recognizes a nonzero power-of-two magnitude q. Only bits at
+or below that bit can change. Let m=2*q-1. Addition stops its downward carry at
+the highest zero in r&m, while subtraction stops its borrow at the highest one.
+The implementation computes that power with 1<<(bit_width(stops|1)-1). The
+forced least significant bit also ends an all-propagating run at bit zero; its
+outgoing carry/borrow is discarded. If t is that stopping power, 2*q-t is the
+contiguous mask of bits that toggle. XOR with r produces the updated address.
+The guard excludes zero and every multi-bit magnitude, which use the general
+calculation below. No FFT size, buffer alignment or program signature is assumed.
+
+For an arbitrary magnitude q, let d=r XOR q. For addition the bitwise generate
+and propagate masks are r&q and d. For subtraction they are (~r)&q and ~d.
+A carry/borrow leaving DSP bit i enters bit i-1. At each prefix distance s:
+
+  next_generate = generate | (propagate & (generate >> s))
+  next_propagate = propagate & (propagate >> s)
+
+The two right-hand sides use the previous masks. Distances 1,2,4,8,16 combine
+all possible 24-bit carry chains. The result is (d XOR (generate >> 1)) masked
+to 24 bits. Bits above the word cannot generate a carry, and the outgoing bit
+zero carry/borrow is discarded. This covers zero, dense magnitudes, subtraction
+and wrap; it does not assume a single-bit FFT stride.
+
+LLVM 19 already recognizes the previous bit-by-bit reversal loops as scalar
+bit reversal. The optimization replaces that resulting three-reversal sequence,
+rather than relying on a spelling change to a reversal intrinsic. The C++23
+implementation uses ordinary integer/bit operations; LLVM emits baseline x86-64
+scalar instructions here. It requires no AVX feature test or SIMD alignment.
+
+Independent qualification uses the existing binary AGU, LUA/LEA, VSL and FFT
+archives, plus test/reverse_carry_test.cpp. That compact host test checks every
+8-bit cursor/operand pair in each of three byte windows, both addition signs,
+all three execution backends, full-width carry chains and single-/multi-bit
+boundary operands. Expectations come from a serial MSB-first carry/borrow
+circuit, never the prefix recurrence or the guarded stopping-bit formula.
+Every case compares full architectural register state, flags, progress and
+interrupt admission. Eight appended binary cases execute 1024 reverse-carry
+updates inside ordinary DSP DO loops, with single-bit/dense magnitudes and
+both signs. They qualify loop-stack restoration and allow focused emulator
+measurements without reporting them as an audio/device workload. Existing binary
+archives retain their independent models and byte reproducibility. No fuzz testing is involved.
+
+Complete numerical-mode, AGU restriction, pipeline/event and full-ISA
+qualification remains open; see doc/coverage.txt and doc/isa-coverage.tsv.
+Performance measurements describe validated warm single-instance emulator
+execution, with host RAM/register preparation outside the timer. They do not
+establish continuous-device realtime, CPU load at 270 MIPS or energy consumption.
+
+Measurement protocol: use the fixture benchmark described in doc/fixtures.txt,
+pinned to CPU2, with 64 warmups and nine trials. Three alternating runs compare
+the saved b7b5299 executable, a pure-prefix experiment and the selected guarded
+implementation. Cases 31656..31663 of addressing.d56 use 256 replays per trial;
+they execute guest DO/update instructions and compare complete expected state.
+The six single-bit cases show 5.0-6.5% lower median latency against b7b5299.
+The implementation's update_address symbol occupies 464 rather than 597 bytes
+in this LLVM 19 release object. Do not equate that size change with total
+resident memory or a whole-workload speedup. The separate Blofeld/FFT sweep
+does not establish a speedup beyond its sub-1% final differences. Frequencies
+were not fixed, and no energy measurement or 270-MIPS qualification follows.
+
+To reproduce the before/after comparison, build b7b5299 separately with the
+same release preset/toolchain and retain its fixture-benchmark executable. Run
+both versions against the same current fixture bytes and alternate their order.

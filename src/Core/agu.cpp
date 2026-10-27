@@ -12,13 +12,29 @@ namespace dsp56300 {
 using namespace detail;
 
 namespace {
-Word reverse_word(Word value) noexcept {
-  Word result = 0;
-  for (unsigned bit = 0; bit < word_bits; ++bit) {
-    result = (result << 1) | (value & 1);
-    value >>= 1;
+struct ReverseOperands {
+  Word original = 0, amount = 0;
+  bool subtract = false;
+};
+
+Word reverse_add(const ReverseOperands input) noexcept {
+  const auto operand = input.amount & word_mask;
+  if (std::has_single_bit(operand)) {
+    const auto lower = (operand << 1) - 1;
+    const auto stops = (input.subtract ? input.original : ~input.original) & lower;
+    // The forced LSB also handles a carry/borrow that leaves the 24-bit word.
+    const auto last = Word{1} << (std::bit_width(stops | 1U) - 1);
+    return input.original ^ ((operand << 1) - last);
   }
-  return result;
+  const auto difference = input.original ^ operand;
+  auto generated = (input.subtract ? ~input.original : input.original) & operand;
+  auto propagated = input.subtract ? ~difference : difference;
+  // Carry/borrow travels towards lower DSP bits. Combine 1,2,4,8,16-bit prefixes.
+  for (unsigned distance = 1; distance < word_bits; distance *= 2) {
+    generated |= propagated & (generated >> distance);
+    propagated &= propagated >> distance;
+  }
+  return (difference ^ (generated >> 1)) & word_mask;
 }
 
 std::int32_t calculation_offset(const Registers &state, const Word opcode) {
@@ -46,10 +62,7 @@ Word Core::Impl::update_address(const AddressUpdate update) {
   if (modifier == modifier_mask) { return address_add(original, offset); }
   if (modifier == 0) {
     const auto amount = static_cast<Word>(offset < 0 ? -static_cast<std::int64_t>(offset) : offset);
-    const auto reversed = reverse_word(original);
-    return reverse_word(address_add(reversed,
-                                    offset < 0 ? -static_cast<std::int32_t>(reverse_word(amount))
-                                               : static_cast<std::int32_t>(reverse_word(amount))));
+    return reverse_add({.original = original, .amount = amount, .subtract = offset < 0});
   }
   if ((modifier & multiple_wrap_bit) != 0) {
     const auto mask = modifier & multiple_wrap_mask;

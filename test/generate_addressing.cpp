@@ -213,6 +213,39 @@ void repeat_sequences(Cases &cases) {
   }
 }
 
+void reverse_loops(Cases &cases) {
+  constexpr Word count = 1024;
+  constexpr Word do_count = 0x060084;
+  constexpr Word cursor = 0x40000f;
+  for (const Word operand : {1U, 512U, sign24, 0x13579bU}) {
+    for (const bool subtract : {false, true}) {
+      BinaryCase item;
+      item.name = "Own reverse-carry DO loop; N=" + std::to_string(operand) +
+                  (subtract ? " subtract" : " add");
+      item.initial = register_model::seed(0);
+      item.initial.sr = status_byte;
+      item.initial.r[0] = cursor;
+      item.initial.n[0] = operand;
+      item.initial.m[0] = ignored_high;
+      item.expected = item.initial;
+      for (Word iteration = 0; iteration < count; ++iteration) {
+        item.expected.r[0] = address_model::reverse_carry(
+            {.original = item.expected.r[0], .operand = operand, .subtract = subtract});
+      }
+      const auto first = (item.initial.sp + 1) % stack_entries;
+      const auto second = (item.initial.sp + 2) % stack_entries;
+      item.expected.stack[first] = (std::uint64_t{item.initial.la} << word_bits) | item.initial.lc;
+      item.expected.stack[second] = (std::uint64_t{start + 2} << word_bits) | item.initial.sr;
+      item.expected.pc = start + 3;
+      item.budget = item.dispatches = count + 1;
+      item.progress = {.instructions = count + 1, .estimated_cycles = count + 5};
+      item.before = {{.words = {do_count, start + 2, update_opcode | (subtract ? 0U : 0x800U)},
+                      .address = start}};
+      cases.push_back(std::move(item));
+    }
+  }
+}
+
 void generate(const char *const output) {
   Cases cases;
   update_cases(cases, linear);
@@ -223,6 +256,7 @@ void generate(const char *const output) {
   fault_cases(cases);
   modifier_sequences(cases);
   repeat_sequences(cases);
+  reverse_loops(cases);
   std::cout << cases.size() << " independently modeled AGU cases\n";
   write_fixture(output, std::move(cases));
 }

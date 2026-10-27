@@ -71,7 +71,7 @@ MOVE.L	13-126	untested	src/Core/moves.cpp	-	Dedicated independent instruction/op
 MOVE.none	13-112	partial	src/Core/moves.cpp	test/generate_arithmetic.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 MOVE.R	13-115	partial	src/Core/moves.cpp	test/native_dataflow_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 MOVE.RY	13-124	untested	src/Core/moves.cpp	-	Dedicated independent instruction/operand tests; other modes and sequences
-MOVE.U	13-117	partial	src/Core/moves.cpp	test/generate_addressing.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
+MOVE.U	13-117	partial	src/Core/moves.cpp;src/Core/agu.cpp	test/generate_addressing.cpp;test/reverse_carry_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 MOVE.X	13-118	partial	src/Core/moves.cpp	test/generate_parallel_moves.cpp	Rn+short/long displacement forms; other modes; full alias/sequence timing
 MOVE.XR	13-120	untested	src/Core/moves.cpp	-	Dedicated independent instruction/operand tests; other modes and sequences
 MOVE.XY	13-123	partial	src/Core/moves.cpp	test/generate_parallel_moves.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
