@@ -3,7 +3,7 @@ Native x64 execution
 Select Options.backend=Backend::jit on Linux x86-64. The default remains cached.
 This is an independent scalar SysV x64 emitter. No external DSP emulator,
 assembler, LLVM runtime or JIT library is linked. SSE/AVX lowering, block linking,
-native guest-RAM/AGU lowering and register allocation across instructions remain
+nonlinear native AGU lowering and register allocation across instructions remain
 future work; this first backend is not the final performance objective.
 
 Core::run has the same exact guest-instruction budget on every backend. One REP
@@ -41,13 +41,26 @@ and unsigned 56-bit inequalities qualify carry, overflow and scaling flags;
 they do not reproduce the emitted padding technique. CMPM and shifted additions
 still use the general executor.
 
-Parallel moves use the same instrumented C++ path as the interpreters. They latch
-old A/B/X/Y before transfers and retain transfer scaling/limiting, AGU behavior,
-span checks, callback ordering and fault context. Emitted ALU inputs then read
-that old register snapshot. PCU register transfers and conditional IFcc forms
-remain on the general path. Emitted memory accesses are constant offsets into
-the CPU/register snapshot; guest RAM and peripheral accesses are not unchecked
-native loads. Loop-ending native instructions return to the general executor
+Single X/Y memory transfers for X0/X1/Y0/Y1/A/B and all ordinary paired X/Y
+transfer directions now have a host-independent transfer plan and native x64
+lowering. Short/absolute/immediate, no-update and linear pre/post/indexed forms
+are admitted. Updating/indexed forms check current low sixteen M bits for linear
+addressing; no-update and absolute forms ignore M. Every RAM address is checked
+against its supplied span and the I/O boundary before any architectural effect.
+Failed guards use the same instrumented move helper as before, without duplicate
+address updates, callbacks or writes. Stores to any bank overlapping P use that
+helper conservatively, preserving program invalidation. Other transfer classes,
+PCU register transfers and conditional IFcc forms retain general execution.
+
+Native moves latch old A/B/X/Y for nonzero ALU operations, update both AGUs, capture
+both port values, then commit X before Y. Physical X/Y storage overlap and shared
+register destinations retain the existing ordering. Full A/B stores implement
+scaling, clipping and sticky S/L directly; accumulator loads sign-extend correctly.
+Exact four-byte guest words avoid overreads and mask raw caller-owned data to
+24 bits. A native_move_instructions diagnostic counts each successful fast
+transfer instruction once, including paired and immediate forms. Pure move
+instructions can retire natively too. Native ALU inputs still use the old snapshot.
+Loop-ending native instructions return to the general executor
 before any side effects, so its DO cleanup and fault rules remain authoritative.
 REP bodies use their original latched general execution path.
 MOVEC/MOVEM/MOVEP use the general helpers. Guest SR writes exit on changed
@@ -78,7 +91,7 @@ inventing compiler-emitted UBSan function-type metadata.
 In strict builds, all project C++ (including code generation, allocation and
 memory/I/O helpers) keeps the ASan/UBSan options. No checks or functions are suppressed.
 Generated machine instructions and the assembly bridge are not compiler
-instrumented; constant-offset accesses, ABI boundaries and emitted arithmetic
+instrumented; guarded RAM accesses, constant offsets, ABI boundaries and arithmetic
 require their own validation. Clang's function check applies to compiler-typed
 indirect calls; the bridge uses the explicitly implemented native calling ABI.
 Reference: https://clang.llvm.org/docs/UndefinedBehaviorSanitizer.html
@@ -86,8 +99,10 @@ Reference: https://clang.llvm.org/docs/UndefinedBehaviorSanitizer.html
 JitStatistics reports compiled blocks, published executable bytes, P
 invalidations and successful native-ALU/helper retirement. The native ALU count
 can include instructions whose parallel transfers still call the move helper;
-it must not be interpreted as fully native RAM/I/O execution. These counters
-make fallback use visible in correctness tests and benchmarks.
+it also includes pure moves/NOPs and must not be interpreted as fully native RAM/I/O
+execution. native_move_instructions overlaps that count and records only complete
+transfers executed by emitted code, not helper fallback or failed instructions.
+These counters make fallback use visible in correctness tests and benchmarks.
 
 The shared binary fixtures run through reference, cached and native backends.
 Directed host tests verify exact/partitioned budgets, numeric mode changes,
@@ -95,3 +110,9 @@ stale-code replacement, I/O invalidation of executing code, failed memory moves,
 DO restoration, failed cleanup and callback reentry rejection. Manufacturer
 programs/fixtures stay local. Benchmarks distinguish initialized warm calls
 from arithmetic-only experiments, continuous streams and whole-device behavior.
+
+Hardware-isolated KVM execution and a shared execution-backend concept are
+planned, not implemented. Consumers must retain ordinary DSP headers and memory,
+event and I/O interfaces, with VM management hidden inside the library. Required
+isolation cannot silently fall back to this host-process JIT. See
+doc/compiler-research.txt for the accepted backend and runtime ABI constraints.

@@ -28,6 +28,8 @@ add_library(dsp56300_core STATIC
   src/Core/bits.cpp
   src/Jit/jit.cpp src/Jit/jit_helpers.cpp src/Jit/X64/jit_emitter.cpp src/Jit/X64/x64.cpp
   src/Jit/X64/jit_addition.cpp
+  src/Jit/native_moves.cpp src/Jit/X64/jit_moves.cpp
+  src/Jit/X64/jit_move_address.cpp src/Jit/X64/jit_move_register.cpp
   src/Memory/memory_arena.cpp)
 add_library(dsp56300::core ALIAS dsp56300_core)
 target_include_directories(dsp56300_core PUBLIC include)
@@ -49,6 +51,9 @@ if(BUILD_TESTING)
   add_executable(dsp56300_jit_test test/jit_test.cpp)
   target_link_libraries(dsp56300_jit_test PRIVATE dsp56300::core)
   add_test(NAME native-boundaries COMMAND dsp56300_jit_test)
+  add_executable(dsp56300_native_move_test test/native_move_test.cpp)
+  target_link_libraries(dsp56300_native_move_test PRIVATE dsp56300::core)
+  add_test(NAME native-move-boundaries COMMAND dsp56300_native_move_test)
   add_executable(dsp56300_transfer_test test/transfer_test.cpp)
   target_link_libraries(dsp56300_transfer_test PRIVATE dsp56300::core)
   add_test(NAME transfer-boundaries COMMAND dsp56300_transfer_test)
@@ -80,6 +85,8 @@ if(BUILD_TESTING)
   target_link_libraries(dsp56300_generate_addition PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_fft test/generate_fft.cpp)
   target_link_libraries(dsp56300_generate_fft PRIVATE dsp56300_fixture_format)
+  add_executable(dsp56300_generate_parallel_moves test/generate_parallel_moves.cpp)
+  target_link_libraries(dsp56300_generate_parallel_moves PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_fixture_test test/fixture_test.cpp)
   target_link_libraries(dsp56300_fixture_test PRIVATE dsp56300::core dsp56300_fixture_format)
   add_executable(dsp56300_fixture_bench test/fixture_bench.cpp)
@@ -105,6 +112,13 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/addition.d56")
   add_test(NAME fft-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/fft.d56")
+  add_test(NAME parallel-move-fixtures COMMAND dsp56300_fixture_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/parallel-moves.d56")
+  add_test(NAME parallel-move-reproducibility COMMAND "${CMAKE_COMMAND}"
+    "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_parallel_moves>"
+    "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/parallel-moves-regenerated.d56"
+    "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/parallel-moves.d56"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
   add_test(NAME fft-reproducibility COMMAND "${CMAKE_COMMAND}"
     "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_fft>"
     "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/fft-regenerated.d56"

@@ -43,8 +43,16 @@ Core::Impl::Impl(const Buffers supplied, Io *const host_io, const Options settin
         cpu,
         buffers.program,
         options,
-        detail::JitRuntime{
-            .owner = this, .latched = &latched, .execute = jit_execute, .moves = jit_moves});
+        detail::JitRuntime{.owner = this,
+                           .latched = &latched,
+                           .execute = jit_execute,
+                           .moves = jit_moves,
+                           .memory = {{{.data = buffers.x.data(),
+                                        .words = buffers.x.size(),
+                                        .aliases_program = aliases_program[1]},
+                                       {.data = buffers.y.data(),
+                                        .words = buffers.y.size(),
+                                        .aliases_program = aliases_program[2]}}}});
   }
 }
 

@@ -125,6 +125,7 @@ void benchmark(const BinaryCase &item, const Backend backend, const unsigned rep
     const auto statistics = replay.statistics();
     std::cout << "  native ALU/retirement: " << statistics.native_alu_instructions
               << ", full helpers: " << statistics.helper_instructions
+              << ", native moves: " << statistics.native_move_instructions
               << ", compiled blocks: " << statistics.compiled_blocks
               << ", executable bytes: " << statistics.executable_bytes << '\n';
   }

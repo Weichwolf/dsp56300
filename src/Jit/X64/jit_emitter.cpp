@@ -6,6 +6,7 @@
 #include "fields.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
+#include "native_moves.hpp"
 #include "x64.hpp"
 
 #include <array>
@@ -88,6 +89,7 @@ bool JitEmitter::lowerable(const NativeOp &operation) const {
     if (reg >= m_register_base) { return false; }
   }
   const auto alu = opcode & byte_mask;
+  if (alu == 0) { return plan_moves(decoded).count != 0; }
   if (is_addition(operation)) { return true; }
   if ((alu & 0x80U) != 0) { return true; }
   const auto operation_code = alu & alu_mask;
@@ -243,6 +245,7 @@ void JitEmitter::native(const NativeOp &operation) {
     return;
   }
   const auto opcode = operation.instruction.opcode & byte_mask;
+  if (opcode == 0) { return; }
   const auto kind = opcode & alu_mask;
   const bool destination_b = (opcode & 8U) != 0;
   const auto destination = register_offsets.at(destination_b ? 1U : 0U);
@@ -278,12 +281,8 @@ void JitEmitter::native(const NativeOp &operation) {
 }
 
 void JitEmitter::retire(const NativeOp &operation) {
-  if (!has_moves(operation)) {
-    code_.store_constant(Reg::r12,
-                         pc_offset,
-                         Width::dword,
-                         (operation.pc + operation.instruction.words) & word_mask);
-  }
+  code_.store_constant(
+      Reg::r12, pc_offset, Width::dword, (operation.pc + operation.instruction.words) & word_mask);
   code_.store_constant(Reg::r12, offsetof(Cpu, repeat_completed), Width::word, 0);
   code_.memory_immediate(group_add, Reg::r12, offsetof(Cpu, instructions), Width::qword, 1);
   code_.memory_immediate(
@@ -306,11 +305,7 @@ std::vector<std::uint8_t> JitEmitter::generate(const std::span<const NativeOp> o
   for (const auto &operation : operations) {
     if (lowerable(operation)) {
       loop_guard(operation);
-      if (has_moves(operation)) {
-        helper(runtime_.moves, operation);
-        code_.binary(op_test, {.destination = Reg::ax, .source = Reg::ax}, Width::dword);
-        code_.exit_if(Branch::equal);
-      }
+      if (has_moves(operation)) { moves(operation); }
       native(operation);
       retire(operation);
     } else {

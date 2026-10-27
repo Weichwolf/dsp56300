@@ -75,6 +75,9 @@ struct Options {
 
 struct JitStatistics {
   std::uint64_t compiled_blocks = 0, native_alu_instructions = 0, helper_instructions = 0;
+  // Successful instructions whose complete parallel transfer ran in emitted code.
+  // This overlaps native_alu_instructions, which also includes move-only retirement.
+  std::uint64_t native_move_instructions = 0;
   std::uint64_t executable_bytes = 0, invalidations = 0;
 };
 

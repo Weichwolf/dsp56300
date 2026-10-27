@@ -105,7 +105,9 @@ struct Jit::Impl {
       : cpu(state),
         program(supplied),
         options(settings),
-        context{.runtime = runtime, .dirty = &invalidated} {}
+        context{.runtime = runtime,
+                .dirty = &invalidated,
+                .native_moves = &statistics.native_move_instructions} {}
 
   [[nodiscard]] std::unique_ptr<Block> compile(Word block_limit) const;
   Cpu &cpu;

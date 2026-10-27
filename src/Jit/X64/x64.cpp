@@ -23,6 +23,7 @@ enum EncodingByte : std::uint8_t {
 };
 
 constexpr unsigned byte_bits = 8, rex_prefix = 0x40, wide_bit = 8, register_bit = 4;
+constexpr unsigned index_bit = 2, word_scale = 2;
 constexpr unsigned mov_register = 0x89, mov_load = 0x8b, mov_immediate = 0xb8;
 constexpr unsigned mod_register = 0xc0, mod_small = 0x40, mod_large = 0x80;
 constexpr unsigned alu_immediate = 0x81, shift_immediate = 0xc1;
@@ -55,11 +56,37 @@ void Code::raw(const std::initializer_list<std::uint8_t> bytes) {
   bytes_.insert(bytes_.end(), bytes);
 }
 
-void Code::rex(const Width width, const unsigned reg, const unsigned base) {
+void Code::rex(const Width width, const unsigned reg, const unsigned base, const unsigned index) {
   if (width == Width::word) { byte(operand_prefix); }
   const auto prefix = rex_prefix | (width == Width::qword ? wide_bit : 0U) |
-                      ((reg >> 3) * register_bit) | (base >> 3);
+                      ((reg >> 3) * register_bit) | (base >> 3) | ((index >> 3) * index_bit);
   if (prefix != rex_prefix || (width == Width::byte && base >= 4)) { byte(prefix); }
+}
+
+void Code::indexed(const unsigned reg, const IndexedAddress address) {
+  if (address.index == Reg::sp) { throw std::logic_error("RSP cannot index a guest word"); }
+  byte(mod_small | ((reg & 7U) << 3) | 4U);
+  byte((word_scale << 6) | ((static_cast<unsigned>(address.index) & 7U) << 3) |
+       (static_cast<unsigned>(address.base) & 7U));
+  byte(0);
+}
+
+void Code::load_indexed(const Reg destination, const IndexedAddress address) {
+  rex(Width::dword,
+      static_cast<unsigned>(destination),
+      static_cast<unsigned>(address.base),
+      static_cast<unsigned>(address.index));
+  byte(mov_load);
+  indexed(static_cast<unsigned>(destination), address);
+}
+
+void Code::store_indexed(const IndexedAddress address, const Reg source) {
+  rex(Width::dword,
+      static_cast<unsigned>(source),
+      static_cast<unsigned>(address.base),
+      static_cast<unsigned>(address.index));
+  byte(mov_register);
+  indexed(static_cast<unsigned>(source), address);
 }
 
 void Code::memory(const unsigned reg, const Reg base, const std::size_t offset) {
@@ -195,6 +222,58 @@ void Code::set(const unsigned condition, const Reg destination) {
   byte(mod_register | ((dst & 7) << 3) | (dst & 7));
 }
 
+void Code::move_if(const unsigned condition, const RegisterPair registers) {
+  const auto dst = static_cast<unsigned>(registers.destination);
+  const auto src = static_cast<unsigned>(registers.source);
+  rex(Width::qword, dst, src);
+  raw({0x0f});
+  byte(condition);
+  byte(mod_register | ((dst & 7U) << 3) | (src & 7U));
+}
+
+void Code::patch(const std::size_t offset, const std::size_t target) {
+  const auto delta =
+      static_cast<std::int64_t>(target) - static_cast<std::int64_t>(offset + sizeof(std::uint32_t));
+  if (!std::in_range<std::int32_t>(delta)) {
+    throw std::logic_error("x64 branch displacement overflow");
+  }
+  const auto displacement = static_cast<std::uint32_t>(delta);
+  for (unsigned index = 0; index < sizeof(displacement); ++index) {
+    bytes_.at(offset + index) =
+        static_cast<std::uint8_t>((displacement >> (index * byte_bits)) & low_byte_mask);
+  }
+}
+
+void Code::reference(Label &label) {
+  const auto offset = bytes_.size();
+  u32(0);
+  if (label.bound) {
+    patch(offset, label.offset);
+  } else {
+    label.references.push_back(offset);
+  }
+}
+
+void Code::jump_if(const Branch condition, Label &label) {
+  byte(0x0f);
+  byte(static_cast<unsigned>(condition));
+  reference(label);
+}
+
+void Code::jump(Label &label) {
+  constexpr unsigned near_jump = 0xe9;
+  byte(near_jump);
+  reference(label);
+}
+
+void Code::bind(Label &label) {
+  if (label.bound) { throw std::logic_error("x64 label already bound"); }
+  label.offset = bytes_.size();
+  label.bound = true;
+  for (const auto offset : label.references) { patch(offset, label.offset); }
+  label.references.clear();
+}
+
 void Code::exit_if(const Branch condition) {
   byte(0x0f);
   byte(static_cast<unsigned>(condition));
@@ -203,17 +282,6 @@ void Code::exit_if(const Branch condition) {
 }
 
 void Code::bind_exit() {
-  for (const auto offset : exits_) {
-    const auto delta = static_cast<std::int64_t>(bytes_.size()) -
-                       static_cast<std::int64_t>(offset + sizeof(std::uint32_t));
-    if (!std::in_range<std::int32_t>(delta)) {
-      throw std::logic_error("x64 branch displacement overflow");
-    }
-    const auto displacement = static_cast<std::uint32_t>(delta);
-    for (unsigned i = 0; i < sizeof(displacement); ++i) {
-      bytes_.at(offset + i) =
-          static_cast<std::uint8_t>((displacement >> (i * byte_bits)) & low_byte_mask);
-    }
-  }
+  for (const auto offset : exits_) { patch(offset, bytes_.size()); }
 }
 } // namespace dsp56300::detail::x64

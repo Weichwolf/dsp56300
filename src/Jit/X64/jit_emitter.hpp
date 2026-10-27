@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 #include "jit.hpp"
+#include "native_moves.hpp"
 #include "x64.hpp"
 
 #include <cstddef>
@@ -12,6 +13,7 @@ namespace dsp56300::detail {
 struct NativeContext {
   JitRuntime runtime;
   bool *dirty = nullptr;
+  std::uint64_t *native_moves = nullptr;
 };
 
 class JitEmitter {
@@ -25,6 +27,14 @@ private:
   [[nodiscard]] static bool is_addition(const NativeOp &operation);
   void helper(JitHelper function, const NativeOp &operation);
   void native(const NativeOp &operation);
+  void moves(const NativeOp &operation);
+  void general_moves(const NativeOp &operation);
+  void move_guard(const NativeMove &move, x64::Label &slow);
+  void move_update(const NativeMove &move);
+  void move_capture(const NativeMove &move, Word mode);
+  void move_commit(const NativeMove &move);
+  void move_read_register(x64::Reg value, const NativeMove &move, Word mode);
+  void move_write_register(x64::Reg value, unsigned reg);
   void multiply(const NativeOp &operation);
   void addition(const NativeOp &operation);
   void round(Word mode);

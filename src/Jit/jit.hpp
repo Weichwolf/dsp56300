@@ -5,6 +5,7 @@
 #include "instruction.hpp"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -17,10 +18,17 @@ struct NativeOp {
 
 using JitHelper = std::uint32_t (*)(void *, const NativeOp *) noexcept;
 
+struct JitMemory {
+  Word *data = nullptr;
+  std::size_t words = 0;
+  bool aliases_program = false;
+};
+
 struct JitRuntime {
   void *owner = nullptr;
   std::array<std::uint64_t, 4> *latched = nullptr;
   JitHelper execute = nullptr, moves = nullptr;
+  std::array<JitMemory, 2> memory;
 };
 
 class Jit {

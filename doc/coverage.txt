@@ -163,6 +163,27 @@ host checks exercise changing modifiers/offsets/pointers through set_registers,
 code-cache clearing and reset, across all three backends. Guest modifier
 replacement and REP sequences remain covered by the independent binary fixtures.
 
+Native RAM transfer extension: a host-independent plan describes single X/Y
+loads/stores for X0/X1/Y0/Y1/A/B and ordinary paired X/Y transfers. The x64
+emitter handles short/absolute/immediate, no-update and guarded linear addressing
+with exact 24-bit wrap and full A/B scaling/limiting/sticky flags. Both addresses
+are checked before any architectural effect; nonlinear modes, I/O, out-of-span
+addresses and stores into a bank overlapping P retain general execution.
+Both port values are captured before X/Y commit, preserving register and physical
+host-storage aliases. Pure move instructions can retire natively. Each successful
+emitted transfer instruction increments a distinct native-move counter once.
+14952 additional independent binary fixtures qualify all admitted data registers,
+AGU indices, directions, addressing forms, scale/sticky states and directed bus
+boundaries, with old-input TFR operations. Expectations use signed modular
+coordinates and a quotient/remainder bus model without core execution. 346 host
+checks cover warm M changes, fallback, aliased X/Y, full-span I/O routing,
+program aliases, exact budgets and four-byte accesses at a guard page.
+All 28 CTests pass in release and ASan/UBSan strict builds, including exact
+fixture regeneration, complete FFT cases and private source-built workloads.
+Native code remains uninstrumented machine code; project C++ retains all strict
+sanitizer/diagnostic checks. No additional ISA support, hardware isolation,
+register allocation, SIMD or completeness claim follows from this extension.
+
 Timing: documented base costs are being added for implemented forms. Pipeline
 interlocks, IRQ entry/return qualification, exact event admission and external
 waits remain open. A complete checkpoint API is pending; Registers omits hidden
@@ -179,12 +200,13 @@ checked after warmup and each trial. This measures initialized call replay,
 including timer/retirement-check overhead; it is not continuous audio or device
 performance. An initial independent scalar x64 JIT now emits MPY/MPYR/MAC/MACR,
 RND/CLR/ABS/NEG/TFR, ADD/SUB/CMP, ADC/SBC and NOP, with guarded general helpers
-for other operations and parallel memory moves. It has exact budgets, numerical mode keys, deferred P
-invalidation, bounded executable storage and immutable RX mappings. Shared
+for other operations and guarded parallel-transfer fallback. It has exact budgets,
+numerical mode keys, deferred P invalidation, bounded executable storage and
+immutable RX mappings. Shared
 fixtures cover all three backends; host tests check ABI/boundary behavior and
 native/helper counters expose actual lowered execution. See doc/jit.txt for
-instrumentation scope and remaining native work. All twenty-five CTests pass in release
-and strict builds, including exact fixture regeneration. SIMD is not implemented
+instrumentation scope and remaining native work. The prior twenty-five CTests
+passed in release and strict builds, including exact fixture regeneration. SIMD is not implemented
 in VM execution; the separate native FFT research comparison uses AVX2.
 Earlier isolated arithmetic experiments do not establish emulator speed.
 More source-built workloads, register-bank SIMD
@@ -197,7 +219,8 @@ reference/cached/JIT execution. A sixteen-block JIT fixture measures about
 66 microseconds per block. Each run uses the nine-trial protocol above; these
 are baselines, not an established optimization gain or device-capacity result.
 About 40% of retired guest instructions use native ALU code in this case;
-the remainder use general helpers. Native parallel transfers still use helpers.
+the remainder use general helpers. At that baseline native parallel transfers
+still used helpers.
 The benchmark now permits selecting one backend for separate profiling.
 An isolated JIT process profile identifies address generation, parallel moves
 and dispatch among visible execution costs. It also includes substantial host
@@ -243,13 +266,35 @@ was rejected by its unchanged retirement counters and is excluded from evidence.
 Artifacts, controls, hashes and raw runs remain local. The replay protocol and
 its warm-call/device limitations above apply; no general speedup follows.
 
+Measured native-RAM benefit: three alternating before/after runs against
+eaa6005 on the i5-10400/CPU2, using the qualified initialized fixture replay,
+reduce ordinary/wide direct-filter medians from 3.70/3.72 to 1.60/1.79 microseconds
+and complete ordinary/wide LP12 from 4.35/4.35 to 2.16/2.31 microseconds.
+This is 1.88-2.31 times faster on those four cases, with 63-67 million retired
+guest instructions/s. A ready-state effect case improves from 59.45 to 56.42
+microseconds, about 5%, or 27.5 million guest instructions/s. Nonlinear transfers
+and other general helpers remain important costs; this does not establish a
+general twofold speedup. Published executable mappings grow from 16-28 KiB to
+28-40 KiB for the filter/LP12 cases, and 64 to 112 KiB for the effect case.
+These are total published mappings, not measured hot instruction-cache occupancy.
+The own DSP FFT programs improve by 1.23-1.38 times: the 1024-point transform
+falls from 2.588 to 1.874 ms, or 84.2 million guest instructions/s, with executable
+mappings growing from 144 to 224 KiB. Its 157810 guest instructions include
+20480 successful native transfer instructions; 44176 still retire through full
+helpers. This is actual CPU execution with full state, not the separate native
+FFT algorithm. Compiler cost is excluded, host restoration is timed separately,
+and no whole-device, sustained realtime or energy claim follows. Raw trials,
+fixture/executable hashes, native/fallback counts and exact protocols remain
+local. The 270-million-instruction target remains unmet on every measured case.
+
 Realtime capacity is not established for a fully loaded DSP or complete synth.
 The user's throughput target is now 270 million emulated DSP instructions/s per
-host core. This is unachieved: current directed cases require approximately
-8-10 times higher throughput to reach it. Qualification must retain full state,
+host core. This is unachieved. Before native RAM transfer lowering, directed cases
+required approximately 8-10 times higher throughput to reach it. Qualification must retain full state,
 precision, memory/event boundaries and representative workload execution.
-Current directed JIT cases execute about 26-35 million guest instructions/s on
-the i5-10400. At an explicitly assumed 48000 frames/s, a 16-frame LP12 call at
+Before native RAM transfer lowering, directed JIT cases executed about 26-35
+million guest instructions/s on the i5-10400. At an explicitly assumed 48000
+frames/s, a 16-frame LP12 call at
 4.35 microseconds projects to about 1.3% of one host core; 24 identical calls to
 about 31%. A 59.2-microsecond effect stereo block projects to about 18%. These
 are arithmetic projections from isolated initialized fixtures, not measured
@@ -309,7 +354,8 @@ LP12 cases, the first scalar JIT reduces warm execution medians by 23-24%
 relative to cached execution in the same release binary on the i5-10400.
 Three runs per case use the replay protocol above; compare the median of run
 medians. The published executable working set is 16-20 KiB for these cases.
-Native ALU still calls parallel-move helpers, and cold compilation is excluded.
+At that baseline native ALU called parallel-move helpers; cold compilation was
+excluded.
 These measurements qualify those initialized calls only. Exact local inputs,
 artifact hashes and raw measurements remain in ignored workload/analysis files.
 
@@ -319,7 +365,8 @@ sticky flags and both accumulators. All nine release/strict tests pass with the
 expanded 9447-case arithmetic fixture. Three alternating before/after runs on
 the wide direct filter and complete wide LP12 reduce JIT call medians by about
 12% and 9%, respectively, versus the first JIT. Sixteen additional operations
-per call use native arithmetic; their parallel transfers still use the helper.
+per call use native arithmetic; at that baseline their parallel transfers used
+the helper.
 Executable mappings grow by one page for these cases (20/24 KiB respectively).
 Ordinary cases keep the same native/helper instruction mix. This remains a
 directed warm-call measurement, with the same limitations stated above.
@@ -334,6 +381,11 @@ i5-10400. This is a warm-call comparison on those cases, not a whole-device or
 final-core performance result.
 
 Integration: basic header/library target and memory/I/O contract exist.
+Transparent hardware VM execution is a user requirement under investigation.
+Consumers must use the same DSP headers, caller-owned shared memory, events and
+I/O contracts without managing VM machinery. KVM mapping, host-span alignment,
+helper placement, deterministic exits and execution qualification are pending;
+the current host-process JIT provides no hardware VM isolation.
 Program-storage alias qualification: guest and host X/Y writes that overlap P
 now invalidate decoded/native caches, including previous-word extension entries.
 Seventy directed host checks cover shared and partially overlapping spans in
