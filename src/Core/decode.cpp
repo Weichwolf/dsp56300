@@ -21,6 +21,19 @@ struct Rule {
 
 // Family manual instruction encodings and documented base costs (appendix A).
 constexpr std::array rules{
+    Rule{.bits = encoding("000000010100000111qqdkmm"),
+         .operation = Operation::product_immediate,
+         .words = 2,
+         .cycles = 2},
+    Rule{.bits = encoding("00000001000sssss11QQdkmm"),
+         .operation = Operation::product_power,
+         .words = 1},
+    Rule{.bits = encoding("000000010010011m1sdkQQQQ"),
+         .operation = Operation::product_mixed,
+         .words = 1},
+    Rule{.bits = encoding("000000010010010s1sdkQQQQ"),
+         .operation = Operation::product_double,
+         .words = 1},
     Rule{.bits = encoding("0000011001MMMRRR0S0r0000"),
          .operation = Operation::loop_effective,
          .words = 2,

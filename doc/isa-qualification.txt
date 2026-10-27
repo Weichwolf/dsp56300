@@ -83,3 +83,13 @@ and complete interrupt/event qualification remain open. In appendix A the DOR
 FOREVER cost is blank; the implementation currently follows DO FOREVER's four
 base cycles and does not claim independent timing qualification. No affected
 catalogue row is complete.
+
+Extended multiplication increment: four long-immediate forms, mixed MPY/MAC,
+DMAC ss/su/uu and positive power constants n=1..23 have independent binary
+fixtures. Signedness follows the written operand order and table 12-16/figure
+3-7; DMAC follows the prose/diagram's 24-bit accumulator shift, not the short
+operation notation's inconsistent 16. Explicit sign/selector encodings, arithmetic
+and rounding overflow, negative discarded bits and cross-helper state are tested.
+Power n=0 is still explicitly unqualified. SB/SC/DM/SM, hardware confirmation of
+manual inconsistencies, full pipeline/event and other listed qualification gaps
+remain open. No affected catalogue row is complete.

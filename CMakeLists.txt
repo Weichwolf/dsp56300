@@ -25,7 +25,7 @@ add_library(dsp56300_core STATIC
   src/Core/core.cpp src/Core/core_state.cpp src/Core/arithmetic.cpp src/Core/shifts.cpp
   src/Core/conditional.cpp src/Core/immediate.cpp src/Core/integer.cpp src/Core/decode.cpp src/Core/moves.cpp
   src/Core/transfers.cpp src/Core/registers.cpp src/Core/agu.cpp src/Core/control.cpp
-  src/Core/bits.cpp src/Core/bit_fields.cpp src/Core/loops.cpp
+  src/Core/bits.cpp src/Core/bit_fields.cpp src/Core/loops.cpp src/Core/products.cpp
   src/Jit/jit.cpp src/Jit/jit_helpers.cpp src/Jit/X64/jit_emitter.cpp src/Jit/X64/x64.cpp
   src/Jit/X64/jit_addition.cpp
   src/Jit/X64/jit_loops.cpp
@@ -118,6 +118,8 @@ if(BUILD_TESTING)
   target_link_libraries(dsp56300_generate_flags PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_integer test/generate_integer.cpp)
   target_link_libraries(dsp56300_generate_integer PRIVATE dsp56300_fixture_format)
+  add_executable(dsp56300_generate_products test/generate_products.cpp)
+  target_link_libraries(dsp56300_generate_products PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_loop_control test/generate_loop_control.cpp)
   target_link_libraries(dsp56300_generate_loop_control PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_bit_fields test/generate_bit_fields.cpp)
@@ -157,6 +159,17 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/flags.d56")
   add_test(NAME integer-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/integer.d56")
+  add_test(NAME immediate-product-fixtures COMMAND dsp56300_fixture_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/products-immediate.d56")
+  add_test(NAME mixed-product-fixtures COMMAND dsp56300_fixture_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/products-mixed.d56")
+  add_test(NAME product-reproducibility COMMAND "${CMAKE_COMMAND}"
+    "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_products>"
+    "-DOUTPUT_IMMEDIATE=${CMAKE_CURRENT_BINARY_DIR}/products-immediate-regenerated.d56"
+    "-DOUTPUT_MIXED=${CMAKE_CURRENT_BINARY_DIR}/products-mixed-regenerated.d56"
+    "-DFIXTURE_IMMEDIATE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/products-immediate.d56"
+    "-DFIXTURE_MIXED=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/products-mixed.d56"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_product_fixtures.cmake")
   add_test(NAME loop-control-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/loop-control.d56")
   add_test(NAME loop-control-reproducibility COMMAND "${CMAKE_COMMAND}"

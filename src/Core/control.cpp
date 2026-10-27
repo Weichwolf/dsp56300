@@ -65,6 +65,10 @@ void Core::Impl::execute(const Instruction &decoded) {
     case Operation::logical_shift_immediate:
     case Operation::logical_shift_register: execute_shift(decoded); return;
     case Operation::immediate_alu: execute_immediate(decoded); return;
+    case Operation::product_immediate:
+    case Operation::product_power:
+    case Operation::product_mixed:
+    case Operation::product_double: execute_product(decoded); return;
     case Operation::increment:
     case Operation::decrement: execute_unit(decoded); return;
     case Operation::compare_unsigned: compare_unsigned(opcode); return;

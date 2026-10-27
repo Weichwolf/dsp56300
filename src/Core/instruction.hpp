@@ -35,6 +35,10 @@ enum class Operation : std::uint8_t {
   logical_shift_immediate,
   logical_shift_register,
   immediate_alu,
+  product_immediate,
+  product_power,
+  product_mixed,
+  product_double,
   increment,
   decrement,
   compare_unsigned,
@@ -69,6 +73,10 @@ enum class Operation : std::uint8_t {
     case Operation::logical_shift_immediate:
     case Operation::logical_shift_register:
     case Operation::immediate_alu:
+    case Operation::product_immediate:
+    case Operation::product_power:
+    case Operation::product_mixed:
+    case Operation::product_double:
     case Operation::increment:
     case Operation::decrement:
     case Operation::compare_unsigned:
