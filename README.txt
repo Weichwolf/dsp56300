@@ -17,6 +17,14 @@ operations, invalidation, execution budgets and instrumentation boundaries.
 Full ISA/mode/timing qualification and Blofeld performance measurements remain
 open; see doc/coverage.txt and the complete objective in doc/objective.txt.
 
+Source layout:
+  src/Core/       architectural state, instruction decoding and execution
+  src/Jit/        translation cache and general-execution bridges
+  src/Jit/X64/    native x64 emission and instruction encoding
+  src/Memory/     host memory reservation
+  include/dsp56300/  public CPU interface
+  test/           independent fixture generators, host tests and benchmarks
+
 Build and check (LLVM 19, CMake >=3.25, Ninja, clang-format-19, clang-tidy-19):
 
   cmake --preset strict

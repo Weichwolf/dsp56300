@@ -21,17 +21,18 @@ find_program(BLOFELD_CLANG_FORMAT NAMES clang-format-19 REQUIRED)
 
 set(CMAKE_CXX_CLANG_TIDY "${BLOFELD_CLANG_TIDY};--warnings-as-errors=*")
 
-add_library(dsp56300_core STATIC Core/core.cpp src/core_state.cpp src/memory_arena.cpp
-  src/arithmetic.cpp src/shifts.cpp src/conditional.cpp src/immediate.cpp src/decode.cpp
-  src/moves.cpp src/transfers.cpp src/registers.cpp src/agu.cpp src/control.cpp src/jit.cpp src/jit_helpers.cpp
-  src/jit_emitter.cpp src/x64.cpp)
+add_library(dsp56300_core STATIC
+  src/Core/core.cpp src/Core/core_state.cpp src/Core/arithmetic.cpp src/Core/shifts.cpp
+  src/Core/conditional.cpp src/Core/immediate.cpp src/Core/decode.cpp src/Core/moves.cpp
+  src/Core/transfers.cpp src/Core/registers.cpp src/Core/agu.cpp src/Core/control.cpp
+  src/Jit/jit.cpp src/Jit/jit_helpers.cpp src/Jit/X64/jit_emitter.cpp src/Jit/X64/x64.cpp
+  src/Memory/memory_arena.cpp)
 add_library(dsp56300::core ALIAS dsp56300_core)
 target_include_directories(dsp56300_core PUBLIC include)
 target_link_libraries(dsp56300_core PUBLIC blofeld_quality)
-target_include_directories(dsp56300_core PRIVATE src)
+target_include_directories(dsp56300_core PRIVATE src/Core src/Jit src/Jit/X64)
 
 file(GLOB_RECURSE DSP56300_OWN_FILES CONFIGURE_DEPENDS
-  "${CMAKE_CURRENT_SOURCE_DIR}/Core/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/Core/*.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/test/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/test/*.hpp")

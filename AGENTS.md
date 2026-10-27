@@ -5,7 +5,7 @@
 - Preserve the complete user objective in doc/objective.txt and audit doc/coverage.txt against it.
 - Keep ~/Git/blofeld-emu and ~/Git/blofeld-src read-only. Do not copy board emulation here.
 - Implement the DSP independently. No dependency on dsp56kEmu in build, API, tests or runtime.
-- Use Core/core.cpp rather than Kernel/kernel.cpp for the emulator implementation.
+- Use src/Core/core.cpp rather than Kernel/kernel.cpp for the emulator implementation.
 - Original code is GPL-3.0-only; preserve dependency and reused-source notices.
 - Manufacturer programs, manual copies, source extracts and private analysis stay in ignored doc/local/ or build/.
 

@@ -17,3 +17,4 @@ Subsequent user clarifications (preserving the original objective above):
   commit verified increments locally; no publication destination is authorized.
 - The user subsequently explicitly requested commit and push again. The existing
   private Weichwolf/dsp56300 origin/main is the authorized destination.
+- Organize implementation files in concern-specific subdirectories under src/.
