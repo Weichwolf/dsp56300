@@ -39,3 +39,19 @@ Subsequent user clarifications (preserving the original objective above):
 - Include FFT as an additional benchmark, with fixed-point correctness and
   distinct emulator/native-algorithm measurements. Use its dependency structure
   to evaluate SIMD and multicore opportunities rather than assuming a gain.
+- Investigate hardware-isolated execution of translated x86 code using VMX/KVM.
+  The VM must remain transparent to consumers: ordinary DSP56300 headers and
+  CPU interfaces expose caller-owned shared memory, events and data-line/I/O
+  communication. Consumers must not manage a guest OS, vCPU, VM lifecycle or
+  transport protocol. Preserve the same observable CPU and communication contract
+  across execution backends. Hardware isolation remains unimplemented.
+- Use concepts where useful to establish a shared execution contract for a
+  direct JIT reference backend and a hardware VM backend. Share decoding and
+  translation; keep backend details behind the ordinary consumer API and retain
+  the independent-expectation tests and interpreter correctness reference.
+- Accepted backend design: separate translation/execution with a defined runtime
+  ABI; required isolation must fail explicitly if unavailable, never silently
+  fall back to unprotected execution. Hide eligible shared-memory allocation and
+  VM mapping in DSP interfaces, specifying ownership/concurrency. Concepts check
+  interfaces; shared semantic tests qualify behavior. Optimize native regions
+  and measure hardware isolation separately from translation speed.

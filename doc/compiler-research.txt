@@ -44,6 +44,43 @@ not a VM backend, automatic code recognizer or a claim to have transpiled the DS
 The DSP fixtures provide the complete architectural qualification needed for a
 future region compiler. See doc/fixtures.txt and doc/coverage.txt for exact scope.
 
+Hardware isolation experiment: translated native code could execute inside a
+minimal x86 KVM guest, without a guest OS. The consumer still includes the normal
+DSP56300 headers and uses caller-owned RAM, events and synchronous I/O contracts;
+VM creation, address mappings, execution and exits belong inside the library.
+Map eligible caller memory directly rather than copying each audio block. KVM
+memory slots require page alignment; arbitrary existing spans need a compatible
+allocation/mapping strategy or an explicit initialization failure when isolation
+is required. Provide ordinary DSP memory objects that hide eligible allocations
+and VM mappings. Never silently change
+alias relationships, fault boundaries, callback ordering or host write visibility.
+RAM instructions run inside the guest; external interactions can cause exits.
+Native helper code must either be available inside the guest or use a defined
+exit boundary, so wrapping the current host-pointer JIT is insufficient. DSP
+budgets, interrupts, fixed-point rules and code invalidation remain compiler/VM
+responsibilities. VMX availability alone proves neither access permission nor
+isolation correctness or speed. Benchmark exit overhead and complete execution
+before choosing a default backend. No KVM implementation or isolation claim yet.
+API reference: https://docs.kernel.org/virt/kvm/api.html
+
+Use a compile-time execution-backend concept for the direct JIT reference and
+hardware VM backend: bounded execution, invalidation, reset and explicit result
+state must obey one observable contract. Concepts check interface shape, not
+semantic equivalence or isolation; common architectural fixtures must prove the
+latter independently. Share decoding, transfer plans and native lowering rather
+than constructing a second DSP implementation. Keep the interpreter reference.
+Public backend selection can dispatch internally without exposing KVM objects.
+
+Accepted design constraints: separate translation from execution so the same
+native regions can run directly or inside KVM with a defined runtime ABI.
+Isolation is an explicit guarantee: never silently substitute the host-process
+JIT when protected execution was requested. Shared-memory ownership, page layout
+and allowed concurrent accesses must be specified without exposing VM internals
+to consumers. Prefer keeping translated code/data independent of arbitrary host
+pointers. Reduce crossings and retain registers across large native regions.
+Hardware isolation and speed must be qualified separately; KVM alone is not a
+performance optimization. The user accepted these constraints explicitly.
+
 Next implementation experiments should remove memory/move helper calls and
 instruction-by-instruction register/flag materialization on guarded RAM regions.
 Compare the current emitter against lifted region execution, then investigate
