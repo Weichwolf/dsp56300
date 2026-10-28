@@ -22,7 +22,7 @@ find_program(DSP56300_CLANG_FORMAT NAMES clang-format-19 REQUIRED)
 set(CMAKE_CXX_CLANG_TIDY "${DSP56300_CLANG_TIDY};--warnings-as-errors=*")
 
 add_library(dsp56300_core STATIC
-  src/core.cpp src/core/core_state.cpp src/core/arithmetic.cpp src/core/shifts.cpp
+  src/core.cpp src/core/core_state.cpp src/core/arithmetic.cpp src/core/saturation.cpp src/core/shifts.cpp
   src/core/conditional.cpp src/core/immediate.cpp src/core/integer.cpp src/core/decode.cpp src/core/moves.cpp
   src/core/transfers.cpp src/core/registers.cpp src/core/agu.cpp src/core/control.cpp src/core/exceptions.cpp
   src/core/bits.cpp src/core/bit_fields.cpp src/core/loops.cpp src/core/products.cpp src/core/iteration.cpp
@@ -219,6 +219,11 @@ if(BUILD_TESTING)
   target_link_libraries(dsp56300_generate_loops PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_flags test/generate_flags.cpp)
   target_link_libraries(dsp56300_generate_flags PRIVATE dsp56300_fixture_format)
+  add_executable(dsp56300_saturation_test test/saturation_test.cpp)
+  target_link_libraries(dsp56300_saturation_test PRIVATE dsp56300::core)
+  add_test(NAME saturation-boundaries COMMAND dsp56300_saturation_test)
+  add_executable(dsp56300_generate_saturation test/generate_saturation.cpp)
+  target_link_libraries(dsp56300_generate_saturation PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_integer test/generate_integer.cpp)
   target_link_libraries(dsp56300_generate_integer PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_address_calc test/generate_address_calc.cpp)
@@ -411,6 +416,13 @@ if(BUILD_TESTING)
     -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
   add_test(NAME native-dataflow-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/native-dataflow.d56")
+  add_test(NAME saturation-fixtures COMMAND dsp56300_fixture_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/saturation.d56")
+  add_test(NAME saturation-reproducibility COMMAND "${CMAKE_COMMAND}"
+    "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_saturation>"
+    "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/saturation-regenerated.d56"
+    "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/saturation.d56"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
   add_test(NAME loop-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/loops.d56")
   add_test(NAME flag-fixtures COMMAND dsp56300_fixture_test

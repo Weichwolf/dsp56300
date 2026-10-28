@@ -445,3 +445,15 @@ Independent RX tests check all defined arithmetic flags, full GPR results and
 memory canaries at immediate/width/displacement boundaries. See native-encoding.txt
 for the rejected alignment pilot, smaller page storage, measured cache effects,
 modest CPU gains and complete qualification limits. No public option/state change.
+
+
+Arithmetic saturation mode
+
+Qualified SM operations now have exact general execution, but native admission
+still excludes SR.SM. A mode change exits/rekeys a translated block; ordinary
+native regions can resume after SM clears. General SM helpers preserve raw
+carry/overflow, after-rounding saturation and canonical full state. Bypass forms
+retain their separate behavior. Same-PC and native/SM/native prefix tests assert
+actual native/helper counters, old parallel operands and callback/P-invalidation/
+fault publication. This adds semantic coverage, not native SM speed or complete
+numeric-mode support. See saturation.txt for implemented and rejected domains.

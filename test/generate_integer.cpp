@@ -4,6 +4,7 @@
 #include "dsp56300/core.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
+#include "saturation_model.hpp"
 #include "support.hpp"
 
 #include <array>
@@ -57,7 +58,9 @@ void model_unit(Registers &state, const UnitInput input) {
   auto &destination = input.destination_b ? state.b : state.a;
   const auto old = destination;
   const auto full = signed56(old) + (input.subtract ? -1 : 1);
-  destination = static_cast<std::uint64_t>(full) & accumulator_mask;
+  const auto saturated = saturation_model::apply(
+      static_cast<std::uint64_t>(full) & accumulator_mask, {.status = state.sr});
+  destination = saturated.value;
   const auto result = signed56(destination);
   const unsigned bits = fractional_bits + ((state.sr & mode_down) != 0 ? 1U : 0U) -
                         ((state.sr & mode_up) != 0 ? 1U : 0U);
@@ -68,7 +71,8 @@ void model_unit(Registers &state, const UnitInput input) {
   const auto divisor = static_cast<std::uint64_t>(boundary);
   if ((destination / divisor) % 2 == (destination / (divisor / 2)) % 2) { flags |= flag_u; }
   if (input.subtract ? old == 0 : old == accumulator_mask) { flags |= flag_c; }
-  if (full < -static_cast<std::int64_t>(sign56) || full >= static_cast<std::int64_t>(sign56)) {
+  if (saturated.limited || full < -static_cast<std::int64_t>(sign56) ||
+      full >= static_cast<std::int64_t>(sign56)) {
     flags |= flag_v | flag_l;
   }
   state.sr = (state.sr & ~changed) | flags;
@@ -228,8 +232,21 @@ void unit_cases(std::vector<BinaryCase> &cases) {
           unit({.value = sign56 - 1, .subtract = subtract, .destination_b = destination_b},
                repeat_zero));
       for (const Word mode : {0x2000U, 0x4000U, 0x20000U, saturation_mode, mode_up | mode_down}) {
-        cases.push_back(
-            rejected(opcode({.subtract = subtract, .destination_b = destination_b}), mode));
+        if (mode == saturation_mode) {
+          auto item =
+              rejected(opcode({.subtract = subtract, .destination_b = destination_b}), mode);
+          model_unit(item.expected, {.subtract = subtract, .destination_b = destination_b});
+          ++item.expected.pc;
+          item.fault = {};
+          item.dispatches = 1;
+          item.progress = {.instructions = 1, .estimated_cycles = 1};
+          item.interruptible = true;
+          item.name = "Qualified SM unit arithmetic on the former unsupported stimulus";
+          cases.push_back(std::move(item));
+        } else {
+          cases.push_back(
+              rejected(opcode({.subtract = subtract, .destination_b = destination_b}), mode));
+        }
       }
     }
   }

@@ -75,7 +75,7 @@ Product mixed_product(const Instruction &decoded, const Registers &state) {
 }
 
 void Core::Impl::execute_product(const Instruction &decoded) {
-  if (!numeric_mode_supported()) { return; }
+  if (!numeric_mode_supported(arithmetic_saturation)) { return; }
   const auto opcode = decoded.opcode;
   if (decoded.operation == Operation::product_power) {
     const unsigned power = (opcode >> 8) & five_bit_mask;
@@ -111,6 +111,9 @@ void Core::Impl::execute_product(const Instruction &decoded) {
   if (product.rounded) {
     round(destination);
     if (overflowed) { cpu.reg.sr |= overflow | limit; }
+  } else if ((cpu.reg.sr & arithmetic_saturation) != 0 &&
+             (ordinary || (decoded.operation == Operation::product_double && sign_mode == 0))) {
+    saturate_arithmetic(destination);
   }
 }
 } // namespace dsp56300

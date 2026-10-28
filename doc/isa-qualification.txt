@@ -315,3 +315,24 @@ mode/readback qualification. Full OnCE/JTAG, trace/breakpoints/security, pipelin
 latch/cache restoration, precise arbitration/timing, all REP/fast/loop interactions,
 physical reset defaults and remaining arithmetic modes remain mandatory work.
 Completion audit still deliberately fails; see doc/debugging.txt for sources.
+
+
+Arithmetic saturation increment: selected SM arithmetic and bypass domains now
+have a general implementation and independent raw-width/table-based witnesses.
+ADD/SUB/ADC/SBC, INC/DEC, signed MPY/MAC/R forms, immediate/power products,
+DMACss, RND/CLR/ABS/NEG and explicitly qualified transfer/unsigned bypasses are
+included. Pure parallel transfers, Tcc and conditional IFcc/IFcc.U have distinct
+flag/limiting witnesses. Other SM arithmetic, count/nonparallel transfers,
+SB/SA sixteen-bit arithmetic, SC/DM combinations and all remaining ISA/sequence/
+IRQ/pipeline obligations remain open. The manufacturer's notation uses both SA
+(SR bit 17) and SB (instruction mode-symbol table) for sixteen-bit arithmetic;
+these refer to the same outstanding numerical domain, not two implemented modes.
+
+New expectations come from raw56 coordinates and explicit three-bit saturation
+actions, with independent arithmetic/rounding models; the producer never links
+or runs the emulator. Existing unsupported-SM cases are promoted while preserving
+their input registers/program/data and every unrelated record. Native mode keys,
+old parallel inputs, alias order, I/O/P edits and failed requests have independent
+host boundary tests. Native lowering still rejects SM and uses exact general
+execution. See saturation.txt for precise domains, counts and qualification.
+No ISA catalogue row becomes complete merely because this mode domain is added.

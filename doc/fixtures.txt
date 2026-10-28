@@ -819,3 +819,29 @@ enums/processing states, RESET PCs exceeding 24 bits, invalid acceptance/debug b
 truncated files and trailing bytes are rejected. Files are trusted local
 test assets; the reader is not an untrusted network input service. A schema
 change, including enum numbering, requires a new format version.
+
+
+Arithmetic saturation
+
+The independently authored saturation.d56 archive contains 65536 deterministic
+cases with complete registers, flags, progress and P/X/Y expectations. Generate
+and compare without executing/linking the DSP implementation:
+
+  build/release/dsp56300_generate_saturation build/saturation.d56
+  cmp build/saturation.d56 test/fixtures/saturation.d56
+
+Raw three-bit saturation decisions, all extension bytes, CCR/round/scale modes,
+ordinary/immediate/power and mixed multiplication/DMAC, carry/overflow, transfer
+bypasses and conditional SM execution are included. Tcc samples every old CCR,
+all legal data sources/destinations and both directions of all sixteen conditions;
+this does not claim every condition/CCR/address combination. IFcc/IFcc.U cases
+separate stored saturation from conditional flag publication. Saturation_model
+uses raw numeric coordinates while production uses aligned internal registers.
+
+Exactly 77 old unsupported-SM cases across six archives now expect qualified
+execution, with identical initial registers and P/data inputs. All unrelated
+records remain byte-identical; 42 other old archives are wholly unchanged. This
+brings the total to 49 archives. Saturation.txt records exact promoted counts,
+mode/bypass scope, callback/alias/native boundary checks and remaining ISA gaps.
+These single-instruction cases qualify semantics, not continuous throughput.
+The continuous bench retains its unchanged FIR/IIR/spectral work packages.

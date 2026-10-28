@@ -11,10 +11,10 @@ namespace dsp56300 {
 using namespace detail;
 
 void Core::Impl::execute_immediate(const Instruction &decoded) {
-  if (!numeric_mode_supported()) { return; }
   const auto opcode = decoded.opcode;
   const Word input = decoded.words == 2 ? decoded.extension : (opcode >> 8) & six_bit_mask;
   const auto kind = opcode & 7;
+  if (!numeric_mode_supported(kind == 0 || kind == 4 ? arithmetic_saturation : 0)) { return; }
   const bool destination_b = (opcode & 8U) != 0;
   auto &destination = destination_b ? cpu.reg.b : cpu.reg.a;
   if (kind == 0 || kind == 4 || kind == 5) {

@@ -2,6 +2,7 @@
 #include "dsp56300/core.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
+#include "saturation_model.hpp"
 #include "support.hpp"
 
 #include <array>
@@ -220,6 +221,16 @@ void invalid_modes(const Options options) {
     initial.sr |= mode;
     machine.core.set_registers(initial);
     const auto result = machine.core.run(1);
+    if (mode == saturation_model::mode) {
+      auto expected = initial;
+      saturation_model::alu(expected, initial, mac_a);
+      ++expected.pc;
+      require(result.dispatches == 1 && result.fault.kind == FaultKind::none &&
+                  result.progress == Progress{.instructions = 2, .estimated_cycles = 2} &&
+                  machine.core.registers() == expected,
+              "Changed SM loop context executes qualified general MAC semantics exactly");
+      continue;
+    }
     require(result.dispatches == 0 && result.progress.instructions == 1 &&
                 result.fault.kind == FaultKind::unsupported_mode,
             "No compressed-key collision can reuse valid native code for an unsupported mode");

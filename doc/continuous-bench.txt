@@ -473,3 +473,44 @@ required instrumentation and all 168 C++ files pass format/tidy/Werror. ISA
 structural audit passes; complete-ISA remains red with 118 partial rows. Full
 objective, usual domains, adaptive placement, SIMD/multicore, latency and energy
 remain active work. Native-encoding.txt records the proof and counter ranges.
+
+
+Arithmetic saturation semantic increment: ordinary regression qualification
+
+SM arithmetic/bypass support is added to the general implementation, without
+changing the three continuous ordinary-mode programs. New SM correctness
+fixtures are single-instruction semantic probes and are not throughput evidence.
+SM native lowering and continuous capacity remain unqualified.
+
+The first implementation retains measured ordinary CPU regressions: FIR 2.47%,
+spectral 1.20%, IIR effectively unchanged. Saturation calls and classification
+are then guarded so clear SM stays on the original ordinary helpers. Both
+captures and exact binaries remain recorded; no failed/regressing result is
+replaced by a statistical average or hidden exclusion.
+
+Final matched parent/candidate/candidate/parent captures use CPU2, one natural
+warmup second then one measured input second, without restoration/replay or
+subtracted overhead. No build/test/format task from this repo overlaps. Other
+host conditions remain uncontrolled; all independent states pass.
+
+Scenario   Parent CPU s         Final CPU s          Mean CPU change
+FIR        0.234212..0.234667    0.230963..0.231807   1.30% lower
+IIR        0.607399..0.609581    0.607523..0.609082   effectively same, 0.03% lower
+spectral   0.781102..0.781246    0.782131..0.783010   0.18% higher, retained
+
+All matched/default package and block deadlines pass. The independent default
+bench records FIR 0.231788 wall / 0.231799 CPU s (1174.17 MIPS), IIR
+0.608268 / 0.608229 s (451.14 MIPS), spectral 0.781203 / 0.781243 s
+(328.60 MIPS). Zero late blocks; maxima 0.340 / 0.883 / 7.984 ms. All guest/native/
+general/move/batch/AVX2 counts and page bytes stay unchanged. There is no new
+DSP SIMD, worker or energy claim, nor indefinite hard-realtime qualification.
+
+All 121 tests pass in release/strict (104.56 / 234.69 s), zero skips, with all
+18 complete ordinary-stream/backend states and strict report-only checks. A new
+65536-case saturation archive adds 1835009 independent fixture assertions and
+host boundaries add 9774 checks per build. Exactly 77 obsolete SM failures are
+promoted across six archives with unchanged stimuli and unrelated records;
+42 other old archives stay byte-identical. All 49 archives regenerate; all 133
+strict units retain required instrumentation, all 173 C++ files pass formatting/
+tidy/Werror. Complete-ISA remains red with 118 partial rows. See saturation.txt
+for exact admission, after-rounding/bypass semantics and remaining objective.

@@ -101,6 +101,7 @@ void Core::Impl::round(std::uint64_t &value) {
   const bool overflowed = signed_overflow(value, bias, added);
   value = added & ~((std::uint64_t{1} << cleared) - 1);
   arithmetic_flags(value, overflowed);
+  if ((cpu.reg.sr & arithmetic_saturation) != 0) { saturate_arithmetic(value, true); }
 }
 
 std::uint64_t Core::Impl::source(const unsigned selector, const bool destination_b) const {
@@ -145,6 +146,8 @@ void Core::Impl::multiply(const Word opcode) {
   if ((opcode & 1U) != 0) {
     round(destination);
     if (overflowed) { cpu.reg.sr |= overflow | limit; }
+  } else {
+    if ((cpu.reg.sr & arithmetic_saturation) != 0) { saturate_arithmetic(destination); }
   }
 }
 
@@ -197,10 +200,12 @@ bool Core::Impl::unary(const Word opcode) {
     case op_abs:
       destination = magnitude(before);
       arithmetic_flags(destination, before == (std::uint64_t{1} << host_sign_bit));
+      if ((cpu.reg.sr & arithmetic_saturation) != 0) { saturate_arithmetic(destination); }
       return true;
     case op_negate:
       destination = wrapped_sub(0, before);
       arithmetic_flags(destination, before == (std::uint64_t{1} << host_sign_bit));
+      if ((cpu.reg.sr & arithmetic_saturation) != 0) { saturate_arithmetic(destination); }
       return true;
     case op_asr:
     case op_asl:
@@ -237,14 +242,15 @@ void Core::Impl::add_operands(const AddOperands input) {
   const auto operand = input.right;
   const auto intermediate =
       input.subtract ? wrapped_sub(before, operand) : wrapped_add(before, operand);
-  const auto result = input.subtract ? wrapped_sub(intermediate, input.carry_in)
-                                     : wrapped_add(intermediate, input.carry_in);
+  auto result = input.subtract ? wrapped_sub(intermediate, input.carry_in)
+                               : wrapped_add(intermediate, input.carry_in);
   const bool overflowed = input.subtract
                               ? ((before ^ operand) & (before ^ result)) >> host_sign_bit != 0
                               : signed_overflow(before, operand, result);
   const bool carried = input.subtract ? (before < operand || intermediate < input.carry_in)
                                       : (intermediate < before || result < intermediate);
   arithmetic_flags(result, input.shift_overflow || overflowed);
+  if ((cpu.reg.sr & arithmetic_saturation) != 0) { saturate_arithmetic(result); }
   cpu.reg.sr = (cpu.reg.sr & ~carry) | (carried ? carry : 0);
   if (!input.compare) { (input.destination_b ? cpu.reg.b : cpu.reg.a) = result; }
 }

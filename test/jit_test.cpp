@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "dsp56300/core.hpp"
+#include "saturation_model.hpp"
 #include "support.hpp"
 
 #include <array>
@@ -152,6 +153,21 @@ void unsupported_sum_modes() {
       state.sr = mode;
       machine.core.set_registers(state);
       const auto result = machine.core.run(1);
+      constexpr Word cmp_immediate = 0x014085;
+      if (mode == saturation_model::mode && opcode != cmp_immediate) {
+        auto expected = state;
+        auto old = state;
+        const bool immediate = opcode < parallel_none;
+        if (immediate) { old.x = 0; }
+        saturation_model::alu(expected, old, immediate ? 0x40U : opcode);
+        ++expected.pc;
+        require(result.dispatches == 1 && result.fault.kind == FaultKind::none &&
+                    result.progress == Progress{.instructions = 1, .estimated_cycles = 1} &&
+                    machine.core.registers() == expected &&
+                    machine.core.jit_statistics().native_alu_instructions == 0,
+                "SM sums now execute exact general semantics without ordinary native reuse");
+        continue;
+      }
       require(result.dispatches == 0 && result.progress == Progress{} &&
                   result.fault.kind == FaultKind::unsupported_mode && result.fault.pc == start &&
                   machine.core.jit_statistics().native_alu_instructions == 0,

@@ -193,6 +193,20 @@ void mode_guards() {
       machine.core.write(Space::program, start, opcode);
       machine.core.set_registers(register_model::seed(mode));
       const auto result = machine.core.run(1);
+      constexpr Word saturation = Word{1} << 20;
+      if (mode == saturation && opcode == move_a_x0) {
+        auto expected = register_model::seed(mode);
+        const auto value = register_model::read(expected, 14);
+        register_model::write(expected, 4, value);
+        ++expected.pc;
+        require(result.dispatches == 1 && result.fault.kind == FaultKind::none &&
+                    result.progress == Progress{.instructions = 1, .estimated_cycles = 1} &&
+                    machine.core.registers() == expected &&
+                    machine.core.jit_statistics().native_alu_instructions == 0 &&
+                    machine.core.jit_statistics().helper_instructions == 1,
+                "Qualified SM MOVE keeps exact transfer flags through the general fallback");
+        continue;
+      }
       require(result.dispatches == 0 && result.progress == Progress{} &&
                   result.fault.kind == FaultKind::unsupported_mode &&
                   machine.core.jit_statistics().native_alu_instructions == 0,

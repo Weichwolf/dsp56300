@@ -10,7 +10,7 @@ namespace dsp56300 {
 using namespace detail;
 
 void Core::Impl::execute_unit(const Instruction &decoded) {
-  if (!numeric_mode_supported()) { return; }
+  if (!numeric_mode_supported(arithmetic_saturation)) { return; }
   const bool destination_b = (decoded.opcode & 1U) != 0;
   add_operands({.left = destination_b ? cpu.reg.b : cpu.reg.a,
                 .right = std::uint64_t{1} << padding_bits,

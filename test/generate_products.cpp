@@ -4,6 +4,7 @@
 #include "dsp56300/core.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
+#include "saturation_model.hpp"
 #include "support.hpp"
 
 #include <array>
@@ -182,6 +183,14 @@ void model(Registers &state, const Input input) {
     if (round_overflow) { ++witnessed.round_overflow; }
     overflowed = overflowed || round_overflow;
     raw = static_cast<std::uint64_t>(full) & accumulator_mask;
+  }
+  const bool saturates = input.family == Family::immediate || input.family == Family::power ||
+                         (input.family == Family::double_product && input.signs == Signs::ss);
+  if (saturates) {
+    const auto limited =
+        saturation_model::apply(raw, {.status = state.sr, .rounded = input.rounded});
+    raw = limited.value;
+    overflowed = overflowed || limited.limited;
   }
   destination = raw;
   state.sr = (state.sr & ~status_changes) | result_flags({.raw = raw, .status = state.sr}) |
@@ -479,7 +488,17 @@ BinaryCase rejected(const Input input, const FaultKind kind, const Word value) {
 void faults(Cases &cases, Input input) {
   for (const Word mode : {0x2000U, 0x4000U, 0x20000U, 0x100000U, mode_down | mode_up}) {
     input.status = mode;
-    cases.push_back(rejected(input, FaultKind::unsupported_mode, mode));
+    auto item = rejected(input, FaultKind::unsupported_mode, mode);
+    if (mode == saturation_model::mode) {
+      model(item.expected, input);
+      item.expected.pc += static_cast<Word>(item.before.front().words.size());
+      item.fault = {};
+      item.dispatches = 1;
+      item.progress = {.instructions = 1, .estimated_cycles = item.before.front().words.size()};
+      item.interruptible = true;
+      item.name = "Qualified SM product/bypass on the former unsupported stimulus";
+    }
+    cases.push_back(std::move(item));
   }
 }
 

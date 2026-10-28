@@ -5,6 +5,7 @@
 #include "move_model.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
+#include "saturation_model.hpp"
 #include "selection_model.hpp"
 #include "support.hpp"
 
@@ -406,6 +407,10 @@ void interactions(Cases &cases, const std::span<const Form> forms) {
 void unsupported_modes(Cases &cases, const std::span<const Form> forms) {
   for (const auto form : forms) {
     for (const Word mode : {0x2000U, 0x4000U, 0x20000U, 0x100000U, mode_up | mode_down}) {
+      if (mode == saturation_model::mode) {
+        cases.push_back(single(form, {.status = mode}));
+        continue;
+      }
       auto item = single(form);
       item.initial.sr = mode;
       item.expected = item.initial;

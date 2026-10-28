@@ -61,7 +61,10 @@ void Core::Impl::parallel(const Instruction &decoded) {
     conditional_alu(decoded.opcode);
     return;
   }
-  if (!numeric_mode_supported()) { return; }
+  const bool supported = (cpu.reg.sr & arithmetic_saturation) != 0
+                             ? numeric_alu_supported(decoded.opcode & byte_mask)
+                             : numeric_mode_supported();
+  if (!supported) { return; }
   if ((decoded.opcode & byte_mask) == 0) {
     moves(decoded);
     return;

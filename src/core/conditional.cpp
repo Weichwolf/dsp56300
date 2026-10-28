@@ -93,7 +93,7 @@ void Core::Impl::conditional_transfer(const Word opcode) {
   constexpr Word address_only_bit = Word{1} << 11;
   constexpr Word dual_bit = Word{1} << 16;
   if ((opcode & address_only_bit) == 0) {
-    if (!numeric_mode_supported()) { return; }
+    if (!numeric_mode_supported(arithmetic_saturation)) { return; }
     const unsigned selector = (opcode >> 4) & 7;
     if (selector != 0 && selector < 4) {
       fail(FaultKind::invalid_instruction, Space::program, current_pc, opcode);
@@ -109,7 +109,10 @@ void Core::Impl::conditional_transfer(const Word opcode) {
 }
 
 void Core::Impl::conditional_alu(const Word opcode) {
-  if (!numeric_mode_supported()) { return; }
+  const bool supported = (cpu.reg.sr & arithmetic_saturation) != 0
+                             ? numeric_alu_supported(opcode & byte_mask)
+                             : numeric_mode_supported();
+  if (!supported) { return; }
   const auto status = cpu.reg.sr;
   if (!condition({.status = status, .selector = (opcode >> 8) & 15})) { return; }
   latched = {cpu.reg.a, cpu.reg.b, cpu.reg.x, cpu.reg.y};

@@ -97,23 +97,26 @@ and old parallel operands without memory/I/O observation barriers. All 6758417
 directed ASR/register assertions pass; no ISA catalogue row becomes complete.
 See doc/native-shifts.txt for guards, witnesses, measurements and remaining work.
 
-The current configuration passes all 118 correctness tests in release (124.43 s,
-two CTest processes) and strict ASan/UBSan (238.91 s, three processes), with no
-skips. All 130 C++ translation units retain the required strict nonrecovering
-address/undefined/integer instrumentation; all 168 project C++ source/header
-files pass clang-format. All 48 pre-existing archives remain byte-identical,
-including the 112-case FFT archive. All registered regeneration checks pass.
+The current configuration passes all 121 correctness tests in release (104.56 s,
+two CTest processes) and strict ASan/UBSan (234.69 s, three processes), with no
+skips. All 133 C++ translation units retain the required strict nonrecovering
+address/undefined/integer instrumentation; all 173 project C++ source/header
+files pass clang-format. Of 48 old archives, 42 remain byte-identical. Exactly
+77 obsolete unsupported-SM
+records are promoted in six archives, with identical inputs and every unrelated
+record byte-identical. A new 65536-case archive brings the total to 49. The
+112-case FFT archive is unchanged. All registered regeneration checks pass.
 No fuzzing was run.
 The structural ISA audit passes; full ISA qualification still fails as intended.
 Full two-second FIR, IIR and spectral cases pass independent complete-state
 checks in all six release variants. The instrumented production bench passes
 all three correctness/report-only cases. Loaded-host comparisons qualify state,
 not release speed. The optimized default bench passes all three one-second
-packages: FIR 0.234156 s, IIR 0.606443 s, spectral 0.778913 s. All final states
-match, with zero late blocks in that capture and the matched encoding comparison.
+packages: FIR 0.231788 s, IIR 0.608268 s, spectral 0.781203 s. All final states
+match, with zero late blocks in that capture and the matched ordinary regression comparison.
 Earlier late captures remain recorded; sustained latency/reserve and wider
 scenario qualification remain open.
-These performance gates are separate from the 118 correctness tests. Retain the
+These performance gates are separate from the 121 correctness tests. Retain the
 individual captures and host-condition limits in continuous-bench.txt.
 The expanded native-move boundary test passes all 78446 assertions in both builds.
 It includes exact same-code reuse after modifier changes and paired aliased X/Y
@@ -408,3 +411,38 @@ See native-encoding.txt for proof, exact performance/counter ranges and limits.
 Complete ISA, other usual domains, adaptive runtime register allocation, further
 host CPU/cache reduction, SIMD/multicore, integration, latency and energy remain
 part of the unchanged active objective.
+
+
+Arithmetic saturation qualification
+
+Selected SM arithmetic now uses the published three-bit, after-rounding rule
+in general execution. Ordinary ADD/SUB/ADC/SBC, INC/DEC, signed MPY/MAC/R,
+immediate/power and signed DMAC, RND/CLR/ABS/NEG, transfer bypasses and mixed
+unsigned bypasses have independent raw-width/flag witnesses. IFcc/IFcc.U separate
+conditional stored values and flag publication; Tcc preserves unscaled operands.
+Other SM operations and control/count/nonparallel transfers, SB/SA/SC/DM
+combinations, native SM lowering, pipeline/IRQ interactions and complete modes
+remain open. No ISA row becomes complete.
+
+The new 65536-case archive checks all extension bytes, representative all-CCR
+arithmetic, six scaling/RM choices, every ordinary signed multiplication code,
+all positive powers 1..23, immediate/mixed aliases and bypasses. It passes
+1835009 assertions through three backends. A separate 9774-check host test
+qualifies actual native/general/native transitions, exact prefixes/progress,
+old operands, X/Y aliases, MOVE V/L, I/O/P edits, partial failures and explicit
+unqualified modes. Expectations are independent, not emulator-generated.
+
+Two initial obsolete SM rejection expectations were corrected without dropping
+their stimuli: 77 records across six binary archives, plus native-shift MOVE's
+host expectation. All unrelated binary records are byte-identical, as are 42
+whole archives. The final 121-test sweeps, all eighteen ordinary-stream/backend
+states, strict report-only checks and reproducibility pass. See saturation.txt.
+
+Initial ordinary FIR/FFT CPU regressions (2.47% / 1.20%) are retained. Skipping
+unused SM helper calls yields matched FIR 1.30% less CPU, IIR unchanged and
+spectral 0.18% more CPU; the small remaining regression is retained. Every final
+matched/default package/block deadline passes in these captures, with unchanged
+native/general/move/batch/AVX2 counts and page storage. These qualify ordinary
+regression behavior, not SM continuous capacity or generic all-program 275 MIPS.
+Full objective, other numerical/application domains, further speed/cache/load,
+adaptive allocation, SIMD/multicore, integration, latency and energy remain open.
