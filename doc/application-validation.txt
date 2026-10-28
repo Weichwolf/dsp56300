@@ -24,9 +24,10 @@ These are general algorithm tests, not claims to emulate complete codecs,
 medical equipment, radio peripherals or a complete video-processing device.
 The independent DSP FFT, FIR dot-product and ISA/AGU/control fixtures already
 exist. The remaining application programs above are a planned expansion, not
-completed coverage. FIR varies 4/16/64/512 taps, four signals, four coefficient
-families, six scaling/rounding modes and two incoming sticky/Carry states. Its
-768 cases validate full registers, frame remnants, progress and output memory,
+completed coverage. FIR varies 4/16/64/512 and holdout 5/7/15/63/129 taps, four
+signals, four coefficient families, six scaling/rounding modes and two incoming
+sticky/Carry states. Its 1728 cases validate full registers, frame remnants,
+progress and output memory,
 with an independent algebraic dot-product check as well as instruction models.
 
 Systematic variation, with deterministic declared domains

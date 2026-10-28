@@ -27,7 +27,7 @@ using x64::Width;
 constexpr auto pc_offset = offsetof(Cpu, reg) + offsetof(Registers, pc);
 constexpr std::array register_offsets{
     offsetof(Registers, a), offsetof(Registers, b), offsetof(Registers, x), offsetof(Registers, y)};
-constexpr unsigned op_add = 0x01, op_sub = 0x29, op_or = 0x09, op_xor = 0x31;
+constexpr unsigned op_add = 0x01, op_sub = 0x29, op_or = 0x09, op_xor = 0x31, op_cmp = 0x39;
 constexpr unsigned group_and = 4, group_cmp = 7;
 constexpr unsigned shift_left = 4, shift_right = 5, shift_arithmetic = 7;
 constexpr unsigned condition_overflow = 0x90;
@@ -61,8 +61,8 @@ static_assert(std::is_standard_layout_v<Cpu> && std::is_standard_layout_v<Native
 static_assert(offsetof(Cpu, interrupt_inhibited) == offsetof(Cpu, repeat_completed) + 1);
 }
 
-JitEmitter::JitEmitter(const JitRuntime runtime, const bool optimize)
-    : runtime_(runtime), optimize_(optimize) {}
+JitEmitter::JitEmitter(const JitRuntime runtime, const bool optimize, const BatchBackend batch)
+    : runtime_(runtime), optimize_(optimize), batch_backend_(batch) {}
 
 bool JitEmitter::has_moves(const NativeOp &operation) {
   return operation.instruction.operation == Operation::parallel &&
@@ -328,6 +328,7 @@ std::vector<std::uint8_t> JitEmitter::generate(const std::span<const NativeOp> o
   code_.mov({.destination = Reg::r12, .source = Reg::di});
   code_.mov({.destination = Reg::r13, .source = Reg::si});
   code_.binary(op_xor, {.destination = Reg::r15, .source = Reg::r15}, Width::dword);
+  batch_entry(operations);
   if (cached_status_) {
     initialize_status();
   } else if (!cached_inputs_) {
@@ -335,6 +336,11 @@ std::vector<std::uint8_t> JitEmitter::generate(const std::span<const NativeOp> o
         Reg::r14, Reg::r13, offsetof(NativeContext, runtime) + offsetof(JitRuntime, latched));
   }
   initialize_retirement();
+  if (mac_batches_) {
+    code_.load(Reg::ax, Reg::r13, offsetof(NativeContext, budget), Width::dword);
+    code_.binary(op_cmp, {.destination = Reg::r15, .source = Reg::ax}, Width::dword);
+    exit_if(Branch::equal);
+  }
   code_.bind(loop_header_);
   const auto flags = plan_flags(operations);
   for (std::size_t operation_index = 0; operation_index < operations.size(); ++operation_index) {

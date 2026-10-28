@@ -29,7 +29,8 @@ For the build target, configuration options select sets/cases/backends:
 
   DSP56300_BENCH_FILTER    fixture-name regex; empty means every fixture set
   DSP56300_BENCH_CASES     sample (default), all, or one zero-based numeric index
-  DSP56300_BENCH_BACKEND   jit (default), cached, reference, or all
+  DSP56300_BENCH_BACKEND   jit (default), jit-unbatched, jit-scalar, jit-avx2,
+                          cached, reference, or all
   DSP56300_BENCH_REPLAYS   auto (default), or [1,1048576] calls per trial
 
 Use -DNAME=value when configuring. For example, CASES=all and FILTER=^fir$
@@ -37,6 +38,11 @@ executes every eligible FIR case; a numeric CASES value selects that index in
 each chosen archive. Unknown indices/backends/invalid counts fail explicitly.
 The target runs serially. Use an external CPU-affinity tool when making a
 controlled comparison; no fixed CPU number or clock policy is imposed here.
+Backend=all instantiates all six variants in the same executable/build. The
+four JIT variants isolate compiled MAC batching while retaining other native
+optimizations. Reports include successful batch calls, guest instructions
+processed in compiled batches and the subset processed by the AVX2 kernel.
+The requested variant name is not a claim that a particular host has AVX2.
 
 Metrics and scope
 

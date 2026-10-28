@@ -18,6 +18,7 @@ inline constexpr std::size_t stack_entries = 16;
 
 enum class Space : std::uint8_t { program, x, y };
 enum class Backend : std::uint8_t { cached, reference, jit };
+enum class BatchBackend : std::uint8_t { automatic, disabled, scalar, avx2 };
 enum class ProcessingState : std::uint8_t { running, waiting, stopped, debugging };
 
 // Qualified IME/SWO view, not a complete OnCE register or JTAG implementation.
@@ -87,14 +88,18 @@ struct Options {
   Word cacheable_begin = address_words, cacheable_end = address_words;
   // Eight sectors, each 128 (1K total) or 256 (2K total) DSP words.
   unsigned cache_sector_words = 128;
+  // Guarded native MAC-loop batches. Unavailable AVX2 uses the scalar kernel.
+  BatchBackend batch_backend = BatchBackend::automatic;
 };
 
 struct JitStatistics {
   std::uint64_t compiled_blocks = 0, native_alu_instructions = 0, helper_instructions = 0;
-  // Successful instructions whose complete parallel transfer ran in emitted code.
+  // Successful transfers completed by native lowering or a compiled batch.
   // This overlaps native_alu_instructions, which also includes move-only retirement.
   std::uint64_t native_move_instructions = 0;
   std::uint64_t executable_bytes = 0, invalidations = 0;
+  // Compiled bulk execution, included in native_alu_instructions/native moves.
+  std::uint64_t batch_instructions = 0, avx2_instructions = 0, batch_calls = 0;
 };
 
 // No derivative peripherals are implemented by this CPU library. False means a

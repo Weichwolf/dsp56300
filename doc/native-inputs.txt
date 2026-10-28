@@ -1,3 +1,5 @@
+Historical increment: revision 728c4eb. Current qualification: coverage.txt.
+
 Native parallel-input snapshots
 
 Implementation and state mapping
@@ -46,7 +48,8 @@ six numeric modes, helper clobbers, rejection and P invalidation across backends
 Existing retirement observers additionally clobber XMM0..6. Independent ASR,
 register/memory transfer, status, dataflow, loop, FIR and FFT tests retain their
 full original expectations. All 41 binary fixture archives are unchanged.
-All 99 release and sanitizer correctness tests pass, with no skips. All 106 C++
+Historical qualification at revision 728c4eb: all 99 release and sanitizer
+correctness tests pass, with no skips. All 106 C++
 translation units retain strict instrumentation and all 141 source/header files
 pass formatting. Warm benchmark sweeps pass for all 41 sets in both builds,
 with the same three explicit correctness-only skips. A complete FIR run checks

@@ -49,13 +49,14 @@ Benchmarks reuse the correctness fixtures, with a separate CTest tree:
 The default covers all fixture sets with up to eight uniformly selected eligible
 cases each. Set DSP56300_BENCH_CASES=all or a numeric index for complete/targeted
 case selection, DSP56300_BENCH_FILTER for the target's fixture-name regex,
-DSP56300_BENCH_BACKEND for jit/cached/reference/all and DSP56300_BENCH_REPLAYS
-for auto or a fixed trial count. See doc/bench.txt for metrics and exclusions.
+DSP56300_BENCH_BACKEND for jit/jit-unbatched/jit-scalar/jit-avx2/cached/reference/all
+and DSP56300_BENCH_REPLAYS for auto or a fixed trial count. See doc/bench.txt for metrics and exclusions.
 
 CoreImplementation and typed BackendCore<Backend::...> adapters allow generic
 consumers and the same fixture runner to compare reference/cached/JIT in one
 build. Host SIMD lane and vector widths are separate constrained parameters;
 see doc/backend-contracts.txt for API examples, supported operations and limits.
+Guarded MAC-loop scalar/AVX2 batching is described in doc/mac-batching.txt.
 
 Integration: link dsp56300::core and include <dsp56300/core.hpp>. Provide mutable
 P/X/Y spans and an optional Io implementation. DSP data words occupy uint32_t

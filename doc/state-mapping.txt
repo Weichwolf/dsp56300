@@ -51,7 +51,7 @@ unqualified or unimplemented; this inventory does not close those ISA gaps.
 
 Current Clang 19 x64 sizes/offsets (measured, not a cache-miss result)
 
-Registers=296 bytes; alignas(64) Cpu=384; NativeContext=104.
+Registers=296 bytes; alignas(64) Cpu=384; NativeContext=128 after bulk diagnostics.
 Each row below is one 64-byte Cpu cacheline:
 
 Line  Byte range  Contents
@@ -117,6 +117,17 @@ and any specialized modifier assumptions. Keep cold compile cost separate from
 warm execution. Publish replacements only at a safe owner boundary; never free
 currently executing code. Cross-region links need explicit mapping adapters.
 The current JIT has mode/loop keys and guards, but no adaptive allocator yet.
+
+Implemented MAC-region representation
+
+The guarded pure-MAC batch uses a different working representation from ordinary
+native instructions. It converts aligned canonical A/B into one signed56 value
+in signed64 storage, keeps X0/Y0 as separate host words and forms four signed64
+products in the AVX2 implementation. Local working state and stream descriptors
+remain unaliased; canonical state updates only after the validated run completes.
+The compiler can keep those locals in host registers across chunks. This is a
+specific guarded region lowering, not a general adaptive register allocator.
+See mac-batching.txt for prefix flags, safe-range proof, budgets and boundaries.
 
 First useful allocation experiments
 

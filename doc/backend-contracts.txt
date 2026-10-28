@@ -13,6 +13,19 @@ at construction. The type's backend wins over Options.backend; other options
 are preserved. These adapters do not introduce three independent ISA models:
 reference and cached execution still share their instruction executor.
 
+The optional second BackendCore parameter selects a compiled batch policy:
+
+  BackendCore<Backend::jit, BatchBackend::disabled>
+  BackendCore<Backend::jit, BatchBackend::scalar>
+  BackendCore<Backend::jit, BatchBackend::avx2>
+
+An explicit non-automatic type policy overrides Options.batch_backend. The
+default preserves that option. These variants share the ordinary JIT and its
+fallback; they compare disabled, scalar and host-guarded AVX2 MAC-loop batching.
+Unavailable AVX2 uses scalar and reports zero AVX2-processed guest instructions.
+Batch counters report compiled bulk work, included in native retirement/moves;
+they do not count host SIMD opcodes. See mac-batching.txt for precise admission.
+
 A generic consumer can use:
 
   #include <dsp56300/backend.hpp>

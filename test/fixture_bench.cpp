@@ -33,6 +33,20 @@ constexpr double mips_time_scale = 1000;
 constexpr unsigned target_instructions_per_trial = 100000;
 constexpr std::size_t sample_cases = 8;
 
+struct BenchBackend {
+  Backend kind;
+  BatchBackend batch;
+  std::string_view name;
+};
+
+constexpr std::array engines{
+    BenchBackend{.kind = Backend::reference, .batch = BatchBackend::automatic, .name = "reference"},
+    BenchBackend{.kind = Backend::cached, .batch = BatchBackend::automatic, .name = "cached"},
+    BenchBackend{.kind = Backend::jit, .batch = BatchBackend::automatic, .name = "jit"},
+    BenchBackend{.kind = Backend::jit, .batch = BatchBackend::scalar, .name = "jit-scalar"},
+    BenchBackend{.kind = Backend::jit, .batch = BatchBackend::avx2, .name = "jit-avx2"},
+    BenchBackend{.kind = Backend::jit, .batch = BatchBackend::disabled, .name = "jit-unbatched"}};
+
 double elapsed(const Clock::time_point begin, const Clock::time_point end) {
   return std::chrono::duration<double, std::nano>(end - begin).count();
 }
@@ -139,8 +153,8 @@ private:
 };
 
 template <CoreImplementation Implementation>
-bool benchmark(const BinaryCase &item, const Backend backend, const unsigned replays) {
-  Replay<Implementation> replay(item, backend);
+bool benchmark(const BinaryCase &item, const BenchBackend backend, const unsigned replays) {
+  Replay<Implementation> replay(item, backend.kind);
   replay.prepare();
   const auto cold_begin = Clock::now();
   replay.execute();
@@ -171,7 +185,7 @@ bool benchmark(const BinaryCase &item, const Backend backend, const unsigned rep
   std::ranges::sort(preparation);
   std::ranges::sort(cpu);
   constexpr auto middle = trial_count / 2;
-  std::cout << backend_name(backend) << ": median execution " << execution[middle] << " ns/call ("
+  std::cout << backend.name << ": median execution " << execution[middle] << " ns/call ("
             << execution[middle] / static_cast<double>(item.progress.instructions)
             << " ns/instruction), trial range " << execution.front() << ".." << execution.back()
             << "; host preparation " << preparation[middle] << " ns/call\n";
@@ -183,33 +197,50 @@ bool benchmark(const BinaryCase &item, const Backend backend, const unsigned rep
             << " ns (includes any first-use compilation); replays/trial: " << replays << '\n';
   require(replay.statistics().compiled_blocks == warmed.compiled_blocks,
           "Warm measurements cannot silently include JIT recompilation");
-  if (backend == Backend::jit) {
+  if (backend.kind == Backend::jit) {
     const auto statistics = replay.statistics();
     const auto calls = static_cast<double>(trial_count) * replays;
-    std::cout << "  native ALU/retirement per call: "
-              << static_cast<double>(statistics.native_alu_instructions -
-                                     warmed.native_alu_instructions) /
-                     calls
-              << ", full helpers: "
-              << static_cast<double>(statistics.helper_instructions - warmed.helper_instructions) /
-                     calls
-              << ", native moves: "
-              << static_cast<double>(statistics.native_move_instructions -
-                                     warmed.native_move_instructions) /
-                     calls
-              << ", compiled blocks: " << statistics.compiled_blocks
-              << ", executable bytes: " << statistics.executable_bytes << '\n';
+    std::cout
+        << "  native ALU/retirement per call: "
+        << static_cast<double>(statistics.native_alu_instructions -
+                               warmed.native_alu_instructions) /
+               calls
+        << ", full helpers: "
+        << static_cast<double>(statistics.helper_instructions - warmed.helper_instructions) / calls
+        << ", native moves: "
+        << static_cast<double>(statistics.native_move_instructions -
+                               warmed.native_move_instructions) /
+               calls
+        << ", compiled blocks: " << statistics.compiled_blocks
+        << ", executable bytes: " << statistics.executable_bytes << '\n'
+        << "  compiled batch instructions/call: "
+        << static_cast<double>(statistics.batch_instructions - warmed.batch_instructions) / calls
+        << ", AVX2: "
+        << static_cast<double>(statistics.avx2_instructions - warmed.avx2_instructions) / calls
+        << ", batch calls/call: "
+        << static_cast<double>(statistics.batch_calls - warmed.batch_calls) / calls << '\n';
   }
   return true;
 }
 
-bool benchmark_backend(const BinaryCase &item, const Backend backend, const unsigned replays) {
-  switch (backend) {
+bool benchmark_backend(const BinaryCase &item, const BenchBackend backend, const unsigned replays) {
+  switch (backend.kind) {
     case Backend::reference:
       return benchmark<BackendCore<Backend::reference>>(item, backend, replays);
     case Backend::cached: return benchmark<BackendCore<Backend::cached>>(item, backend, replays);
-    case Backend::jit: return benchmark<BackendCore<Backend::jit>>(item, backend, replays);
+    case Backend::jit: break;
     default: throw std::invalid_argument("Unknown benchmark backend");
+  }
+  switch (backend.batch) {
+    case BatchBackend::automatic:
+      return benchmark<BackendCore<Backend::jit>>(item, backend, replays);
+    case BatchBackend::scalar:
+      return benchmark<BackendCore<Backend::jit, BatchBackend::scalar>>(item, backend, replays);
+    case BatchBackend::avx2:
+      return benchmark<BackendCore<Backend::jit, BatchBackend::avx2>>(item, backend, replays);
+    case BatchBackend::disabled:
+      return benchmark<BackendCore<Backend::jit, BatchBackend::disabled>>(item, backend, replays);
+    default: throw std::invalid_argument("Unknown benchmark batch implementation");
   }
 }
 
@@ -222,12 +253,13 @@ std::size_t case_index(const std::string_view text) {
   return value;
 }
 
-std::optional<Backend> selected_backend(const std::string_view name) {
+std::optional<BenchBackend> selected_backend(const std::string_view name) {
   if (name == "all") { return std::nullopt; }
-  for (const auto backend : {Backend::reference, Backend::cached, Backend::jit}) {
-    if (name == backend_name(backend)) { return backend; }
+  for (const auto backend : engines) {
+    if (name == backend.name) { return backend; }
   }
-  throw std::invalid_argument("Invalid backend: use all, reference, cached or jit");
+  throw std::invalid_argument(
+      "Invalid backend: use all, reference, cached, jit, jit-scalar, jit-avx2 or jit-unbatched");
 }
 
 std::vector<std::size_t> select_cases(const std::vector<BinaryCase> &cases,
@@ -249,7 +281,7 @@ std::vector<std::size_t> select_cases(const std::vector<BinaryCase> &cases,
 
 bool run_cases(const std::vector<BinaryCase> &cases,
                const std::string_view selection,
-               const std::optional<Backend> selected,
+               const std::optional<BenchBackend> selected,
                const std::string_view replay_option) {
   const auto indices = select_cases(cases, selection);
   const auto eligible =
@@ -277,8 +309,8 @@ bool run_cases(const std::vector<BinaryCase> &cases,
       throw std::invalid_argument("Replays must be in [1,1048576]");
     }
     std::cout << "case " << index << ": " << item.name << '\n';
-    for (const auto backend : {Backend::reference, Backend::cached, Backend::jit}) {
-      if (selected.has_value() && *selected != backend) { continue; }
+    for (const auto backend : engines) {
+      if (selected.has_value() && selected->name != backend.name) { continue; }
       measured += benchmark_backend(item, backend, static_cast<unsigned>(replays)) ? 1U : 0U;
     }
   }

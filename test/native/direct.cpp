@@ -2,7 +2,7 @@
 #include "direct.hpp"
 
 #include "architecture.hpp"
-#include "jit_emitter.hpp"
+#include "jit.hpp"
 
 #include <cerrno>
 #include <cstddef>

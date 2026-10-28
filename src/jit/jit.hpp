@@ -36,6 +36,14 @@ struct JitRuntime {
   std::array<JitMemory, 2> memory;
 };
 
+struct NativeContext {
+  JitRuntime runtime;
+  bool *dirty = nullptr;
+  std::uint64_t *native_moves = nullptr;
+  std::uint64_t *batch_instructions = nullptr, *avx2_instructions = nullptr, *batch_calls = nullptr;
+  std::uint32_t budget = 0;
+};
+
 class Jit {
 public:
   Jit(Cpu &cpu, std::span<const Word> program, Options options, JitRuntime runtime);

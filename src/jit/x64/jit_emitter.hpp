@@ -13,16 +13,9 @@
 #include <vector>
 
 namespace dsp56300::detail {
-struct NativeContext {
-  JitRuntime runtime;
-  bool *dirty = nullptr;
-  std::uint64_t *native_moves = nullptr;
-  std::uint32_t budget = 0;
-};
-
 class JitEmitter {
 public:
-  JitEmitter(JitRuntime runtime, bool optimize);
+  JitEmitter(JitRuntime runtime, bool optimize, BatchBackend batch = BatchBackend::automatic);
   [[nodiscard]] std::vector<std::uint8_t> generate(std::span<const NativeOp> operations);
 
   [[nodiscard]] bool packed_retirement() const noexcept { return packed_retirement_; }
@@ -30,6 +23,8 @@ public:
   [[nodiscard]] bool cached_status() const noexcept { return cached_status_; }
 
   [[nodiscard]] bool cached_inputs() const noexcept { return cached_inputs_; }
+
+  [[nodiscard]] bool mac_batches() const noexcept { return mac_batches_; }
 
 private:
   [[nodiscard]] bool lowerable(const NativeOp &operation) const;
@@ -84,6 +79,7 @@ private:
   void loop_guard(const NativeOp &operation);
   void loop_continue();
   void loop_backedge();
+  void batch_entry(std::span<const NativeOp> operations);
   void retire(const NativeOp &operation, bool publish);
   x64::Code code_;
 
@@ -95,6 +91,8 @@ private:
   std::vector<RingGuard> ring_guards_;
   JitRuntime runtime_;
   bool optimize_;
+  BatchBackend batch_backend_;
+  bool mac_batches_ = false;
   bool packed_retirement_ = false;
   bool retirement_helpers_ = false;
   bool cached_status_ = false;

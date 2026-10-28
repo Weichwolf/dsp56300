@@ -45,8 +45,10 @@ concept CoreImplementation = std::constructible_from<Implementation, Buffers, Io
                                { core.clear_code_cache() } -> std::same_as<void>;
                              };
 
-template <Backend Kind>
-  requires(Kind == Backend::reference || Kind == Backend::cached || Kind == Backend::jit)
+template <Backend Kind, BatchBackend Batch = BatchBackend::automatic>
+  requires((Kind == Backend::reference || Kind == Backend::cached || Kind == Backend::jit) &&
+           (Batch == BatchBackend::automatic || Batch == BatchBackend::disabled ||
+            Batch == BatchBackend::scalar || Batch == BatchBackend::avx2))
 class BackendCore {
 public:
   static constexpr Backend backend = Kind;
@@ -103,6 +105,7 @@ public:
 private:
   static Options select(Options options) {
     options.backend = Kind;
+    if constexpr (Batch != BatchBackend::automatic) { options.batch_backend = Batch; }
     return options;
   }
 

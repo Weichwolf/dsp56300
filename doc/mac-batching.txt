@@ -1,0 +1,103 @@
+Guarded pipelined MAC batches
+
+Implementation experiment: a one-instruction hardware-loop region with ordinary
+unrounded signed MAC, paired X0/Y0 loads and linear unit postincrements. Admission
+uses decoded effects, not an application/program signature. The existing scalar
+native region and general executor remain the fallback. No board events are invented.
+
+Chunk step   MAC input pair                   Next X0/Y0
+0            initial data registers            RAM[Rx], RAM[Ry]
+1            RAM[Rx], RAM[Ry]                  RAM[Rx+1], RAM[Ry+1]
+2            RAM[Rx+1], RAM[Ry+1]              RAM[Rx+2], RAM[Ry+2]
+3            RAM[Rx+2], RAM[Ry+2]              RAM[Rx+3], RAM[Ry+3]
+
+Four signed products and their ordered prefix sums fit signed64 for one signed56
+initial accumulator. Sticky L records any prefix leaving signed56 range. Terminal
+V is derived from the wrapped third prefix and the last product. Final ordinary
+flags retain scaling rules; C/S and all inactive state remain preserved. Raw56 is
+masked once per chunk when overflow reconstruction is required. MACR/intermediate rounding are outside this admission.
+
+Proven interior shortcut
+
+Each signed24 fractional product, including either sign, has magnitude at most
+2^47. Four such terms move signed56 A by at most D=2^49. If entry A lies in
+[-2^55+D, 2^55-1-D], every ordered prefix stays in signed56. This proves V=0 and
+no additional L; the chunk can retain incoming L and store the unwrapped sum.
+Otherwise it evaluates all ordered prefix overflows and the final wrapped step.
+Boundary witnesses include both signs, full-scale minimum*minimum products,
+the exact interior endpoints and values one unit beyond them.
+
+Guard                     Requirement before any update
+compiled region           one native MAC/paired-load ending, one word/base unit
+numeric/CPU state         supported mode; running; no REP/debug pending or DSP cache
+loop/frame                active ending LA, saved start=header, ordinary finite LC
+budget                    four available instructions; retain final loop cleanup
+AGU                       both postincrement forms, linear modifiers, valid R slots
+RAM                       four or more contiguous words, below I/O, no 24-bit wrap
+observation               caller-owned nonvolatile RAM; host mutation only stopped
+
+The batch consumes a multiple of four up to the validated RAM, LC-1 and run-budget
+limits. It executes once at native entry, before accumulator/status/retirement
+caches initialize. All resulting state/counters are canonical; the ordinary
+region handles the remaining budget or final-loop boundary. A batch cannot cause
+a fault: insufficient spans, modifiers, frames or states reject without changes.
+
+The compiled scalar and AVX2 kernels share prefix-state/commit rules. AVX2 requires
+runtime host feature admission; a requested unavailable vector path uses scalar.
+Lane/vector geometry is explicit and does not change DSP precision or instance count.
+Batch diagnostics distinguish compiled bulk execution from general ISA helpers.
+Both kernels copy working state and stream descriptors locally, keeping the
+active accumulator, input pair and pointers available for host registers across
+chunks. Canonical CPU state commits once after the prevalidated span. This is a
+specific region representation; general adaptive register allocation and
+persistent SIMD banks across arbitrary instructions remain open.
+
+Qualification
+
+All 101 release and strict correctness tests pass with no skips. Directed batch
+tests perform 311604 checks; observation-boundary tests perform 672 checks.
+They cover both accumulators/signs, all raw56 bits/complements, six modes,
+incoming flags, exact interior endpoints and neighboring values, terminal vs
+intermediate overflow, short budgets/lengths, AGU pairs, stack slots, progress
+wrap, rejected admission, CPU/RAM alias, I/O, RAM faults and code invalidation.
+The original FIR fixture expands to 1728 cases with odd/short held-out lengths.
+All six backend configurations pass all 10368 FIR case/configuration pairs.
+The 41-set bench sweeps pass in release and strict; three sets explicitly skip
+because no case admits a completed warm replay (304 default sampled cases).
+Strict timing is validation evidence, not acceptance performance.
+
+Controlled warm single-instance measurements
+
+Same executable: jit-unbatched vs jit (automatic batch dispatch). Seven rotating
+order repetitions also include the previous revision, scalar and explicit AVX2.
+Each uses CPU affinity 2, identical archives/replay counts, 64 warmups and nine
+trials; no own compiler/test process runs concurrently. Medians below are warm
+execution nanoseconds per call and actual retired DSP instructions per second.
+
+Own workload       Unbatched ns   Automatic ns   Throughput ratio   Guest MIPS
+FIR 4 taps               244.35         241.58               1.01        33.12
+FIR 16 taps              328.32         295.41               1.11        67.70
+FIR 64 taps              644.92         339.19               1.90       200.47
+FIR 512 taps            3521.91         756.03               4.66       682.51
+FIR 15 taps holdout      323.68         288.58               1.12        65.84
+FIR 129 taps holdout    1065.54         410.39               2.60       324.08
+FFT 1024 points       656855.50      657463.00               1.00       240.03
+
+The 512-tap alternating, DC/extreme and alternate-mode cases reach 671-684 MIPS.
+The automatic 512-tap case retires 508 instructions in one AVX2 batch; ordinary
+execution retains setup, tails and cleanup. Four taps do not enter a batch.
+Actual VPMULDQ vector instructions and VZEROUPPER are present in the release
+object; guest batch counters do not count host instructions.
+
+A diagnostic sweep compares 304 cases across all 38 eligible archives. Its
+largest tiny-case outlier (debug state) was about 15% slower in one sweep.
+Seven subsequent same-process comparisons measured 55.97 ns automatic vs
+55.45 ns unbatched (about 0.9%); that case never enters a batch. Short timer,
+layout and frequency variability remain relevant; this is not a guarantee of
+zero regressions. FFT 16/64/256/1024 comparisons are approximately unchanged.
+
+These figures qualify this decoded pattern, not arbitrary programs, a complete
+device, sustained realtime or energy. Process CPU includes initialization and
+timer overhead. Representative application coverage, minimum host load at
+270 MIPS and further speed improvements remain active work. Raw logs, artifact
+hashes and the seven-repeat comparison are retained in ignored local evidence.

@@ -401,7 +401,7 @@ these files describe initialization and expectations, not resumable CPU snapshot
 
 Independent application fixtures
 
-fir.d56 adds 768 original pipelined dot-product cases. It preloads both ports,
+fir.d56 contains 1728 original pipelined dot-product cases. It preloads both ports,
 executes a counted MAC/load loop, rounds the final accumulator and stores one
 output word. Independent raw-56/word-transfer models and an algebraic integer
 sum qualify outputs, sticky/Carry state, old inputs, pointers, residual frames
@@ -421,7 +421,8 @@ Warm single-instance benchmark
   taskset -c 2 build/release/dsp56300_fixture_bench test/fixtures/fft.d56 24
 
 The optional case argument selects a zero-based case. An additional backend
-argument selects all (the default), reference, cached or jit. For example:
+argument selects all (the default), reference, cached, jit, jit-unbatched,
+jit-scalar or jit-avx2. For example:
 
   taskset -c 2 build/release/dsp56300_fixture_bench test/fixtures/fft.d56 24 jit
 

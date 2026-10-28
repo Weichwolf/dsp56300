@@ -97,14 +97,23 @@ and old parallel operands without memory/I/O observation barriers. All 6758417
 directed ASR/register assertions pass; no ISA catalogue row becomes complete.
 See doc/native-shifts.txt for guards, witnesses, measurements and remaining work.
 
-The configuration with typed core contracts and native input caching passes all
-99 correctness tests in release (137.51 s) and strict (519.74 s), with no skips.
-Strict builds instrument all 106 C++ translation units with nonrecovering
-address/undefined/integer checks. All 141 project C++ source/header files pass
-clang-format. All 41 independent fixture archives, including fir.d56, are
-unchanged in this increment. The structural ISA audit passes; full ISA
-qualification still fails as intended. See doc/native-retirement.txt for the bounded optimization,
-independent boundary evidence, matched control and performance tradeoffs.
+The current configuration passes all 101 correctness tests in release (115.43 s)
+and strict (446.53 s), with no skips. Strict builds instrument all 112 C++
+translation units with nonrecovering address/undefined/integer checks. All 148
+project C++ source/header files pass clang-format. Forty independent fixture
+archives are unchanged; fir.d56 expands from 768 to 1728 original cases. The
+structural ISA audit passes; full ISA qualification still fails as intended.
+See doc/native-retirement.txt for the earlier bounded bookkeeping optimization.
+
+Guarded one-instruction MAC/paired-linear-load loops now use compiled scalar or
+AVX2 batches. Four products share one accumulator checkpoint; ordered prefix
+checks retain intermediate sticky L and terminal V. A signed56 interior proof
+omits impossible overflow reconstruction. General native execution handles
+unsupported patterns, states, RAM boundaries and loop cleanup. All 311604
+arithmetic/admission checks and 672 observation-boundary checks pass in both
+builds, including exact budgets, saved frames, faults, I/O, rejected callbacks
+and code invalidation. See doc/mac-batching.txt for scope and measurements.
+
 Adaptive pattern-dependent register allocation, new SIMD bank formats and
 both-branch evaluation remain design/experiment work, not implemented features;
 see doc/state-mapping.txt for inventory, layouts, guards and transition witnesses.
@@ -141,11 +150,20 @@ call by about 6% against a matched disabled-input-cache control (about 132 MIPS)
 FFT effects in that comparison are small and mixed. See doc/native-inputs.txt
 for the complete table, protocol, short-case variability and scope limitations.
 
+The current guarded MAC experiment reaches about 683 actual guest MIPS for the
+own 512-tap FIR, about 4.66 times the same-build unbatched JIT throughput. The
+held-out 129-tap length reaches about 324 MIPS; FFT1024 stays about 240 MIPS.
+Seven rotating-order repetitions use identical inputs/replay counts and one
+pinned DSP instance. This establishes a specific loop-pattern improvement only;
+representative full-semantics throughput, fixed-load CPU use and energy remain
+open. See doc/mac-batching.txt for short-case behavior and regression checks.
+
 The bench CMake target reuses all 41 public correctness fixture archives in a
 separate CTest tree. Default uniform sampling measures 304 cases across 38 sets;
 three sets have no eligible warm replay and report explicit skips. Both release
 and sanitizer benchmark sweeps pass. The original FIR dot-product contributes
-768 cases with four lengths/signals/coefficient families and six numeric modes.
+1728 cases with nine lengths, four signal/coefficient families and six numeric
+modes.
 Current architectural matrices are broad, but block FIR, IIR/resampling,
 image/video, communications and control applications still need qualification. See doc/application-validation.txt. Inputs from external applications
 are removed from active test/benchmark configuration. Historical application
@@ -159,8 +177,10 @@ of those properties. Report actual retirement separately from base-cost estimate
 
 SIMD, parallelism and cache locality: research remains open
 
-DSP arithmetic lowering is scalar x64; SSE2 holds instruction-local old inputs
-and packs two host retirement fields. The separate native FFT reference checks scalar/AVX2 and
+General DSP arithmetic lowering is scalar x64. The guarded MAC loop additionally
+uses four-lane signed64 AVX2 products with exact ordered prefix state; it runs
+one DSP instance. SSE2 holds instruction-local old inputs and packs two host
+retirement fields. The separate native FFT reference checks scalar/AVX2 and
 persistent workers with fixed-point data agreement, without DSP state
 reconstruction. Its speed exposes computation headroom, not automatic lifting.
 Dependence/alias/flag proof, ordered commit, admissible event windows, general
@@ -169,7 +189,8 @@ inherently reduce latency or energy. See doc/compiler-research.txt.
 
 Register-bank packing, broader register/flag holding, fewer helpers, compact
 regions and code/data locality remain candidates. Recorded Clang 19 x64 sizes
-are Cpu=384 and owner=131648 bytes. Layout/allocation is not L1/cache-miss evidence;
+are Cpu=384, native entry context=128 and owner=131648 bytes. Layout/allocation
+is not L1/cache-miss evidence;
 executable mappings are not measured hot instruction-cache occupancy. More
 working-set and cache evidence on real programs is required.
 

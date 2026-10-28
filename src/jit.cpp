@@ -109,7 +109,10 @@ struct Jit::Impl {
         options(settings),
         context{.runtime = runtime,
                 .dirty = &invalidated,
-                .native_moves = &statistics.native_move_instructions} {}
+                .native_moves = &statistics.native_move_instructions,
+                .batch_instructions = &statistics.batch_instructions,
+                .avx2_instructions = &statistics.avx2_instructions,
+                .batch_calls = &statistics.batch_calls} {}
 
   [[nodiscard]] std::unique_ptr<Block> compile(Word block_limit) const;
   Cpu &cpu;
@@ -144,7 +147,7 @@ std::unique_ptr<Block> Jit::Impl::compile(const Word block_limit) const {
     pc += decoded.words;
   }
   if (block->operations.empty()) { return nullptr; }
-  JitEmitter emitter(context.runtime, options.optimize);
+  JitEmitter emitter(context.runtime, options.optimize, options.batch_backend);
   const auto bytes = emitter.generate(block->operations);
   if (bytes.size() > cache_limit / 2) { return nullptr; }
   block->code = std::make_unique<Executable>(bytes);

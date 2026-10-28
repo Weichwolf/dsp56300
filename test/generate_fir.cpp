@@ -22,7 +22,7 @@ constexpr Word data_base = 128, coefficient_base = 768, output_address = 16;
 constexpr Word preload_clear = 0xf09813, pipelined_mac = 0xf098d2;
 constexpr Word mac = 0x2000d2, rounded = 0x200011, loop_prefix = 0x060080;
 constexpr Word store_a = 0x560000 | (output_address << 8);
-constexpr std::array<Word, 4> tap_counts{4, 16, 64, 512};
+constexpr std::array<Word, 9> tap_counts{4, 16, 64, 512, 5, 7, 15, 63, 129};
 constexpr std::array modes{0U, mode_down, mode_up, mode_rm, mode_rm | mode_down, mode_rm | mode_up};
 constexpr std::array<Word, 2> incoming{0, flag_c | flag_s | flag_l};
 
