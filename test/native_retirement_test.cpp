@@ -334,10 +334,12 @@ public:
       if (index == 0 && invalidate) { cpu->write(Space::program, patch_pc, 0); }
     }
     // Deliberately destroy the caller-saved SIMD temporaries before returning.
-    asm volatile("pcmpeqd %%xmm0, %%xmm0\n\tpxor %%xmm1, %%xmm1\n\tpcmpeqd %%xmm2, %%xmm2"
+    asm volatile("pcmpeqd %%xmm0, %%xmm0\n\tpxor %%xmm1, %%xmm1\n\tpcmpeqd %%xmm2, %%xmm2\n\t"
+                 "pxor %%xmm3, %%xmm3\n\tpcmpeqd %%xmm4, %%xmm4\n\tpxor %%xmm5, %%xmm5\n\t"
+                 "pcmpeqd %%xmm6, %%xmm6"
                  :
                  :
-                 : "xmm0", "xmm1", "xmm2");
+                 : "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6");
     return valid && accepted;
   }
 

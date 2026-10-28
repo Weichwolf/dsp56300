@@ -17,8 +17,6 @@ using x64::Branch;
 using x64::Reg;
 using x64::Width;
 constexpr unsigned op_test = 0x85, group_add = 0, group_and = 4;
-constexpr std::array register_offsets{
-    offsetof(Registers, a), offsetof(Registers, b), offsetof(Registers, x), offsetof(Registers, y)};
 }
 
 void JitEmitter::general_moves(const NativeOp &operation) {
@@ -27,6 +25,7 @@ void JitEmitter::general_moves(const NativeOp &operation) {
   // helper() materialized all previous results. Preserve the helper's own
   // partial fault state rather than flushing pre-transfer cached operands.
   code_.jump_if(Branch::equal, exits_[0]);
+  restore_inputs();
 }
 
 void JitEmitter::move_capture(const NativeMove &move, const Word mode) {
@@ -53,19 +52,6 @@ void JitEmitter::move_commit(const NativeMove &move) {
     code_.constant(Reg::r11, reinterpret_cast<std::uintptr_t>(memory.data));
     code_.store_indexed({.base = Reg::r11, .index = move.space == Space::x ? Reg::cx : Reg::r8},
                         value);
-  }
-}
-
-void JitEmitter::capture_inputs() {
-  if (dataflow_.old_inputs == 0) { return; }
-  if (cached_status_) {
-    code_.load(
-        Reg::r11, Reg::r13, offsetof(NativeContext, runtime) + offsetof(JitRuntime, latched));
-  }
-  for (unsigned index = 0; index < register_offsets.size(); ++index) {
-    if ((dataflow_.old_inputs & (Word{1} << index)) == 0) { continue; }
-    current_value(Reg::ax, index);
-    code_.store(cached_status_ ? Reg::r11 : Reg::r14, index * sizeof(std::uint64_t), Reg::ax);
   }
 }
 

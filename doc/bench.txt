@@ -4,6 +4,9 @@ bench is a CMake target, using the existing internal fixture runner and the same
 project-authored .d56 files as correctness CTest. It has its own generated CTest
 tree under build/<preset>/bench, so normal correctness runs do not time workloads.
 No external application inputs or machine-local fixture injection are registered.
+The runner instantiates all three typed BackendCore implementations against the
+same CoreImplementation contract; see backend-contracts.txt. Backend=all compares
+them within one executable/build, using the same fixture cases and trial scopes.
 
   cmake --preset release
   cmake --build --preset release --target bench

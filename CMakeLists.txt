@@ -34,7 +34,7 @@ add_library(dsp56300_core STATIC
   src/jit/native_moves.cpp src/jit/dataflow.cpp src/jit/x64/jit_moves.cpp
   src/jit/x64/jit_move_address.cpp src/jit/x64/jit_move_register.cpp
   src/core/memory.cpp src/jit/x64/jit_retirement.cpp src/jit/x64/jit_status.cpp
-  src/jit/x64/jit_shifts.cpp src/jit/native_register_moves.cpp)
+  src/jit/x64/jit_shifts.cpp src/jit/native_register_moves.cpp src/jit/x64/jit_inputs.cpp)
 add_library(dsp56300::core ALIAS dsp56300_core)
 target_include_directories(dsp56300_core PUBLIC include)
 target_link_libraries(dsp56300_core PUBLIC dsp56300_quality)
@@ -56,6 +56,10 @@ if(BUILD_TESTING)
     target_include_directories(dsp56300_native_retirement_test PRIVATE
       src/core src/jit src/jit/x64 test)
     add_test(NAME native-retirement-boundaries COMMAND dsp56300_native_retirement_test)
+    add_executable(dsp56300_native_inputs_test test/native_inputs_test.cpp test/native/direct.cpp)
+    target_link_libraries(dsp56300_native_inputs_test PRIVATE dsp56300::core)
+    target_include_directories(dsp56300_native_inputs_test PRIVATE src/core src/jit src/jit/x64 test)
+    add_test(NAME native-input-snapshots COMMAND dsp56300_native_inputs_test)
     add_executable(dsp56300_native_status_test test/native_status_test.cpp)
     target_link_libraries(dsp56300_native_status_test PRIVATE dsp56300::core)
     target_include_directories(dsp56300_native_status_test PRIVATE test)

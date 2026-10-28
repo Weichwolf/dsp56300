@@ -58,7 +58,10 @@ Current user requirements
 - Use C++23, LLVM 19, CMake/Ninja, strict warnings, hardening, clang-format/tidy,
   and nonrecovering ASan/UBSan with native dependencies instrumented in strict
   builds. Keep functions at most 120 lines and do not suppress/weaken checks.
-  Consider concepts for portable compile-time interface contracts.
+  Use core concepts for portable compile-time interface contracts and compare
+  reference/cached/JIT implementations in the same fixture build. Parameterize
+  host SIMD lane width separately from vector width; validate combinations and
+  retain exact DSP precision and runtime host-ISA admission.
 - Keep entry points in src/core.cpp and src/jit.cpp; helpers in src/core/ and
   src/jit/, native emission in src/jit/x64/, memory in src/core/memory.cpp.
   Organize sources consistently and remove empty project directories.

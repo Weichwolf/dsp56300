@@ -156,13 +156,35 @@ void Code::packed_shift_right(const Xmm destination, const unsigned count) {
   byte(count);
 }
 
-void Code::packed_from(const Xmm destination, const Reg source) {
+void Code::scalar_from(const Xmm destination, const Reg source, const Width width) {
   constexpr unsigned move_dword = 0x6e;
   byte(operand_prefix);
-  rex(Width::dword, static_cast<unsigned>(destination), static_cast<unsigned>(source));
+  rex(width, static_cast<unsigned>(destination), static_cast<unsigned>(source));
   raw({0x0f, move_dword});
   byte(mod_register | (static_cast<unsigned>(destination) << 3) |
        (static_cast<unsigned>(source) & 7));
+}
+
+void Code::scalar_to(const Reg destination, const Xmm source, const Width width) {
+  constexpr unsigned move_qword = 0x7e;
+  byte(operand_prefix);
+  rex(width, static_cast<unsigned>(source), static_cast<unsigned>(destination));
+  raw({0x0f, move_qword});
+  byte(mod_register | (static_cast<unsigned>(source) << 3) |
+       (static_cast<unsigned>(destination) & 7));
+}
+
+void Code::scalar_load(const Xmm destination,
+                       const Reg base,
+                       const std::size_t offset,
+                       const Width width) {
+  constexpr unsigned move_qword_prefix = 0xf3;
+  constexpr unsigned move_qword = 0x7e;
+  constexpr unsigned move_dword = 0x6e;
+  byte(width == Width::qword ? move_qword_prefix : operand_prefix);
+  rex(Width::dword, static_cast<unsigned>(destination), static_cast<unsigned>(base));
+  raw({0x0f, static_cast<std::uint8_t>(width == Width::qword ? move_qword : move_dword)});
+  memory(static_cast<unsigned>(destination), base, offset);
 }
 
 void Code::packed_load(const Xmm destination, const Reg base, const std::size_t offset) {

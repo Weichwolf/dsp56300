@@ -52,6 +52,11 @@ case selection, DSP56300_BENCH_FILTER for the target's fixture-name regex,
 DSP56300_BENCH_BACKEND for jit/cached/reference/all and DSP56300_BENCH_REPLAYS
 for auto or a fixed trial count. See doc/bench.txt for metrics and exclusions.
 
+CoreImplementation and typed BackendCore<Backend::...> adapters allow generic
+consumers and the same fixture runner to compare reference/cached/JIT in one
+build. Host SIMD lane and vector widths are separate constrained parameters;
+see doc/backend-contracts.txt for API examples, supported operations and limits.
+
 Integration: link dsp56300::core and include <dsp56300/core.hpp>. Provide mutable
 P/X/Y spans and an optional Io implementation. DSP data words occupy uint32_t
 elements; architectural A/B values in Registers are raw 56-bit quantities.

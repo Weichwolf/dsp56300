@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "binary_fixture.hpp"
+#include "dsp56300/backend.hpp"
 #include "dsp56300/core.hpp"
 #include "fixture_memory.hpp"
 #include "support.hpp"
@@ -53,14 +54,15 @@ private:
   bool matched_ = true;
 };
 
+template <CoreImplementation Implementation>
 void check(const BinaryCase &item, const Backend backend) {
   auto memory = initial_memory(item);
   auto expected = memory;
   patch(expected, item.after);
   ResetScript script(item.reset_actions);
-  Core core({.program = memory[0], .x = memory[1], .y = memory[2]},
-            item.reset_actions.empty() ? nullptr : &script,
-            {.backend = backend});
+  Implementation core({.program = memory[0], .x = memory[1], .y = memory[2]},
+                      item.reset_actions.empty() ? nullptr : &script,
+                      {.backend = backend});
   core.set_debug_interrupt_mode(item.debug_interrupt_mode);
   core.set_registers(item.initial);
   const auto result = core.run(item.budget);
@@ -85,13 +87,22 @@ void check(const BinaryCase &item, const Backend backend) {
   }
 }
 
+void check_backend(const BinaryCase &item, const Backend backend) {
+  switch (backend) {
+    case Backend::reference: check<BackendCore<Backend::reference>>(item, backend); return;
+    case Backend::cached: check<BackendCore<Backend::cached>>(item, backend); return;
+    case Backend::jit: check<BackendCore<Backend::jit>>(item, backend); return;
+    default: throw std::invalid_argument("Unknown fixture backend");
+  }
+}
+
 void run(const std::filesystem::path &path) {
   const auto cases = read_fixture(path);
   require(!cases.empty(), "Fixture contains cases");
   for (const auto backend : {Backend::reference, Backend::cached, Backend::jit}) {
     for (std::size_t index = 0; index < cases.size(); ++index) {
       try {
-        check(cases[index], backend);
+        check_backend(cases[index], backend);
       } catch (const std::exception &error) {
         const std::string engine{backend_name(backend)};
         throw std::runtime_error(path.string() + ": case " + std::to_string(index) + " (" +

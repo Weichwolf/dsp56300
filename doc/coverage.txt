@@ -97,16 +97,25 @@ and old parallel operands without memory/I/O observation barriers. All 6758417
 directed ASR/register assertions pass; no ISA catalogue row becomes complete.
 See doc/native-shifts.txt for guards, witnesses, measurements and remaining work.
 
-The independent-only configuration passes all 98 correctness tests in both
-release (126.97 s) and strict (422.71 s), with no skips. Strict builds instrument all 103 C++ translation units with
-nonrecovering address/undefined/integer checks. All 137 project C++ source/header
-files pass clang-format. The 40 prior archives are unchanged, and fir.d56 adds
-the new independent application corpus. The structural ISA audit passes; full ISA qualification still
-fails as intended. See doc/native-retirement.txt for the bounded optimization,
+The configuration with typed core contracts and native input caching passes all
+99 correctness tests in release (137.51 s) and strict (519.74 s), with no skips.
+Strict builds instrument all 106 C++ translation units with nonrecovering
+address/undefined/integer checks. All 141 project C++ source/header files pass
+clang-format. All 41 independent fixture archives, including fir.d56, are
+unchanged in this increment. The structural ISA audit passes; full ISA
+qualification still fails as intended. See doc/native-retirement.txt for the bounded optimization,
 independent boundary evidence, matched control and performance tradeoffs.
 Adaptive pattern-dependent register allocation, new SIMD bank formats and
 both-branch evaluation remain design/experiment work, not implemented features;
 see doc/state-mapping.txt for inventory, layouts, guards and transition witnesses.
+The new instruction-local input snapshots use only live old-value banks in
+XMM3..6, reloading after successful general transfer helpers. This removes fast
+RAM snapshot round trips, not canonical X/Y storage across guest instructions.
+CoreImplementation and typed reference/cached/JIT adapters now share a checked
+integration contract in the correctness/benchmark runner. Lane/vector geometry
+is explicit; the emitter constrains actual scalar transfers to 32/64-bit lanes.
+See doc/backend-contracts.txt and doc/native-inputs.txt. These changes do not
+qualify any previously unsupported DSP numerical mode or ISA form.
 
 Performance and realtime: reference target not established
 
@@ -127,6 +136,10 @@ matching independently expected results. Earlier alternating parent/control
 measurements of the same own FFT show about 38-58% shorter calls, with the
 1024-point case about 235 actual guest MIPS. See doc/native-shifts.txt for scope.
 This does not establish the representative 270 MIPS target or fixed-load CPU use.
+Instruction-local SIMD snapshots subsequently reduce the original 512-tap FIR
+call by about 6% against a matched disabled-input-cache control (about 132 MIPS).
+FFT effects in that comparison are small and mixed. See doc/native-inputs.txt
+for the complete table, protocol, short-case variability and scope limitations.
 
 The bench CMake target reuses all 41 public correctness fixture archives in a
 separate CTest tree. Default uniform sampling measures 304 cases across 38 sets;
@@ -146,8 +159,8 @@ of those properties. Report actual retirement separately from base-cost estimate
 
 SIMD, parallelism and cache locality: research remains open
 
-DSP arithmetic lowering is scalar x64; SSE2 counter packing updates two host
-bookkeeping fields. The separate native FFT reference checks scalar/AVX2 and
+DSP arithmetic lowering is scalar x64; SSE2 holds instruction-local old inputs
+and packs two host retirement fields. The separate native FFT reference checks scalar/AVX2 and
 persistent workers with fixed-point data agreement, without DSP state
 reconstruction. Its speed exposes computation headroom, not automatic lifting.
 Dependence/alias/flag proof, ordered commit, admissible event windows, general

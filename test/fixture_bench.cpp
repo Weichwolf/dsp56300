@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "binary_fixture.hpp"
+#include "dsp56300/backend.hpp"
 #include "dsp56300/core.hpp"
 #include "fixture_memory.hpp"
 #include "support.hpp"
@@ -65,7 +66,7 @@ std::string_view exclusion(const BinaryCase &item) {
   return {};
 }
 
-class Replay {
+template <CoreImplementation Implementation> class Replay {
 public:
   Replay(const BinaryCase &item, const Backend backend)
       : item_(item),
@@ -134,11 +135,12 @@ public:
 private:
   const BinaryCase &item_;
   FixtureMemory initial_, expected_, memory_;
-  Core core_;
+  Implementation core_;
 };
 
+template <CoreImplementation Implementation>
 bool benchmark(const BinaryCase &item, const Backend backend, const unsigned replays) {
-  Replay replay(item, backend);
+  Replay<Implementation> replay(item, backend);
   replay.prepare();
   const auto cold_begin = Clock::now();
   replay.execute();
@@ -199,6 +201,16 @@ bool benchmark(const BinaryCase &item, const Backend backend, const unsigned rep
               << ", executable bytes: " << statistics.executable_bytes << '\n';
   }
   return true;
+}
+
+bool benchmark_backend(const BinaryCase &item, const Backend backend, const unsigned replays) {
+  switch (backend) {
+    case Backend::reference:
+      return benchmark<BackendCore<Backend::reference>>(item, backend, replays);
+    case Backend::cached: return benchmark<BackendCore<Backend::cached>>(item, backend, replays);
+    case Backend::jit: return benchmark<BackendCore<Backend::jit>>(item, backend, replays);
+    default: throw std::invalid_argument("Unknown benchmark backend");
+  }
 }
 
 std::size_t case_index(const std::string_view text) {
@@ -267,7 +279,7 @@ bool run_cases(const std::vector<BinaryCase> &cases,
     std::cout << "case " << index << ": " << item.name << '\n';
     for (const auto backend : {Backend::reference, Backend::cached, Backend::jit}) {
       if (selected.has_value() && *selected != backend) { continue; }
-      measured += benchmark(item, backend, static_cast<unsigned>(replays)) ? 1U : 0U;
+      measured += benchmark_backend(item, backend, static_cast<unsigned>(replays)) ? 1U : 0U;
     }
   }
   std::cout << "Fixture summary: total=" << cases.size() << ", warm-eligible=" << eligible

@@ -29,6 +29,8 @@ public:
 
   [[nodiscard]] bool cached_status() const noexcept { return cached_status_; }
 
+  [[nodiscard]] bool cached_inputs() const noexcept { return cached_inputs_; }
+
 private:
   [[nodiscard]] bool lowerable(const NativeOp &operation) const;
   [[nodiscard]] static bool has_moves(const NativeOp &operation);
@@ -40,6 +42,8 @@ private:
   void moves(const NativeOp &operation);
   void general_moves(const NativeOp &operation);
   void capture_inputs();
+  void restore_inputs();
+  [[nodiscard]] bool admit_cached_inputs(std::span<const NativeOp> operations) const;
   void register_move(const NativeRegisterMove &move, Word mode);
   void move_guard(const NativeMove &move, x64::Label &slow);
   void move_next(const NativeMove &move);
@@ -94,6 +98,7 @@ private:
   bool packed_retirement_ = false;
   bool retirement_helpers_ = false;
   bool cached_status_ = false;
+  bool cached_inputs_ = false;
   NativeDataflow dataflow_;
   // Only native writes establish a live host value; dirty also implies valid.
   std::array<bool, 2> accumulator_dirty_{};

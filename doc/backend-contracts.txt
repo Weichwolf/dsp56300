@@ -1,0 +1,55 @@
+Core and SIMD contracts
+
+include/dsp56300/backend.hpp defines CoreImplementation: a structural C++23
+contract for construction, registers, progress/faults, P/X/Y access, bounded
+execution, processing/debug state, interrupts and cache invalidation. Methods
+retain the ordinary Core ownership/event contracts and precise return types.
+Concept satisfaction alone proves no numerical, timing or ownership semantics.
+
+BackendCore<Backend::reference>, BackendCore<Backend::cached> and
+BackendCore<Backend::jit> are typed adapters of the existing implementations.
+They own the same Core facade, add no virtual dispatch and choose their backend
+at construction. The type's backend wins over Options.backend; other options
+are preserved. These adapters do not introduce three independent ISA models:
+reference and cached execution still share their instruction executor.
+
+A generic consumer can use:
+
+  #include <dsp56300/backend.hpp>
+
+  template <dsp56300::CoreImplementation Implementation>
+  dsp56300::RunResult execute(Implementation &core, std::uint32_t budget) {
+    return core.run(budget);
+  }
+
+All three adapter types are instantiated in the same correctness fixture runner
+and benchmark executable. New implementations may satisfy the same contract;
+there is no requirement to inherit from Core. Independent fixture expectations
+remain the oracle. Backend agreement alone is insufficient qualification.
+
+  cmake --preset release -DDSP56300_BENCH_FILTER='^(fir|fft)$' \
+    -DDSP56300_BENCH_BACKEND=all
+  cmake --build --preset release --target bench
+
+Host SIMD geometry
+
+include/dsp56300/simd.hpp separates LaneBits from VectorBits. SimdShape checks
+8/16/32/64-bit host lanes in 128/256-bit layouts; SimdLayout exposes both bit
+widths and the lane count. These are storage/type descriptions, not a CPU
+feature test or evidence of an available vector arithmetic implementation.
+
+Shape                  Meaning
+SimdLayout<32,128>     four 32-bit host lanes
+SimdLayout<64,256>     four 64-bit host lanes
+SimdShape<24,128>      rejected; DSP precision is not host storage width
+
+The current x64 SSE2 scalar-transfer emitter accepts compile-time LaneBits=32
+or 64. Its constrained packed_from/packed_to/packed_load_lane operations select
+MOVD/MOVQ encoding and exact zero extension. Retirement uses 32-bit transfers;
+parallel-input snapshots use all 64 bits. Other valid storage shapes require
+their own implemented backend operations and host-ISA admission. No AVX arithmetic
+backend is claimed by a valid SimdLayout<64,256> instantiation.
+
+DSP 24/48/56-bit masking, signed coordinates, products, rounding and flags remain
+explicit architectural semantics. Neither lane width nor vector width changes
+the number of emulated DSP instances. See native-inputs.txt and state-mapping.txt.

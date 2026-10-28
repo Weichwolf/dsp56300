@@ -102,18 +102,6 @@ bool JitEmitter::lowerable(const NativeOp &operation) const {
          operation_code == alu_abs || operation_code == alu_neg || operation_code == alu_round;
 }
 
-void JitEmitter::value(const Reg destination, const unsigned index, const bool latched) {
-  if (latched && (dataflow_.old_inputs & (Word{1} << index)) != 0) {
-    if (cached_status_) {
-      code_.load(
-          destination, Reg::r13, offsetof(NativeContext, runtime) + offsetof(JitRuntime, latched));
-    }
-    code_.load(destination, cached_status_ ? destination : Reg::r14, index * sizeof(std::uint64_t));
-    return;
-  }
-  current_value(destination, index);
-}
-
 void JitEmitter::current_value(const Reg destination, const unsigned index) {
   if (index < accumulator_dirty_.size() && accumulator_dirty_.at(index)) {
     code_.mov({.destination = destination, .source = index == 0 ? Reg::bp : Reg::bx});
@@ -334,6 +322,7 @@ std::vector<std::uint8_t> JitEmitter::generate(const std::span<const NativeOp> o
   packed_retirement_ = admit_packed_retirement(operations);
   retirement_helpers_ = packed_retirement_ && std::ranges::any_of(operations, observable_moves);
   cached_status_ = admit_cached_status();
+  cached_inputs_ = admit_cached_inputs(operations);
   code_.raw(entry_landing); // ENDBR64.
   code_.raw(save_nonvolatile);
   code_.mov({.destination = Reg::r12, .source = Reg::di});
@@ -341,7 +330,7 @@ std::vector<std::uint8_t> JitEmitter::generate(const std::span<const NativeOp> o
   code_.binary(op_xor, {.destination = Reg::r15, .source = Reg::r15}, Width::dword);
   if (cached_status_) {
     initialize_status();
-  } else {
+  } else if (!cached_inputs_) {
     code_.load(
         Reg::r14, Reg::r13, offsetof(NativeContext, runtime) + offsetof(JitRuntime, latched));
   }

@@ -31,6 +31,9 @@
   placement per region/pattern; retain complete checkpoints and guarded fallback.
 - Share correctness fixtures with the bench CMake target and support all or
   selected fixture sets. Keep measurement scope and skipped case counts explicit.
+- Use core concepts to compare implementations in one build. Parameterize host
+  SIMD lane width separately from vector width; keep DSP precision exact and
+  dispatch only to implemented, host-supported instruction sets.
 - The user canceled the hardware virtualization path. Build and optimize direct
   native JIT execution; do not add a KVM/VMX backend, tests or permissions setup.
 - Keep local account names out of tracked instructions, code and documentation.
