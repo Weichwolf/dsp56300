@@ -8,6 +8,8 @@
 #include <stdexcept>
 
 namespace dsp56300::test::kvm {
+enum class RegisterTransfer : std::uint8_t { automatic, ioctls, shared };
+
 class Unavailable : public std::runtime_error {
 public:
   using std::runtime_error::runtime_error;
@@ -29,13 +31,16 @@ public:
   static constexpr std::size_t code_address = 0x10000, halt_address = 0x30000;
   static constexpr std::size_t cpu_address = 0x20000, context_address = 0x21000;
 
-  Guest();
+  explicit Guest(RegisterTransfer transfer = RegisterTransfer::automatic);
   ~Guest();
   Guest(const Guest &) = delete;
   Guest &operator=(const Guest &) = delete;
   Guest(Guest &&) = delete;
   Guest &operator=(Guest &&) = delete;
   [[nodiscard]] void *address(std::size_t offset, std::size_t length);
+  [[nodiscard]] bool shared_registers() const noexcept;
+  void prepare(std::span<const std::uint8_t> code);
+  [[nodiscard]] Exit enter();
   [[nodiscard]] Exit run(std::span<const std::uint8_t> code);
 
 private:

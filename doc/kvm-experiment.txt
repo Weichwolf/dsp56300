@@ -45,18 +45,32 @@ Initial host evidence (2026-10-27): both configurations built, but executions
 skipped on EACCES before any VM/vCPU or translated guest code could run.
 Access follow-up (2026-10-28): granted group access allows VM/vCPU creation.
 The first accessible runs failed at KVM_SET_SREGS with EINVAL. Installing the
-explicit supported CPUID model fixes that setup failure. Both final tests pass
-4501 assertions: 1500 translated arithmetic runs with three assertions each,
+explicit supported CPUID model fixes that setup failure. That increment passed
+4501 assertions per test: 1500 translated arithmetic runs with three assertions each,
 plus the separate unbacked-memory MMIO exit. CTest wall times are 0.11/0.23 s
 for release/strict, including VM setup, generation, state checks and teardown.
 These are correctness-test durations, not guest throughput or a JIT comparison.
 The existing public arithmetic emitter and independent model are unchanged.
 
+Prepared-entry follow-up: Guest::prepare installs code once, enter executes it
+without reinstalling, and run(code) preserves the prior combined interface.
+Automatic entry uses KVM_CAP_SYNC_REGS GPR exchange when available, with an
+explicit SET/RUN/GET ioctl path as the control/fallback. Both paths now execute
+the original 1500-case matrix and memory-exit test, plus preparation boundaries:
+9016 assertions per configuration. A companion concept-checked direct/KVM
+region experiment passes 864 checks over six supported modes and repeated
+guarded loop entries. It also measures identical emitted code with fixed
+affinity and three runs. See doc/kvm-performance.txt for protocol, measured
+entry costs, the remaining long-region gap and the exact limits.
+Unhandled non-HLT exits and failed entries make the guest terminal; reentry
+or preparation is rejected instead of implicitly completing a pending MMIO
+transaction. Only a completed HLT boundary permits another prepared entry.
+
 Scope limits: this checks a small helper-free arithmetic region and one memory
 exit only. General DSP programs, RAM-transfer plans, protected code pages,
-helper/event/I/O exits, code invalidation, budgets/interrupts and the transparent
+helper/event/I/O exits, code invalidation, general budgets/interrupts and the transparent
 consumer backend remain unimplemented in KVM. This harness is neither a sandbox
-security qualification nor a realtime/performance benchmark. In particular it
+security qualification nor a realtime workload benchmark. In particular it
 does not show a KVM speedup or host-load reduction at the 270 MIPS reference load.
 
 API reference: https://docs.kernel.org/virt/kvm/api.html

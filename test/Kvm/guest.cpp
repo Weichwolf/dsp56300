@@ -157,6 +157,16 @@ void configure_cpu(const int device, const int vcpu) {
   if (!supports_long_mode) { throw Unavailable("KVM does not support x86-64 long mode"); }
   checked(ioctl(vcpu, KVM_SET_CPUID2, &model), "KVM_SET_CPUID2");
 }
+
+bool use_shared_registers(const int device, const RegisterTransfer transfer) {
+  const auto supported = checked(ioctl(device, KVM_CHECK_EXTENSION, KVM_CAP_SYNC_REGS),
+                                 "KVM_CHECK_EXTENSION(KVM_CAP_SYNC_REGS)");
+  const bool available = (static_cast<unsigned>(supported) & KVM_SYNC_X86_REGS) != 0;
+  if (transfer == RegisterTransfer::shared && !available) {
+    throw Unavailable("KVM does not support shared x86 registers");
+  }
+  return transfer != RegisterTransfer::ioctls && available;
+}
 } // namespace
 
 struct Guest::Impl {
@@ -165,8 +175,10 @@ struct Guest::Impl {
   Descriptor vcpu{checked(ioctl(vm.get(), KVM_CREATE_VCPU, 0), "KVM_CREATE_VCPU")};
   Mapping memory{{.size = memory_size}};
   Mapping run_memory{{.fd = vcpu.get(), .size = run_mapping_size(device.get())}};
+  bool shared_registers, prepared = false, terminal = false;
 
-  Impl() {
+  explicit Impl(const RegisterTransfer transfer)
+      : shared_registers(use_shared_registers(device.get(), transfer)) {
     kvm_userspace_memory_region region{};
     region.memory_size = memory_size;
     region.userspace_addr = reinterpret_cast<std::uintptr_t>(memory.data());
@@ -199,7 +211,7 @@ struct Guest::Impl {
   }
 };
 
-Guest::Guest() : impl_(std::make_unique<Impl>()) {}
+Guest::Guest(const RegisterTransfer transfer) : impl_(std::make_unique<Impl>(transfer)) {}
 
 Guest::~Guest() = default;
 
@@ -212,12 +224,26 @@ void *Guest::address(const std::size_t offset, const std::size_t length) {
       .data();
 }
 
-Exit Guest::run(const std::span<const std::uint8_t> code) {
-  if (code.size() > cpu_address - code_address) {
+bool Guest::shared_registers() const noexcept {
+  return impl_->shared_registers;
+}
+
+void Guest::prepare(const std::span<const std::uint8_t> code) {
+  if (impl_->terminal) { throw std::logic_error("KVM test guest has an unhandled terminal exit"); }
+  if (code.empty() || code.size() > cpu_address - code_address) {
     throw std::out_of_range("KVM test guest code range");
   }
   std::memcpy(address(code_address, code.size()), code.data(), code.size());
   std::memcpy(address(halt_address, sizeof(halt_opcode)), &halt_opcode, sizeof(halt_opcode));
+  impl_->prepared = true;
+}
+
+Exit Guest::enter() {
+  if (!impl_->prepared) { throw std::logic_error("KVM test guest requires prepared code"); }
+  if (impl_->terminal) { throw std::logic_error("KVM test guest has an unhandled terminal exit"); }
+  // Only a completed HLT boundary makes another call safe. Other exits and
+  // failed ioctls must not resume a pending transaction with invented data.
+  impl_->terminal = true;
   constexpr std::uint64_t return_address = halt_address;
   std::memcpy(
       address(stack_address, sizeof(return_address)), &return_address, sizeof(return_address));
@@ -227,18 +253,36 @@ Exit Guest::run(const std::span<const std::uint8_t> code) {
   state.rdi = cpu_address;
   state.rsi = context_address;
   state.rflags = 2;
-  checked(ioctl(impl_->vcpu.get(), KVM_SET_REGS, &state), "KVM_SET_REGS");
+  auto &run = *static_cast<kvm_run *>(impl_->run_memory.data());
+  if (impl_->shared_registers) {
+    run.s.regs.regs = state;
+    run.kvm_valid_regs = KVM_SYNC_X86_REGS;
+    run.kvm_dirty_regs = KVM_SYNC_X86_REGS;
+  } else {
+    checked(ioctl(impl_->vcpu.get(), KVM_SET_REGS, &state), "KVM_SET_REGS");
+  }
   int result = 0;
+  // Keep the live kernel/shared register image on EINTR; never reapply the
+  // entry state after the guest may already have retired instructions.
   do { result = ioctl(impl_->vcpu.get(), KVM_RUN, 0); } while (result < 0 && errno == EINTR);
   checked(result, "KVM_RUN");
-  checked(ioctl(impl_->vcpu.get(), KVM_GET_REGS, &state), "KVM_GET_REGS");
-  const auto &run = *static_cast<const kvm_run *>(impl_->run_memory.data());
+  if (impl_->shared_registers) {
+    state = run.s.regs.regs;
+  } else {
+    checked(ioctl(impl_->vcpu.get(), KVM_GET_REGS, &state), "KVM_GET_REGS");
+  }
   Exit exit{.reason = run.exit_reason, .result = state.rax, .rip = state.rip};
   if (run.exit_reason == KVM_EXIT_MMIO) {
     exit.address = run.mmio.phys_addr;
     exit.length = run.mmio.len;
     exit.write = run.mmio.is_write != 0;
   }
+  impl_->terminal = run.exit_reason != KVM_EXIT_HLT;
   return exit;
+}
+
+Exit Guest::run(const std::span<const std::uint8_t> code) {
+  prepare(code);
+  return enter();
 }
 } // namespace dsp56300::test::kvm

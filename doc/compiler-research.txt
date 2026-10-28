@@ -78,6 +78,13 @@ Release/strict now pass 4501 checks with actual translated arithmetic execution
 and one unbacked-memory exit. This is a small helper-free test harness, not a
 public VM backend, full security qualification or performance comparison.
 See doc/kvm-experiment.txt for the exact scope and outstanding validation.
+The prepared-region follow-up now compares identical emitted bytes through
+direct and KVM execution. Shared GPR exchange reduces short-entry overhead,
+but long regions still measure about 1.6-1.9 times direct execution on the
+current host. A compile-time RegionExecutor concept checks the experimental
+execution interface; it does not prove semantic equivalence or isolation.
+Independent full-state/progress witnesses supply the tested semantic evidence.
+The normal consumer VM backend remains open. See doc/kvm-performance.txt.
 API reference: https://docs.kernel.org/virt/kvm/api.html
 
 Use a compile-time execution-backend concept for the direct JIT reference and

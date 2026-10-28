@@ -18,6 +18,7 @@
 #include <linux/kvm.h>
 #include <memory>
 #include <span>
+#include <stdexcept>
 #include <vector>
 
 namespace dsp56300::test {
@@ -103,9 +104,9 @@ void arithmetic(kvm::Guest &guest) {
   }
 }
 
-void unmapped_memory() {
+void unmapped_memory(const kvm::RegisterTransfer transfer) {
   // Separate guest: do not complete the MMIO transaction with fabricated data.
-  kvm::Guest guest;
+  kvm::Guest guest(transfer);
   detail::x64::Code code;
   code.constant(detail::x64::Reg::ax, unmapped_address);
   code.load(detail::x64::Reg::ax, detail::x64::Reg::ax, 0);
@@ -114,15 +115,60 @@ void unmapped_memory() {
   require(exit.reason == KVM_EXIT_MMIO && exit.address == unmapped_address &&
               exit.length == sizeof(std::uint64_t) && !exit.write,
           "An unbacked guest physical read exits without reading unrelated host memory");
+  for (const bool install : {false, true}) {
+    bool rejected = false;
+    try {
+      if (install) {
+        guest.prepare(code.bytes());
+      } else {
+        static_cast<void>(guest.enter());
+      }
+    } catch (const std::logic_error &) { rejected = true; }
+    require(rejected,
+            "An unhandled MMIO exit forbids reentry or code installation without a reply");
+  }
+}
+
+void prepared_boundaries(const kvm::RegisterTransfer transfer) {
+  kvm::Guest guest(transfer);
+  bool rejected = false;
+  try {
+    static_cast<void>(guest.enter());
+  } catch (const std::logic_error &) { rejected = true; }
+  require(rejected, "A guest cannot enter an unprepared code region");
+  detail::x64::Code code;
+  constexpr std::uint64_t returned = 123;
+  constexpr std::uint8_t return_opcode = 0xc3;
+  code.constant(detail::x64::Reg::ax, returned);
+  code.byte(return_opcode);
+  guest.prepare(code.bytes());
+  for (const auto length :
+       {std::size_t{0}, kvm::Guest::cpu_address - kvm::Guest::code_address + 1}) {
+    rejected = false;
+    const std::vector<std::uint8_t> invalid(length);
+    try {
+      guest.prepare(invalid);
+    } catch (const std::out_of_range &) { rejected = true; }
+    require(rejected, "Empty or CPU-overlapping code cannot replace a prepared region");
+    const auto exit = guest.enter();
+    require(exit.reason == KVM_EXIT_HLT && exit.result == returned &&
+                exit.rip == kvm::Guest::halt_address + 1,
+            "Failed preparation preserves previously installed code and its next entry");
+  }
 }
 } // namespace
 } // namespace dsp56300::test
 
 int main() {
   try {
-    dsp56300::test::kvm::Guest guest;
-    dsp56300::test::arithmetic(guest);
-    dsp56300::test::unmapped_memory();
+    for (const auto transfer : {dsp56300::test::kvm::RegisterTransfer::ioctls,
+                                dsp56300::test::kvm::RegisterTransfer::automatic}) {
+      dsp56300::test::kvm::Guest guest(transfer);
+      std::cout << "Shared KVM registers: " << guest.shared_registers() << '\n';
+      dsp56300::test::arithmetic(guest);
+      dsp56300::test::unmapped_memory(transfer);
+      dsp56300::test::prepared_boundaries(transfer);
+    }
     std::cout << dsp56300::test::checks << " KVM translation experiment checks passed\n";
   } catch (const dsp56300::test::kvm::Unavailable &error) {
     std::cerr << "KVM experiment unavailable: " << error.what() << '\n';

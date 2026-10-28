@@ -55,6 +55,13 @@ if(BUILD_TESTING)
       src/Core src/Jit src/Jit/X64 test)
     add_test(NAME kvm-translation-experiment COMMAND dsp56300_kvm_translation_test)
     set_tests_properties(kvm-translation-experiment PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60)
+    add_executable(dsp56300_kvm_bench test/Kvm/guest.cpp test/Kvm/direct.cpp
+      test/Kvm/region_bench.cpp)
+    target_link_libraries(dsp56300_kvm_bench PRIVATE dsp56300::core)
+    target_include_directories(dsp56300_kvm_bench PRIVATE
+      src/Core src/Jit src/Jit/X64 test)
+    add_test(NAME kvm-prepared-regions COMMAND dsp56300_kvm_bench --verify)
+    set_tests_properties(kvm-prepared-regions PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60)
   endif()
   add_executable(dsp56300_loop_control_test test/loop_control_test.cpp)
   target_link_libraries(dsp56300_loop_control_test PRIVATE dsp56300::core)
