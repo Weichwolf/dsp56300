@@ -489,6 +489,51 @@ the portability check. LLVM 19 emits the selected AVX2 operations.
 fft-native-algorithm checks every fixture with scalar/AVX2 and 1/2/3/6 workers.
 The same comparison passes ASan/UBSan and a separate ThreadSanitizer run.
 
+Selection, complement/test and control-byte fixtures
+
+Three synthetic archives add 120208 independently modeled cases per backend:
+- selection.d56: 31094 MAX/MAXM cases.
+- test-complement.d56: 47500 NOT/TST cases.
+- control-bytes.d56: 41614 ANDI/ORI cases.
+
+Regenerate explicitly:
+  build/release/dsp56300_generate_selection select build/selection.d56
+  build/release/dsp56300_generate_selection unary build/test-complement.d56
+  build/release/dsp56300_generate_control_bytes build/control-bytes.d56
+  cmp build/selection.d56 test/fixtures/selection.d56
+  cmp build/test-complement.d56 test/fixtures/test-complement.d56
+  cmp build/control-bytes.d56 test/fixtures/control-bytes.d56
+
+Both generators link only the fixture-format library, never the core. Separate
+raw signed-56 comparisons and per-bit complement/flag/boolean-byte models derive
+expectations. Existing independent quotient/remainder bus and sequence models
+supply transfer and native-prefix state. No emulator output is an oracle.
+The selection archives include raw56 bit/complement bases, signed extrema,
+equal/opposite magnitudes including -2^55, six supported numeric modes, all
+256 old CCR values and all sixteen IFcc/IFcc.U conditions. Twelve representative
+legal bus configurations include old-source stores, accumulator loads, paired
+ports, short/long immediates, long absolute loads and a parallel Y-to-R0 load
+consumed by subsequent native X-memory execution. Unsupported numeric modes
+remain explicit diagnostics. Partial REP budgets and finite DO endings check
+current operands/AGU state and restored LF/FV/stack frames.
+Control cases enumerate all 2048 encodings with twenty old-byte patterns,
+including both old-bit polarities. MR/CCR/COM/EOM logic preserves every other
+byte, including OMR SCS. REP covers prefixes and the encoded-zero 65536 count;
+non-MR repetitions change every selected bit on the first iteration; legal MR
+repetitions alter IPL only, never LF/scaling. CCR-only DO-end cases
+check preserved byte updates through finite iteration and saved LF/FV cleanup.
+Native prefix cases test dirty A/B, changed Carry and admitted mode transitions.
+The exhaustive host matrix adds 1572915 assertions on reference/cached/JIT,
+including all 256x256 old-byte/immediate combinations and actual translated
+helper execution. Another 102 host assertions test selection/status callback
+boundaries and resumed native consumers after callback program invalidation.
+Raw MR/COM/EOM matrices include all representable bits, including reserved bits
+and loop bits. They qualify byte manipulation only, not device-specific bit
+readback, downstream OMR behavior or legal initialization/abort of loop state.
+Other modes, every parallel format/alias, all IRQ/event and calibrated pipeline
+behavior remain unqualified; all six ISA rows remain partial. Archives keep the
+existing version and 65536 per-file limit; no old fixture bytes are replaced.
+
 Wire format D56F, version 1
 
 Every integer is unsigned little-endian. u32/u64 always occupy 4/8 bytes.

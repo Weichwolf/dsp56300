@@ -84,6 +84,12 @@ if(BUILD_TESTING)
   add_executable(dsp56300_displacement_test test/displacement_test.cpp)
   target_link_libraries(dsp56300_displacement_test PRIVATE dsp56300::core)
   add_test(NAME displacement-boundaries COMMAND dsp56300_displacement_test)
+  add_executable(dsp56300_control_byte_test test/control_byte_test.cpp)
+  target_link_libraries(dsp56300_control_byte_test PRIVATE dsp56300::core)
+  add_test(NAME control-byte-boundaries COMMAND dsp56300_control_byte_test)
+  add_executable(dsp56300_selection_test test/selection_test.cpp)
+  target_link_libraries(dsp56300_selection_test PRIVATE dsp56300::core)
+  add_test(NAME selection-boundaries COMMAND dsp56300_selection_test)
   add_executable(dsp56300_viterbi_test test/viterbi_test.cpp)
   target_link_libraries(dsp56300_viterbi_test PRIVATE dsp56300::core)
   add_test(NAME viterbi-boundaries COMMAND dsp56300_viterbi_test)
@@ -122,6 +128,10 @@ if(BUILD_TESTING)
   target_link_libraries(dsp56300_generate_parallel_moves PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_displacement test/generate_displacement.cpp)
   target_link_libraries(dsp56300_generate_displacement PRIVATE dsp56300_fixture_format)
+  add_executable(dsp56300_generate_control_bytes test/generate_control_bytes.cpp)
+  target_link_libraries(dsp56300_generate_control_bytes PRIVATE dsp56300_fixture_format)
+  add_executable(dsp56300_generate_selection test/generate_selection.cpp)
+  target_link_libraries(dsp56300_generate_selection PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_dataflow test/generate_dataflow.cpp)
   target_link_libraries(dsp56300_generate_dataflow PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_loops test/generate_loops.cpp)
@@ -174,6 +184,27 @@ if(BUILD_TESTING)
   add_test(NAME displacement-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/displacement-short.d56"
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/displacement-long.d56")
+  add_test(NAME selection-fixtures COMMAND dsp56300_fixture_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/selection.d56"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/test-complement.d56"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/control-bytes.d56")
+  add_test(NAME selection-reproducibility COMMAND "${CMAKE_COMMAND}"
+    "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_selection>"
+    "-DGENERATOR_ARGUMENTS=select"
+    "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/selection-regenerated.d56"
+    "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/selection.d56"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
+  add_test(NAME test-complement-reproducibility COMMAND "${CMAKE_COMMAND}"
+    "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_selection>"
+    "-DGENERATOR_ARGUMENTS=unary"
+    "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/test-complement-regenerated.d56"
+    "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/test-complement.d56"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
+  add_test(NAME control-byte-reproducibility COMMAND "${CMAKE_COMMAND}"
+    "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_control_bytes>"
+    "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/control-bytes-regenerated.d56"
+    "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/control-bytes.d56"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
   add_test(NAME displacement-short-reproducibility COMMAND "${CMAKE_COMMAND}"
     "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_displacement>"
     "-DGENERATOR_ARGUMENTS=short"

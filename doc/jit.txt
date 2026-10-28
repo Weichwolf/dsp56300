@@ -232,3 +232,20 @@ Consumers must retain ordinary DSP headers and memory,
 event and I/O interfaces, with VM management hidden inside the library. Required
 isolation cannot silently fall back to this host-process JIT. See
 doc/compiler-research.txt for the accepted backend and runtime ABI constraints.
+
+Selection/control helper boundaries
+
+MAX/MAXM, NOT/TST and ANDI/ORI use general executor helpers, with no new native
+lowering or SIMD claim. MAX/MAXM select old raw A/B despite parallel loads;
+TST preserves any parallel result while deriving flags from its old source.
+Independent native/helper/native tests exercise dirty A/B materialization,
+changed Carry feeding ADC, MR writes selecting the next rounding mode, and a
+parallel pointer load consumed by subsequent native RAM access. The exhaustive
+ANDI/ORI test constrains blocks to one instruction and checks actual translated
+helper execution, rather than qualifying only short-budget general tails.
+Accepted/rejected I/O callbacks observe canonical native state and exact retired
+progress. Callback P edits invalidate the successor before native continuation.
+Rejected transfers execute no following ALU and retire no guest instruction;
+existing partial-transfer effects and fail-stop semantics remain authoritative.
+These tests qualify helper integration only; other numerical modes, full ISA,
+pipeline/IRQ behavior and workload performance remain separate requirements.

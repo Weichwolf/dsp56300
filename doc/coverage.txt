@@ -5,11 +5,57 @@ implemented and independently tested, as explicitly reiterated by the user.
 Neither a passing current CTest suite nor successful Blofeld workloads is a
 replacement. doc/isa-coverage.tsv inventories 118 instruction/family/MOVE-form
 and alias entries against DSP56300FM Rev.5. The current audit records 15 missing,
-11 without dedicated independent tests and 92 partially tested entries; none
+5 without dedicated independent tests and 98 partially tested entries; none
 claims complete support. These counts are catalogue rows, not disjoint opcode
 counts or an ISA-support percentage. Detailed format/mode/sequence expansion
 remains mandatory. python3 tools/isa_audit.py --require-complete deliberately
 returns failure while any entry remains incomplete; see doc/isa-qualification.txt.
+
+Selection/control ISA increment: ANDI/ORI now accept the legal EOM byte,
+OMR[15:8], in addition to MR/CCR/COM. Both instructions are admitted after REP
+as documented. These were independently exposed defects, not new performance
+lowering. Six previously untested catalogue rows now have dedicated independent
+models: ANDI, ORI, MAX, MAXM, NOT and TST. All six remain partial. MAX compares
+signed full-56 values, MAXM compares mathematical magnitudes including -2^55,
+and ties copy old A to B while clearing C. NOT complements only the middle
+24-bit word; TST writes full-56 status without replacing a parallel destination.
+Per-bit status/complement and signed-coordinate models preserve unrelated and
+sticky flags, old ALU inputs and captured parallel bus sources. They use no
+emulator execution, decoder or ALU helpers to derive expectations.
+Three new reproducible archives contain 31094 selection, 47500 complement/test
+and 41614 control-byte cases, 120208 total per backend. Cases include six
+supported numerical modes, raw bit/sign boundaries,
+all old CCR bytes, all sixteen IFcc/IFcc.U conditions, twelve representative
+legal parallel bus configurations, clipping, pointer loads, REP prefixes and
+DO endings. Control cases enumerate all 2048 ANDI/ORI encodings and exercise
+zero-encoded REP counts, CCR DO endings and native/helper/native consumers.
+The optional authoring assembler agrees on all 2048 control encodings and 264
+representative parallel/conditional forms present in the executed archives;
+it supplies no semantic oracle or runtime/build dependency.
+1572915 host assertions exhaust all old/immediate byte combinations on all
+three backends and test warm CCR/MR changes before native Carry/rounding.
+102 additional assertions qualify accepted/rejected callback state, no ALU
+execution or retirement after failure, fail-stop/reentry and successor P changes.
+Parallel transfers retain their documented partial-failure contract; no new
+rollback guarantee is claimed. All four control fields preserve other bytes.
+Raw control-byte matrices deliberately test all representable bit patterns,
+including reserved/loop bits. They do not qualify device-specific reserved-bit
+readback, OMR downstream effects or valid LF/FV setup/abort. Legal MR repetitions
+change IPL only, and DO-end byte cases target CCR, never prohibited MR writes.
+SB/SC/DM/SM, all operand/parallel formats, fast-interrupt admission and complete
+sequence/pipeline/event timing remain gaps. These changes add no CPU state,
+public API or native dependency. No SIMD, speed, host-load or energy claim is
+made. Complete ISA, 270 MIPS qualification and the transparent hardware-isolated
+backend remain mandatory outstanding parts of the objective.
+Full release and ASan/UBSan strict suites pass all 67 executable tests
+(81.24 s and 316.07 s). Both register 68 tests; KVM is the sole skipped test,
+with open /dev/kvm still reporting Permission denied, not qualified isolation.
+After strengthening the REP operands, the affected fixture/reproducibility tests
+pass again in release and strict (8.99 s and 39.95 s); both generators reproduce
+the same reviewed bytes. All 24 previous public archives remain unchanged.
+LLVM 19 strict diagnostics/tidy, formatting and the structural ISA audit pass;
+--require-complete still fails as required on the explicit incomplete catalogue.
+No fuzz tests were run. This increment is committed locally; the goal stays active.
 
 Displaced-MOVE ISA increment: MOVE.X and MOVE.Y now decode and execute the
 separate signed-seven-bit and 24-bit-extension Rn-relative forms. Both sample

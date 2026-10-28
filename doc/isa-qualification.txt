@@ -170,3 +170,27 @@ stack/memory failures, P aliases, extensions, observers and guest SR/M changes;
 a private source-built sample entry now executes cursor publication and RTS.
 No row becomes complete: other numerical modes, fast-IRQ admission, complete
 AGU restrictions/sequences and pipeline/event qualification remain mandatory.
+
+Selection/control increment: ANDI/ORI now include EOM, the OMR middle byte,
+and are repeatable single-word instructions. Independent expectations exposed
+both the missing legal selector and the incorrect REP prohibition. Exhaustive
+host tests enumerate all old/immediate byte combinations for MR/CCR/COM/EOM;
+reproducible fixtures enumerate every opcode and add numeric-mode/Carry consumer
+chains, zero-count REP prefixes and CCR DO endings with saved LF/FV frames.
+The raw register-byte matrix includes reserved/loop-bit patterns only to test
+the byte operation. It does not qualify reserved-bit hardware readback, OMR
+mode side effects, explicit LF/FV initialization/abort or prohibited sequences.
+Legal MR REP witnesses change IPL only; DO-end witnesses target CCR only.
+MAX/MAXM, NOT and TST additionally have independent full-width/per-bit models.
+Signed and magnitude ties, the raw -2^55 magnitude, middle-word-only complement,
+full-width TST flags, scaled E/U, preserved sticky flags, IFcc suppression and
+IFcc.U updates are checked with representative legal parallel moves. Models
+capture old ALU/bus inputs before writes. Tests include TST source overwrite,
+clipped accumulator stores, pointer loads consumed by subsequent native code,
+REP/DO boundaries and actual native/helper/native execution. Callback tests
+check canonical dirty-native state, success/failure, reentry and P invalidation;
+a failed transfer must not execute the ALU or retire, without promising transfer
+rollback. Other numerical modes, full parallel/operand expansion, fast IRQ and
+sequence/pipeline/event qualification remain open. All six rows move from
+untested to partial; none becomes complete. Current catalogue totals are
+15 missing, 5 untested, 98 partial, 0 complete. No speed/device claim follows.

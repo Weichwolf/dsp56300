@@ -75,6 +75,8 @@ enum class Operation : std::uint8_t {
   switch (operation) {
     case Operation::parallel:
     case Operation::nop:
+    case Operation::and_control:
+    case Operation::or_control:
     case Operation::arithmetic_shift_immediate:
     case Operation::arithmetic_shift_register:
     case Operation::logical_shift_immediate:
@@ -117,8 +119,6 @@ enum class Operation : std::uint8_t {
     case Operation::call_effective:
     case Operation::return_subroutine:
     case Operation::return_interrupt:
-    case Operation::and_control:
-    case Operation::or_control:
     case Operation::repeat_immediate:
     case Operation::loop_immediate:
     case Operation::loop_register:

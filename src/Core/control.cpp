@@ -101,12 +101,8 @@ void Core::Impl::execute(const Instruction &decoded) {
     case Operation::and_control:
     case Operation::or_control: {
       const unsigned field = opcode & 3;
-      if (field > 2) {
-        fail(FaultKind::unsupported_mode, Space::program, current_pc, opcode);
-        return;
-      }
-      auto &target = field == 2 ? reg.omr : reg.sr;
-      const unsigned shift = field == 0 ? control_byte_shift : 0;
+      auto &target = field >= 2 ? reg.omr : reg.sr;
+      const unsigned shift = field == 0 || field == 3 ? control_byte_shift : 0;
       const auto value = ((opcode >> control_byte_shift) & 0xff) << shift;
       const Word byte_mask = Word{0xff} << shift;
       target = decoded.operation == Operation::and_control ? target & (value | ~byte_mask)
