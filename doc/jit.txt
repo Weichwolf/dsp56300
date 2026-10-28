@@ -431,3 +431,17 @@ including sticky transfer flags and partial failures. Old parallel inputs
 remain separate through the context's latched buffer. Other regions retain
 canonical memory SR and the previous pointer convention. See doc/native-status.txt
 for the independent CCR/old-input/callback matrix and controlled measurements.
+
+
+Compact host immediates
+
+The private x64 encoder chooses exact flag-preserving MOV r32/imm32 or signed
+MOV r64/imm32 when they reproduce a complete 64-bit constant; other constants
+retain MOVABS. Register/memory ALU instructions use a sign-extended byte only
+when it reproduces the operand at its actual width, with dedicated accumulator
+opcodes where shorter. Byte/word payloads have their real operand size. Existing
+ModRM/SIB addressing, labels, guards, retirement and checkpoints are unchanged.
+Independent RX tests check all defined arithmetic flags, full GPR results and
+memory canaries at immediate/width/displacement boundaries. See native-encoding.txt
+for the rejected alignment pilot, smaller page storage, measured cache effects,
+modest CPU gains and complete qualification limits. No public option/state change.

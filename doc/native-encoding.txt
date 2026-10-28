@@ -1,0 +1,145 @@
+Compact x64 immediate encodings
+
+Design recorded before implementation
+
+Generic RAM/post-N regions reduce host work but grow native code and instruction
+cache misses. Investigate actual machine-code layout/encoding with unchanged
+DSP work, fixtures, register allocation, checkpoints and native/general paths.
+The full objective remains incomplete. No DSP arithmetic SIMD or worker change.
+
+Candidate                  Exact state requirement             Expected byte cost
+32B entry/header alignment host NOPs, same branches/state      padding/entry work
+unsigned 32-bit constant   complete qword, zero upper bits     MOV r32: 5/6 vs 10
+signed 32-bit constant     complete sign-extended qword        MOV r64,imm32: 7 vs 10
+other qword constant       exact arbitrary 64-bit pattern      existing MOVABS: 10
+signed byte ALU operand    identical operand at selected width imm8 saves 3 bytes
+accumulator immediate      same operation/flags, implicit AX   saves 1 byte
+memory immediate           same width/address/flags            compact operand only
+
+All MOV forms preserve host flags, including zero constants. Positive $80000000
+and $ffffffff constants must zero-extend; negative sign-extended constants use
+their full 64-bit value. A qword ALU immediate retains the prior sign-extension
+of its 32-bit operand. A byte immediate represents the low eight bits. Word
+immediates truncate to 16 bits and qualify for a sign-extended byte only when
+that byte reproduces the complete word. Full-width word payloads have two
+bytes. Byte/word encodings now have explicit directed witnesses; their former
+unqualified wide payloads are not used by the existing DSP compiler paths.
+
+The existing ModRM/SIB/displacement forms, memory bounds/alias proof, branch
+labels/patching, numeric modes, loop guards, budget accounting and helper/return
+checkpoints are unchanged. Recompute normal label offsets from emitted bytes;
+never splice shorter instructions into already-patched machine code. No public
+CPU, context, option, architecture or consumer contract changes.
+
+Rejected alignment pilot
+
+A private 32-byte experiment aligned guarded child entries and loop headers,
+retaining the ordinary path. Twelve complete stream states pass. Parent/
+aligned/aligned/parent captures use CPU2 and natural one-second warmup plus
+one measured input second, with no build/test task from this repository.
+Unrelated host load/frequency/scheduling remain uncontrolled.
+
+FIR CPU changes 0.258323..0.259358 -> 0.254424..0.255991 s (1.40% lower), IIR
+0.676639..0.678611 -> 0.681057..0.682066 s (0.58% higher), spectral
+0.830145..0.841842 -> 0.834110..0.842277 s (0.26% higher). FIR's generated path
+is unchanged, so its small timing change does not prove an alignment benefit.
+Both aligned spectral packages fail their wall deadline (1.122212 / 1.595156 s),
+with CPU still around 0.84 s; retain the substantial scheduling gap rather than
+attributing it causally to padding. The parent packages pass. There is no
+established cross-workload improvement, so this candidate is not retained.
+All pilot logs, code diff and executables remain in ignored experiment storage.
+
+Independent encoding qualification
+
+A new directed test executes actual RX bytes through the production SysV bridge.
+Literal bytes for positive/sign-extended/wide constants, imm8/imm32 boundaries,
+accumulator and memory operations were checked separately with LLVM MC 19 during
+authoring. That assembler is not a build/test/runtime dependency.
+
+An independent serial carry circuit checks ADD/ADC/SUB/SBB/CMP arithmetic,
+borrow, auxiliary carry and signed overflow for 8/16/32/64-bit operands. Separate
+logical/parity/zero/sign expectations check OR/AND/XOR. Host AF is undefined
+for logical operations and is excluded only there. All other defined arithmetic
+flags are checked, with both incoming carry choices. MOV checks all six flags
+unchanged, with distinct incoming combinations.
+
+The matrix covers fifteen non-stack GPRs (including low-byte REX cases), signed
+byte/word/dword/qword boundaries and high-half preservation/clearing. Memory
+cases cover low/high/SIB bases, zero/127/128-byte displacements, unaligned words
+and whole-buffer canaries. Compare complete qword results and all adjacent
+bytes. The probes preserve DSP state and context. RSP is covered by a literal
+memory encoding; it is deliberately not overwritten as a register destination.
+The independent direct test passes 767401 assertions per build.
+
+Both builds pass all 118 correctness tests, zero skips: release 124.43 s with
+two CTest processes, strict 238.91 s with three. The direct host-encoding test
+passes 767401 checks independently in each configuration. All eighteen full
+stream/backend combinations match complete independent state; those loaded-host
+timings are correctness evidence only. Strict bench checks all three full states
+in report-only mode, retaining its wall deadline failures. All 48 archives are
+byte-identical. All 130 strict C++ translation units retain nonrecovering required
+instrumentation and all 168 C++ files pass format/tidy/Werror policies. Structural
+ISA audit passes; complete-ISA remains red with 118 partial rows and zero complete.
+No fuzzing or publication is performed. Green host encoding tests do not complete
+DSP ISA, all applications, long-run realtime, cache locality, adaptive allocation,
+SIMD/multicore lifting or energy goals.
+
+Matched continuous comparison
+
+The verified parent and compact candidate execute unchanged fixtures on CPU2
+in parent/candidate/candidate/parent order for each scenario. One natural input
+second warmup is followed by one measured input second in the same DSP. No
+restoration, replay, skipped scenario or overhead subtraction. No build/test/
+format job from this repository overlaps. Other host activity, frequency and
+scheduling remain uncontrolled. All twelve complete states pass.
+
+Scenario   Parent CPU s         Candidate CPU s      Mean CPU reduction
+FIR        0.235804..0.235862    0.234438..0.235670   0.33%, small
+IIR        0.623471..0.623711    0.606421..0.607430   2.67%
+spectral   0.787616..0.788601    0.780704..0.782964   0.80%
+
+Every compared package and block deadline passes. Spectral candidate wall is
+0.780663..0.782927 s, 327.88..328.83 actual guest MIPS. These absolute rates
+differ from previous captures' host conditions; the new encoding increment's
+FFT gain is only the matched 0.80%, not the increase over an old absolute rate.
+Instruction/base-cycle and native/general/move/batch/AVX2 counts are unchanged.
+
+The independent default optimized bench passes FIR 0.234156 wall / 0.234172 CPU s
+(1162.30 MIPS), IIR 0.606443 / 0.606475 s (452.50 MIPS) and spectral
+0.778913 / 0.778947 s (329.57 MIPS). All states pass, with zero late blocks;
+maximum block times 0.339 / 0.961 / 8.163 ms against 1.333 / 1.333 / 10 ms.
+This qualifies these captures, not indefinite hard realtime or all DSP programs.
+No passing new capture replaces earlier retained failures or the active goal.
+
+Footprint and hardware counters
+
+Page-rounded native storage changes IIR 53248 -> 49152 bytes (7.69% less) and
+spectral 385024 -> 344064 bytes (10.64% less). FIR stays 32768 bytes; page
+quantization can hide smaller individual encodings. The number of DSP operations
+and chosen execution routes does not change. This improves host code footprint,
+without adding DSP arithmetic SIMD, workers or speculative memory effects.
+
+Four additional alternating PMU runs per IIR/spectral scenario use the same
+CPU affinity and binary pair. All state checks pass, every event runs for 100%
+of enabled time. User counters cover the whole process, including fixture setup,
+oracle, cold compilation, natural warmup, measured work and final validation.
+Do not attribute them exclusively to JIT execution/the measured interval, or
+infer energy use from them.
+
+Scenario/counter        Parent / candidate range                    Mean reduction
+IIR user instructions   16.47224 / 16.47219 billion                  effectively same
+IIR user cycles         4.98060..4.98350 / 4.84924..4.85253 billion   2.63%
+IIR L1 data loads       2.36048 / 2.36045 billion                    effectively same
+IIR L1 data misses      0.64666..0.65014 / 0.64404..0.64513 million   0.59%
+IIR L1 instr misses     25.51398..28.48042 / 12.85151..13.49971 million 51.20%
+spectral user instr     20.26139 / 20.26117 billion                  effectively same
+spectral user cycles    6.57200..6.57687 / 6.51151..6.52334 billion   0.87%
+spectral L1 data loads  3.41775 / 3.41765 billion                    effectively same
+spectral L1 data misses 4.00878..4.11950 / 4.01722..4.07462 million   0.45%, overlapping
+spectral L1 instr misses 9.18015..10.49053 / 6.61709..7.32665 million 29.11%
+
+Smaller encodings reduce storage and instruction misses in these samples with
+modest CPU gains. Full cache locality is unproven. Dynamic pattern-based register
+allocation, broader application scenarios, precise ISA/events/integration,
+further host work reduction, sustained latency, SIMD/multicore research and
+energy per work block remain part of the unchanged incomplete objective.

@@ -123,3 +123,8 @@ instruction-cache costs and additional data loads. Do not claim complete cache
 locality or energy savings. Header/entry layout, smaller cold fallbacks,
 per-pattern register allocation, wider applications, complete ISA and precise
 integration/event qualification remain part of the unchanged active objective.
+
+
+The subsequent compact host-encoding increment in native-encoding.txt examines
+layout and reduces native storage without changing this stride proof or guest
+work. Its matched CPU/cache evidence is separate from the measurements above.

@@ -429,3 +429,47 @@ C++ files pass formatting/tidy/Werror. ISA structural audit passes, while the
 complete-ISA gate still fails with 118 partial rows. Further reserve, sustained
 latency, complete ISA, all application domains, cache/energy, adaptive allocation
 and SIMD/multicore research remain open; the objective is unchanged/incomplete.
+
+
+Compact host encoding increment
+
+Constant MOVs, register/memory arithmetic immediates and accumulator forms now
+use shorter equal-effect encodings, without changing any DSP program, execution
+route, instruction/base-cycle count or checkpoint. A 32-byte entry/header
+alignment pilot is rejected: no generic CPU benefit, with two late spectral
+packages under substantial scheduling interference. All observations remain in
+native-encoding.txt and private capture logs.
+
+Matched parent/candidate/candidate/parent measurements use CPU2, one natural
+warmup second then one measured input second. No build/test/format job from
+this repository overlaps; other host conditions remain uncontrolled. All states
+and package/block deadlines pass in the final matched comparison.
+
+Scenario   Parent CPU s         Candidate CPU s      Mean CPU reduction
+FIR        0.235804..0.235862    0.234438..0.235670   0.33%, small
+IIR        0.623471..0.623711    0.606421..0.607430   2.67%
+spectral   0.787616..0.788601    0.780704..0.782964   0.80%
+
+Spectral is 327.88..328.83 actual guest MIPS. Changes from earlier absolute rates
+include different host conditions; only matched reductions above qualify this
+increment. The separate default bench passes FIR 0.234156 wall / 0.234172 CPU s
+(1162.30 MIPS), IIR 0.606443 / 0.606475 s (452.50 MIPS), spectral
+0.778913 / 0.778947 s (329.57 MIPS), zero late blocks and all states PASS.
+Maxima are 0.339 / 0.961 / 8.163 ms against 1.333 / 1.333 / 10 ms. These passing
+samples do not establish indefinite realtime, all programs or complete ISA.
+
+IIR page storage falls 53248 -> 49152 bytes; spectral 385024 -> 344064; FIR
+stays 32768. Whole-process alternating PMU captures show essentially unchanged
+host instruction/data-load counts, IIR/spectral cycles 2.63% / 0.87% lower and
+instruction misses 51.20% / 29.11% lower. L1 data-miss changes are small/overlap.
+All events run 100%; setup/oracle/cold/warm/checks are included. No isolated
+interval attribution, full cache-locality or energy claim follows.
+
+All 118 release/strict tests pass (124.43 / 238.91 s), no skips. A new independent
+serial host-flag/width/canary test passes 767401 assertions per build. All eighteen
+full-stream/backend states pass, plus three strict report-only checks with late
+packages retained. All 48 archives are unchanged, all 130 strict units retain
+required instrumentation and all 168 C++ files pass format/tidy/Werror. ISA
+structural audit passes; complete-ISA remains red with 118 partial rows. Full
+objective, usual domains, adaptive placement, SIMD/multicore, latency and energy
+remain active work. Native-encoding.txt records the proof and counter ranges.

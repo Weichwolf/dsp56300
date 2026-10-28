@@ -97,10 +97,10 @@ and old parallel operands without memory/I/O observation barriers. All 6758417
 directed ASR/register assertions pass; no ISA catalogue row becomes complete.
 See doc/native-shifts.txt for guards, witnesses, measurements and remaining work.
 
-The current configuration passes all 117 correctness tests in release (99.69 s,
-two CTest processes) and strict ASan/UBSan (231.81 s, three processes), with no
-skips. All 128 C++ translation units retain the required strict nonrecovering
-address/undefined/integer instrumentation; all 167 project C++ source/header
+The current configuration passes all 118 correctness tests in release (124.43 s,
+two CTest processes) and strict ASan/UBSan (238.91 s, three processes), with no
+skips. All 130 C++ translation units retain the required strict nonrecovering
+address/undefined/integer instrumentation; all 168 project C++ source/header
 files pass clang-format. All 48 pre-existing archives remain byte-identical,
 including the 112-case FFT archive. All registered regeneration checks pass.
 No fuzzing was run.
@@ -109,10 +109,11 @@ Full two-second FIR, IIR and spectral cases pass independent complete-state
 checks in all six release variants. The instrumented production bench passes
 all three correctness/report-only cases. Loaded-host comparisons qualify state,
 not release speed. The optimized default bench passes all three one-second
-packages: FIR 0.262642 s, IIR 0.688857 s, spectral 0.872246 s. All final states
-match, with zero late blocks in that capture. One controlled spectral hop is
-late; sustained latency/reserve and wider-scenario qualification remain open.
-These performance gates are separate from the 117 correctness tests. Retain the
+packages: FIR 0.234156 s, IIR 0.606443 s, spectral 0.778913 s. All final states
+match, with zero late blocks in that capture and the matched encoding comparison.
+Earlier late captures remain recorded; sustained latency/reserve and wider
+scenario qualification remain open.
+These performance gates are separate from the 118 correctness tests. Retain the
 individual captures and host-condition limits in continuous-bench.txt.
 The expanded native-move boundary test passes all 78446 assertions in both builds.
 It includes exact same-code reuse after modifier changes and paired aliased X/Y
@@ -377,3 +378,33 @@ captures show fewer instructions/cycles (6.56% / 7.08%) but more L1 data loads
 or energy savings. See native-strides.txt for proof, full measurements and
 limitations. Full ISA, generic adaptive register placement, further performance,
 SIMD/multicore lifting, applications and integration remain active work.
+
+
+Compact host encoding qualification
+
+The private x64 emitter now uses exact smaller constant MOV, signed-byte ALU/
+memory operands and dedicated accumulator opcodes. It preserves every defined
+host flag, correct zero/sign extension and full/partial-register semantics.
+Word/byte immediate payloads now have explicit size-correct witnesses. No DSP
+program/path/count, public CPU/context, bounds proof or checkpoint changes.
+A new independent serial carry/borrow model and actual RX execution qualify
+767401 checks per build, all 8/16/32/64-bit widths, fifteen non-stack GPRs,
+carry/overflow/sign/zero/parity/auxiliary flags, immediate boundaries, memory
+bases/displacements and neighboring canaries. No ISA row becomes complete.
+
+The 32-byte alignment pilot is rejected, retaining its scheduling-heavy package
+failures and mixed CPU results. The verified compact candidate reduces page
+storage IIR 53248 -> 49152, spectral 385024 -> 344064, with FIR unchanged.
+Matched CPU reductions are 2.67% IIR, 0.80% spectral, small 0.33% FIR. Host
+instruction/data-load counts remain nearly equal; whole-process IIR/spectral
+instruction misses fall 51.20% / 29.11%, cycles 2.63% / 0.87%. Counter scope
+includes setup/cold/warm/oracle/checks, not isolated JIT or energy. All compared
+and default optimized package/block deadlines pass in these captures, without
+establishing indefinite realtime or all-program 275-MIPS qualification.
+
+All 118 tests pass in both builds, all eighteen full-stream/backend states and
+strict report-only checks agree independently. All 48 archives stay unchanged.
+See native-encoding.txt for proof, exact performance/counter ranges and limits.
+Complete ISA, other usual domains, adaptive runtime register allocation, further
+host CPU/cache reduction, SIMD/multicore, integration, latency and energy remain
+part of the unchanged active objective.

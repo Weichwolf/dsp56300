@@ -27,6 +27,27 @@ constexpr unsigned index_bit = 2, word_scale = 2;
 constexpr unsigned mov_register = 0x89, mov_load = 0x8b, mov_immediate = 0xb8;
 constexpr unsigned mod_register = 0xc0, mod_small = 0x40, mod_large = 0x80;
 constexpr unsigned alu_immediate = 0x81, shift_immediate = 0xc1;
+
+std::uint32_t immediate_opcode(const Width width, const std::uint32_t value) {
+  constexpr std::uint32_t immediate_byte = 0x80;
+  constexpr std::uint32_t immediate_short = 0x83;
+  constexpr std::uint32_t maximum_short = 127;
+  constexpr std::uint32_t word_mask = 0xffff;
+  if (width == Width::byte) { return immediate_byte; }
+  const auto mask = width == Width::word ? word_mask : std::numeric_limits<std::uint32_t>::max();
+  const auto truncated = value & mask;
+  return truncated <= maximum_short || truncated >= mask - maximum_short ? immediate_short
+                                                                         : alu_immediate;
+}
+
+void immediate_value(Code &code, const Width width, const std::uint32_t value, const bool compact) {
+  code.byte(value & low_byte_mask);
+  if (compact) { return; }
+  code.byte((value >> byte_bits) & low_byte_mask);
+  if (width == Width::word) { return; }
+  code.byte((value >> (2 * byte_bits)) & low_byte_mask);
+  code.byte((value >> (3 * byte_bits)) & low_byte_mask);
+}
 }
 
 void Code::byte(const std::uint32_t value) {
@@ -121,10 +142,23 @@ void Code::mov(const RegisterPair registers, const Width width) {
 }
 
 void Code::constant(const Reg destination, const std::uint64_t value) {
+  constexpr std::uint64_t minimum_signed32 = 0xffffffff80000000;
   const auto dst = static_cast<unsigned>(destination);
-  rex(Width::qword, 0, dst);
-  byte(mov_immediate + (dst & 7));
-  u64(value);
+  if (value <= std::numeric_limits<std::uint32_t>::max()) {
+    // A 32-bit MOV clears the complete upper half without changing flags.
+    rex(Width::dword, 0, dst);
+    byte(mov_immediate + (dst & 7));
+    u32(static_cast<std::uint32_t>(value));
+  } else if (value >= minimum_signed32) {
+    rex(Width::qword, 0, dst);
+    byte(store_other);
+    byte(mod_register | (dst & 7));
+    u32(static_cast<std::uint32_t>(value));
+  } else {
+    rex(Width::qword, 0, dst);
+    byte(mov_immediate + (dst & 7));
+    u64(value);
+  }
 }
 
 void Code::load(const Reg destination,
@@ -227,14 +261,11 @@ void Code::memory_immediate(const unsigned group,
                             const std::size_t offset,
                             const Width width,
                             const std::uint32_t value) {
+  const auto opcode = immediate_opcode(width, value);
   rex(width, group, static_cast<unsigned>(base));
-  byte(width == Width::byte ? 0x80 : alu_immediate);
+  byte(opcode);
   memory(group, base, offset);
-  if (width == Width::byte) {
-    byte(value);
-  } else {
-    u32(value);
-  }
+  immediate_value(*this, width, value, opcode != alu_immediate);
 }
 
 void Code::binary(const std::uint32_t opcode, const RegisterPair registers, const Width width) {
@@ -250,10 +281,17 @@ void Code::immediate(const unsigned group,
                      const std::uint32_t value,
                      const Width width) {
   const auto dst = static_cast<unsigned>(destination);
+  const auto opcode = immediate_opcode(width, value);
   rex(width, group, dst);
-  byte(alu_immediate);
-  byte(mod_register | (group << 3) | (dst & 7));
-  u32(value);
+  if (destination == Reg::ax && (width == Width::byte || opcode == alu_immediate)) {
+    constexpr unsigned accumulator_byte = 4;
+    constexpr unsigned accumulator_other = 5;
+    byte((width == Width::byte ? accumulator_byte : accumulator_other) + (group * byte_bits));
+  } else {
+    byte(opcode);
+    byte(mod_register | (group << 3) | (dst & 7));
+  }
+  immediate_value(*this, width, value, opcode != alu_immediate);
 }
 
 void Code::shift(const unsigned group,
