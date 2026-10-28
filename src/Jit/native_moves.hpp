@@ -20,6 +20,13 @@ struct NativeMoves {
   unsigned count = 0;
 };
 
+struct NativeRegisterMove {
+  unsigned source = 0, destination = 0;
+
+  [[nodiscard]] bool valid() const noexcept { return source != 0; }
+};
+
 // Compile-time transfer description, independent of the host instruction set.
 [[nodiscard]] NativeMoves plan_moves(const Instruction &instruction);
+[[nodiscard]] NativeRegisterMove plan_register_move(const Instruction &instruction);
 } // namespace dsp56300::detail

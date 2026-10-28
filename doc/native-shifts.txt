@@ -1,0 +1,134 @@
+Native ASR and data-register transfers
+
+The x64 emitter now lowers the single-bit parallel ASR A/B forms and register
+moves among X0/X1/Y0/Y1/A/B. These remove general execution from common FFT
+instructions and permit longer native-only regions. General execution remains
+available; this is not full ISA or full-program qualification.
+
+Arithmetic precision and flags
+
+DSP accumulators use raw 56-bit coordinates externally and left-aligned host
+values internally. ASR emits signed SAR by nine followed by SHL by eight. The
+first shift places original DSP bit zero in x64 CF, which is captured before
+the alignment shift. All internal padding bits are zero again afterwards.
+This implements signed floor division by two, including negative odd values,
+with sign extension, shifted-out Carry and cleared Overflow. Existing scaled
+E/U/N/Z generation and sticky S/L preservation are reused. ASR declares its
+Carry write to the flag-liveness pass so a subsequent ADC/SBC reads fresh C.
+
+Only single-bit ASR is added to native lowering. Multi-bit immediate/register
+ASR, ASL, logical/rotate forms and unqualified numerical modes retain their
+existing general paths/diagnostics. The mode key and numeric guard remain
+unchanged. The manual basis is DSP56300FM Rev.5, ASR pages 13-16/13-17; local
+reference copies are ignored assets.
+
+Register transfers and observability
+
+A separate host-independent register plan admits all 36 source/destination
+combinations among X0/X1/Y0/Y1/A/B. It excludes partial accumulators, R/N and
+PCU/control registers and non-register move classes. Parallel duplicate
+accumulator destinations remain outside the native transfer plan, following
+the register-MOVE restrictions in pages 13-115/13-116. Excluded forms use the
+existing general transfer/execution path; no new hardware behavior is invented.
+
+Full accumulator reads reuse native word-transfer scaling, clipping and sticky
+S/L logic. Full accumulator destinations receive the same sign-extended word
+as general MOVE. A/B-to-A/B therefore transfers a bus word, not a raw 56-bit
+copy. Both self transfers and other aliases preserve that distinction.
+Old-input analysis captures every bank overwritten by a move but read by its
+parallel ALU. The ALU consumes those old values after the move commits; source
+clipping flags remain preserved. ASR's old-input description names only its
+accumulator rather than conservatively snapshotting every bank.
+
+Admitted data-register moves cannot fault, call I/O, invalidate P or change
+control state. They do not require the memory-transfer dirty check, helper
+checkpoint or unconditional flag-observation barrier. Flag liveness crosses
+these pure transfers while retaining Carry dependencies and sticky effects.
+Register-only native regions can derive common retirement from R15D instead
+of maintaining a pending helper pair. Possible memory/general transfers still
+materialize canonical progress, SR and accumulators before observers; loop
+guards and exits retain their existing checkpoints. CPU/owner/runtime layouts,
+public API, memory ownership and instruction budgets are unchanged.
+
+JitStatistics.native_move_instructions already counts any complete parallel
+transfer executed natively, overlapping native_alu_instructions. It now also
+counts admitted register moves. It is neither an extra retired instruction nor
+a count of memory bus accesses.
+
+Independent evidence
+
+native-shift-boundaries performs 6758417 directed assertions. Single shifts
+cover both destinations, all 256 initial CCR bytes, six supported numeric
+specializations, boundary values and every raw bit position/complement. The
+model uses signed quotient/remainder floor division and independent raw-56
+flags, not the emitted padding/CF technique. Complete six-instruction chains
+exercise every admitted register pair with four parallel-ALU shapes, six seeds
+and every initial CCR/mode. Native and disabled-optimization paths must expose
+identical independently expected full registers and exact progress. Successful
+native chains require exactly six native retirements, one native transfer and
+zero general helper retirements, not merely Backend::jit selection.
+
+The expanded native-retirement test performs 104795 directed assertions. It
+adds ASR-to-ADC/SBC chains, one/four-op native loops and actual ASR prefixes
+before accepted/rejected/SIMD-clobbering I/O callbacks and P invalidation.
+Qword/PC wrap, exact budgets, LC/SP/saved-target guards and zero/partial exits
+remain covered. General-helper admission negatives now use still-general ASL.
+Dataflow tests retain real general partial-register witnesses while requiring
+the newly admitted full-register forms to use native transfers. Existing binary
+archives remain independent expectations and are not regenerated from core output.
+
+Both complete suites pass all 97 tests without skips: release 133.47 s and
+strict 435.83 s. All 102 project C++ translation units carry the required
+nonrecovering sanitizer flags in strict builds. All 136 project C++ source/header
+files pass formatting; quality policies, public API and CPU/owner layouts are
+unchanged. The 40 public binary archives remain byte-identical to the parent.
+The structural ISA audit passes; the complete-ISA gate deliberately still fails
+with 118 partial catalogue entries and zero complete entries.
+
+Controlled workload measurements
+
+Host: Intel Core i5-10400, Clang 19 release, CPU2 affinity, powersave governor
+with dynamic frequency, shared host. Parent is 273fea4. The matched control
+disables only the two new lowering admissions; every other 39 core archive
+objects are byte-identical to the candidate, with the same runtime layouts and
+options. Native/helper/move counts in parent and control match. Candidate
+retirement and independent fixture results match, with more native execution.
+Host text addresses need not match the parent. No public control option is added.
+
+Each executable uses 64 warmups and nine trials. Three process runs rotate
+parent/control/candidate order. Values below are medians of trial medians,
+ns/call. Host RAM/register restoration and compilation are outside the measured
+interval; Core::run, timer and retirement-check overhead remain inside. No timer
+subtraction is used. Raw trials, artifact hashes and control provenance stay in
+ignored local analysis. These are actual single-Core source-built Blofeld
+routines and independently modeled own DSP FFTs, not native algorithm rewrites.
+
+Workload           Parent       Control      Candidate    Actual MIPS
+Filter ordinary       975.24       972.46       969.06         107.3
+Filter wide          1061.06      1057.04      1055.88         113.6
+Complete LP12        1602.32      1614.36      1505.93          90.3
+Complete LP12 wide   1657.25      1641.72      1535.41          98.3
+Effect/reverb       47107.56     46686.66     45809.77          33.9
+DSP FFT16           15773.10     15753.65      9822.13         114.0
+DSP FFT64           73507.34     72260.38     37731.05         164.7
+DSP FFT256         344005.75    344357.38    157018.25         204.4
+DSP FFT1024       1614668.62   1578590.12    671771.25         234.9
+
+FFT calls take about 37.7/48.7/54.4/58.4% less time than the parent (16..1024
+points); matched-control reductions are about 37.7/47.8/54.4/57.4%. Complete
+LP12 cases take 6.0/7.4% less time than the parent and 6.7/6.5% less than the
+control. Filter cases are nearly flat. Reverb is about 2.8%/1.9% shorter against
+parent/control, despite unchanged helper counts; code-layout/shared-host effects
+therefore remain relevant, and no causal instruction-mix claim follows for it.
+Small differences on this shared host are not a confidence or fixed-load result.
+
+A separately validated single-step FFT256 profile matches the ordinary run's
+native/helper mix. General retirements fall from 8284 to 2140: all 4096 single-bit
+ASR and 2048 selected accumulator register moves leave general execution. This
+counts instructions, not their elapsed-time contribution. Remaining helpers
+include 1020 address updates, 510 repeated pointer immediates, 256 final loop
+cleanups and 354 other instructions. These guide further lowering experiments.
+
+Complete ISA, representative 270 MIPS and whole-device realtime, fixed-load
+CPU/latency, SIMD/multicore lifting and energy remain open requirements. A warm
+initialized routine is not continuous audio, all voices/effects or a whole DSP56371.

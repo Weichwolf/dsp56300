@@ -36,6 +36,7 @@ struct Step {
 constexpr Step mac_a{.opcode = 0x2000d3}, mac_b{.opcode = 0x2000fb};
 constexpr Step immediate{.opcode = 0x0140c0, .extension = 0xff1234, .immediate = true};
 constexpr Step round_a{.opcode = 0x200011}, io_mac{.opcode = 0x44e0d3};
+constexpr Step asr_a{.opcode = 0x200022}, asr_b{.opcode = 0x20002a};
 
 Word words(const Step step) {
   return step.immediate ? 2U : 1U;
@@ -193,6 +194,7 @@ void generated(const std::span<const Step> steps, const Word mode, const bool lo
 void counter_lanes() {
   const std::array long_body{mac_a, mac_b, immediate, mac_a, round_a, mac_b, immediate, mac_a};
   const std::array mixed{immediate, mac_a, immediate, mac_b};
+  const std::array shifts{asr_a, Step{.opcode = 0x200021}, asr_b, Step{.opcode = 0x200035}};
   for (const auto mode : modes) {
     generated({}, mode, false);
     for (const auto size : {std::size_t{1}, std::size_t{3}, std::size_t{4}, long_body.size()}) {
@@ -202,11 +204,15 @@ void counter_lanes() {
     }
     generated(mixed, mode, false);
     generated(mixed, mode, true);
+    generated(std::span(shifts).first(1), mode, false);
+    generated(std::span(shifts).first(1), mode, true);
+    generated(shifts, mode, false);
+    generated(shifts, mode, true);
   }
 }
 
 void admission_guards() {
-  constexpr Word shift = 0x200022;
+  constexpr Word shift = 0x200032;
   constexpr Word aliased_store = 0x4460d3;
   const std::array body{mac_a, mac_b, mac_a, mac_b};
   const auto ops = operations(body, 0, start, false);
@@ -221,7 +227,7 @@ void admission_guards() {
   };
   check(ops, {}, false);
   auto changed = ops;
-  changed[1].instruction = detail::decode(shift); // General ASR helper.
+  changed[1].instruction = detail::decode(shift); // General ASL helper.
   check(changed, {}, true);
   changed = ops;
   for (auto &operation : changed) { operation.mode = detail::arithmetic_16; }
@@ -357,7 +363,8 @@ struct Machine {
 };
 
 Expected callback_expectations(Observer &observer, const Registers &initial, const Progress base) {
-  std::array body{mac_a, mac_b, immediate, mac_a, io_mac, mac_b, io_mac, round_a, mac_b};
+  std::array body{
+      mac_a, mac_b, immediate, mac_a, asr_a, io_mac, mac_b, asr_b, io_mac, round_a, mac_b};
   Expected result{.state = initial, .progress = base};
   unsigned access = 0;
   for (std::size_t index = 0; index < body.size(); ++index) {
@@ -394,7 +401,8 @@ void callback_case(const CallbackInput input) {
   observer.core = &machine.core;
   observer.reject = input.reject;
   observer.invalidate = input.invalidate;
-  const std::array body{mac_a, mac_b, immediate, mac_a, io_mac, mac_b, io_mac, round_a, mac_b};
+  const std::array body{
+      mac_a, mac_b, immediate, mac_a, asr_a, io_mac, mac_b, asr_b, io_mac, round_a, mac_b};
   Word cursor = start;
   for (const auto step : body) {
     machine.core.write(Space::program, cursor++, step.opcode);

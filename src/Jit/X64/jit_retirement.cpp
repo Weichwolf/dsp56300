@@ -60,11 +60,12 @@ void JitEmitter::retire_progress(const NativeOp &operation) {
 
 bool JitEmitter::publish_pc(const std::span<const NativeOp> operations,
                             const std::size_t index) const {
-  if (!packed_retirement_ || index + 1 == operations.size() || has_moves(operations[index])) {
+  if (!packed_retirement_ || index + 1 == operations.size() ||
+      observable_moves(operations[index])) {
     return true;
   }
   const auto &next = operations[index + 1];
-  return has_moves(next) || at_loop_end(next);
+  return observable_moves(next) || at_loop_end(next);
 }
 
 // Keep admission separate for independent local performance controls; this
@@ -77,6 +78,7 @@ bool JitEmitter::admit_packed_retirement(const std::span<const NativeOp> operati
   for (const auto &operation : operations) {
     if (!lowerable(operation) || operation.instruction.cycles == 0) { return false; }
     if (!has_moves(operation)) { continue; }
+    if (plan_register_move(operation.instruction).valid()) { continue; }
     const auto plan = plan_moves(operation.instruction);
     if (plan.count == 0) { return false; }
     for (const auto &move : std::span(plan.transfers).first(plan.count)) {

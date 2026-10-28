@@ -15,6 +15,7 @@ constexpr Word all_banks = 15;
 constexpr Word accumulator_b_bit = 8, multiply_bit = 0x80, accumulate_bit = 2;
 constexpr Word clear_code = 0x13, round_code = 0x11, absolute_code = 0x26, negate_code = 0x36;
 constexpr Word operation_mask = 0xf7;
+constexpr Word right_shift_code = 0x22;
 
 Word register_bank(const unsigned reg) {
   if (reg == a_register) { return bank_bit(ValueBank::a); }
@@ -40,7 +41,10 @@ Word alu_inputs(const Word opcode) {
     constexpr std::array inputs{x, y, x, y, x | y, x | y, x | y, x | y};
     return inputs.at((alu >> 4) & 7) | ((alu & accumulate_bit) != 0 ? destination : 0);
   }
-  if (kind == round_code || kind == absolute_code || kind == negate_code) { return destination; }
+  if (kind == round_code || kind == absolute_code || kind == negate_code ||
+      kind == right_shift_code) {
+    return destination;
+  }
   const auto selector = (alu >> 4) & 7;
   // TFR has no old destination input; ADC forms with low bits 001 do.
   if ((alu & 7U) == 1 && (selector == 0 || selector >= 4)) {
@@ -63,7 +67,10 @@ NativeDataflow analyze_dataflow(const Instruction &instruction) {
     return result;
   }
   const auto plan = plan_moves(instruction);
-  if (plan.count == 0) {
+  const auto reg = plan_register_move(instruction);
+  if (reg.valid()) {
+    result.move_writes = register_bank(reg.destination);
+  } else if (plan.count == 0) {
     result.move_writes = all_banks;
   } else {
     for (const auto &move : std::span(plan.transfers.data(), plan.count)) {

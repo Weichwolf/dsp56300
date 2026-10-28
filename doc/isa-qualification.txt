@@ -5,6 +5,14 @@ The current implementation is partial. A passing CTest suite and successful
 Blofeld/FFT routines prove only their tested subsets. Performance work does not
 waive missing instructions, operand forms, numerical modes or observable effects.
 
+Native ASR/register-transfer increment: single-bit ASR A/B and data-register
+MOVE among X0/X1/Y0/Y1/A/B now have native lowering, independent complete-CCR
+and bit-position witnesses, clipped transfer/old-input chains and exact native
+retirement assertions. Existing binary expectations remain unchanged. This
+changes execution strategy in the stated ordinary-mode domain; multi-bit ASR,
+all register/control forms, other numerical modes and full sequence/timing
+qualification remain mandatory. ASR and MOVE.R therefore remain partial.
+
 doc/isa-coverage.tsv inventories the 117 distinct entries in the DSP56300FM
 Rev.5 instruction summary (including MOVE subforms and mixed multiply forms),
 plus the LEA alias identified with LUA in appendix A. These are catalogue rows,

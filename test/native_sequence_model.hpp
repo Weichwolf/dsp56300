@@ -11,6 +11,7 @@ namespace dsp56300::test::sequence_model {
 constexpr unsigned sign48_position = 47;
 constexpr Word arithmetic_changed = flag_v | flag_z | flag_n | flag_e | flag_u;
 constexpr Word alu_mask = 0xf7, clear = 0x13, round = 0x11, absolute = 0x26, negate = 0x36;
+constexpr Word right_shift = 0x22;
 constexpr Word tfr_other = 0x01, tfr_x0 = 0x41, tfr_y0 = 0x51, tfr_x1 = 0x61, tfr_y1 = 0x71;
 
 inline std::int64_t signed48(const std::uint64_t raw) {
@@ -122,6 +123,12 @@ inline void alu(Registers &state, const Registers &old, const Word opcode) {
   Arithmetic result;
   if ((code & 0x80U) != 0) {
     result = multiplication(old, code);
+  } else if (kind == right_shift) {
+    const auto raw = (code & 8U) != 0 ? old.b : old.a;
+    const auto value = signed56(raw);
+    result.full = value / 2 - (value % 2 < 0 ? 1 : 0);
+    result.carry_changed = true;
+    result.carry = raw % 2 != 0;
   } else if (kind == clear) {
     result.full = 0;
   } else if (kind == absolute || kind == negate || kind == round) {

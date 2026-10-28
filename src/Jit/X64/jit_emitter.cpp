@@ -69,6 +69,10 @@ bool JitEmitter::has_moves(const NativeOp &operation) {
          (operation.instruction.opcode & upper_move_mask) != no_move_group;
 }
 
+bool JitEmitter::observable_moves(const NativeOp &operation) {
+  return has_moves(operation) && !plan_register_move(operation.instruction).valid();
+}
+
 bool JitEmitter::lowerable(const NativeOp &operation) const {
   if (!optimize_) { return false; }
   const auto &decoded = operation.instruction;
@@ -88,8 +92,9 @@ bool JitEmitter::lowerable(const NativeOp &operation) const {
     if (reg >= m_register_base) { return false; }
   }
   const auto alu = opcode & byte_mask;
-  if (alu == 0) { return plan_moves(decoded).count != 0; }
+  if (alu == 0) { return plan_moves(decoded).count != 0 || plan_register_move(decoded).valid(); }
   if (is_addition(operation)) { return true; }
+  if (is_right_shift(operation)) { return true; }
   if ((alu & 0x80U) != 0) { return true; }
   const auto operation_code = alu & alu_mask;
   return operation_code == alu_clear || operation_code == 0x01 || operation_code == alu_x0 ||
@@ -254,6 +259,10 @@ void JitEmitter::native(const NativeOp &operation) {
     addition(operation);
     return;
   }
+  if (is_right_shift(operation)) {
+    right_shift(operation);
+    return;
+  }
   const auto opcode = operation.instruction.opcode & byte_mask;
   if (opcode == 0) { return; }
   const auto kind = opcode & alu_mask;
@@ -301,7 +310,7 @@ void JitEmitter::retire(const NativeOp &operation, const bool publish) {
   code_.store_constant(Reg::r12, offsetof(Cpu, repeat_completed), Width::word, 0);
   retire_progress(operation);
   code_.raw(increment_retired); // INC R15D (retired instructions).
-  if (has_moves(operation) && (!at_loop_end(operation) || loop_size_ != 0)) {
+  if (observable_moves(operation) && (!at_loop_end(operation) || loop_size_ != 0)) {
     code_.load(Reg::ax, Reg::r13, offsetof(NativeContext, dirty));
     code_.memory_immediate(group_cmp, Reg::ax, 0, Width::byte, 0);
     exit_if(Branch::not_equal);
@@ -323,7 +332,7 @@ std::vector<std::uint8_t> JitEmitter::generate(const std::span<const NativeOp> o
     loop_pc_ = operations.front().pc;
   }
   packed_retirement_ = admit_packed_retirement(operations);
-  retirement_helpers_ = packed_retirement_ && std::ranges::any_of(operations, has_moves);
+  retirement_helpers_ = packed_retirement_ && std::ranges::any_of(operations, observable_moves);
   cached_status_ = admit_cached_status();
   code_.raw(entry_landing); // ENDBR64.
   code_.raw(save_nonvolatile);

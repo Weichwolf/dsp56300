@@ -14,7 +14,7 @@ budget tail may use the general executor. Block length is bounded by
 Options.instructions_per_block in [1,256]. The former unused prototype options
 for block links and DO dispatch batching have been removed.
 
-The emitter translates signed MPY/MPYR/MAC/MACR variants, RND, CLR, ABS, NEG,
+The emitter translates signed MPY/MPYR/MAC/MACR variants, RND, CLR, ABS, NEG, single-bit ASR,
 ADD/SUB/CMP, ADC/SBC, internal TFR and NOP retirement. ADD/SUB/CMP include
 short/long immediate forms. Native flags use full left-aligned 56-bit
 accumulator coordinates, with distinct ordinary/down/up scaling specializations
@@ -52,6 +52,14 @@ Failed guards use the same instrumented move helper as before, without duplicate
 address updates, callbacks or writes. Stores to any bank overlapping P use that
 helper conservatively, preserving program invalidation. Other transfer classes,
 PCU register transfers and conditional IFcc forms retain general execution.
+
+Register-to-register moves among X0/X1/Y0/Y1/A/B now have a separate native plan.
+They retain word-transfer clipping/scaling and old parallel-ALU inputs, while
+remaining free of memory/I/O/control effects. Consequently flag liveness and
+retirement can cross them without a helper/dirty checkpoint. Partial-register,
+R/N/control and prohibited duplicate-accumulator destination forms keep the
+general transfer path. See doc/native-shifts.txt for ASR precision, exact
+admission, independent matrices and controlled workload measurements.
 
 Multiple-wrap guards require M-low16 in [$8000,$c000), a nonzero low-fourteen-bit
 mask q and q&(q+1)=0. Thus the ring length is a power of two from 2 to 16384.

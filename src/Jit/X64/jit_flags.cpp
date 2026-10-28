@@ -42,9 +42,9 @@ bool reads_carry(const NativeOp &operation) {
 }
 }
 
-Word JitEmitter::written_flags(const NativeOp &operation) {
+Word JitEmitter::written_flags(const NativeOp &operation) const {
   if (operation.instruction.operation == Operation::nop) { return 0; }
-  if (is_addition(operation)) { return observed_flags; }
+  if (is_addition(operation) || is_right_shift(operation)) { return observed_flags; }
   const auto alu = operation.instruction.opcode & byte_mask;
   const auto kind = alu & alu_mask;
   if (alu == 0 || kind == tfr_other || kind == tfr_x0 || kind == tfr_y0 || kind == tfr_x1 ||
@@ -65,7 +65,7 @@ std::vector<Word> JitEmitter::plan_flags(const std::span<const NativeOp> operati
     }
     // Moves may call observers/fault or invalidate code after their ALU. A
     // loop-ending guard may exit before its ALU. Neither boundary hides flags.
-    const bool boundary = has_moves(operation) || at_loop_end(operation);
+    const bool boundary = observable_moves(operation) || at_loop_end(operation);
     if (boundary) { live = observed_flags; }
     result[i - 1] = live;
     live &= ~written_flags(operation);

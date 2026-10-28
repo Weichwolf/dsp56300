@@ -56,7 +56,33 @@ void JitEmitter::move_commit(const NativeMove &move) {
   }
 }
 
+void JitEmitter::capture_inputs() {
+  if (dataflow_.old_inputs == 0) { return; }
+  if (cached_status_) {
+    code_.load(
+        Reg::r11, Reg::r13, offsetof(NativeContext, runtime) + offsetof(JitRuntime, latched));
+  }
+  for (unsigned index = 0; index < register_offsets.size(); ++index) {
+    if ((dataflow_.old_inputs & (Word{1} << index)) == 0) { continue; }
+    current_value(Reg::ax, index);
+    code_.store(cached_status_ ? Reg::r11 : Reg::r14, index * sizeof(std::uint64_t), Reg::ax);
+  }
+}
+
+void JitEmitter::register_move(const NativeRegisterMove &move, const Word mode) {
+  capture_inputs();
+  move_read_register(Reg::si, {.address = {}, .reg = move.source}, mode);
+  move_write_register(Reg::si, move.destination);
+  code_.load(Reg::ax, Reg::r13, offsetof(NativeContext, native_moves));
+  code_.memory_immediate(group_add, Reg::ax, 0, Width::qword, 1);
+}
+
 void JitEmitter::moves(const NativeOp &operation) {
+  const auto reg = plan_register_move(operation.instruction);
+  if (reg.valid()) {
+    register_move(reg, operation.mode);
+    return;
+  }
   const auto plan = plan_moves(operation.instruction);
   const std::span transfers(plan.transfers.data(), plan.count);
   for (const auto &move : transfers) {
@@ -73,17 +99,7 @@ void JitEmitter::moves(const NativeOp &operation) {
   x64::Label done;
   const auto first_guard = ring_guards_.size();
   for (const auto &move : transfers) { move_guard(move, slow); }
-  if (dataflow_.old_inputs != 0) {
-    if (cached_status_) {
-      code_.load(
-          Reg::r11, Reg::r13, offsetof(NativeContext, runtime) + offsetof(JitRuntime, latched));
-    }
-    for (unsigned index = 0; index < register_offsets.size(); ++index) {
-      if ((dataflow_.old_inputs & (Word{1} << index)) == 0) { continue; }
-      current_value(Reg::ax, index);
-      code_.store(cached_status_ ? Reg::r11 : Reg::r14, index * sizeof(std::uint64_t), Reg::ax);
-    }
-  }
+  capture_inputs();
   for (const auto &move : transfers) { move_update(move); }
   // Capture both ports before either destination changes, including host aliases.
   for (const auto &move : transfers) { move_capture(move, operation.mode); }

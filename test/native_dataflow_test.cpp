@@ -101,8 +101,11 @@ void helper_writes(const HelperInput input) {
           "General partial/full accumulator writes invalidate reused native values");
   if (input.options.backend == Backend::jit && input.options.optimize) {
     const auto statistics = machine.core.jit_statistics();
-    require(statistics.native_alu_instructions == 4 && statistics.helper_instructions == 1,
-            "The coherency sequence crosses real native/helper/native execution");
+    const bool native_move = (input.source < 8 || input.source >= 14) && input.target >= 14;
+    require(statistics.native_alu_instructions == (native_move ? 5U : 4U) &&
+                statistics.helper_instructions == (native_move ? 0U : 1U) &&
+                statistics.native_move_instructions == (native_move ? 1U : 0U),
+            "Coherency crosses actual native register transfers or the qualified general helper");
   }
 }
 
@@ -257,7 +260,7 @@ void check(const Backend backend, const bool optimize) {
     prefixes({.backend = backend, .instructions_per_block = length, .optimize = optimize});
   }
   const Options options{.backend = backend, .optimize = optimize};
-  for (const unsigned source : {4U, 6U, 14U, 15U}) {
+  for (const unsigned source : {4U, 6U, 8U, 9U, 14U, 15U}) {
     for (unsigned target = 8; target <= 15; ++target) {
       helper_writes({.options = options, .source = source, .target = target});
     }

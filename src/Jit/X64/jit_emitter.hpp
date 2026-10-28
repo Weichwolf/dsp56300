@@ -32,11 +32,15 @@ public:
 private:
   [[nodiscard]] bool lowerable(const NativeOp &operation) const;
   [[nodiscard]] static bool has_moves(const NativeOp &operation);
+  [[nodiscard]] static bool observable_moves(const NativeOp &operation);
   [[nodiscard]] static bool is_addition(const NativeOp &operation);
+  [[nodiscard]] bool is_right_shift(const NativeOp &operation) const;
   void helper(JitHelper function, const NativeOp &operation);
   void native(const NativeOp &operation);
   void moves(const NativeOp &operation);
   void general_moves(const NativeOp &operation);
+  void capture_inputs();
+  void register_move(const NativeRegisterMove &move, Word mode);
   void move_guard(const NativeMove &move, x64::Label &slow);
   void move_next(const NativeMove &move);
   void move_delta(const NativeMove &move);
@@ -50,6 +54,7 @@ private:
   void move_write_register(x64::Reg value, unsigned reg);
   void multiply(const NativeOp &operation);
   void addition(const NativeOp &operation);
+  void right_shift(const NativeOp &operation);
   void round(Word mode);
   void arithmetic_flags(Word mode, bool carry_changed = false);
   [[nodiscard]] bool admit_cached_status() const;
@@ -58,7 +63,7 @@ private:
   void read_status(x64::Reg destination);
   void merge_status(x64::Reg source, Word changed = 0, x64::Reg scratch = x64::Reg::ax);
   [[nodiscard]] std::vector<Word> plan_flags(std::span<const NativeOp> operations) const;
-  [[nodiscard]] static Word written_flags(const NativeOp &operation);
+  [[nodiscard]] Word written_flags(const NativeOp &operation) const;
   void input(x64::Reg destination, unsigned selector, bool destination_b, bool latched);
   void value(x64::Reg destination, unsigned index, bool latched);
   void current_value(x64::Reg destination, unsigned index);
