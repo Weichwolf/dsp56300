@@ -15,7 +15,10 @@
 namespace dsp56300::detail {
 class JitEmitter {
 public:
-  JitEmitter(JitRuntime runtime, bool optimize, BatchBackend batch = BatchBackend::automatic);
+  JitEmitter(JitRuntime runtime,
+             bool optimize,
+             BatchBackend batch = BatchBackend::automatic,
+             std::array<Word, agu_registers> modifiers = {});
   [[nodiscard]] std::vector<std::uint8_t> generate(std::span<const NativeOp> operations);
 
   [[nodiscard]] bool packed_retirement() const noexcept { return packed_retirement_; }
@@ -42,6 +45,7 @@ private:
   void register_move(const NativeRegisterMove &move, Word mode);
   void move_guard(const NativeMove &move, x64::Label &slow);
   void move_next(const NativeMove &move);
+  void move_profiled_next(const NativeMove &move, Word modifier);
   void move_delta(const NativeMove &move);
   void move_ring_delta(const NativeMove &move);
   void emit_ring_guards();
@@ -86,10 +90,12 @@ private:
   struct RingGuard {
     x64::Label entry, resume, slow;
     NativeMove move;
+    bool profiled = false;
   };
 
   std::vector<RingGuard> ring_guards_;
   JitRuntime runtime_;
+  std::array<Word, agu_registers> modifiers_;
   bool optimize_;
   BatchBackend batch_backend_;
   bool mac_batches_ = false;

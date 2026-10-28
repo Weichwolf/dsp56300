@@ -7,6 +7,7 @@
 #include "x64.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cstddef>
 #include <stdexcept>
 #include <vector>
@@ -17,6 +18,7 @@ using x64::Branch;
 using x64::Reg;
 using x64::Width;
 constexpr unsigned op_add = 0x01, op_sub = 0x29, op_xor = 0x31, op_and = 0x21, op_test = 0x85;
+constexpr unsigned op_cmp = 0x39, move_above_equal = 0x43;
 constexpr unsigned op_return = 0xc3;
 constexpr unsigned group_add = 0, group_and = 4, group_sub = 5, group_cmp = 7;
 constexpr auto r_offset = offsetof(Cpu, reg) + offsetof(Registers, r);
@@ -44,17 +46,45 @@ void JitEmitter::move_delta(const NativeMove &move) {
   }
 }
 
+// AX holds the matching low16 M. Keep both ports prospective until bounds pass.
+void JitEmitter::move_profiled_next(const NativeMove &move, const Word modifier) {
+  const auto address = move.space == Space::x ? Reg::cx : Reg::r8;
+  const auto next = move.space == Space::x ? Reg::si : Reg::di;
+  const auto length = modifier + 1;
+  if (std::has_single_bit(length)) {
+    code_.constant(Reg::ax, modifier);
+    move_ring_delta(move);
+    return;
+  }
+  const auto span_mask = std::bit_ceil(length) - 1;
+  move_delta(move);
+  code_.mov({.destination = Reg::r9, .source = address}, Width::dword);
+  code_.immediate(group_and, Reg::r9, word_mask & ~span_mask, Width::dword);
+  code_.immediate(group_add, Reg::r9, length, Width::dword);
+  code_.mov({.destination = Reg::ax, .source = next}, Width::dword);
+  code_.immediate(group_sub, Reg::ax, length, Width::dword);
+  code_.binary(op_cmp, {.destination = next, .source = Reg::r9}, Width::dword);
+  code_.move_if(move_above_equal, {.destination = next, .source = Reg::ax});
+  code_.immediate(group_and, next, word_mask, Width::dword);
+}
+
 void JitEmitter::move_next(const NativeMove &move) {
   const auto next = move.space == Space::x ? Reg::si : Reg::di;
   const auto offset = move.address.index * sizeof(Word);
   code_.load(Reg::ax, Reg::r12, m_offset + offset, Width::dword);
   code_.immediate(group_and, Reg::ax, modifier_mask, Width::dword);
-  code_.immediate(group_cmp, Reg::ax, modifier_mask, Width::dword);
+  const auto modifier = modifiers_.at(move.address.index) & modifier_mask;
   auto &guard = ring_guards_.emplace_back();
   guard.move = move;
+  guard.profiled = move.address.mode == 3 && modifier > 0 && modifier < multiple_wrap_bit;
+  code_.immediate(group_cmp, Reg::ax, guard.profiled ? modifier : modifier_mask, Width::dword);
   code_.jump_if(Branch::not_equal, guard.entry);
-  move_delta(move);
-  code_.immediate(group_and, next, word_mask, Width::dword);
+  if (guard.profiled) {
+    move_profiled_next(move, modifier);
+  } else {
+    move_delta(move);
+    code_.immediate(group_and, next, word_mask, Width::dword);
+  }
   code_.bind(guard.resume);
 }
 
@@ -90,6 +120,16 @@ void JitEmitter::emit_ring_guards() {
   for (auto &guard : ring_guards_) {
     if (!guard.slow.bound) { throw std::logic_error("Unbound native ring fallback"); }
     code_.bind(guard.entry);
+    if (guard.profiled) {
+      x64::Label non_linear;
+      code_.immediate(group_cmp, Reg::ax, modifier_mask, Width::dword);
+      code_.jump_if(Branch::not_equal, non_linear);
+      move_delta(guard.move);
+      code_.immediate(
+          group_and, guard.move.space == Space::x ? Reg::si : Reg::di, word_mask, Width::dword);
+      code_.jump(guard.resume);
+      code_.bind(non_linear);
+    }
     // Ordinary modulo/reverse fallback needs neither a call nor R/N loads.
     code_.immediate(group_cmp, Reg::ax, multiple_wrap_bit - 1, Width::dword);
     code_.jump_if(Branch::below_equal, guard.slow);

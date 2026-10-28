@@ -1,0 +1,67 @@
+Original causal biquad validation
+
+The project-authored program is a cascade of transposed direct-form-II sections.
+It uses ordinary TFR/MAC/RND and register/memory MOVE forms, one finite hardware
+loop over samples and separate short-address coefficient/state locations.
+No application/firmware code, external emulator or board response is involved.
+
+For one stage, with signed24 words x, y, s1, s2 and five Q1.23 coefficients:
+  y   = Q(s1*2^24 + 2*b0*x)
+  s1' = Q(s2*2^24 + 2*b1*x - 2*a1*y)
+  s2' = Q(          2*b2*x - 2*a2*y)
+Q rounds with the declared scaling/RM mode and clips to signed24. The normal
+mode defines the ordinary filter. Other scaling modes deliberately change the
+recurrence; they stress DSP precision rather than preserve a frequency response.
+
+Phase            Preserved live values       Architectural update
+entry            x in X0, old s1/s2 in RAM    load s1 into X1, s2 into Y1
+output           x in X0, s2 in Y1           compute/quantize y into X1
+first state      x in X0, y in X1, old s2    compute/quantize and store s1'
+second state     x in X0, y in X1            compute/quantize and store s2'
+next stage       both new states in RAM       move y into X0
+next sample      state feedback is required  store output, continue hardware loop
+
+The input dependency prevents treating successive samples as independent SIMD
+lanes. The first state must consume old s2. Word clipping and per-state rounding
+cannot be deferred or replaced by an unquantized matrix multiplication.
+
+An algebraic signed-integer recurrence independently checks every completed
+section's output and both updated states. A separate declared-instruction trace
+predicts full registers, CCR/sticky flags, residual frames, RAM, cursors, PC and
+instruction/base-unit counts, without decoding or executing the emulator core.
+The producer links only the portable fixture codec. Expected values are never
+emulator snapshots. Raw wide values fit signed56 by construction (at most a
+word-state term plus two signed24 fractional products); no wrap is discarded.
+
+The archive contains 16992 cases: 10368 complete programs plus 6624 prefixes.
+Both serial (22 instructions/section) and parallel scheduled (15/section)
+programs cover 1/7/32/129 samples, 1/2/4 sections, six signals, four coefficient
+designs, six scaling/RM modes, three history/flag/stack contexts, separate and
+in-place buffers, and poisoned boundaries. Its producer cross-checks 1031472
+completed stages against the algebraic recurrence. It links the fixture codec
+only, with no emulator execution or decoder in expectation construction.
+
+The dedicated resume test starts each prefix group once and advances through
+23 independently predicted checkpoints without register/memory restoration.
+Across reference/cached/JIT this gives 864 scenarios and 19872 checkpoints,
+including stops within parallel moves and active loops. It checks the general
+causal path never enters the independent-product MAC batch. All 80931 resume
+assertions and the 16992 full/prefix cases per backend pass in release and
+strict ASan/UBSan builds. Byte-for-byte regeneration also passes.
+
+The separate continuous stream program uses the same scheduled arithmetic with
+indirect state cursors and a 20-word coefficient ring. It has 92 independent
+channels, each with four original stable dyadic lowpass sections, mixed to one
+output after exact quantization and /128 normalization. Signal phases and
+frequencies differ by channel. Input is a persistent interleaved periodic ring;
+filter state and mixed output rings continue throughout 96000 audio frames.
+No host operation resets DSP state between samples, blocks or measured seconds.
+
+A separate algebraic producer computes every filter state/sample and the
+normalized mix. It predicts all final registers, residual loop frames, memory
+and exact instruction/base-cycle counts. Explicit low-amplitude bounds exclude
+growth/limit sticky bits; the earlier broad fixture covers clipping modes.
+Eight short cases (1/7/257/1025 frames and both RM settings) execute the identical
+DSP program through all three backends, covering input and output ring wraps.
+The full two-second case is used by bench, with one second natural warmup and
+one second measured. Qualification results are recorded in continuous-bench.txt.

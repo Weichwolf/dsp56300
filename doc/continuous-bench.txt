@@ -1,0 +1,101 @@
+Continuous one-second DSP workloads (partial implementation)
+
+The user replaced single-call replay benchmarks with representative continuous
+DSP work. Each measured package represents one second of real input data,
+calibrated near the active compute capacity of a 275 MHz DSP. It must complete
+within one host second. Actual retirement and documented base units are reported
+separately; the family clock is not an assertion of one cycle for every opcode.
+The 275-MIPS reference remains a minimum optimization target, not a cap or an
+aggregate score that can hide a slow scenario.
+
+Initialize the DSP and caller-owned P/X/Y buffers once. Run one input second as
+natural warmup, then measure the following input second in the same instance.
+Registers, history, rings, counters and loop frames continue across all slices.
+There is no host restoration of DSP state between samples or measured slices.
+Use normal audio-block/hop budgets, not single-instruction API calls. Validate
+final registers and all RAM against independently generated expectations after
+measurement. Retain exact instruction/base-unit checks and the public contracts.
+
+The IIR program is implemented; FIR and spectral programs remain planned.
+
+Scene                 Real input per measured second      Useful work
+FIR bank              11 channels at 48 kHz               symmetric 507-tap FIR
+IIR bank and mix      92 channels at 48 kHz               four biquads/channel, mix
+spectral analysis     15 complex streams at 48 kHz        Hann STFT/power, 1024/480
+
+The FIR/IIR packages contain approximately 275 million base units per input
+second. The spectral package uses the largest whole stream count near that
+budget. There are no padding instructions to manufacture a MIPS score.
+
+Scene      Loop/control mapping                   Memory/checkpoint obligations
+FIR        outer frames, channels, tap loop       independent channel cursors;
+                                                    overlapping causal windows
+IIR        outer frames, channel loop             distinct state per channel;
+                                                    old s2, rounded feedback
+spectral   hops, channels, copy/FFT/power loops    persistent stream cursors;
+                                                    scratch reuse, overlap
+
+Native input/output rings stay live. Input streams are deterministic, changing
+signals, not restored snapshots. The reference/cached/JIT concepts remain
+comparable in one build. Old architectural fixtures remain correctness and
+API-latency diagnostics; they are not qualifying continuous throughput runs.
+
+Report measured input duration, wall and process-CPU time, real-time factor,
+equivalent core demand, actual DSP-MIPS, base units, native/helper mix, and
+maximum slice latency against its input-time budget. CPU demand includes all
+worker threads if a future backend creates them. Instrumented runs verify
+correctness; optimized builds qualify speed. Mark every deadline/throughput
+shortfall explicitly. Keep the complete instruction-set, application, memory,
+event and energy objectives open where evidence is still missing.
+
+Current controlled IIR comparison (release, one pinned host core)
+
+Two baseline and two final candidate runs used identical full-stream fixture
+bytes, compiler/hardening settings and affinity. Order was baseline/candidate,
+candidate/baseline, after the native boundary/short-stream checks. No compiler
+or project test process ran concurrently with this capture. Each process used
+one natural input second warmup and one input second measurement, not replay.
+All four complete independent final-state checks passed.
+
+                      Wall s             Process CPU s       Actual guest MIPS
+baseline              3.091567..3.103887   3.091720..3.104073   88.4104..88.7628
+profiled modulo       1.266911..1.267666   1.266997..1.267733   216.4733..216.6025
+
+The means imply about 2.44 times the throughput and 59.1% less process CPU time.
+The package still exceeds one host second by about 26.7%; every measured
+64-frame block also misses its 1.333 ms input budget. This is an explicit
+performance failure, not a qualifying realtime result. A single execution
+thread does not automatically distribute that demand over additional cores.
+The program's feedback prohibits batching successive time samples as independent
+lanes. Current AVX2 batch counters are zero. SIMD across proven independent
+channels and broader native region allocation remain research work.
+
+The candidate reserves 45056 executable bytes versus 40960 baseline bytes.
+Both capture one additional block in the measured interval at finite outer-loop
+cleanup; compilation cost is included, not subtracted or described as fully warm.
+See profiled-modulo.txt for the guarded compiler change. These measurements do
+not establish 275 MIPS, full ISA, all applications, board realtime or energy.
+
+Qualification of this increment
+
+- All 107 correctness tests pass in release and strict ASan/UBSan builds, with
+  three independent CTest processes per build (50.56 s / 170.99 s, no skips).
+- All 116 strict translation units retain the required nonrecovering sanitizer
+  options; all 155 C++ sources/headers pass clang-format and normal builds retain
+  clang-tidy/Werror. No fuzzing was run. The old 41 archives are unchanged.
+- The native-move suite passes 78446 checks, including ordinary-ring profile
+  admission/mismatch and paired aliased transfers, bounds and I/O fallback.
+- The 16992 causal IIR cases, 864 resume scenarios / 19872 checkpoints, and eight
+  short continuous cases pass in all three implementations. All new binary
+  archives regenerate byte-for-byte through emulator-independent producers.
+- The complete 96000-frame program passes full independent state/progress/RAM
+  checks in all six release variants. The strict production bench also passes
+  full-state validation. These runs overlapped correctness jobs and are not the
+  quiet-host before/after performance capture above.
+- After those jobs ended, the optimized CMake bench gate fails explicitly at
+  1.262421 wall / 1.262500 process-CPU seconds (217.37 MIPS), with correct final
+  state. The gate is working; the performance objective remains unmet.
+- The structural ISA audit passes with 118 partial rows. The complete-ISA gate
+  fails as required: none of those rows is fully qualified. General ISA and
+  application coverage, FIR/spectral continuous programs, more host efficiency,
+  SIMD/multicore research and energy qualification remain open.

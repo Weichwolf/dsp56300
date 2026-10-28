@@ -114,15 +114,17 @@ public:
 };
 
 struct IoInput {
-  bool both_io = false, ring = false;
+  bool both_io = false, ring = false, ordinary = false;
 };
 
 void io_case(Core &core, Port &port, const IoInput input) {
   auto state = initial_state();
-  const Word cursor = input.ring ? 15U : 7U;
+  constexpr Word ordinary_modifier = 19;
+  Word cursor = input.ring ? 15U : 7U;
+  if (input.ordinary) { cursor = ordinary_modifier; }
   state.r[0] = input.both_io ? io_begin : cursor;
   state.r[4] = io_begin;
-  if (input.ring) { state.m[0] = high_ring_modifier; }
+  if (input.ring) { state.m[0] = input.ordinary ? ordinary_modifier : high_ring_modifier; }
   core.write(Space::x, cursor, other_datum);
   core.set_registers(state);
   const auto before = port.reads;
@@ -153,17 +155,20 @@ void io_boundary() {
       io_case(core, port, {.both_io = both_io, .ring = ring});
     }
   }
+  core.reset();
+  io_case(core, port, {.ring = true, .ordinary = true});
 }
 
 struct AliasInput {
   unsigned xreg = 0, yreg = 0, directions = 0;
   unsigned xmode = 3, ymode = 3;
   bool optimize = true, ring = false;
+  Word modifier = high_ring_modifier, cursor = 15;
 };
 
 void aliased_ports(const AliasInput input) {
   constexpr Word displacement = 16;
-  const Word address = input.ring ? 15U : 7U;
+  const Word address = input.ring ? input.cursor : 7U;
   std::array<Word, memory_words> p{};
   std::array<Word, memory_words + displacement> shared{};
   shared[address + displacement] = datum;
@@ -183,7 +188,7 @@ void aliased_ports(const AliasInput input) {
   state.r[0] = address + displacement;
   state.r[4] = address;
   if (input.ring) {
-    state.m[0] = state.m[4] = high_ring_modifier;
+    state.m[0] = state.m[4] = input.modifier;
     state.n[4] = word_mask;
   }
   auto expected = state;
@@ -217,7 +222,8 @@ void aliased_ports(const AliasInput input) {
 }
 
 void aliased_variants(const AliasInput input) {
-  const unsigned addressing_pairs = input.ring ? 16U : 1U;
+  const bool ordinary = input.ring && input.modifier < 0x8000U;
+  const unsigned addressing_pairs = input.ring && !ordinary ? 16U : 1U;
   for (unsigned modes = 0; modes < addressing_pairs; ++modes) {
     for (unsigned xreg = 0; xreg < 4; ++xreg) {
       for (unsigned yreg = 0; yreg < 4; ++yreg) {
@@ -226,8 +232,8 @@ void aliased_variants(const AliasInput input) {
           variant.xreg = xreg;
           variant.yreg = yreg;
           variant.directions = direction;
-          variant.xmode = modes % 4;
-          variant.ymode = modes / 4;
+          variant.xmode = ordinary ? 3U : modes % 4;
+          variant.ymode = ordinary ? 3U : modes / 4;
           aliased_ports(variant);
         }
       }
@@ -238,7 +244,7 @@ void aliased_variants(const AliasInput input) {
 struct RingInput {
   unsigned mode = 0, index = 0;
   Word modifier = 0, cursor = 0, offset = 0;
-  bool y = false, store = false;
+  bool y = false, store = false, native = true;
 };
 
 void ring_case(Machine &machine, const RingInput input) {
@@ -278,8 +284,9 @@ void ring_case(Machine &machine, const RingInput input) {
               run.progress == Progress{.instructions = progress.instructions + 1,
                                        .estimated_cycles = progress.estimated_cycles + cost} &&
               machine.core.registers() == expected && memory == expected_memory &&
-              machine.core.jit_statistics().native_move_instructions == native + 1,
-          "All admitted ring sizes/signs/ports execute natively with independent coordinate state");
+              machine.core.jit_statistics().native_move_instructions ==
+                  native + (input.native ? 1U : 0U),
+          "Guarded ring updates and changed-M fallback match independent complete state");
 }
 
 void ring_operands(Machine &machine, RingInput input) {
@@ -309,6 +316,54 @@ void ring_matrix() {
         }
       }
     }
+  }
+}
+
+void ordinary_reuse(Machine &machine, RingInput input) {
+  const auto profiled = input.modifier;
+  constexpr Word ignored_high = 0xab0000;
+  constexpr Word changed_ordinary = 23;
+  const auto enclosing = address_model::span(profiled + 1);
+  for (const Word modifier :
+       {profiled, profiled | ignored_high, word_mask, changed_ordinary, 0U, ring_modifier}) {
+    input.modifier = modifier;
+    input.native = (modifier & address_model::linear) == profiled || modifier == word_mask ||
+                   modifier == ring_modifier;
+    for (const Word cursor : {0U,
+                              1U,
+                              profiled - 1,
+                              profiled,
+                              profiled + 1,
+                              enclosing - 1,
+                              static_cast<Word>(memory_words - 1)}) {
+      input.cursor = cursor;
+      for (const Word offset : {0U, word_mask}) {
+        input.offset = offset;
+        ring_case(machine, input);
+      }
+    }
+  }
+  require(machine.core.jit_statistics().compiled_blocks == 1,
+          "M/R/N mutations reuse the same compiled PC and its exact runtime admission guard");
+}
+
+void profiled_modulo() {
+  constexpr std::array<Word, 7> modifiers{1, 2, 3, 19, 31, 255, 32767};
+  Machine machine;
+  for (const auto modifier : modifiers) {
+    for (unsigned index = 0; index < agu_registers; ++index) {
+      for (const bool y : {false, true}) {
+        for (const bool store : {false, true}) {
+          machine.core.reset();
+          const auto base = (store ? store_x0 : load_x0) | (y ? 0x0a0000U : 0U);
+          machine.core.write(Space::program, start, base | (3U << 11) | (index << 8));
+          ordinary_reuse(machine,
+                         {.mode = 3, .index = index, .modifier = modifier, .y = y, .store = store});
+        }
+      }
+    }
+    rejected_address(3, false, modifier);
+    rejected_address(3, true, modifier);
   }
 }
 
@@ -460,6 +515,7 @@ void budgets_and_ram_end() {
 int main() {
   try {
     dsp56300::test::changing_modifier();
+    dsp56300::test::profiled_modulo();
     for (const unsigned mode : {0U, 1U, 2U, 3U, 4U, 5U, 7U}) {
       dsp56300::test::rejected_address(mode, false);
       dsp56300::test::rejected_address(mode, true);
@@ -476,6 +532,11 @@ int main() {
     for (const bool optimize : {false, true}) {
       for (const bool ring : {false, true}) {
         dsp56300::test::aliased_variants({.optimize = optimize, .ring = ring});
+      }
+      constexpr dsp56300::Word ordinary_modifier = 19;
+      for (const dsp56300::Word cursor : {3U, ordinary_modifier}) {
+        dsp56300::test::aliased_variants(
+            {.optimize = optimize, .ring = true, .modifier = ordinary_modifier, .cursor = cursor});
       }
     }
     dsp56300::test::ring_matrix();

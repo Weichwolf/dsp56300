@@ -217,9 +217,41 @@ if(BUILD_TESTING)
   add_executable(dsp56300_fixture_test test/fixture_test.cpp)
   target_link_libraries(dsp56300_fixture_test PRIVATE dsp56300::core dsp56300_fixture_format)
   add_executable(dsp56300_fixture_bench test/fixture_bench.cpp)
+  add_executable(dsp56300_continuous_bench test/continuous_bench.cpp)
+  target_link_libraries(dsp56300_continuous_bench PRIVATE dsp56300::core dsp56300_fixture_format)
   include(cmake/Bench.cmake)
   add_executable(dsp56300_generate_fir test/generate_fir.cpp)
   target_link_libraries(dsp56300_generate_fir PRIVATE dsp56300_fixture_format)
+  add_executable(dsp56300_generate_iir_stream test/generate_iir_stream.cpp)
+  target_link_libraries(dsp56300_generate_iir_stream PRIVATE dsp56300_fixture_format)
+  add_test(NAME iir-stream-fixtures COMMAND dsp56300_fixture_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/iir-stream-check.d56")
+  foreach(kind check full)
+    if(kind STREQUAL "check")
+      set(stream_fixture iir-stream-check)
+    else()
+      set(stream_fixture iir-stream)
+    endif()
+    add_test(NAME ${stream_fixture}-reproducibility COMMAND "${CMAKE_COMMAND}"
+      "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_iir_stream>"
+      "-DGENERATOR_ARGUMENTS=${kind}"
+      "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/${stream_fixture}-regenerated.d56"
+      "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/${stream_fixture}.d56"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
+  endforeach()
+  add_executable(dsp56300_generate_iir test/generate_iir.cpp)
+  target_link_libraries(dsp56300_generate_iir PRIVATE dsp56300_fixture_format)
+  add_executable(dsp56300_iir_resume_test test/iir_resume_test.cpp)
+  target_link_libraries(dsp56300_iir_resume_test PRIVATE dsp56300::core dsp56300_fixture_format)
+  add_test(NAME iir-resume COMMAND dsp56300_iir_resume_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/iir.d56")
+  add_test(NAME iir-fixtures COMMAND dsp56300_fixture_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/iir.d56")
+  add_test(NAME iir-reproducibility COMMAND "${CMAKE_COMMAND}"
+    "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_iir>"
+    "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/iir-regenerated.d56"
+    "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/iir.d56"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
   add_test(NAME fir-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/fir.d56")
   add_test(NAME fir-reproducibility COMMAND "${CMAKE_COMMAND}"

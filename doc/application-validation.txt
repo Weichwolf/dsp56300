@@ -22,8 +22,8 @@ control         fixed-point recurrence/PID           latency, flags, events
 
 These are general algorithm tests, not claims to emulate complete codecs,
 medical equipment, radio peripherals or a complete video-processing device.
-The independent DSP FFT, FIR dot-product and ISA/AGU/control fixtures already
-exist. The remaining application programs above are a planned expansion, not
+The independent DSP FFT, FIR dot-product, causal IIR and ISA/AGU/control
+fixtures already exist. The remaining application programs above are a planned expansion, not
 completed coverage. FIR varies 4/16/64/512 and holdout 5/7/15/63/129 taps, four
 signals, four coefficient families, six scaling/rounding modes and two incoming
 sticky/Carry states. Its 1728 cases validate full registers, frame remnants,
@@ -51,21 +51,29 @@ without explicit authorization; these are reproducible directed domains.
 
 Shared correctness/benchmark fixtures
 
-CTest checks complete declared fixture expectations. The bench target selects
-from those same archives and reports selection/eligibility counts. Expected
-faults, unfinished control state or nonrepeatable side effects remain correctness
-cases and are excluded explicitly from warm replay metrics. They are not silently
-converted into successful workloads. Replayed successful cases must preserve
-full expected state/RAM and exact progress. Workload-specific cold measurements
-must retain their own label and reset/initialization contract.
+CTest checks complete independently declared fixture expectations. The bench
+target now runs continuous one-second work packages, initially a 92-channel
+four-biquad bank and normalized mix. The same scheduled DSP program is checked
+in short fixtures through all three backends, with full independent expectations
+for the two-second input used by bench. No host restoration occurs across blocks
+or between the natural warmup second and the measured second. All final P/X/Y,
+registers and exact progress are checked. See bench.txt and iir-validation.txt.
 
-Report actual guest instructions/s, wall latency and host work with numeric
-units and timing scope. Separate preparation, cold compilation/execution, warm
-execution, native/helper mix and code storage. Use one DSP instance per backend,
-bounded warmups/trials, raw result logs and artifact identities. Run selected
-fixtures for diagnosis and all configured sets for cross-pattern effects.
-Microinstruction tests are not substitutes for representative application runs;
-a separately written native algorithm is not emulator throughput.
+Finite architectural prefixes, faults, control/debug transitions and tiny ISA
+cases remain correctness tests. They are not qualifying throughput benchmarks.
+Old replay executables remain optional API/compiler diagnostics with an explicit
+historical label. Slow continuous cases remain visible and fail the optimized
+one-second package gate rather than being excluded from results.
+
+Report actual guest instructions/s, base cycles, process CPU seconds, wall time,
+real-time factor and worst block latency with declared timing scope. Separate
+initialization, natural cold warmup and measured continuous execution. Use one
+DSP instance per backend, complete-state checks and raw artifact identities.
+Reference/cached/JIT and scalar/AVX2 batch concepts remain comparable within one
+build. Current causal IIR execution does not use independent-time SIMD batches.
+Continuous FIR and spectral workloads, plus the other application domains above,
+remain pending. Microinstructions and a separately written native algorithm do
+not establish emulator throughput, fixed-load CPU use or energy efficiency.
 
 Manufacturer context used only to select algorithm families
 

@@ -40,17 +40,18 @@ Build and check (LLVM 19, CMake >=3.25, Ninja, clang-format-19, clang-tidy-19):
 Use the release preset for performance work. No fuzzing runs automatically.
 Project setup and strict policies retain their source attribution in THIRD_PARTY.txt.
 
-Benchmarks reuse the correctness fixtures, with a separate CTest tree:
+Benchmarks run continuous one-second DSP workloads with independent binary fixtures:
 
   cmake --preset release
   cmake --build --preset release --target bench
-  ctest --test-dir build/release/bench -R '^(fir|fft)$' --verbose
+  ctest --test-dir build/release/bench -R '^iir-stream$' --verbose
 
-The default covers all fixture sets with up to eight uniformly selected eligible
-cases each. Set DSP56300_BENCH_CASES=all or a numeric index for complete/targeted
-case selection, DSP56300_BENCH_FILTER for the target's fixture-name regex,
-DSP56300_BENCH_BACKEND for jit/jit-unbatched/jit-scalar/jit-avx2/cached/reference/all
-and DSP56300_BENCH_REPLAYS for auto or a fixed trial count. See doc/bench.txt for metrics and exclusions.
+One input second warms the same DSP before the measured second, without host
+state resets. The initial continuous scenario is a 92-channel IIR bank and mix;
+FIR and spectral scenarios are still pending. Select all or a numeric case with
+DSP56300_BENCH_CASES, workloads with DSP56300_BENCH_FILTER, and implementations
+with DSP56300_BENCH_BACKEND. Release bench fails when a one-second package exceeds
+one host second. See doc/bench.txt for CPU, latency, correctness and scope.
 
 CoreImplementation and typed BackendCore<Backend::...> adapters allow generic
 consumers and the same fixture runner to compare reference/cached/JIT in one

@@ -147,7 +147,7 @@ std::unique_ptr<Block> Jit::Impl::compile(const Word block_limit) const {
     pc += decoded.words;
   }
   if (block->operations.empty()) { return nullptr; }
-  JitEmitter emitter(context.runtime, options.optimize, options.batch_backend);
+  JitEmitter emitter(context.runtime, options.optimize, options.batch_backend, cpu.reg.m);
   const auto bytes = emitter.generate(block->operations);
   if (bytes.size() > cache_limit / 2) { return nullptr; }
   block->code = std::make_unique<Executable>(bytes);

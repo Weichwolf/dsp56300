@@ -44,8 +44,13 @@ Current user requirements
   regions. Commit only the selected state/effects; preserve dependent recurrences,
   failures, I/O and memory bounds. Measure whether prediction is a real bottleneck
   rather than assuming branchless or speculative work must improve execution.
-- At least 270 million actual emulated DSP instructions/s per host core is a
-  reference load, not a ceiling or stopping criterion. Continue maximizing
+- The user raised the performance reference to 275 MIPS and clarified that
+  throughput benchmarks must model continuous DSP operation, not single-call
+  microfixtures. Each scenario processes one real-time second of meaningful
+  work near full DSP capacity in at most one host second. Report actual
+  instructions and base cycles separately, retain all shortfalls, and do not
+  replace a per-scenario minimum with an average. This is not a ceiling or
+  stopping criterion. Continue maximizing
   throughput and minimizing CPU time/load and latency at that fixed load.
   Qualify sustained realtime and energy per work block separately. Core count
   and GHz alone do not establish energy efficiency; faster host completion must
@@ -69,6 +74,7 @@ Current user requirements
   GPL-3.0-only licensing and source/dependency attribution. Keep manufacturer
   reference copies and private analysis outside the tracked source tree.
 - Do not run fuzz tests without an explicit user request. Commit verified
-  increments and push every commit to the private origin repository.
+  increments locally. The latest user-provided repository instructions do not
+  authorize a publication destination; do not publish these increments.
 - Speak German with the user; write code, comments, documentation and commits
   in English. Keep local account names out of tracked source and instructions.

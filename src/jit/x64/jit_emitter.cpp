@@ -61,8 +61,11 @@ static_assert(std::is_standard_layout_v<Cpu> && std::is_standard_layout_v<Native
 static_assert(offsetof(Cpu, interrupt_inhibited) == offsetof(Cpu, repeat_completed) + 1);
 }
 
-JitEmitter::JitEmitter(const JitRuntime runtime, const bool optimize, const BatchBackend batch)
-    : runtime_(runtime), optimize_(optimize), batch_backend_(batch) {}
+JitEmitter::JitEmitter(const JitRuntime runtime,
+                       const bool optimize,
+                       const BatchBackend batch,
+                       const std::array<Word, agu_registers> modifiers)
+    : runtime_(runtime), modifiers_(modifiers), optimize_(optimize), batch_backend_(batch) {}
 
 bool JitEmitter::has_moves(const NativeOp &operation) {
   return operation.instruction.operation == Operation::parallel &&

@@ -1,3 +1,27 @@
+Continuous and causal IIR fixtures
+
+- iir.d56: 16992 independently predicted serial/scheduled biquad cases,
+  including 6624 execution prefixes. The resume test advances the same DSP
+  through each prefix group without restoring state. See iir-validation.txt.
+- iir-stream-check.d56: eight short cases of the continuous 92-channel filter
+  bank and mix. Both RM settings and 1/7/257/1025 frames cover state feedback,
+  input-ring wrap, output-ring wrap, residual frames and poisoned boundaries.
+  The ordinary correctness runner checks all three implementations.
+- iir-stream.d56: the identical DSP program for 96000 audio frames (two seconds
+  at 48 kHz). The continuous bench warms one input second, then measures the
+  next second in 750 blocks, with no host state restoration. Its independent
+  algebraic producer predicts all final states and exact base/instruction counts.
+  Complete-state validation includes all P/X/Y memory. See bench.txt.
+
+The two stream archives differ in initial loop count and independently predicted
+results, not opcode scheduling. Both are byte-for-byte reproducible through the
+same portable producer, which does not link or execute the emulator. They add no
+new wire-format fields. Full stream timing is separate from normal CTest; the
+short stream correctness cases use the same schedule and register/memory layout.
+The older single-call FIR/FFT figures below remain historical diagnostics, not
+continuous throughput acceptance. The bench target now registers continuous
+programs explicitly instead of replaying every architectural microfixture.
+
 Binary instruction fixtures
 
 test/fixtures/arithmetic.d56 contains only synthetic instruction cases authored

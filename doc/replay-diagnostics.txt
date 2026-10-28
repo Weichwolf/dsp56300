@@ -1,0 +1,99 @@
+Historical replay diagnostics; not qualifying throughput benchmarks
+
+The bench target no longer registers these calls. The internal fixture replay
+executable is retained only for correctness/API-latency and local compiler
+experiments. Its old MIPS figures do not establish sustained realtime.
+
+Shared-fixture benchmarks
+
+bench is a CMake target, using the existing internal fixture runner and the same
+project-authored .d56 files as correctness CTest. It has its own generated CTest
+tree under build/<preset>/bench, so normal correctness runs do not time workloads.
+No external application inputs or machine-local fixture injection are registered.
+The runner instantiates all three typed BackendCore implementations against the
+same CoreImplementation contract; see backend-contracts.txt. Backend=all compares
+them within one executable/build, using the same fixture cases and trial scopes.
+
+  cmake --preset release
+  cmake --build --preset release --target bench
+
+The default selects every fixture archive and up to eight evenly spaced eligible
+cases within each archive. This is a bounded sample, not every correctness case.
+Selection is independent of measured speed. Both application and ISA/micro cases
+retain their names; a single-instruction fixture is not a complete application.
+The own FIR dot-product and FFT programs are initial application workloads.
+
+Selection, analogous to CTest
+
+  ctest --test-dir build/release/bench --show-only
+  ctest --test-dir build/release/bench -R '^(fir|fft)$' --verbose
+
+For the build target, configuration options select sets/cases/backends:
+
+  cmake --preset release -DDSP56300_BENCH_FILTER='^(fir|fft)$'
+  cmake --build --preset release --target bench
+
+  DSP56300_BENCH_FILTER    fixture-name regex; empty means every fixture set
+  DSP56300_BENCH_CASES     sample (default), all, or one zero-based numeric index
+  DSP56300_BENCH_BACKEND   jit (default), jit-unbatched, jit-scalar, jit-avx2,
+                          cached, reference, or all
+  DSP56300_BENCH_REPLAYS   auto (default), or [1,1048576] calls per trial
+
+Use -DNAME=value when configuring. For example, CASES=all and FILTER=^fir$
+executes every eligible FIR case; a numeric CASES value selects that index in
+each chosen archive. Unknown indices/backends/invalid counts fail explicitly.
+The target runs serially. Use an external CPU-affinity tool when making a
+controlled comparison; no fixed CPU number or clock policy is imposed here.
+Backend=all instantiates all six variants in the same executable/build. The
+four JIT variants isolate compiled MAC batching while retaining other native
+optimizations. Reports include successful batch calls, guest instructions
+processed in compiled batches and the subset processed by the AVX2 kernel.
+The requested variant name is not a claim that a particular host has AVX2.
+
+Metrics and scope
+
+Each backend/case owns one DSP instance. One cold call (including any initial
+JIT compilation) is timed separately, followed by 64 warmups and nine trials.
+auto targets about 100000 actual guest instructions per trial, bounded to
+1..4096 replays. The selected count is printed. An explicit count overrides it.
+
+Metric                           Meaning
+execution ns/call + range        median of nine trial means, plus min/max
+ns/guest instruction, MIPS       actual retired DSP instructions, not host opcodes
+instructions/base units per call qualified guest retirement/base-cost totals
+host preparation ns/call         RAM/register restoration outside execution timer
+process CPU ns/call              whole trial CPU, including preparation/timer
+cold execution ns                first run including any first-use compilation
+native/helper/moves per call     timed-period averages; moves overlap retirement
+compiled blocks/executable bytes host JIT storage/compilation diagnostics
+
+Compilation is not inferred by subtracting warm from cold time. Warm trials
+must not compile additional code. No timer subtraction, host-load projection,
+energy estimate or calibrated hardware-clock claim is made. CPU time includes
+harness work and is not a measurement of an entire consumer device. Instrumented
+builds validate the harness, but performance comparisons use the release preset.
+
+Before/after comparisons need the same fixture hashes, configuration and host
+conditions, alternating executable order and retaining raw ranges. One aggregate
+score must not hide a regression in another workload. CTest records output in
+the benchmark tree's Testing/Temporary/LastTest.log.
+
+Correctness and eligibility
+
+Cold and warm initialization/result checks compare complete expected registers,
+P/X/Y memory, processing/debug state and interrupt admission. Every trial also
+checks precise instruction/base-cost deltas. Expectations come from independent
+models, never from the emulator under measurement.
+
+Warm replay excludes expected faults, zero/nonquiescent retirement, active DO or
+architectural cache state, sleep/debug/reset-script state and declared program
+mutations. Repeated code compilation is reported separately as non-warm input.
+Reports print total, eligible, selected and measured backend/case counts, with
+exclusion reasons. A fixture with no measurable warm cases exits 77 and appears
+as skipped in the benchmark CTest tree; it remains a normal correctness fixture.
+Unexpected result mismatches fail, rather than becoming skipped performance data.
+
+The common fixtures do not imply identical correctness/performance coverage:
+every correctness case remains checked, while the benchmark's default sample is
+limited deliberately. More original application families are listed in
+application-validation.txt. Full ISA and representative 270 MIPS remain open.

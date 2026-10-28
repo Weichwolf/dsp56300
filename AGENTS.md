@@ -38,4 +38,4 @@
   native JIT execution; do not add a KVM/VMX backend, tests or permissions setup.
 - Keep local account names out of tracked instructions, code and documentation.
 - Do not run fuzz tests unless the user explicitly requests them.
-- Commit verified increments and push every commit to the private origin repository.
+- Commit verified increments locally. No publication destination is authorized.
