@@ -222,22 +222,24 @@ if(BUILD_TESTING)
   include(cmake/Bench.cmake)
   add_executable(dsp56300_generate_fir test/generate_fir.cpp)
   target_link_libraries(dsp56300_generate_fir PRIVATE dsp56300_fixture_format)
-  add_executable(dsp56300_generate_iir_stream test/generate_iir_stream.cpp)
-  target_link_libraries(dsp56300_generate_iir_stream PRIVATE dsp56300_fixture_format)
-  add_test(NAME iir-stream-fixtures COMMAND dsp56300_fixture_test
-    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/iir-stream-check.d56")
-  foreach(kind check full)
-    if(kind STREQUAL "check")
-      set(stream_fixture iir-stream-check)
-    else()
-      set(stream_fixture iir-stream)
-    endif()
-    add_test(NAME ${stream_fixture}-reproducibility COMMAND "${CMAKE_COMMAND}"
-      "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_iir_stream>"
-      "-DGENERATOR_ARGUMENTS=${kind}"
-      "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/${stream_fixture}-regenerated.d56"
-      "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/${stream_fixture}.d56"
-      -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
+  foreach(workload fir iir)
+    add_executable(dsp56300_generate_${workload}_stream test/generate_${workload}_stream.cpp)
+    target_link_libraries(dsp56300_generate_${workload}_stream PRIVATE dsp56300_fixture_format)
+    add_test(NAME ${workload}-stream-fixtures COMMAND dsp56300_fixture_test
+      "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/${workload}-stream-check.d56")
+    foreach(kind check full)
+      if(kind STREQUAL "check")
+        set(stream_fixture ${workload}-stream-check)
+      else()
+        set(stream_fixture ${workload}-stream)
+      endif()
+      add_test(NAME ${stream_fixture}-reproducibility COMMAND "${CMAKE_COMMAND}"
+        "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_${workload}_stream>"
+        "-DGENERATOR_ARGUMENTS=${kind}"
+        "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/${stream_fixture}-regenerated.d56"
+        "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/${stream_fixture}.d56"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
+    endforeach()
   endforeach()
   add_executable(dsp56300_generate_iir test/generate_iir.cpp)
   target_link_libraries(dsp56300_generate_iir PRIVATE dsp56300_fixture_format)

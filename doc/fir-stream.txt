@@ -1,0 +1,84 @@
+Continuous FIR bank
+
+Use an original eleven-channel symmetric 507-tap lowpass FIR at 48 kHz. Each
+channel has 506 initial zero-history words followed by two real input seconds.
+The DSP advances overlapping windows by one sample per audio frame. Channel
+cursors, outer hardware loops and an output ring persist across all blocks.
+There is no host replay/reset at sample, block or warmup boundaries.
+
+State             DSP placement                  Host/cache behavior
+input window      X, R0, linear M0                507 words/channel, overlap 506
+coefficients      Y, R4, linear M4                one shared 507-word table
+channel cursors   X:8..18, R2/R3                  read/write once/channel/frame
+output            X ring, R1, M1=1023             eleven outputs/frame, 64-frame blocks
+work/count        A, X0/Y0, LC, N0/N4/N7          nested frame/channel/tap loops
+progress          X:24, X1                        remaining frame count for consumer
+
+Input channel stride is 96528 words (6033 cache lines at 64 bytes/line), avoiding
+a power-of-two set collision between the eleven live windows. Their data plus
+coefficients occupy about 24 KiB, excluding output/core metadata and native
+code. This is a placement choice, not proof of L1 residency on every host.
+Initial input storage is larger; timed execution reuses overlapping windows.
+
+Each channel loads its cursor, clears/preloads X0/Y0, performs 506 pipelined MACs
+and the final unpaired MAC, rounds and stores one result, advances the saved
+window by one and restores the coefficient cursor. The existing guarded MAC
+batch is eligible only within the exact one-instruction linear tap loop.
+Independent channel windows do not imply time samples can ignore history.
+
+Per channel: 507+8=515 instructions; per audio frame: 11*515+5=5670 instructions.
+Immediate cursor setup and hardware DO add 50 base cycles/frame, giving 5720.
+One input second contains 272160000 instructions / 274560000 base cycles,
+99.84% of the 275 MHz reference. The initial DO N7 adds 1 instruction/5 cycles
+before natural warmup. There are no NOPs or padded instruction repetitions.
+
+Coefficients are 128*min(i+1,507-i), a dyadic triangular lowpass. An independent
+prefix-sum/first-moment oracle evaluates its convolution in constant work per
+output. A separate direct integer dot product cross-checks every short-case
+output and selected full-stream boundaries. Bound the input and absolute sum
+to prove all 56-bit prefixes stay interior and no new transfer S/L is possible.
+Use the existing independent rounding/bus/flag model for final architectural
+state. Explicitly predict residual frame slots, cursors, progress and all RAM.
+Short checks span six numeric modes, incoming C/S/L, full-history startup
+transition and output ring wrap; full
+bench uses the identical program and layout for 96000 frames, with 48000 warmup.
+
+The implementation contains only project-authored bytecodes and independent
+models. Its producer links the fixture codec only, with no emulator or decoder.
+The final 60-case producer passes 283140 assertions, including 94380 direct-dot
+comparisons; the full producer passes 2112066 assertions, including 66 direct
+boundary dots. Lengths 1/7/65/129/513 cover both initial history and its complete
+replacement. The 60 short cases execute through all
+three implementations and regenerate byte-for-byte in release and strict.
+The full case has 544320001 retired instructions / 549120005 base cycles over
+two input seconds, with 272160000 / 274560000 in the measured second.
+
+Complete expected state includes all sixteen stack slots, not only active SP:
+slots 1/2 save the initial outer context; 3/4 retain the last frame's channel
+loop entry (including previous-frame flags); 5/6 retain the last tap-loop entry.
+X1 and X:24 contain the observed remaining frame count of one. Final R0/cursor
+metadata advances by exactly 96000, R4 returns to the shared coefficient base,
+and R1 reflects the interleaved output ring. All untouched RAM and guard words
+remain part of the expectation. The direct-dot oracle checks every short-case
+output; only the last 1024 outputs remain observable in the full ring at exit.
+
+A controlled forward/reverse backend comparison gives about 0.269 process CPU
+seconds per input second for automatic/AVX2, 0.388 scalar-batch and 1.942 without
+batches. Automatic throughput is about 1012..1014 actual guest MIPS, with
+266112000 guest instructions retired in actual AVX2 batches per measured second.
+Every batched block meets its input-time budget in that capture. This qualifies
+this bounded linear normalized convolution scenario, not all FIR programs,
+all numerical data or all hardware/OS conditions. Original high-dynamic-range
+and clipping fixtures remain correctness inputs with guarded general fallback.
+See continuous-bench.txt for ranges, scopes and the failing IIR deadline.
+
+Qualification: all 110 correctness tests pass in both configurations (full sweeps
+86.06 s release / 185.40 s strict, no skips). The final expansion to 60 FIR cases
+reruns all three FIR correctness/reproducibility targets in each build, passing
+in 5.45 s / 21.32 s. The full case passes independent complete-state validation
+in all six release backend variants; the strict bench validates both FIR and
+IIR in report-only mode. The optimized CMake bench passes FIR at 0.268284 s and
+fails IIR at 1.257526 s. The broader realtime objective remains incomplete.
+All 117 strict translation units preserve nonrecovering ASan/UBSan/integer flags;
+all 157 C++ source/header files pass format checks. No fuzzing was run and all
+44 pre-existing binary archives remain byte-identical. See coverage.txt.

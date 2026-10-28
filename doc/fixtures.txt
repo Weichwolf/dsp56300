@@ -1,3 +1,22 @@
+Continuous FIR fixtures
+
+- fir-stream-check.d56: 60 project-authored eleven-channel 507-tap cases,
+  1/7/65/129/513 frames, six scaling/RM modes, incoming C/S/L or zero flags. The
+  prefix-moment convolution oracle is independently checked by direct integer
+  dots. Full expected registers/frames, all RAM, guards and progress are checked
+  in reference/cached/JIT, including full-history startup replacement, output
+  ring wrap and persistent cursors.
+- fir-stream.d56: the identical program and memory layout for 96000 frames at
+  48 kHz. One input second warms naturally; the next is timed in 750 blocks.
+  The host never restores DSP state between blocks. The full case independently
+  predicts 544320001 instructions / 549120005 base cycles over two seconds.
+  The producer links the portable codec only and both archives regenerate exactly.
+
+See fir-stream.txt and continuous-bench.txt for oracle domains, runtime counter
+and performance evidence. Linear preloaded streams qualify convolution/core
+work, not board I/O, DMA or every wrapped streaming layout. The output ring
+retains only its terminal 1024 words; short cases validate earlier boundaries.
+
 Continuous and causal IIR fixtures
 
 - iir.d56: 16992 independently predicted serial/scheduled biquad cases,

@@ -17,11 +17,11 @@ Configuration, analogous to CTest selection:
                           cached, reference, or all
   DSP56300_BENCH_ENFORCE_DEADLINE  ON (default); fail when a package exceeds 1 s
 
-The current continuous list contains the IIR bank. FIR and spectral-analysis
-programs are planned in continuous-bench.txt; their old replay fixtures are
-correctness/latency diagnostics and are not silently accepted as continuous work.
-There is currently one full-duration IIR case, so sample and all select that same
-case. A numeric out-of-range index, invalid backend or an empty filter fails.
+The current continuous list contains FIR and IIR banks. Spectral analysis is
+still planned in continuous-bench.txt. Old single-output FIR and FFT replay
+fixtures remain correctness/latency diagnostics outside the qualifying target.
+Each current continuous archive has one full-duration case, so sample and all
+select the same case within each set. A numeric out-of-range index, invalid backend or an empty filter fails.
 DSP56300_BENCH_REPLAYS does not control the continuous target. The target executes
 serially. Compare release binaries with the same fixture and host conditions;
 use external affinity when desired. No host clock policy is imposed here.
@@ -34,12 +34,19 @@ restores RAM, registers or PC between samples or blocks. Work is not padded with
 NOPs. The runner does not sleep to manufacture an input duration or subtract
 harness overhead. A one-second package must complete in at most one host second.
 
-The initial program is a 92-channel, four-section causal IIR filter bank and
+The IIR program is a 92-channel, four-section causal filter bank and
 normalized mix at 48 kHz. It retires 274416000 instructions and 274704000 documented
 base cycles per input second: 99.8924% of a 275 MHz reference. This excludes
 pipeline/bus stalls and derivative peripherals, so it is not a calibrated
 DSP56371 board simulation. The first outer DO adds one instruction/five cycles
 before warmup. The measured interval uses 750 calls of 64 audio frames each.
+
+The FIR program filters eleven 48 kHz channels with 507 triangular taps. It
+retires 272160000 instructions / 274560000 base cycles per input second, 99.84%
+reference load. Overlapping linear histories, shared coefficients and an output
+ring continue over both seconds. The guarded one-instruction MAC batch handles
+qualified inner tap loops. It does not transform filter samples into independent
+time lanes. Full state and short-case direct-dot checks are in fir-stream.txt.
 
 Metric                    Meaning
 wall_s                    full measured execution interval, including run/checks

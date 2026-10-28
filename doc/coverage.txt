@@ -97,20 +97,22 @@ and old parallel operands without memory/I/O observation barriers. All 6758417
 directed ASR/register assertions pass; no ISA catalogue row becomes complete.
 See doc/native-shifts.txt for guards, witnesses, measurements and remaining work.
 
-The current configuration passes all 107 correctness tests in release (50.56 s)
-and strict ASan/UBSan (170.99 s), with three independent CTest processes per
-build and no skips. All 116 C++ translation units carry the required strict
-nonrecovering address/undefined/integer instrumentation. All 155 project C++
-source/header files pass clang-format. The 41 original independent archives
-remain byte-identical; three new archives bring the total to 44. All registered
-reproducibility checks pass, including the new algebraic full-stream producer.
+The current configuration qualifies all 110 correctness tests: full sweeps pass
+in release (86.06 s, two CTest processes) and strict ASan/UBSan (185.40 s, three
+processes), with no skips. The final expansion to 60 FIR stream cases reruns
+its three correctness/reproducibility targets in each configuration and passes
+in 5.45 s / 21.32 s. All 117 C++ translation units retain the required strict
+nonrecovering address/undefined/integer instrumentation; all 157 project C++
+source/header files pass clang-format. The 44 pre-existing archives remain
+byte-identical in the FIR increment, with two additions bringing the total to
+46. All registered regeneration checks pass. No fuzzing was run.
 The structural ISA audit passes; full ISA qualification still fails as intended.
-The full two-second IIR case also passes independent complete-state checks in
-all six release backend variants, and the instrumented production bench passes
-its correctness/report-only run. These loaded-host runs qualify state, not speed.
-The optimized bench deadline gate fails explicitly at 1.262421 s per input second;
-its final state is correct. It is not included among the 107 correctness tests.
-See continuous-bench.txt for controlled before/after timings and remaining scope.
+Full two-second FIR and IIR cases pass independent complete-state checks in all
+six release backend variants. The instrumented production bench passes both
+correctness/report-only cases. Those loaded-host runs qualify state, not speed.
+The optimized bench passes FIR at 0.268284 s per input second and fails IIR at
+1.257526 s; both final states are correct. These performance gates are separate
+from the 110 correctness tests. See continuous-bench.txt for controlled captures.
 The expanded native-move boundary test passes all 78446 assertions in both builds.
 It includes exact same-code reuse after modifier changes and paired aliased X/Y
 wraps/I/O fallback. Profiled modulo checks compile ring constants but guard every
@@ -170,8 +172,20 @@ The initial before/after comparison of guarded modulo lowering reduces about
 still fails the required package deadline. Further controlled results are in
 profiled-modulo.txt and continuous-bench.txt; no target-achieved claim is made.
 
-FIR and spectral continuous programs are pending. Current application coverage
-therefore remains incomplete, even if every registered continuous test becomes
+The continuous FIR bank processes eleven 507-tap channels at 48 kHz, with
+272160000 guest instructions / 274560000 base cycles in the measured second.
+Overlapping linear input histories and an output ring continue across warmup
+and all 750 blocks. Its existing guarded MAC batch now has sustained-work
+qualification: automatic/AVX2 use about 0.269 CPU seconds per input second
+(roughly 1012..1015 guest MIPS), versus 0.388 scalar-batch / 1.942 unbatched.
+Counters confirm 266112000 guest instructions use actual AVX2 per measured
+second. No production emulator code changes in this fixture-only increment.
+Sixty short cases cover six numerical modes, incoming flags, startup replacement
+and ring wrap; every short convolution is checked by an independent direct dot
+as well as the prefix-moment model. See fir-stream.txt.
+
+Spectral and wrapped-history continuous programs remain pending. Application
+coverage remains incomplete even if every registered continuous test becomes
 fast enough. Native execution alone does not establish capacity: DSP precision,
 flags, parallel transfers, addressing, loops and helpers cost host instructions.
 One DSP instruction is not one x64 instruction. The following short-call data
@@ -204,19 +218,19 @@ open. See doc/mac-plan-compilation.txt for the current protocol and individual
 controls; earlier arithmetic-window results remain in doc/mac-reductions.txt.
 
 The bench CMake target now registers only continuous full-state workloads in a
-separate CTest tree, initially the IIR bank. It supports all/selected sets and
+separate CTest tree, currently FIR and IIR banks. It supports all/selected sets and
 cases plus six same-build backend variants. Release runs enforce the one-second
 package deadline by default; instrumented runs use correctness/report-only mode.
 No slow case is skipped and no timing/harness overhead is subtracted. Old replay
 executables remain local correctness/API-latency experiments, outside bench.
-See bench.txt. Eight short stream cases exercise the identical DSP schedule and
-memory layout through all three backends; both short/full archives regenerate
-from an independent algebraic model linked only to the fixture codec.
+See bench.txt. Sixty FIR and eight IIR short stream cases exercise each full
+program's identical DSP schedule/layout through all three backends; all four
+short/full archives regenerate from emulator-independent algebraic producers.
 
 Causal biquad validation adds 16992 independent serial/scheduled IIR cases and
 864 resume scenarios with 19872 complete-state checkpoints. The algebraic model
 cross-checks 1031472 completed stages in the producer. See iir-validation.txt.
-The project still needs continuous FIR, resampling, spectral, image/video,
+The project still needs wrapped FIR, resampling, spectral, image/video,
 communications and control scenarios; see application-validation.txt. Inputs
 from external applications are excluded from active test/benchmark configuration.
 Historical application measurements are not current acceptance criteria.

@@ -21,7 +21,7 @@ file(MAKE_DIRECTORY "${bench_directory}")
 # This explicit list contains qualified continuous program shapes. New scenarios
 # need independent full-state fixtures and real-time workload metadata first.
 set(bench_tests "# Generated continuous single-instance benchmarks.\n")
-foreach(name iir)
+foreach(name fir iir)
   set(fixture "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/${name}-stream.d56")
   string(APPEND bench_tests
     "add_test([==[${name}-stream]==] [==[$<TARGET_FILE:dsp56300_continuous_bench>]==] [==[${name}]==] [==[${fixture}]==] [==[${DSP56300_BENCH_CASES}]==] [==[${DSP56300_BENCH_BACKEND}]==] [==[${deadline_policy}]==])\n")

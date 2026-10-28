@@ -44,11 +44,11 @@ Benchmarks run continuous one-second DSP workloads with independent binary fixtu
 
   cmake --preset release
   cmake --build --preset release --target bench
-  ctest --test-dir build/release/bench -R '^iir-stream$' --verbose
+  ctest --test-dir build/release/bench -R '^(fir|iir)-stream$' --verbose
 
 One input second warms the same DSP before the measured second, without host
-state resets. The initial continuous scenario is a 92-channel IIR bank and mix;
-FIR and spectral scenarios are still pending. Select all or a numeric case with
+state resets. Current continuous scenarios are an eleven-channel 507-tap FIR
+and a 92-channel IIR bank/mix; spectral analysis remains pending. Select all or a numeric case with
 DSP56300_BENCH_CASES, workloads with DSP56300_BENCH_FILTER, and implementations
 with DSP56300_BENCH_BACKEND. Release bench fails when a one-second package exceeds
 one host second. See doc/bench.txt for CPU, latency, correctness and scope.

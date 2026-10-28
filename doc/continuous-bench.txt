@@ -16,7 +16,7 @@ Use normal audio-block/hop budgets, not single-instruction API calls. Validate
 final registers and all RAM against independently generated expectations after
 measurement. Retain exact instruction/base-unit checks and the public contracts.
 
-The IIR program is implemented; FIR and spectral programs remain planned.
+The FIR and IIR programs are implemented; spectral analysis remains planned.
 
 Scene                 Real input per measured second      Useful work
 FIR bank              11 channels at 48 kHz               symmetric 507-tap FIR
@@ -35,7 +35,8 @@ IIR        outer frames, channel loop             distinct state per channel;
 spectral   hops, channels, copy/FFT/power loops    persistent stream cursors;
                                                     scratch reuse, overlap
 
-Native input/output rings stay live. Input streams are deterministic, changing
+Input histories/cursors and output rings stay live. FIR reads overlapping linear
+streams; IIR uses an interleaved input ring. Inputs are deterministic, changing
 signals, not restored snapshots. The reference/cached/JIT concepts remain
 comparable in one build. Old architectural fixtures remain correctness and
 API-latency diagnostics; they are not qualifying continuous throughput runs.
@@ -76,7 +77,7 @@ cleanup; compilation cost is included, not subtracted or described as fully warm
 See profiled-modulo.txt for the guarded compiler change. These measurements do
 not establish 275 MIPS, full ISA, all applications, board realtime or energy.
 
-Qualification of this increment
+Qualification of the preceding IIR/modulo increment
 
 - All 107 correctness tests pass in release and strict ASan/UBSan builds, with
   three independent CTest processes per build (50.56 s / 170.99 s, no skips).
@@ -97,5 +98,73 @@ Qualification of this increment
   state. The gate is working; the performance objective remains unmet.
 - The structural ISA audit passes with 118 partial rows. The complete-ISA gate
   fails as required: none of those rows is fully qualified. General ISA and
-  application coverage, FIR/spectral continuous programs, more host efficiency,
+  application coverage, the spectral continuous program, more host efficiency,
   SIMD/multicore research and energy qualification remain open.
+
+Continuous FIR addition
+
+The independent eleven-channel 507-tap program now processes 96000 audio frames,
+using overlapping zero-history-prefixed input streams, shared coefficients,
+persistent channel cursors and a 1024-word interleaved output ring. One input
+second contains 272160000 instructions / 274560000 base cycles (99.84% reference
+load). It uses the identical warmup, 750-block measurement and deadline policy
+as IIR. No production emulator code changes are needed in this increment.
+
+Sixty short cases cover 1/7/65/129/513 frames, six scaling/RM modes and both
+zero and incoming C/S/L. Their independent prefix-moment oracle is checked by a
+separate direct integer convolution, including every short output. The full
+producer cross-checks startup, full-history, midpoint and terminal boundaries.
+Complete architectural state, residual nested loop frames, all P/X/Y and exact
+progress match through all three correctness backends. See fir-stream.txt.
+
+A sequential affinity capture compares automatic, scalar, AVX2 and disabled MAC
+batches in forward then reverse order. Each process executes a genuine input
+second warmup plus a measured input second; no completed-program replay occurs.
+No compiler/project correctness job runs concurrently with this capture. All
+eight independent full-state validations pass. Ranges retain both samples:
+
+Backend         Wall s               Process CPU s        Actual guest MIPS
+automatic       0.268500..0.268952   0.268514..0.268967    1011.93..1013.63
+scalar batch    0.387583..0.388044   0.387592..0.387995    701.36..702.20
+AVX2 batch      0.268255..0.268685   0.268274..0.268698    1012.93..1014.56
+unbatched JIT   1.940913..1.942649   1.941028..1.942760    140.10..140.22
+
+Automatic/AVX2 use about 26.9% of one host core at this fixed reference load,
+with roughly 3.72 times package realtime reserve. AVX2 processes 266112000 guest
+instructions per measured second, confirmed by runtime counters. Scalar uses
+the same compiled batch admission, with zero AVX2 instructions. This confirms
+the existing batch implementation under continuous useful work; it is not a
+new production compiler speedup in this fixture-only increment. Vector batches
+reduce process CPU about 30.8% versus scalar batches and 86.2% versus unbatched
+JIT in this capture. Reported page-rounded code storage is 28672 bytes for every variant. All controlled batched blocks meet 1.333 ms; this is not a hard
+OS scheduling guarantee. Initial probes under a format-check job showed a few
+late blocks despite meeting the package deadline; those observations are kept
+in the local experiment logs rather than hidden as correctness exclusions.
+
+The linear input streams isolate convolution/core work and do not model an
+external DMA/input service, board wait states or energy. Wrapped streaming
+histories and more application patterns still need qualification. Only final
+output-ring contents are retained; short complete-state cases independently
+cover startup and wrap. A complete-output observation trace is future work.
+The IIR production scenario still fails the package deadline, so bench as a
+whole remains red. No arithmetic average or fastest result replaces that failure.
+
+FIR increment qualification
+
+The full 110-test sweeps pass in release (86.06 s, two CTest processes) and strict
+(185.40 s, three processes), with no skips. The additional 513-frame FIR boundary
+extends the short archive to 60 cases; its three correctness/reproducibility tests
+are rerun in each configuration and pass in 5.45 s / 21.32 s. Full-history startup
+replacement, output wrap and every short output now have independent witnesses.
+The complete full-stream case matches its independent final state in all six
+release backend variants. Those comparison runs overlapped correctness jobs;
+their wall/CPU numbers are not the controlled performance capture above.
+
+Both instrumented continuous scenarios pass full-state validation in report-only
+mode. The optimized default CMake bench passes FIR (0.268284 wall / 0.268299 CPU
+seconds, 1014.45 MIPS, zero late blocks) and fails IIR (1.257526 wall / 1.257598 CPU
+seconds, 218.22 MIPS, 750 late blocks). Every scenario is retained. All 44 previous
+archives are unchanged; the total is 46. All 117 strict translation units retain
+required nonrecovering instrumentation, and all 157 C++ sources/headers pass
+format/Werror/tidy policies. The structural ISA audit passes; complete-ISA still
+fails with all 118 rows partial. The goal remains active and incomplete.
