@@ -275,3 +275,21 @@ copying derivative mapping/peripherals. Full prefetch/burst/bus timing, CE-chang
 separation, automatic exceptions, reset-tag priority/all-locked fetch confirmation,
 all modes/IRQ/events and cache/PRAM remapping remain mandatory qualification work.
 See doc/program-cache.txt for the precise functional subset and primary source.
+
+Processing-state increment: RESET, WAIT and STOP move from missing to partial;
+2 missing, 0 untested, 116 partial and 0 complete rows remain. run must stop at
+the first successful sleep, not continue or spin until its budget expires.
+WAIT admits only a valid unmasked interrupt; STOP uses a separate host-completed
+IRQA phase before normal arbitration/continuation. Guest RESET must be explicitly
+accepted by a derivative callback and preserves CPU state. Missing/rejected
+acceptance is a named fail-stop event error, never a silent NOP or Core::reset.
+Independent state/sequence v2 fixtures record expected sleep and RESET scripts;
+separate host tests require native work, complete frame/state/progress equality,
+no callback replay/reentry, P mutation, all priority masks and cache retention.
+The v1 bytes/limits are preserved; literal wire records and malformed v2 fields
+are independently checked. Raw status copying does not qualify reserved-bit
+hardware readback or every resulting mode effect. Current library reset is not
+a physical RESET/boot implementation; CP/IPL defaults and held-reset behavior
+remain open, alongside DE/debug/DMA wake, clock stabilization, precise pending
+arbitration, full legal sequences and derivative reset side effects. Full ISA
+qualification still fails by design; see doc/processing.txt for primary sources.

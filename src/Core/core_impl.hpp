@@ -40,6 +40,7 @@ struct Core::Impl {
   }
 
   [[nodiscard]] Word fetch_program(Word address);
+  void execute_processing(const detail::Instruction &decoded);
   void execute_cache(const detail::Instruction &decoded);
   void execute_exception(const detail::Instruction &decoded);
   void step_vector();

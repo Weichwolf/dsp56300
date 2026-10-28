@@ -78,7 +78,10 @@ enum class Operation : std::uint8_t {
   cache_lock,
   cache_unlock,
   cache_lock_relative,
-  cache_unlock_relative
+  cache_unlock_relative,
+  reset_peripherals,
+  wait,
+  stop
 };
 
 [[nodiscard]] constexpr bool repeatable(const Operation operation) noexcept {
@@ -89,6 +92,7 @@ enum class Operation : std::uint8_t {
     case Operation::cache_flush:
     case Operation::cache_flush_unlocked:
     case Operation::cache_free:
+    case Operation::reset_peripherals:
     case Operation::cache_lock:
     case Operation::cache_unlock:
     case Operation::and_control:
@@ -128,6 +132,8 @@ enum class Operation : std::uint8_t {
     case Operation::move_peripheral_program:
     case Operation::bit_register:
     case Operation::bit_memory: return true;
+    case Operation::wait:
+    case Operation::stop:
     case Operation::cache_lock_relative:
     case Operation::cache_unlock_relative:
     case Operation::unsupported:

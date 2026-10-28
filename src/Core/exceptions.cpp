@@ -57,7 +57,8 @@ void Core::Impl::step_vector() {
       decoded.operation == Operation::call_effective) {
     call_vector(decoded);
   } else {
-    if ((decoded.operation != Operation::parallel && decoded.operation != Operation::nop) ||
+    if ((decoded.operation != Operation::parallel && decoded.operation != Operation::nop &&
+         decoded.operation != Operation::reset_peripherals) ||
         (decoded.words == 2 && vector.phase == VectorPhase::second)) {
       fail(FaultKind::unsupported_instruction, Space::program, current_pc, decoded.opcode);
       return;

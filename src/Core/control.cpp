@@ -45,6 +45,9 @@ void Core::Impl::execute(const Instruction &decoded) {
   const auto opcode = decoded.opcode;
   switch (decoded.operation) {
     case Operation::nop: return;
+    case Operation::reset_peripherals:
+    case Operation::wait:
+    case Operation::stop: execute_processing(decoded); return;
     case Operation::cache_flush:
     case Operation::cache_flush_unlocked:
     case Operation::cache_free:
@@ -149,6 +152,7 @@ void Core::interrupt(const Word vector, const unsigned level) {
       !interruptible()) {
     throw std::invalid_argument("DSP interrupt is not admissible at this boundary");
   }
+  impl_->cpu.processing = ProcessingState::running;
   impl_->vector = {
       .resume = state.pc, .address = vector, .level = level, .phase = Impl::VectorPhase::first};
   impl_->cpu.repeat_completed = false;

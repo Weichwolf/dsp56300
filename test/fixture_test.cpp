@@ -8,21 +8,67 @@
 #include <exception>
 #include <filesystem>
 #include <iostream>
+#include <span>
 #include <stdexcept>
 #include <string>
 
 namespace dsp56300::test {
 namespace {
+class ResetScript final : public Io {
+public:
+  explicit ResetScript(const std::span<const ResetAction> actions) : actions_(actions) {}
+
+  bool read(Space /*space*/, Word /*address*/, Word /*pc*/, Word & /*value*/) noexcept override {
+    return false;
+  }
+
+  bool write(Space /*space*/, Word /*address*/, Word /*pc*/, Word /*value*/) noexcept override {
+    return false;
+  }
+
+  bool bit(Space /*space*/,
+           Word /*address*/,
+           Word /*pc*/,
+           Word /*bit*/,
+           BitAction /*action*/,
+           bool & /*previous*/) noexcept override {
+    return false;
+  }
+
+  bool reset_peripherals(const Word pc) noexcept override {
+    if (used_ == actions_.size()) {
+      matched_ = false;
+      return false;
+    }
+    const auto action = actions_[used_++];
+    matched_ = matched_ && pc == action.pc;
+    return action.accepted;
+  }
+
+  [[nodiscard]] bool complete() const noexcept { return matched_ && used_ == actions_.size(); }
+
+private:
+  std::span<const ResetAction> actions_;
+  std::size_t used_ = 0;
+  bool matched_ = true;
+};
+
 void check(const BinaryCase &item, const Backend backend) {
   auto memory = initial_memory(item);
   auto expected = memory;
   patch(expected, item.after);
-  Core core({.program = memory[0], .x = memory[1], .y = memory[2]}, nullptr, {.backend = backend});
+  ResetScript script(item.reset_actions);
+  Core core({.program = memory[0], .x = memory[1], .y = memory[2]},
+            item.reset_actions.empty() ? nullptr : &script,
+            {.backend = backend});
   core.set_registers(item.initial);
   const auto result = core.run(item.budget);
   require(result.dispatches == item.dispatches, "Retired dispatch count");
   require(result.progress == item.progress, "Instruction count and documented base cost");
   require(result.fault == item.fault, "Expected fault context");
+  require(result.state == item.state && core.processing_state() == item.state,
+          "Explicit running/WAIT/STOP state");
+  require(script.complete(), "RESET callback PC/order/count follows explicit host script");
   if (backend == Backend::jit) {
     const auto statistics = core.jit_statistics();
     require(statistics.native_alu_instructions + statistics.helper_instructions ==

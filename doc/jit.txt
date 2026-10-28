@@ -318,3 +318,20 @@ Cache storage/geometry is separate cold owner state; Cpu/generated-code offsets
 stay unchanged. Exact memory-layout results and the current semantic gaps are
 recorded in doc/coverage.txt and doc/program-cache.txt. No throughput/cache-miss,
 SIMD, host-load, energy or whole-device improvement is claimed in this increment.
+
+Processing-state boundaries
+
+WAIT/STOP terminate blocks and successful helpers stop native continuation
+when the CPU enters sleep. Every dispatch checks the state before more guest
+work. Sleeping run calls return immediately, including zero/maximum budgets,
+and cannot consume successor instructions or interrupt exclusions. Wake/resume
+then uses the existing mode/loop keys and exact instruction budgets. RESET uses
+the common instrumented helper and requires a real host acknowledgement; it can
+continue a block when state/mode/PC/code remain valid. Callback P changes still
+invalidate and end continuation before modified successors. Tests require actual
+native arithmetic before/after RESET and wake/RTI under warm old-mode code.
+The state byte uses prior Cpu padding, keeping every existing generated-code
+offset and Cpu size unchanged. RunResult.state uses prior result padding; Io
+has an extended callback interface and consumers rebuild. This is a layout
+result, not a speed/device/isolation claim. Full pipeline/clock/event and
+physical reset/debug qualification remains open; see doc/processing.txt.

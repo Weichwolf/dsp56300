@@ -669,7 +669,37 @@ precise disabled-mode exceptions, CE restrictions and other full-ISA gaps remain
 explicit in doc/program-cache.txt. Previous fixture bytes and wire format stay
 unchanged; manufacturer programs/manual extracts are not public fixtures.
 
-Wire format D56F, version 1
+test/fixtures/processing-state.d56 and processing-sequences.d56 use version 2
+and contain 31200 and 4704 independently authored cases per backend (35904
+combined). Regeneration is explicit:
+
+  build/release/dsp56300_generate_processing state build/processing-state.d56
+  build/release/dsp56300_generate_processing sequences build/processing-sequences.d56
+  cmp build/processing-state.d56 test/fixtures/processing-state.d56
+  cmp build/processing-sequences.d56 test/fixtures/processing-sequences.d56
+
+The producer links only fixture-format. It models unchanged CPU/CCR fields,
+explicit sleeping state, accepted/rejected/absent RESET requests and exact
+nominal costs. All CCR/IPL combinations and six supported numeric modes,
+raw status basis/complement copying, zero/excess budgets, every native/reset/
+sleep prefix, REP callback counts, encoded-zero 65536 repetitions and forbidden
+sleep bodies have independent expectations. Raw status copying is not reserved-
+bit/mode or physical-reset qualification. Callback PC/order/count/replies are
+explicit script records; no emulator snapshots provide expectations. The runner
+checks state and all script consumption in addition to prior state/memory/cost
+checks, on every backend. Negative post-failure registers are still checked
+separately by host witnesses, not inferred from negative binary records.
+6252 host assertions cover native/RESET/native and wake/RTI arithmetic, warm mode
+changes, every IRQ mask/priority, STOP IRQA-only completion, canonical callback
+state, P edits, reentry, failures/no replay, finite DO frames, repeated actions,
+legal fast RESET, rejected fast sleeps and architectural cache preservation.
+36 format tests compare independent literal byte records for both versions,
+including count boundaries, invalid state/acceptance/PC/fault/version fields,
+truncation/trailing data and refusal to drop v2 expectations into v1 output.
+These are directed tests, not fuzz tests. doc/processing.txt lists all remaining
+clock/pin/event/mode/debug and hardware qualification gaps.
+
+Wire format D56F, versions 1 and 2
 
 Every integer is unsigned little-endian. u32/u64 always occupy 4/8 bytes.
 No native structures, pointers, padding, enum layout or SIMD state are dumped.
@@ -682,7 +712,11 @@ Lengths count elements, not bytes, except string lengths. Strings contain their
 literal bytes without a terminator. The file ends immediately after its cases.
 
 Header:
-  u32 magic 0x46363544 (ASCII D56F), u32 version 1, u32 case_count.
+  u32 magic 0x46363544 (ASCII D56F), u32 version (1 or 2), u32 case_count.
+Existing producers default to v1. New processing producers explicitly select
+FixtureVersion::processing (v2); readers accept both. A v1 writer rejects
+non-running state, nonempty RESET scripts and the new host_event fault instead
+of silently dropping expectations. All previous wire bytes remain unchanged.
 
 Each case, in order:
   u32 name_length, name bytes;
@@ -691,6 +725,9 @@ Each case, in order:
   u64 expected retired instructions, u64 expected estimated base cycles;
   five u32 expected fault fields (kind, space, address, value, pc);
   u32 expected interruptible (0 or 1);
+  v2 only: u32 expected processing state (running=0, waiting=1, stopped=2);
+  v2 only: u32 RESET action_count; for each action: u32 instruction PC,
+           u32 acceptance (0 or 1), in expected request order;
   initial register record, expected register record;
   before memory-block list, after memory-block list.
 
@@ -705,9 +742,13 @@ Memory-block list:
   followed by word_count u32 values, each limited to 24 bits.
   Space numbers are P=0, X=1, Y=2. Blocks apply in listed order.
   Fault kind numbers follow the documented FaultKind order in core.hpp.
+  V1 accepts none..invalid_instruction (0..9). V2 additionally accepts
+  host_event (10); earlier numbers are unchanged.
 
-Limits: 65536 cases, 256 name bytes, 1024 blocks per list, and 2^24 words
+Limits: 65536 cases and RESET actions per case, 256 name bytes, 1024 blocks
+per list, and 2^24 words
 per address space/block. Zero-sized address spaces, unknown versions, invalid
-enums, truncated files and trailing bytes are rejected. Files are trusted local
+enums/processing states, RESET PCs exceeding 24 bits, invalid acceptance bits,
+truncated files and trailing bytes are rejected. Files are trusted local
 test assets; the reader is not an untrusted network input service. A schema
 change, including enum numbering, requires a new format version.

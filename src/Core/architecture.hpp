@@ -85,5 +85,6 @@ struct alignas(64) Cpu {
   Word repeat_remaining = 0, repeat_pc = 0, repeat_lc = 0, repeat_opcode = 0;
   bool repeat_loaded = false, repeat_completed = false;
   bool interrupt_inhibited = false;
+  ProcessingState processing = ProcessingState::running;
 };
 } // namespace dsp56300::detail

@@ -150,3 +150,25 @@ burst failure model. Derivative cache/PRAM remapping stays with the embedder.
 Run budgets count retired guest instructions; CE-enabled general execution does
 not prefetch/retire successors through JIT lookahead. No protected VM, new I/O
 reply or native dependency is added.
+
+Sleep/wake and guest RESET
+
+RunResult.state and Core::processing_state distinguish running, waiting and
+stopped. WAIT/STOP retire once then return early, without advancing successors
+or idle Progress. A valid unmasked Core::interrupt wakes WAIT. STOP rejects IRQ
+admission until the host has modeled IRQA/clock stabilization and calls
+resume_from_stop; it can then admit any highest enabled source or continue with
+no IRQ. This completion is rejected in WAIT/running/faulted/reentrant execution.
+All calls stay on the owning execution thread. run(0), cache clearing, host RAM
+accesses and register initialization do not wake a sleeper; library reset does.
+
+Io::reset_peripherals(pc) handles guest RESET synchronously, resetting the
+consumer's peripherals/interrupt priorities before returning true. Its default
+is false. No Io or rejection gives FaultKind::host_event at the instruction PC,
+with no retirement/replay or fabricated reset registers. CPU/cache state stays
+preserved in the functional model. Pre-retirement canonical registers/progress,
+advanced foreground PC, vector pc arguments, P edits and the existing callback
+rules apply. resume_from_stop is also prohibited callback reentry. Every legal
+REP iteration requires its own acknowledgement. Accepted prior host/vector
+and loop effects are retained after later failure. See doc/processing.txt for
+exact budgets, fault context, clock ownership and unresolved hardware details.

@@ -215,6 +215,7 @@ void Core::reset() {
   if (impl_->executing) { throw std::logic_error("Reset requires stopped DSP execution"); }
   impl_->cpu = {};
   impl_->vector = {};
+  impl_->cpu.processing = ProcessingState::running;
   impl_->icache.reset();
   impl_->cpu.reg.m.fill(word_mask);
   impl_->fault = {};
@@ -266,7 +267,8 @@ void Core::load(const Space space, const Word address, const std::span<const Wor
 
 std::uint32_t Core::Impl::run_general(const std::uint32_t budget) {
   std::uint32_t retired = 0;
-  while (retired < budget && fault.kind == FaultKind::none) {
+  while (retired < budget && fault.kind == FaultKind::none &&
+         cpu.processing == ProcessingState::running) {
     step();
     if (fault.kind == FaultKind::none) { ++retired; }
   }
@@ -280,9 +282,11 @@ RunResult Core::run(const std::uint32_t instruction_budget) {
     result.dispatches = impl_->run_general(instruction_budget);
     result.progress = progress();
     result.fault = fault();
+    result.state = processing_state();
     return result;
   }
-  while (result.dispatches < instruction_budget && fault().kind == FaultKind::none) {
+  while (result.dispatches < instruction_budget && fault().kind == FaultKind::none &&
+         impl_->cpu.processing == ProcessingState::running) {
     if (impl_->cpu.repeat_remaining == 0 && impl_->vector.phase == Impl::VectorPhase::none &&
         (impl_->cpu.reg.sr & detail::cache_enable) == 0) {
       const auto retired = impl_->jit->run(instruction_budget - result.dispatches);
@@ -297,12 +301,14 @@ RunResult Core::run(const std::uint32_t instruction_budget) {
   }
   result.progress = progress();
   result.fault = fault();
+  result.state = processing_state();
   return result;
 }
 
 bool Core::interruptible() const {
-  if (fault().kind != FaultKind::none || impl_->vector.phase != Impl::VectorPhase::none ||
-      impl_->cpu.repeat_remaining != 0 || impl_->cpu.interrupt_inhibited) {
+  if (impl_->cpu.processing == ProcessingState::stopped || fault().kind != FaultKind::none ||
+      impl_->vector.phase != Impl::VectorPhase::none || impl_->cpu.repeat_remaining != 0 ||
+      impl_->cpu.interrupt_inhibited) {
     return false;
   }
   if (!impl_->cpu.repeat_completed) { return true; }

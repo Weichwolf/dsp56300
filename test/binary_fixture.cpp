@@ -18,7 +18,8 @@
 namespace dsp56300::test {
 namespace {
 constexpr std::uint32_t format_magic = 0x46363544; // ASCII D56F
-constexpr std::uint32_t format_version = 1;
+constexpr std::uint32_t legacy_version = 1, processing_version = 2;
+constexpr std::uint32_t maximum_reset_actions = 65536;
 constexpr std::uint32_t maximum_cases = 65536, maximum_blocks = 1024, maximum_name = 256;
 constexpr unsigned byte_bits = 8;
 
@@ -148,7 +149,28 @@ template <FixtureArchive Archive> void blocks(Archive &archive, std::vector<Memo
   }
 }
 
-template <FixtureArchive Archive> void test_case(Archive &archive, BinaryCase &item) {
+template <FixtureArchive Archive> void processing(Archive &archive, BinaryCase &item) {
+  auto state = static_cast<std::uint32_t>(item.state);
+  archive.count(state, static_cast<std::uint32_t>(ProcessingState::stopped));
+  item.state = static_cast<ProcessingState>(state);
+  auto count = static_cast<std::uint32_t>(item.reset_actions.size());
+  archive.count(count, maximum_reset_actions);
+  item.reset_actions.resize(count);
+  for (auto &action : item.reset_actions) {
+    archive.scalar(action.pc);
+    if (action.pc > word_mask) { throw std::runtime_error("Fixture RESET PC exceeds 24 bits"); }
+    std::uint32_t accepted = action.accepted ? 1U : 0U;
+    archive.count(accepted, 1);
+    action.accepted = accepted != 0;
+  }
+}
+
+template <FixtureArchive Archive>
+void test_case(Archive &archive, BinaryCase &item, const std::uint32_t version) {
+  if (version == legacy_version &&
+      (item.state != ProcessingState::running || !item.reset_actions.empty())) {
+    throw std::runtime_error("Processing expectations require fixture version 2");
+  }
   archive.text(item.name);
   for (auto &size : item.memory_words) {
     archive.scalar(size);
@@ -164,7 +186,9 @@ template <FixtureArchive Archive> void test_case(Archive &archive, BinaryCase &i
   auto space = static_cast<std::uint32_t>(item.fault.space);
   archive.scalar(kind);
   archive.scalar(space);
-  if (kind > static_cast<std::uint32_t>(FaultKind::invalid_instruction) ||
+  const auto maximum_fault =
+      version == legacy_version ? FaultKind::invalid_instruction : FaultKind::host_event;
+  if (kind > static_cast<std::uint32_t>(maximum_fault) ||
       space > static_cast<std::uint32_t>(Space::y)) {
     throw std::runtime_error("Invalid fixture fault");
   }
@@ -176,37 +200,41 @@ template <FixtureArchive Archive> void test_case(Archive &archive, BinaryCase &i
   std::uint32_t interruptible = item.interruptible ? 1U : 0U;
   archive.count(interruptible, 1);
   item.interruptible = interruptible != 0;
+  if (version == processing_version) { processing(archive, item); }
   registers(archive, item.initial);
   registers(archive, item.expected);
   blocks(archive, item.before);
   blocks(archive, item.after);
 }
 
-template <FixtureArchive Archive> void contents(Archive &archive, std::vector<BinaryCase> &cases) {
+template <FixtureArchive Archive>
+void contents(Archive &archive, std::vector<BinaryCase> &cases, const FixtureVersion schema) {
   auto magic = format_magic;
-  auto version = format_version;
+  auto version = static_cast<std::uint32_t>(schema);
   archive.scalar(magic);
   archive.scalar(version);
-  if (magic != format_magic || version != format_version) {
+  if (magic != format_magic || (version != legacy_version && version != processing_version)) {
     throw std::runtime_error("Unsupported DSP fixture magic/version");
   }
   auto count = static_cast<std::uint32_t>(cases.size());
   archive.count(count, maximum_cases);
   cases.resize(count);
-  for (auto &item : cases) { test_case(archive, item); }
+  for (auto &item : cases) { test_case(archive, item, version); }
   archive.finish();
 }
 } // namespace
 
-void write_fixture(const std::filesystem::path &path, std::vector<BinaryCase> cases) {
+void write_fixture(const std::filesystem::path &path,
+                   std::vector<BinaryCase> cases,
+                   const FixtureVersion version) {
   Writer writer(path);
-  contents(writer, cases);
+  contents(writer, cases, version);
 }
 
 std::vector<BinaryCase> read_fixture(const std::filesystem::path &path) {
   Reader reader(path);
   std::vector<BinaryCase> cases;
-  contents(reader, cases);
+  contents(reader, cases, FixtureVersion::legacy);
   return cases;
 }
 } // namespace dsp56300::test

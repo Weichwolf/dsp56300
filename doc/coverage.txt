@@ -4,12 +4,66 @@ Full-ISA completion requirement: the complete DSP56300 instruction set must be
 implemented and independently tested, as explicitly reiterated by the user.
 Neither a passing current CTest suite nor successful Blofeld workloads is a
 replacement. doc/isa-coverage.tsv inventories 118 instruction/family/MOVE-form
-and alias entries against DSP56300FM Rev.5. The current audit records 5 missing,
-0 without dedicated independent tests and 113 partially tested entries; none
+and alias entries against DSP56300FM Rev.5. The current audit records 2 missing,
+0 without dedicated independent tests and 116 partially tested entries; none
 claims complete support. These counts are catalogue rows, not disjoint opcode
 counts or an ISA-support percentage. Detailed format/mode/sequence expansion
 remains mandatory. python3 tools/isa_audit.py --require-complete deliberately
 returns failure while any entry remains incomplete; see doc/isa-qualification.txt.
+
+Processing-state ISA increment: RESET, WAIT and STOP now have explicit execution
+and independent tests. WAIT/STOP return early from run with an observable state;
+further budgets retire nothing and fetch no successor. An admitted unmasked IRQ
+wakes WAIT. STOP requires host-completed IRQA/clock stabilization before IRQ
+admission or normal continuation; generic forced WAIT wake and double/reentrant
+STOP completion are rejected. Cache clearing/register initialization do not wake
+sleepers. Guest RESET requires Io::reset_peripherals acknowledgement, with a
+default explicit host-event fault; it cannot silently reset or fabricate CPU
+or peripheral state. It preserves the qualified CPU/cache state, can repeat and
+can execute in fast vectors. Rejected actions never retire or replay, and prior
+accepted effects remain. WAIT/STOP remain prohibited REP/fast-vector bodies.
+31200 state and 4704 sequence binary cases (35904 per backend) independently
+check all CCRs/IPLs, six supported numeric modes, raw status copying, zero/excess
+budgets, explicit accepted/rejected/absent RESET scripts, native/reset/sleep
+prefixes, REP/encoded-zero counts and prohibited-body failures. Version 2 of the
+fixture format adds expected processing state and bounded RESET action scripts;
+legacy writers retain version 1 and cannot drop new expectations silently.
+Independent literal wire records and malformed/version/boundary tests qualify
+both layouts; no native structure dump or core-linked expectation generator is
+used. Existing archive bytes must remain unchanged and reproduce normally.
+6252 host assertions require actual native arithmetic across RESET and IRQ/RTI,
+canonical callback state and exact progress/PC, P successor edits, no reentry,
+all mask/priority combinations, rejected metadata/failed-fetch wake, plain STOP
+wake even at IPL3, finite DO frames,
+REP rejection retention, legal/failed fast RESET and forbidden fast sleeps.
+Architectural cache contents survive sleep/wake and software RESET in the
+functional model. Clock/peripheral ownership stays with the consumer; no board
+emulation, fabricated reset reply or native dependency is added.
+The new state byte fits existing Cpu padding at offset 331 and the result byte
+fits RunResult padding at offset 4. Clang 19 x64 layouts retain Cpu=384,
+Core::Impl=131648 and RunResult=40 bytes and every recorded existing field offset.
+The extended Io interface requires consumer rebuild; this is data-layout,
+not vtable binary compatibility, cache-miss/latency or throughput evidence.
+The three rows move from missing to partial: DEBUG/DEBUGcc still have no
+implementation and every other catalogue row remains partial. Physical RESET
+pin/boot/defaults (including the current library initializer's CP/IPL gap),
+DE/JTAG/debug and DMA wake, complete pending-event/pipeline/clock arbitration,
+derivative reset/cache side effects, all numeric effects and full legal
+sequences remain mandatory work. See doc/processing.txt for the exact contracts.
+Complete ISA, optimized representative 270 MIPS host load/energy, native/SIMD
+improvements and transparent hardware isolation remain open; no speed claim.
+
+Processing-state validation: full release/strict suites pass 90 executable tests
+each, with 91 registered and one explicit /dev/kvm permission skip. Times are
+127.79 s and 469.96 s. Both reproduce the new v2 archives and old v1 archives,
+and pass 36 independent wire tests. Release full-suite host checks passed 6234
+assertions; after adding failed-wake boundaries, the final direct release host
+passes 6252 and the strict full suite includes the same final 6252-assertion
+source. Production code and binary cases stay unchanged during that refinement.
+All 36 earlier archives remain byte-identical. All 93 strict translation units
+retain nonrecovering ASan/UBSan/integer instrumentation, clang-tidy and hardening.
+Format-check and structural ISA audit pass; --require-complete still fails.
+No quality policy change, new native dependency, fuzz run or publication occurs.
 
 Architectural-cache ISA increment: PFLUSH, PFLUSHUN, PFREE, PLOCK/PUNLOCK and
 PLOCKR/PUNLOCKR now operate on separate DSP cache storage, not host decoded/JIT

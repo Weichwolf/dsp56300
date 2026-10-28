@@ -44,8 +44,11 @@ The host retains buffer ownership and must use Core::load/write for program
 mutation. Core is owned by one execution thread; callbacks run synchronously.
 Unimplemented instructions/modes, unmapped accesses and rejected I/O stop the
 core with explicit context. Faulted execution requires reset. Register views
-are not complete checkpoints of REP/interrupt continuation or DSP cache state.
+are not complete checkpoints of REP/interrupt continuation, DSP cache or sleep state.
 See doc/io.txt for synchronous word/atomic-bit callbacks and mutation boundaries.
+run returns an explicit waiting/stopped state for WAIT/STOP. Guest RESET needs
+Io::reset_peripherals acknowledgement; the default is an explicit event fault.
+See doc/processing.txt for wake, callback, clock and qualification contracts.
 
 The host supplies derivative interrupt arbitration and admits an interrupt at
 a stopped boundary. Hardware clocks, memory aliases, boot ROM, DMA, timers,

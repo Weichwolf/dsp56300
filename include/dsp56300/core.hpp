@@ -18,6 +18,7 @@ inline constexpr std::size_t stack_entries = 16;
 
 enum class Space : std::uint8_t { program, x, y };
 enum class Backend : std::uint8_t { cached, reference, jit };
+enum class ProcessingState : std::uint8_t { running, waiting, stopped };
 enum class BitAction : std::uint8_t { test, clear, set, change };
 enum class FaultKind : std::uint8_t {
   none,
@@ -29,7 +30,8 @@ enum class FaultKind : std::uint8_t {
   unsupported_instruction,
   unsupported_mode,
   stack,
-  invalid_instruction
+  invalid_instruction,
+  host_event
 };
 
 // Architectural values use unshifted DSP coordinates, including raw 56-bit A/B.
@@ -61,6 +63,8 @@ struct Fault {
 struct RunResult {
   // Legacy name: the number of retired guest instructions, on every backend.
   std::uint32_t dispatches = 0;
+  // Sleeping returns early without a fault; further run calls retire nothing.
+  ProcessingState state = ProcessingState::running;
   Progress progress;
   Fault fault;
 };
@@ -99,6 +103,11 @@ public:
   Io(Io &&) = default;
   Io &operator=(Io &&) = default;
   virtual ~Io() = default;
+
+  // Guest RESET preserves CPU state. Accept only after resetting derivative
+  // peripherals and their interrupt priorities; default rejection is explicit.
+  virtual bool reset_peripherals(Word /*pc*/) noexcept { return false; }
+
   virtual bool read(Space space, Word address, Word pc, Word &value) noexcept = 0;
   virtual bool write(Space space, Word address, Word pc, Word value) noexcept = 0;
   virtual bool
@@ -156,6 +165,11 @@ public:
   // Translated blocks never exceed the budget; a short tail can use the interpreter.
   // Faults require reset. CPU state after a failed dispatch is not committed evidence.
   [[nodiscard]] RunResult run(std::uint32_t instruction_budget);
+  [[nodiscard]] ProcessingState processing_state() const noexcept;
+  // Complete host-modeled IRQA wake/clock stabilization from STOP. The host then
+  // admits its highest pending interrupt, or runs the next foreground instruction.
+  // This does not wake WAIT, which requires an admitted interrupt or reset.
+  void resume_from_stop();
   [[nodiscard]] bool interruptible() const;
   // Host-admitted vector/priority at a stopped boundary, not an on-chip IRQ controller.
   // The kernel verifies mask/REP constraints. Derivative arbitration stays with the host.

@@ -87,13 +87,13 @@ void check_loop(const dsp56300::Backend backend) {
 
 void check_fail_stop(const dsp56300::Backend backend) {
   Fixture fixture(backend);
-  // WAIT is a real architectural instruction, currently an explicit ISA gap.
-  constexpr Word unimplemented_wait = 0x000086;
-  fixture.core.write(dsp56300::Space::program, start, unimplemented_wait);
+  // DEBUG is a real architectural instruction, currently an explicit ISA gap.
+  constexpr Word unimplemented_debug = 0x000200;
+  fixture.core.write(dsp56300::Space::program, start, unimplemented_debug);
   const auto result = fixture.core.run(1);
   require(result.dispatches == 0 &&
               result.fault.kind == dsp56300::FaultKind::unsupported_instruction &&
-              result.fault.pc == start && result.fault.value == unimplemented_wait,
+              result.fault.pc == start && result.fault.value == unimplemented_debug,
           "An unimplemented architectural instruction reports explicit context");
   require(fixture.core.run(1).dispatches == 0, "Failed core does not resume");
 }
