@@ -1,5 +1,19 @@
 Objective audit: incomplete
 
+KVM access/execution follow-up: group access is now granted. Existing agent
+processes can use `sg kvm -c '...'` without requesting access again. The initial
+accessible VM/vCPU setup failed at KVM_SET_SREGS with EINVAL because the harness
+had not installed its CPUID model. It now installs KVM-supported features,
+requires long mode and disables features requiring an absent in-kernel APIC.
+Final release/strict tests each pass 4501 assertions with actual guest execution:
+1500 helper-free DSP arithmetic cases plus an unbacked-memory MMIO exit.
+CTest wall times of 0.11/0.23 s include setup/generation/checks/teardown; they
+cannot establish guest MIPS, KVM/JIT speed, isolation security or realtime load.
+The complete transparent VM backend, event/helper/RAM-transfer exits and actual
+workload/performance qualification remain open. The normal CPU/emitter and all
+binary fixtures are unchanged. See doc/kvm-experiment.txt. User-specific local
+account names are removed from tracked instructions/documentation.
+
 Full-ISA completion requirement: the complete DSP56300 instruction set must be
 implemented and independently tested, as explicitly reiterated by the user.
 Neither a passing current CTest suite nor successful Blofeld workloads is a
@@ -63,7 +77,7 @@ results and final targeted logs are retained; its detailed CTest log was
 overwritten by a concurrent inventory command. Strict full details are retained.
 No quality checks are weakened, no native dependency is added and no fuzz runs.
 The latest explicit user instruction authorizes pushing verified commits to
-the existing private Weichwolf/dsp56300 origin after commit; doc/objective.txt
+the existing private origin after commit; doc/objective.txt
 retains the full original objective and records that authorization.
 
 Processing-state ISA increment: RESET, WAIT and STOP now have explicit execution
@@ -1289,13 +1303,12 @@ final-core performance result.
 Integration: basic header/library target and memory/I/O contract exist.
 Transparent hardware VM execution is a user requirement under investigation.
 The user explicitly requires a concrete VMX/KVM trial. The initial host API
-probe currently fails with EACCES opening /dev/kvm; no VM or vCPU was created.
-This access prerequisite is pending, not a completed protected-execution test.
+probe failed with EACCES opening /dev/kvm; at that stage no VM or vCPU existed.
 A Linux x86-64 KVM translation test harness is now built under the ordinary
 release/strict policies. It uses the existing native emitter for 1500 directed
-arithmetic cases and an unbacked-memory exit test. Both actual runs skip because
-the device ACL still lacks cosmo access after access was reported arranged;
-no guest execution has been qualified. See doc/kvm-experiment.txt.
+arithmetic cases and an unbacked-memory exit test. Those initial runs skipped
+on EACCES; the later access/CPUID follow-up above qualifies the small experiment.
+See doc/kvm-experiment.txt for the exact remaining limits.
 Consumers must use the same DSP headers, caller-owned shared memory, events and
 I/O contracts without managing VM machinery. KVM mapping, host-span alignment,
 helper placement, deterministic exits and execution qualification are pending;

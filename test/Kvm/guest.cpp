@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "guest.hpp"
 
+#include <array>
 #include <asm/kvm.h>
 #include <cerrno>
 #include <cstddef>
@@ -28,6 +29,14 @@ constexpr std::uint32_t segment_limit = 0xffffffff;
 constexpr std::uint16_t code_selector = 8, data_selector = 16;
 constexpr std::uint8_t code_segment_type = 11, data_segment_type = 3;
 constexpr std::uint8_t halt_opcode = 0xf4;
+constexpr std::uint32_t cpuid_entries = 256;
+
+struct CpuDescription {
+  std::uint32_t count = cpuid_entries, padding = 0;
+  std::array<kvm_cpuid_entry2, cpuid_entries> entries{};
+};
+
+static_assert(offsetof(CpuDescription, entries) == offsetof(kvm_cpuid2, entries));
 
 [[noreturn]] void fail(const char *operation) {
   throw std::system_error(errno, std::generic_category(), operation);
@@ -121,6 +130,33 @@ std::size_t run_mapping_size(const int device) {
   return static_cast<std::size_t>(
       checked(ioctl(device, KVM_GET_VCPU_MMAP_SIZE, 0), "KVM_GET_VCPU_MMAP_SIZE"));
 }
+
+void configure_cpu(const int device, const int vcpu) {
+  constexpr std::uint32_t paravirtual_features = 0x40000001;
+  constexpr std::uint32_t extended_features = 0x80000001;
+  constexpr std::uint32_t cpuid_long_mode = 1U << 29;
+  CpuDescription model;
+  checked(ioctl(device, KVM_GET_SUPPORTED_CPUID, &model), "KVM_GET_SUPPORTED_CPUID");
+  if (model.count > model.entries.size()) { throw std::runtime_error("KVM CPUID count overflow"); }
+  bool supports_long_mode = false;
+  for (auto &entry : std::span(model.entries).first(model.count)) {
+    if (entry.function == 1) {
+      // No in-kernel local APIC is created by this helper-free experiment.
+      constexpr std::uint32_t x2apic = 1U << 21;
+      constexpr std::uint32_t tsc_deadline = 1U << 24;
+      entry.ecx &= ~(x2apic | tsc_deadline);
+    }
+    if (entry.function == paravirtual_features) {
+      constexpr std::uint32_t pv_unhalt = 1U << 7;
+      entry.eax &= ~pv_unhalt;
+    }
+    if (entry.function == extended_features) {
+      supports_long_mode = (entry.edx & cpuid_long_mode) != 0;
+    }
+  }
+  if (!supports_long_mode) { throw Unavailable("KVM does not support x86-64 long mode"); }
+  checked(ioctl(vcpu, KVM_SET_CPUID2, &model), "KVM_SET_CPUID2");
+}
 } // namespace
 
 struct Guest::Impl {
@@ -135,6 +171,7 @@ struct Guest::Impl {
     region.memory_size = memory_size;
     region.userspace_addr = reinterpret_cast<std::uintptr_t>(memory.data());
     checked(ioctl(vm.get(), KVM_SET_USER_MEMORY_REGION, &region), "KVM_SET_USER_MEMORY_REGION");
+    configure_cpu(device.get(), vcpu.get());
     setup_paging();
   }
 

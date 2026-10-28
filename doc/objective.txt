@@ -9,14 +9,14 @@ Subsequent user clarifications (preserving the original objective above):
   independent per-voice work inside one DSP program (up to 24 Blofeld voices).
   Preserve shared-state dependencies, quantization, output order and interrupt
   boundaries, with a general fallback when batching is inadmissible.
-- Commit and push each verified increment to private Weichwolf/dsp56300.
+- Commit and push each verified increment to the existing private origin.
 - Use binary test fixtures for reproducible instruction/program inputs and
   independently derived expectations. Keep manufacturer workloads local.
 - Consider C++ concepts for portable, compile-time-checked internal interfaces.
 - Current workspace instructions supersede the earlier publication instruction:
   commit verified increments locally; no publication destination is authorized.
 - The user subsequently explicitly requested commit and push again. The existing
-  private Weichwolf/dsp56300 origin/main is the authorized destination.
+  private origin/main is the authorized destination.
 - Organize implementation files in concern-specific subdirectories under src/.
 - Construct additional demanding tests from complete Blofeld DSP source routines.
   Reverb is one example, not a user-imposed priority. Select priorities according
@@ -56,7 +56,7 @@ Subsequent user clarifications (preserving the original objective above):
   interfaces; shared semantic tests qualify behavior. Optimize native regions
   and measure hardware isolation separately from translation speed.
 - Latest user instruction reauthorizes pushing every verified commit to the
-  existing private Weichwolf/dsp56300 origin, including accumulated local
+  existing private origin, including accumulated local
   progress. This supersedes the earlier local-only publication restriction.
 - 270 MIPS is a reference workload and baseline, not an optimization ceiling
   or stopping criterion. Continue maximizing real guest throughput and minimizing
@@ -75,5 +75,9 @@ Subsequent user clarifications (preserving the original objective above):
   instruction, encoding/operand form, numerical mode, flag and observable effect;
   keep unimplemented and unqualified cases visible until closed independently.
 - The latest user instruction again explicitly requests a push after committing.
-  Verified commits may be pushed to the existing private Weichwolf/dsp56300
+  Verified commits may be pushed to the existing private
   origin; this supersedes the preceding local-only publication restrictions.
+- KVM access is now granted through group membership. Existing agent processes
+  can run KVM commands with `sg kvm -c '...'` without requesting access again.
+- Keep local account names out of tracked instructions/code/documentation;
+  describe the current user and existing private origin generically.

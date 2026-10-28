@@ -70,15 +70,14 @@ isolation correctness or speed. Benchmark exit overhead and complete execution
 before choosing a default backend. No public KVM backend or isolation claim yet.
 The first concrete host API probe was attempted on 2026-10-27: opening /dev/kvm
 with read/write access failed with EACCES before API/version/VM creation could
-run. The current cosmo session is not in kvm, and the device ACL grants no cosmo
-access. Device access is a pending test prerequisite; this does not establish
-that protected execution works or that its performance is useful. Preparation
-and independent compiler work can continue while access is arranged. A
-reproducible test harness now generates arithmetic code with the existing DSP
-emitter and sets up a minimal long-mode guest. Both release/strict builds pass
-the project checks, but actual execution still skips on EACCES after the user
-reported arranging access. The visible device ACL still lacks cosmo access.
-See doc/kvm-experiment.txt for the exact test scope and outstanding validation.
+run. Access was granted on 2026-10-28 through kvm group membership. Existing
+agent processes use `sg kvm -c '...'` to refresh the command's group credentials.
+The first accessible runs revealed a missing guest CPUID model; explicitly
+installing KVM-supported features before enabling long mode fixes setup.
+Release/strict now pass 4501 checks with actual translated arithmetic execution
+and one unbacked-memory exit. This is a small helper-free test harness, not a
+public VM backend, full security qualification or performance comparison.
+See doc/kvm-experiment.txt for the exact scope and outstanding validation.
 API reference: https://docs.kernel.org/virt/kvm/api.html
 
 Use a compile-time execution-backend concept for the direct JIT reference and
