@@ -20,6 +20,21 @@ bool pure_address_update(const Instruction &instruction) {
          (instruction.opcode & byte_mask) == 0;
 }
 
+NativeAddressImmediate plan_address_immediate(const Instruction &instruction) {
+  // Fixed memory-group, load, immediate-EA and zero ALU fields. Only the
+  // five register-selector bits and the irrelevant X/Y bus bit can vary.
+  constexpr Word mask = 0xc0ffff;
+  constexpr Word immediate = 0x40f400;
+  if (instruction.operation != Operation::parallel || instruction.words != 2 ||
+      (instruction.opcode & mask) != immediate) {
+    return {};
+  }
+  const auto reg =
+      ((instruction.opcode >> 16) & 7) | ((instruction.opcode >> 17) & high_register_mask);
+  if (reg < r_register_base || reg >= m_register_base) { return {}; }
+  return {.destination = reg, .value = instruction.extension & word_mask};
+}
+
 NativeMoves plan_moves(const Instruction &instruction) {
   NativeMoves result;
   if (instruction.operation != Operation::parallel) { return result; }

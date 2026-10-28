@@ -28,6 +28,16 @@ constexpr auto m_offset = offsetof(Cpu, reg) + offsetof(Registers, m);
 
 }
 
+void JitEmitter::address_immediate(const NativeAddressImmediate &move) {
+  const bool offset_register = move.destination >= n_register_base;
+  const auto index = move.destination - (offset_register ? n_register_base : r_register_base);
+  const auto bank = offset_register ? offsetof(Registers, n) : offsetof(Registers, r);
+  code_.store_constant(
+      Reg::r12, offsetof(Cpu, reg) + bank + (index * sizeof(Word)), Width::dword, move.value);
+  code_.load(Reg::ax, Reg::r13, offsetof(NativeContext, native_moves));
+  code_.memory_immediate(group_add, Reg::ax, 0, Width::qword, 1);
+}
+
 // Address generation touches CPU registers only; no RAM/I/O address is dereferenced.
 void JitEmitter::address_update(const NativeOp &operation) {
   const auto opcode = operation.instruction.opcode;

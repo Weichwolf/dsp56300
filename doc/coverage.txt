@@ -97,10 +97,10 @@ and old parallel operands without memory/I/O observation barriers. All 6758417
 directed ASR/register assertions pass; no ISA catalogue row becomes complete.
 See doc/native-shifts.txt for guards, witnesses, measurements and remaining work.
 
-The current configuration passes all 114 correctness tests in release (119.24 s,
-two CTest processes) and strict ASan/UBSan (253.89 s, three processes), with no
-skips. All 120 C++ translation units retain the required strict nonrecovering
-address/undefined/integer instrumentation; all 161 project C++ source/header
+The current configuration passes all 115 correctness tests in release (133.12 s,
+two CTest processes) and strict ASan/UBSan (243.23 s, three processes), with no
+skips. All 122 C++ translation units retain the required strict nonrecovering
+address/undefined/integer instrumentation; all 162 project C++ source/header
 files pass clang-format. All 48 pre-existing archives remain byte-identical,
 including the 112-case FFT archive. All registered regeneration checks pass.
 No fuzzing was run.
@@ -108,9 +108,9 @@ The structural ISA audit passes; full ISA qualification still fails as intended.
 Full two-second FIR, IIR and spectral cases pass independent complete-state
 checks in all six release variants. The instrumented production bench passes
 all three correctness/report-only cases. Loaded-host comparisons qualify state,
-not release speed. The optimized default bench passes FIR (0.278491 s) and fails
-IIR (1.401406 s) and spectral (1.161694 s) in this capture; all final states match.
-These performance gates are separate from the 114 correctness tests. Retain the
+not release speed. The optimized default bench passes FIR (0.282549 s) and fails
+IIR (1.386984 s) and spectral (1.009317 s) in this capture; all final states match.
+These performance gates are separate from the 115 correctness tests. Retain the
 individual captures and host-condition limits in continuous-bench.txt.
 The expanded native-move boundary test passes all 78446 assertions in both builds.
 It includes exact same-code reuse after modifier changes and paired aliased X/Y
@@ -126,6 +126,19 @@ address checks pass in both builds. Matched continuous runs reduce FIR CPU time
 8.22% and spectral 8.12%; IIR is effectively unchanged. Code storage grows and
 both slow package deadlines remain failures. See native-address-updates.txt
 for guards, counters, complete-state witnesses and comparison limits.
+
+Two-word immediate assignments to R/N also lower natively with masked constants,
+zero data-bank clobbers and no RAM/I/O access. Their pure-state semantics admit
+the existing deferred status/PC/retirement rules, with exact extra base cost.
+All 1390025 new independent direct/native and Core checks pass, including qword
+counter/PC wrap, aliases, changed extensions, callbacks and loop cleanup.
+The ISA catalogue records the new native witnesses while all 118 rows remain
+partial. See native-address-immediates.txt for the admitted domain and evidence.
+Matched continuous CPU time drops 10.30% for spectral and 2.05% for FIR, with
+little IIR change. Spectral wall ranges 0.990399..1.011767 seconds: both the
+passing and failing packages remain recorded. Whole-process user counters
+decrease host instructions 8.43% and L1 data loads 12.44%, with mixed instruction
+cache misses. These are not isolated core/cache/energy or realtime guarantees.
 
 Guarded one-instruction MAC/paired-linear-load loops now use compiled scalar or
 AVX2 batches. Four products share one accumulator checkpoint; ordered prefix

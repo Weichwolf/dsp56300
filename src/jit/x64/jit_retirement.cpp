@@ -78,7 +78,10 @@ bool JitEmitter::admit_packed_retirement(const std::span<const NativeOp> operati
   for (const auto &operation : operations) {
     if (!lowerable(operation) || operation.instruction.cycles == 0) { return false; }
     if (!has_moves(operation)) { continue; }
-    if (plan_register_move(operation.instruction).valid()) { continue; }
+    if (plan_register_move(operation.instruction).valid() ||
+        plan_address_immediate(operation.instruction).valid()) {
+      continue;
+    }
     const auto plan = plan_moves(operation.instruction);
     if (plan.count == 0) { return false; }
     for (const auto &move : std::span(plan.transfers).first(plan.count)) {

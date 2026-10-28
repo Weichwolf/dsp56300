@@ -73,7 +73,8 @@ bool JitEmitter::has_moves(const NativeOp &operation) {
 }
 
 bool JitEmitter::observable_moves(const NativeOp &operation) {
-  return has_moves(operation) && !plan_register_move(operation.instruction).valid();
+  return has_moves(operation) && !plan_register_move(operation.instruction).valid() &&
+         !plan_address_immediate(operation.instruction).valid();
 }
 
 bool JitEmitter::lowerable(const NativeOp &operation) const {
@@ -96,8 +97,8 @@ bool JitEmitter::lowerable(const NativeOp &operation) const {
   }
   const auto alu = opcode & byte_mask;
   if (alu == 0) {
-    return pure_address_update(decoded) || plan_moves(decoded).count != 0 ||
-           plan_register_move(decoded).valid();
+    return pure_address_update(decoded) || plan_address_immediate(decoded).valid() ||
+           plan_moves(decoded).count != 0 || plan_register_move(decoded).valid();
   }
   if (is_addition(operation)) { return true; }
   if (is_right_shift(operation)) { return true; }

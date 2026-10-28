@@ -236,6 +236,18 @@ unchanged. Native retirement can therefore include a non-linear helper branch;
 native_move_instructions stays zero for these address-only instructions.
 See native-address-updates.txt for independent guard/state tests and measurements.
 
+Immediate R/N assignments
+
+Decoded two-word MOVE immediates with zero ALU byte can store constants directly
+into R0..R7 or N0..N7. Both bus encodings have the same no-RAM/no-I/O semantics.
+Other operands and numerical-mode admission retain existing execution. A static
+descriptor masks the constant to low24; normal P invalidation replaces embedded
+values. Data-bank liveness preserves cached accumulators. Since this assignment
+cannot fault or observe state, it shares pure-register flag/PC planning and packed
+retirement, retaining its second base cycle. One completed native assignment
+increments native_move_instructions, as existing immediate/register transfers do.
+See native-address-immediates.txt for exact-state and invalidation qualification.
+
 The shared binary fixtures run through reference, cached and native backends.
 Directed host tests verify exact/partitioned budgets, numeric mode changes,
 stale-code replacement, I/O invalidation of executing code, failed memory moves,

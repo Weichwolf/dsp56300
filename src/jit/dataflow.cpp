@@ -63,7 +63,8 @@ Word alu_inputs(const Word opcode) {
 NativeDataflow analyze_dataflow(const Instruction &instruction) {
   NativeDataflow result;
   if (instruction.operation != Operation::parallel ||
-      (instruction.opcode & upper_move_mask) == no_move_group || pure_address_update(instruction)) {
+      (instruction.opcode & upper_move_mask) == no_move_group || pure_address_update(instruction) ||
+      plan_address_immediate(instruction).valid()) {
     return result;
   }
   const auto plan = plan_moves(instruction);

@@ -252,3 +252,42 @@ are unchanged. All 120 strict C++ units retain instrumentation and all 161 C++
 files pass formatting. ISA structural audit passes, complete-ISA remains red.
 See native-address-updates.txt for the register plan, guard tests, code-size
 tradeoff and distinction between retired helpers and actual C++ transitions.
+
+Native R/N constant increment
+
+The compiler now embeds two-word R/N constants with zero data-bank clobbers and
+exact deferred extra base costs. No program or fixture bytes change. All three
+scenarios use the same saved parent and candidate executables on CPU2 in order
+baseline/candidate/candidate/baseline. Each run naturally warms one input second
+then measures one in the same DSP. No project compile/test/format job overlaps
+the capture. External scheduling/frequency variation is not controlled.
+
+Scenario   Baseline CPU s       Candidate CPU s      Mean CPU reduction
+FIR        0.277176..0.279159    0.272135..0.272793   2.05%
+IIR        1.388035..1.390959    1.385394..1.387265   little change (0.23%)
+spectral   1.094568..1.107052    0.986250..0.988507   10.30%
+
+All compared complete states pass. Spectral wall is 0.990399..1.011767 s,
+253.72..259.19 guest MIPS, with four/eleven late hops. One package meets its
+deadline and the other fails. CPU below one second is not enough for qualified
+realtime or the 275-MIPS optimization reference; retain both observations.
+The independent default release gate gives FIR PASS (0.282549 wall / 0.274747
+CPU s), IIR FAIL (1.386984 / 1.385574 s) and spectral FAIL (1.009317 / 0.984258 s).
+Its seven late spectral hops and 20.330 ms maximum are retained. Bench stays red.
+
+Page-rounded code storage is unchanged in all scenarios. Spectral native moves
+increase by 3237200 and general retirements fall by the same count. Both FIR
+and IIR replace 96000 general instructions. Batch/AVX2 counts are unchanged.
+Separate whole-process user-counter captures show 8.43% fewer host instructions
+and 12.44% fewer L1 data loads, including cold/warm work, setup/oracle/checks.
+Instruction-cache misses are mixed; this does not prove full cache locality or
+energy savings. See native-address-immediates.txt for the exact scopes/ranges.
+
+All 115 correctness tests pass in release/strict (133.12 / 243.23 s), zero skips.
+The six release variants agree with independent full state for each stream;
+their loaded-host timings are correctness evidence only. Strict bench validates
+all three states in report-only mode while reporting deadline failures.
+The new directed test passes 1390025 independent checks per build. All 122 C++
+units retain strict instrumentation, all 162 C++ files pass format/tidy/Werror,
+and all 48 archives are unchanged. ISA structural audit passes, complete gate
+still fails with 118 partial rows. Full objective remains active and incomplete.

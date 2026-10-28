@@ -26,8 +26,16 @@ struct NativeRegisterMove {
   [[nodiscard]] bool valid() const noexcept { return source != 0; }
 };
 
+struct NativeAddressImmediate {
+  unsigned destination = 0;
+  Word value = 0;
+
+  [[nodiscard]] bool valid() const noexcept { return destination != 0; }
+};
+
 // Compile-time transfer description, independent of the host instruction set.
 [[nodiscard]] bool pure_address_update(const Instruction &instruction);
+[[nodiscard]] NativeAddressImmediate plan_address_immediate(const Instruction &instruction);
 [[nodiscard]] NativeMoves plan_moves(const Instruction &instruction);
 [[nodiscard]] NativeRegisterMove plan_register_move(const Instruction &instruction);
 } // namespace dsp56300::detail
