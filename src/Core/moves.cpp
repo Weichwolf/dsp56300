@@ -138,6 +138,43 @@ void Core::Impl::memory_move(const Instruction &decoded) {
   }
 }
 
+void Core::Impl::displacement_move(const Instruction &decoded) {
+  if (!numeric_mode_supported()) { return; }
+  const auto opcode = decoded.opcode;
+  const bool long_form = decoded.words == 2;
+  const auto reg = opcode & (long_form ? six_bit_mask : Word{15});
+  const bool valid = (reg >= x0_register && reg < m_register_base + agu_registers) ||
+                     reg == ep_register || reg == vba_register || reg == sc_register ||
+                     reg >= sz_register;
+  if (!valid) {
+    fail(FaultKind::invalid_instruction, Space::program, current_pc, opcode);
+    return;
+  }
+  const auto index = (opcode >> 8) & 7U;
+  Word displacement = decoded.extension;
+  if (!long_form) {
+    constexpr Word upper_displacement = 0x7e;
+    constexpr Word sign = 0x40;
+    constexpr Word short_mask = 0x7f;
+    displacement = ((opcode >> 10) & upper_displacement) | ((opcode >> 6) & 1U);
+    if ((displacement & sign) != 0) { displacement |= word_mask & ~short_mask; }
+  }
+  const auto offset = (cpu.reg.m[index] & modifier_mask) == 0
+                          ? static_cast<std::int32_t>(displacement)
+                          : signed_word(displacement);
+  const auto address = update_address({.index = index, .offset = offset});
+  if (fault.kind != FaultKind::none) { return; }
+  const auto space = ((opcode >> (long_form ? 16U : 5U)) & 1U) != 0 ? Space::y : Space::x;
+  const bool load = ((opcode >> (long_form ? 6U : 4U)) & 1U) != 0;
+  if (load) {
+    const auto value = read_memory(space, address);
+    if (fault.kind == FaultKind::none) { write_register(reg, value); }
+  } else {
+    const auto value = read_register(reg);
+    if (fault.kind == FaultKind::none) { write_memory(space, address, value); }
+  }
+}
+
 void Core::Impl::long_move(const Instruction &decoded) {
   const auto opcode = decoded.opcode;
   const auto selector = ((opcode >> 16) & 3) | ((opcode >> 17) & 4);

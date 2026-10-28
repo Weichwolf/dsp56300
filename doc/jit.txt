@@ -165,6 +165,13 @@ independent iterations or vectorize the guest.
 MOVEC/MOVEM/MOVEP use the general helpers. Guest SR writes exit on changed
 numerical mode, and guest P writes exit on invalidation before executing a
 previously planned successor. Directed host sequences exercise both boundaries.
+The separate short/long Rn-displacement MOVE forms also use full general helpers.
+Their legal control-register writes retain the same materialization boundary:
+guest SR changes cannot enter a successor specialized for the old numerical
+mode, and current M values remain visible to following native transfer guards.
+Displaced stores through data banks overlapping P invalidate planned successors;
+warmed P-extension replacement through X/Y aliases invalidates the preceding
+decode page as well. There is no displacement-specific native or SIMD speed claim.
 Bit access and bit control-flow instructions currently use general helpers too.
 Bit SR writes and I/O-bit callback program changes use the same mode/invalidation
 exits; no new native-ALU or SIMD performance claim follows from this ISA extension.

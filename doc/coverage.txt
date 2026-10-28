@@ -11,7 +11,57 @@ counts or an ISA-support percentage. Detailed format/mode/sequence expansion
 remains mandatory. python3 tools/isa_audit.py --require-complete deliberately
 returns failure while any entry remains incomplete; see doc/isa-qualification.txt.
 
-Native multiple-wrap transfer optimization: the x64 emitter now admits current
+Displaced-MOVE ISA increment: MOVE.X and MOVE.Y now decode and execute the
+separate signed-seven-bit and 24-bit-extension Rn-relative forms. Both sample
+current R/M before operand effects, ignore N and leave R unchanged except for
+an explicit destination write. Long forms cover all legal on-chip register
+selectors, including stack/control effects. Reverse carry uses the sign-extended
+raw24 short operand; ordinary linear/modulo/multiple-wrap arithmetic uses its
+signed value. Ordinary fixed-point bus clipping/scaling and sticky flags are
+preserved. Base costs are two/three cycles; full pipeline/IRQ timing is not
+qualified. Long displacement has priority over the shared prohibited bit-jump
+EA-extension slot. Its reserved-register-zero negative case in the old bit
+archive remains byte-identical. The new forms use the general executor on every
+backend, without new CPU state, native dependencies or a workload speed claim.
+55713 short and 21608 long independently modeled binary cases enumerate all
+50656 legal opcode forms and add operand, flag, mode, alias and sequence
+witnesses. The optional authoring assembler agrees on 52160 input words; it is
+not a semantic oracle or build/runtime dependency. The synthetic model uses
+serial carry/ring coordinates, raw register fields and quotient/remainder bus
+conversion, never the emulator's decoder/register/AGU helpers. Cases cover
+qualified modifiers, ignored N/high M bits, signed boundaries, 24-bit wrap,
+all short offsets, legal selectors, six supported numerical modes, old CCRs,
+REP prefixes, DO endings with extension/stack wrapping and saved flags,
+native/helper/native prefixes and missing/wrapping P extensions. The two files
+retain the fixture format's existing per-file limit and reproduce independently.
+21661 host assertions across all backends qualify all 128 I/O ports with full
+RAM backing, both forms/spaces/directions, rejected/accepted callbacks, single
+source-stack effects, memory/stack failures and fail-stop without replay.
+They also check observer state/reentry, dirty native A/B materialization,
+callback/P-alias successor invalidation and warm extension replacement through
+X/Y aliases across decode pages. Guest SR writes distinguish an actual rounding
+half tie under changed RM/scaling before native continuation; guest M writes
+require the following warm native AGU to observe the new modifier.
+An additional 1536-case ignored source-built Comb- archive executes the original
+sample entry through descriptor publication and RTS, extending the previous
+loop-only corpus without rewriting it. Independent expectations include causal
+feedback/clipping, unchanged histories, published cursor, restored full M bits,
+the caller return frame and residual DO frames. Each call retires 105 guest
+instructions and 113 estimated base cycles. Coefficient/descriptor setup, the
+outer callback and full device remain unqualified. Other numerical modes,
+fast-IRQ admission, complete AGU/sequence restrictions and pipeline/event timing
+remain mandatory gaps; neither MOVE row nor the overall ISA is complete.
+Full release and ASan/UBSan strict suites pass all 61 executable tests, including
+the new archives, independent byte reproduction, old unchanged bit archives and
+private source-built routines. There are 62 registered tests; KVM is the sole
+inaccessible-device skip, not a protected-execution qualification. LLVM 19
+strict diagnostics/tidy, formatting and the structural ISA audit pass. The
+--require-complete gate still fails on the unchanged 15 missing, 11 untested and
+92 partial catalogue rows. No fuzz tests were run. This verified increment is
+committed locally. Complete ISA, 270 MIPS/host-load/energy qualification and the
+transparent hardware-isolated backend remain open parts of the full objective.
+
+Previous native multiple-wrap transfer optimization: the x64 emitter now admits current
 M-low16=$8000..$bfff with a nonzero power-of-two-minus-one low-fourteen-bit mask.
 Linear and valid multiple-wrap updates compute prospective R values once;
 both X/Y modifier/span/I/O guards precede either R commit or RAM transfer.

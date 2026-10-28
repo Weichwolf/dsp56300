@@ -353,7 +353,8 @@ void failed_cases(FixtureSets &cases) {
   constexpr Word reserved_register = 0x0ac040;
   constexpr Word immediate_source = 0x0a7400;
   constexpr Word branch_long_source = 0x0cb000;
-  constexpr Word jump_long_source = 0x0a7080;
+  // This shared opcode is a long displaced MOVE with reserved register zero.
+  constexpr Word reserved_displacement_register = 0x0a7080;
   constexpr Word out_of_span = 0x0a6000;
   constexpr Word test_ssh = 0x0bfc60;
   constexpr Word call_clear_x0 = 0x0bc400;
@@ -375,7 +376,7 @@ void failed_cases(FixtureSets &cases) {
                  .stack_count = 0,
                  .opcode_value = false});
   failed_access(cases.branches, {.program = {branch_long_source, cursor}});
-  failed_access(cases.branches, {.program = {jump_long_source, cursor}});
+  failed_access(cases.branches, {.program = {reserved_displacement_register, cursor}});
   failed_access(cases.branches,
                 {.program = {call_clear_x0, cursor},
                  .fault = {.kind = FaultKind::stack, .address = start, .value = 15},

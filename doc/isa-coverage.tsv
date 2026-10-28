@@ -72,10 +72,10 @@ MOVE.none	13-112	partial	src/Core/moves.cpp	test/generate_arithmetic.cpp	Other n
 MOVE.R	13-115	partial	src/Core/moves.cpp	test/native_dataflow_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 MOVE.RY	13-124	untested	src/Core/moves.cpp	-	Dedicated independent instruction/operand tests; other modes and sequences
 MOVE.U	13-117	partial	src/Core/moves.cpp;src/Core/agu.cpp	test/generate_addressing.cpp;test/reverse_carry_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
-MOVE.X	13-118	partial	src/Core/moves.cpp;src/Jit/X64/jit_move_address.cpp	test/generate_parallel_moves.cpp;test/native_move_test.cpp	Rn+short/long displacement forms; other modes; full alias/sequence timing
+MOVE.X	13-118	partial	src/Core/moves.cpp;src/Jit/X64/jit_move_address.cpp	test/generate_parallel_moves.cpp;test/native_move_test.cpp;test/generate_displacement.cpp;test/displacement_test.cpp	Other numerical modes; fast-IRQ admission; full address/alias/sequence and timing qualification
 MOVE.XR	13-120	untested	src/Core/moves.cpp	-	Dedicated independent instruction/operand tests; other modes and sequences
 MOVE.XY	13-123	partial	src/Core/moves.cpp;src/Jit/X64/jit_move_address.cpp	test/generate_parallel_moves.cpp;test/native_move_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
-MOVE.Y	13-122	partial	src/Core/moves.cpp;src/Jit/X64/jit_move_address.cpp	test/generate_parallel_moves.cpp;test/native_move_test.cpp	Rn+short/long displacement forms; other modes; full alias/sequence timing
+MOVE.Y	13-122	partial	src/Core/moves.cpp;src/Jit/X64/jit_move_address.cpp	test/generate_parallel_moves.cpp;test/native_move_test.cpp;test/generate_displacement.cpp;test/displacement_test.cpp	Other numerical modes; fast-IRQ admission; full address/alias/sequence and timing qualification
 MOVEC	13-130	partial	src/Core/transfers.cpp	test/generate_transfers.cpp;test/transfer_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 MOVEM	13-132	partial	src/Core/transfers.cpp	test/generate_transfers.cpp;test/transfer_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 MOVEP	13-134	partial	src/Core/transfers.cpp	test/generate_transfers.cpp;test/transfer_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification

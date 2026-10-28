@@ -56,6 +56,7 @@ enum class Operation : std::uint8_t {
   relative_branch,
   conditional_transfer,
   move_control_effective,
+  move_displacement,
   move_control_short,
   move_control_register,
   move_control_immediate,
@@ -98,6 +99,7 @@ enum class Operation : std::uint8_t {
     case Operation::count_leading_bits:
     case Operation::conditional_transfer:
     case Operation::move_control_effective:
+    case Operation::move_displacement:
     case Operation::move_control_short:
     case Operation::move_control_register:
     case Operation::move_control_immediate:

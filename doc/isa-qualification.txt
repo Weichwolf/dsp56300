@@ -155,3 +155,18 @@ feedback and transfer precision. This changes execution strategy for an already
 implemented addressing subset; it closes no missing instruction, numerical mode,
 displacement form or full-ISA catalogue row. Complete ISA qualification remains
 mandatory regardless of any passing workload or performance improvement.
+
+Displaced-MOVE increment: MOVE.X/MOVE.Y now support the separate signed seven-bit
+and 24-bit-extension Rn-relative forms. They use current Mn, ignore Nn, and have
+no implicit R writeback; explicit register destinations still apply after address
+sampling. Long forms admit the legal on-chip register selectors, including
+stack/control effects. Fixed-point transfers retain ordinary clipping/scaling
+and sticky flags. Both forms use the general executor, with native helper
+materialization and mode/invalidation boundaries. Long displacement takes
+priority over the shared, prohibited bit-jump EA-extension slot.
+Independent binary fixtures enumerate every valid encoding plus operand,
+numerical-mode, alias and sequence witnesses. Directed host tests qualify I/O,
+stack/memory failures, P aliases, extensions, observers and guest SR/M changes;
+a private source-built sample entry now executes cursor publication and RTS.
+No row becomes complete: other numerical modes, fast-IRQ admission, complete
+AGU restrictions/sequences and pipeline/event qualification remain mandatory.

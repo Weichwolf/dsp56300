@@ -47,6 +47,7 @@ void Core::Impl::execute(const Instruction &decoded) {
   switch (decoded.operation) {
     case Operation::nop: return;
     case Operation::parallel: parallel(decoded); return;
+    case Operation::move_displacement: displacement_move(decoded); return;
     case Operation::bit_register:
     case Operation::bit_memory:
     case Operation::bit_jump:

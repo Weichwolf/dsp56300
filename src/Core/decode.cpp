@@ -21,6 +21,15 @@ struct Rule {
 
 // Family manual instruction encodings and documented base costs (appendix A).
 constexpr std::array rules{
+    Rule{.bits = encoding("0000001aaaaaaRRR1aSWDDDD"),
+         .operation = Operation::move_displacement,
+         .words = 1,
+         .cycles = 2},
+    // Long displacement reuses the prohibited bit-jump EA-extension encodings.
+    Rule{.bits = encoding("0000101S01110RRR1WDDDDDD"),
+         .operation = Operation::move_displacement,
+         .words = 2,
+         .cycles = 3},
     Rule{.bits = encoding("0000101S11MMMRRR110i0000"),
          .operation = Operation::viterbi_shift,
          .words = 1},

@@ -31,6 +31,18 @@ X/Y spans alias. It is a library transfer/error contract; chip-specific bus
 arbitration and peripheral side effects remain unqualified and must not be
 inferred from it. Ordinary guest stores require no fabricated peripheral data.
 
+Short/long displaced MOVE samples its effective address from the old R/M state
+without implicit R/N writeback. A successful read then writes the explicit
+destination, including an aliased address/modifier/control register. A rejected
+read does not write that destination. Stores capture the source after address
+calculation; a source SSH pop is visible to the callback and is not rolled back
+on a rejected write. A failed pop prevents the write request. Stack overflow on
+a destination SSH push is reported after its read, without modifying the stack.
+Failures do not retire the instruction and later run calls do not replay it.
+Callbacks observe the advanced PC, pre-retirement progress and any already
+performed source effects. This is the library's explicit fail-stop contract,
+not a qualification of chip bus-error arbitration or rollback.
+
 All callbacks run synchronously on the CPU execution thread. The host can inspect
 state and read/write/load supplied RAM, including P, or clear code caches.
 Host Core::read/write/load access the supplied spans directly. Program mutations

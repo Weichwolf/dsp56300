@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
-execute_process(COMMAND "${GENERATOR}" "${OUTPUT}"
+execute_process(COMMAND "${GENERATOR}" ${GENERATOR_ARGUMENTS} "${OUTPUT}"
   RESULT_VARIABLE generation_result OUTPUT_VARIABLE generation_output
   ERROR_VARIABLE generation_error)
 if(NOT generation_result EQUAL 0)

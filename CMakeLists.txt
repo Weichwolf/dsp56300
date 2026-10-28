@@ -81,6 +81,9 @@ if(BUILD_TESTING)
   add_executable(dsp56300_transfer_test test/transfer_test.cpp)
   target_link_libraries(dsp56300_transfer_test PRIVATE dsp56300::core)
   add_test(NAME transfer-boundaries COMMAND dsp56300_transfer_test)
+  add_executable(dsp56300_displacement_test test/displacement_test.cpp)
+  target_link_libraries(dsp56300_displacement_test PRIVATE dsp56300::core)
+  add_test(NAME displacement-boundaries COMMAND dsp56300_displacement_test)
   add_executable(dsp56300_viterbi_test test/viterbi_test.cpp)
   target_link_libraries(dsp56300_viterbi_test PRIVATE dsp56300::core)
   add_test(NAME viterbi-boundaries COMMAND dsp56300_viterbi_test)
@@ -117,6 +120,8 @@ if(BUILD_TESTING)
   target_link_libraries(dsp56300_generate_fft PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_parallel_moves test/generate_parallel_moves.cpp)
   target_link_libraries(dsp56300_generate_parallel_moves PRIVATE dsp56300_fixture_format)
+  add_executable(dsp56300_generate_displacement test/generate_displacement.cpp)
+  target_link_libraries(dsp56300_generate_displacement PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_dataflow test/generate_dataflow.cpp)
   target_link_libraries(dsp56300_generate_dataflow PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_loops test/generate_loops.cpp)
@@ -166,6 +171,21 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/fft.d56")
   add_test(NAME parallel-move-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/parallel-moves.d56")
+  add_test(NAME displacement-fixtures COMMAND dsp56300_fixture_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/displacement-short.d56"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/displacement-long.d56")
+  add_test(NAME displacement-short-reproducibility COMMAND "${CMAKE_COMMAND}"
+    "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_displacement>"
+    "-DGENERATOR_ARGUMENTS=short"
+    "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/displacement-short-regenerated.d56"
+    "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/displacement-short.d56"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
+  add_test(NAME displacement-long-reproducibility COMMAND "${CMAKE_COMMAND}"
+    "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_displacement>"
+    "-DGENERATOR_ARGUMENTS=long"
+    "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/displacement-long-regenerated.d56"
+    "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/displacement-long.d56"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
   add_test(NAME native-dataflow-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/native-dataflow.d56")
   add_test(NAME loop-fixtures COMMAND dsp56300_fixture_test
