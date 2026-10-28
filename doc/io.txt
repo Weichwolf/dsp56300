@@ -148,7 +148,7 @@ boundaries rather than accessing unavailable host memory or fabricating data.
 This is a functional RAM contract, not a calibrated external bus or speculative
 burst failure model. Derivative cache/PRAM remapping stays with the embedder.
 Run budgets count retired guest instructions; CE-enabled general execution does
-not prefetch/retire successors through JIT lookahead. No protected VM, new I/O
+not prefetch/retire successors through JIT lookahead. No new I/O
 reply or native dependency is added.
 
 Sleep/wake and guest RESET

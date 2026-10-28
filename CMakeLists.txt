@@ -33,7 +33,7 @@ add_library(dsp56300_core STATIC
   src/Jit/X64/jit_flags.cpp
   src/Jit/native_moves.cpp src/Jit/dataflow.cpp src/Jit/X64/jit_moves.cpp
   src/Jit/X64/jit_move_address.cpp src/Jit/X64/jit_move_register.cpp
-  src/Memory/memory_arena.cpp)
+  src/Memory/memory_arena.cpp src/Jit/X64/jit_retirement.cpp)
 add_library(dsp56300::core ALIAS dsp56300_core)
 target_include_directories(dsp56300_core PUBLIC include)
 target_link_libraries(dsp56300_core PUBLIC blofeld_quality)
@@ -49,19 +49,12 @@ add_custom_target(format-check
 
 if(BUILD_TESTING)
   if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64)$")
-    add_executable(dsp56300_kvm_translation_test test/Kvm/guest.cpp test/Kvm/translation_test.cpp)
-    target_link_libraries(dsp56300_kvm_translation_test PRIVATE dsp56300::core)
-    target_include_directories(dsp56300_kvm_translation_test PRIVATE
+    add_executable(dsp56300_native_retirement_test test/native_retirement_test.cpp
+      test/Native/direct.cpp)
+    target_link_libraries(dsp56300_native_retirement_test PRIVATE dsp56300::core)
+    target_include_directories(dsp56300_native_retirement_test PRIVATE
       src/Core src/Jit src/Jit/X64 test)
-    add_test(NAME kvm-translation-experiment COMMAND dsp56300_kvm_translation_test)
-    set_tests_properties(kvm-translation-experiment PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60)
-    add_executable(dsp56300_kvm_bench test/Kvm/guest.cpp test/Kvm/direct.cpp
-      test/Kvm/region_bench.cpp)
-    target_link_libraries(dsp56300_kvm_bench PRIVATE dsp56300::core)
-    target_include_directories(dsp56300_kvm_bench PRIVATE
-      src/Core src/Jit src/Jit/X64 test)
-    add_test(NAME kvm-prepared-regions COMMAND dsp56300_kvm_bench --verify)
-    set_tests_properties(kvm-prepared-regions PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60)
+    add_test(NAME native-retirement-boundaries COMMAND dsp56300_native_retirement_test)
   endif()
   add_executable(dsp56300_loop_control_test test/loop_control_test.cpp)
   target_link_libraries(dsp56300_loop_control_test PRIVATE dsp56300::core)

@@ -10,6 +10,7 @@
 #include "native_moves.hpp"
 #include "x64.hpp"
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstddef>
@@ -27,7 +28,7 @@ constexpr auto pc_offset = offsetof(Cpu, reg) + offsetof(Registers, pc);
 constexpr std::array register_offsets{
     offsetof(Registers, a), offsetof(Registers, b), offsetof(Registers, x), offsetof(Registers, y)};
 constexpr unsigned op_add = 0x01, op_sub = 0x29, op_or = 0x09, op_xor = 0x31;
-constexpr unsigned group_add = 0, group_and = 4, group_cmp = 7;
+constexpr unsigned group_and = 4, group_cmp = 7;
 constexpr unsigned shift_left = 4, shift_right = 5, shift_arithmetic = 7;
 constexpr unsigned condition_overflow = 0x90;
 constexpr unsigned low_word_shift = 40, high_word_shift = 16, aligned_shift = 8;
@@ -153,6 +154,7 @@ void JitEmitter::finish() {
     code_.jump(returned);
   }
   if (branched) { code_.bind(returned); }
+  materialize_retirement();
   code_.mov({.destination = Reg::ax, .source = Reg::r15}, Width::dword);
   code_.raw(restore_and_return);
 }
@@ -182,11 +184,13 @@ void JitEmitter::input(const Reg destination,
 }
 
 void JitEmitter::helper(const JitHelper function, const NativeOp &operation) {
+  materialize_retirement();
   flush_accumulators(dirty_accumulators());
   code_.load(Reg::di, Reg::r13, offsetof(NativeContext, runtime) + offsetof(JitRuntime, owner));
   code_.constant(Reg::si, reinterpret_cast<std::uintptr_t>(&operation));
   code_.constant(Reg::ax, std::bit_cast<std::uintptr_t>(function));
   code_.raw(call_ax);
+  initialize_retirement();
 }
 
 void JitEmitter::multiply(const NativeOp &operation) {
@@ -278,19 +282,17 @@ void JitEmitter::native(const NativeOp &operation) {
   arithmetic_flags(operation.mode);
 }
 
-void JitEmitter::retire(const NativeOp &operation) {
+void JitEmitter::retire(const NativeOp &operation, const bool publish) {
   if (at_loop_end(operation)) {
     loop_continue();
-  } else {
+  } else if (publish) {
     code_.store_constant(Reg::r12,
                          pc_offset,
                          Width::dword,
                          (operation.pc + operation.instruction.words) & word_mask);
   }
   code_.store_constant(Reg::r12, offsetof(Cpu, repeat_completed), Width::word, 0);
-  code_.memory_immediate(group_add, Reg::r12, offsetof(Cpu, instructions), Width::qword, 1);
-  code_.memory_immediate(
-      group_add, Reg::r12, offsetof(Cpu, cycles), Width::qword, operation.instruction.cycles);
+  retire_progress(operation);
   code_.raw(increment_retired); // INC R15D (retired instructions).
   if (has_moves(operation) && (!at_loop_end(operation) || loop_size_ != 0)) {
     code_.load(Reg::ax, Reg::r13, offsetof(NativeContext, dirty));
@@ -313,12 +315,15 @@ std::vector<std::uint8_t> JitEmitter::generate(const std::span<const NativeOp> o
     loop_size_ = static_cast<Word>(operations.size());
     loop_pc_ = operations.front().pc;
   }
+  packed_retirement_ = admit_packed_retirement(operations);
+  retirement_helpers_ = packed_retirement_ && std::ranges::any_of(operations, has_moves);
   code_.raw(entry_landing); // ENDBR64.
   code_.raw(save_nonvolatile);
   code_.mov({.destination = Reg::r12, .source = Reg::di});
   code_.mov({.destination = Reg::r13, .source = Reg::si});
   code_.binary(op_xor, {.destination = Reg::r15, .source = Reg::r15}, Width::dword);
   code_.load(Reg::r14, Reg::r13, offsetof(NativeContext, runtime) + offsetof(JitRuntime, latched));
+  initialize_retirement();
   code_.bind(loop_header_);
   const auto flags = plan_flags(operations);
   for (std::size_t operation_index = 0; operation_index < operations.size(); ++operation_index) {
@@ -334,7 +339,7 @@ std::vector<std::uint8_t> JitEmitter::generate(const std::span<const NativeOp> o
         }
       }
       native(operation);
-      retire(operation);
+      retire(operation, publish_pc(operations, operation_index));
     } else {
       helper(runtime_.execute, operation);
       accumulator_dirty_.fill(false);

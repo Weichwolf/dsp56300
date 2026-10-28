@@ -1,0 +1,107 @@
+Native retirement checkpoints
+
+The direct x64 JIT executes generated machine code in the host process. The
+hardware virtualization experiment was removed at the user's explicit request.
+This optimization reduces host bookkeeping in existing native regions; it does
+not vectorize DSP audio samples or extend the qualified instruction set.
+
+Admission and representation
+
+Packed retirement requires optimization enabled, a nonempty region containing
+at least four straight operations or a native loop continuation, every operation
+already lowerable, and every instruction base cost nonzero. Moves require a
+nonempty native transfer plan. Stores through X/Y aliases of P reject admission.
+Other regions retain the scalar progress and PC publication path.
+
+Helper-free regions already count successful instructions in R15D. At return,
+MOVD zero-extends that count and PUNPCKLQDQ duplicates it into independent qword
+lanes. A single unaligned load/PADDQ/store adds the pair to adjacent Cpu fields
+instructions/cycles. Non-unit instructions add their extra cycles separately.
+R15D is bounded by the existing 32-bit dispatch budget. The architectural qword
+counters retain modulo-64-bit addition, including carries and wrap.
+
+Transfer-capable regions keep the pending pair in XMM0 and a unit pair in XMM1.
+Every successful native instruction adds one to each lane. Before a general
+move helper, generated code materializes progress and dirty accumulators. After
+the call it initializes both caller-saved SIMD temporaries before testing the
+result. A rejected transfer therefore preserves its partial fault state and
+the completed prefix without counting its unsuccessful ALU or replaying work.
+Native RAM transfers avoid this callback checkpoint. Callbacks may freely
+clobber XMM0/1/2. SSE2 is part of the x64 baseline; no AVX feature is required.
+
+PC stores remain at transfers, before loop-ending guards, at the final operation
+and on loop continuation. Native guard failures and dirty-code exits retain
+canonical progress, PC and accumulator state. Existing repeat/interrupt exclusion
+clearing still occurs per retired instruction. No Cpu, owner, NativeContext or
+public interface layout changes are introduced. Single-thread ownership and the
+existing memory/event contracts remain necessary; see doc/io.txt.
+
+Independent evidence
+
+native-retirement-boundaries performs 76794 directed assertions in release and
+strict builds. An independent raw-56 arithmetic model supplies full registers,
+frames and counts for mixed one/two-cycle bodies, six numerical modes, empty
+entries, straight/loop regions, exact budgets, LC exit boundaries, stack slots,
+saved same/other loop targets and 24-bit PC wrap. Initial counters cross 2^32,
+2^63 and 2^64 independently. Literal SSE2 byte expectations are checked against
+the encoder; a separate native stub proves MOVD zero extension through the
+32-bit sign boundary and preservation of neighboring fields.
+
+Actual Core tests warm native RAM paths before redirecting addresses to I/O.
+Callbacks compare every register and both progress fields, destroy SIMD
+temporaries, optionally invalidate the next P instruction, or reject either
+access. Subsequent execution must preserve committed results without replay.
+Negative admission tests include general helpers, unsupported numerical modes,
+zero synthetic costs and aliased P stores. These are directed tests, not fuzzing.
+
+Both complete direct-only suites pass all 95 tests without skips: release
+161.45 s and strict 499.22 s. All 40 public binary fixtures remain unchanged.
+The structural ISA audit passes, while the complete-ISA gate still fails with
+118 partial catalogue entries and zero complete entries. These tests qualify
+the change's stated domains, not the complete DSP56300 architecture.
+
+Single-instance workload measurements
+
+Host: Intel Core i5-10400, Clang 19 release, CPU2 affinity, powersave governor
+with dynamic frequency. The host is shared with other work; no exclusive-core,
+fixed-frequency, energy or statistical-confidence claim is made. Each executable
+uses 64 warmups and nine trials. Three process runs rotate parent/control/after
+order. The table is the median of their three trial medians, in ns/call.
+
+Parent is commit 5c7f4c8. The admission-disabled control uses the candidate
+compiler and runtime layouts, changing only the positive admission return.
+All 37 other core archive objects are byte-identical to the candidate. This
+controls the selected optimization but does not equalize host text addresses
+with the parent. Raw trials, hashes and control provenance remain ignored local
+analysis. Both comparisons are necessary to expose a whole-change regression.
+
+Workload           Parent       Control      After        Actual MIPS
+Filter ordinary      1125.75      1129.34      1107.55          93.9
+Filter wide          1236.76      1236.75      1196.85         100.3
+Complete LP12        1861.71      1880.24      1845.54          73.7
+Complete LP12 wide   1916.90      1929.95      1881.05          80.3
+Effect/reverb       52272.00     52484.46     52269.28          29.7
+DSP FFT16           17373.89     17780.89     17465.41          64.1
+DSP FFT64           79355.70     81934.80     81432.61          76.3
+DSP FFT256         371613.94    384090.94    377728.88          85.0
+DSP FFT1024       1726036.44   1785434.25   1755521.88          89.9
+
+Filter/LP12 calls are about 0.9-3.2% shorter than the parent. Reverb is effectively
+flat; FFT calls are about 0.5-2.6% longer. All candidate medians beat the matched
+control, by about 0.4-3.2%, but this does not cancel the observed FFT regression
+against the parent. Small differences on this shared host are not a general
+speedup guarantee. Further code-layout and helper/dispatch work remains open.
+
+These execute actual single-Core DSP programs: private source-built Blofeld
+filter/complete LP12/effect routines and the independently modeled own DSP FFT.
+The measured interval includes Core::run and retirement-check/timer overhead;
+RAM/register restoration and compilation are outside it. All versions validate
+the same independent expected state/RAM, instruction count, native/helper/move
+counts and block counts. No timer subtraction is used. Reproduce with the
+fixture benchmark described in doc/fixtures.txt and the same locally built
+workloads; manufacturer code is not distributed here.
+
+Throughput counts actual retired DSP instructions, not base-cost estimates or
+host arithmetic. The representative 270 MIPS reference target is not achieved.
+Continuous audio, full voices/effects, derivative I/O, whole-device realtime,
+fixed-load CPU consumption and joules per audio block remain unqualified.

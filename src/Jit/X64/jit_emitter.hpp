@@ -25,6 +25,8 @@ public:
   JitEmitter(JitRuntime runtime, bool optimize);
   [[nodiscard]] std::vector<std::uint8_t> generate(std::span<const NativeOp> operations);
 
+  [[nodiscard]] bool packed_retirement() const noexcept { return packed_retirement_; }
+
 private:
   [[nodiscard]] bool lowerable(const NativeOp &operation) const;
   [[nodiscard]] static bool has_moves(const NativeOp &operation);
@@ -58,10 +60,15 @@ private:
   void flush_accumulators(Word mask);
   void exit_if(x64::Branch condition);
   void finish();
+  [[nodiscard]] bool admit_packed_retirement(std::span<const NativeOp> operations) const;
+  void initialize_retirement();
+  void materialize_retirement();
+  void retire_progress(const NativeOp &operation);
+  [[nodiscard]] bool publish_pc(std::span<const NativeOp> operations, std::size_t index) const;
   void loop_guard(const NativeOp &operation);
   void loop_continue();
   void loop_backedge();
-  void retire(const NativeOp &operation);
+  void retire(const NativeOp &operation, bool publish);
   x64::Code code_;
 
   struct RingGuard {
@@ -72,6 +79,8 @@ private:
   std::vector<RingGuard> ring_guards_;
   JitRuntime runtime_;
   bool optimize_;
+  bool packed_retirement_ = false;
+  bool retirement_helpers_ = false;
   NativeDataflow dataflow_;
   // Only native writes establish a live host value; dirty also implies valid.
   std::array<bool, 2> accumulator_dirty_{};

@@ -476,7 +476,7 @@ Native FFT research comparison
   taskset -c 0-5 build/release/dsp56300_fft_native_bench test/fixtures/fft.d56 108 2 512
 
 Arguments are FILE CASE [WORKERS [REPLAYS]]. This runs a separately authored
-native integer algorithm, not DSP instructions or the VM. It preserves the FFT
+native integer algorithm, not DSP instructions. It preserves the FFT
 model's quantization/clipping and checks every data/output word. It does not
 produce DSP registers, stack, flags, progress, code invalidation or event state;
 its speed cannot be reported as emulator throughput. Plans/twiddle layouts and

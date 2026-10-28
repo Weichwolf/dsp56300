@@ -97,5 +97,5 @@ DMA wake details, exact pending-event/pipeline arbitration, clock stabilization,
 all numeric-mode interactions and complete legal sequence coverage remain open.
 In particular, Core::reset is still library initialization, not a qualification
 of the manual's complete physical-reset register defaults (including CP/IPL).
-No peripheral/board emulation or successful hardware-isolated backend is added.
+No peripheral/board emulation is added.
 All three ISA rows remain partial; complete support/testing is still mandatory.

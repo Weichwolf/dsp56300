@@ -3,9 +3,8 @@ Native-region compiler research
 The objective is one DSP56300 program with arbitrary supported control flow,
 full architectural semantics and at least 270 million guest instructions/s per
 host core on representative workloads. SIMD and multicore execution should
-exploit independent work expressed serially by the guest. A safe VM owns memory
-bounds, code versions, instruction/time budgets, interrupt/I/O boundaries and
-architectural commit. Host computation may finish early without advancing guest
+exploit independent work expressed serially by the guest. The emulator owns memory bounds, code versions, instruction/time budgets,
+interrupt/I/O boundaries and architectural commit. Host computation may finish early without advancing guest
 time early. Full ISA, precise timing and sustained realtime qualification remain
 incomplete; the current emitter is a partial compiler with many general helpers.
 
@@ -13,8 +12,8 @@ incomplete; the current emitter is a partial compiler with many general helpers.
 Optimize maximum real guest throughput and measured host CPU time/load needed
 to sustain that load, while preserving latency/event constraints. Report both
 unthrottled throughput and fixed-load CPU consumption; energy needs its own
-measurement. The user requires a concrete VMX/KVM execution experiment in
-addition to the direct native compiler work.
+measurement. Generated x64 code runs directly on the host CPU; hardware
+virtualization is outside the current user-requested scope.
 
 The compilation direction is DSP instructions to typed dataflow/SSA regions,
 then native loops and vector operations. Preserve 24/48/56-bit coordinates,
@@ -47,63 +46,17 @@ integer algorithm. Both use identical coefficients, quantization and clipping.
 The native comparison tests scalar and four-lane AVX2 with persistent workers
 and stage barriers. It validates numerical data, not DSP registers, loop stack,
 retirement, events or self modification. It is a computation-headroom reference,
-not a VM backend, automatic code recognizer or a claim to have transpiled the DSP.
+not an emulator backend, automatic code recognizer or a claim to have transpiled the DSP.
 The DSP fixtures provide the complete architectural qualification needed for a
 future region compiler. See doc/fixtures.txt and doc/coverage.txt for exact scope.
 
-Hardware isolation experiment: translated native code could execute inside a
-minimal x86 KVM guest, without a guest OS. The consumer still includes the normal
-DSP56300 headers and uses caller-owned RAM, events and synchronous I/O contracts;
-VM creation, address mappings, execution and exits belong inside the library.
-Map eligible caller memory directly rather than copying each audio block. KVM
-memory slots require page alignment; arbitrary existing spans need a compatible
-allocation/mapping strategy or an explicit initialization failure when isolation
-is required. Provide ordinary DSP memory objects that hide eligible allocations
-and VM mappings. Never silently change
-alias relationships, fault boundaries, callback ordering or host write visibility.
-RAM instructions run inside the guest; external interactions can cause exits.
-Native helper code must either be available inside the guest or use a defined
-exit boundary, so wrapping the current host-pointer JIT is insufficient. DSP
-budgets, interrupts, fixed-point rules and code invalidation remain compiler/VM
-responsibilities. VMX availability alone proves neither access permission nor
-isolation correctness or speed. Benchmark exit overhead and complete execution
-before choosing a default backend. No public KVM backend or isolation claim yet.
-The first concrete host API probe was attempted on 2026-10-27: opening /dev/kvm
-with read/write access failed with EACCES before API/version/VM creation could
-run. Access was granted on 2026-10-28 through kvm group membership. Existing
-agent processes use `sg kvm -c '...'` to refresh the command's group credentials.
-The first accessible runs revealed a missing guest CPUID model; explicitly
-installing KVM-supported features before enabling long mode fixes setup.
-Release/strict now pass 4501 checks with actual translated arithmetic execution
-and one unbacked-memory exit. This is a small helper-free test harness, not a
-public VM backend, full security qualification or performance comparison.
-See doc/kvm-experiment.txt for the exact scope and outstanding validation.
-The prepared-region follow-up now compares identical emitted bytes through
-direct and KVM execution. Shared GPR exchange reduces short-entry overhead,
-but long regions still measure about 1.6-1.9 times direct execution on the
-current host. A compile-time RegionExecutor concept checks the experimental
-execution interface; it does not prove semantic equivalence or isolation.
-Independent full-state/progress witnesses supply the tested semantic evidence.
-The normal consumer VM backend remains open. See doc/kvm-performance.txt.
-API reference: https://docs.kernel.org/virt/kvm/api.html
-
-Use a compile-time execution-backend concept for the direct JIT reference and
-hardware VM backend: bounded execution, invalidation, reset and explicit result
-state must obey one observable contract. Concepts check interface shape, not
-semantic equivalence or isolation; common architectural fixtures must prove the
-latter independently. Share decoding, transfer plans and native lowering rather
-than constructing a second DSP implementation. Keep the interpreter reference.
-Public backend selection can dispatch internally without exposing KVM objects.
-
-Accepted design constraints: separate translation from execution so the same
-native regions can run directly or inside KVM with a defined runtime ABI.
-Isolation is an explicit guarantee: never silently substitute the host-process
-JIT when protected execution was requested. Shared-memory ownership, page layout
-and allowed concurrent accesses must be specified without exposing VM internals
-to consumers. Prefer keeping translated code/data independent of arbitrary host
-pointers. Reduce crossings and retain registers across large native regions.
-Hardware isolation and speed must be qualified separately; KVM alone is not a
-performance optimization. The user accepted these constraints explicitly.
+The direct JIT publishes generated instructions in ordinary host-process RX
+pages and enters them through the production SysV bridge. This is actual native
+execution. Instruction lowering still needs to reproduce DSP arithmetic, flags,
+parallel transfers and control state; a native host opcode is not equivalent to
+one complete DSP instruction. General helpers remain a material execution cost.
+Consumers keep the ordinary memory/event/I/O API. Concepts can constrain shared
+reference/cached/native interfaces, while independent fixtures prove behavior.
 
 Next implementation experiments should remove memory/move helper calls and
 instruction-by-instruction register/flag materialization on guarded RAM regions.
@@ -133,8 +86,8 @@ omits overwritten ordinary flags inside safe native sequences while preserving
 incoming Carry dependencies and every sticky overflow. Both sides of transfers,
 helpers and ending guards remain full-status boundaries. These are
 foundations for lifted regions, not full SSA, flag liveness across memory guards, native final loop
-cleanup, SIMD batching or hardware-isolated execution. PC/progress batching
-remains a future experiment; it must preserve callback and fault observations.
+cleanup or SIMD batching. PC/progress batching is under qualification; it must
+preserve callback and fault observations.
 
 Next region experiment: consider side-effect-free RAM/AGU preflight guards before
 extending liveness across transfers. A failed preflight must reach the general

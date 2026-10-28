@@ -69,4 +69,4 @@ with injected vector costs remain uncalibrated. The documented ILLEGAL-at-LA
 pipeline anomaly is not implemented. Extended stacks, SE/UF and automatic
 exceptions, complete source arbitration/vector legality/numeric modes and
 pipeline/event qualification remain mandatory gaps. None of these ISA rows is
-complete, and this is not a protected VM backend or throughput qualification.
+complete, and this is not throughput qualification.

@@ -74,7 +74,7 @@ Storage, validation and remaining work
 IME/SWO/pending flags fit byte 332 of existing Cpu padding. The resolved pending
 vector uses cold owner storage. Existing architectural/generated-code offsets,
 actual structure sizes and limits are recorded in doc/coverage.txt; these are
-layout facts, not a speed, cache-miss or hardware-isolation result.
+layout facts, not a speed or cache-miss result.
 Independent binary fixtures use a separate condition truth table, raw state,
 integer ALU/rounding and bit-built frames. Version 3 explicitly records initial
 IME and expected IME/SWO plus the debug processing state; older versions cannot

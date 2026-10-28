@@ -27,6 +27,13 @@ enum class Reg : std::uint8_t {
   r15
 };
 enum class Width : std::uint8_t { byte = 1, word = 2, dword = 4, qword = 8 };
+enum class Xmm : std::uint8_t { x0, x1, x2 };
+enum class Packed : std::uint8_t {
+  add_qword = 0xd4,
+  equal_dword = 0x76,
+  bit_xor = 0xef,
+  unpack_low_qword = 0x6c
+};
 enum class Branch : std::uint8_t {
   above_equal = 0x83,
   equal = 0x84,
@@ -71,6 +78,11 @@ public:
   void multiply(RegisterPair registers);
   void unary(unsigned group, Reg destination);
   void set(unsigned condition, Reg destination);
+  void packed(Packed operation, Xmm destination, Xmm source);
+  void packed_from(Xmm destination, Reg source);
+  void packed_shift_right(Xmm destination, unsigned count);
+  void packed_load(Xmm destination, Reg base, std::size_t offset);
+  void packed_store(Reg base, std::size_t offset, Xmm source);
   void move_if(unsigned condition, RegisterPair registers);
   void jump_if(Branch condition, Label &label);
   void jump(Label &label);

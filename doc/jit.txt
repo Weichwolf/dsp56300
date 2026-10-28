@@ -225,14 +225,6 @@ DO restoration, failed cleanup and callback reentry rejection. Manufacturer
 programs/fixtures stay local. Benchmarks distinguish initialized warm calls
 from arithmetic-only experiments, continuous streams and whole-device behavior.
 
-Hardware-isolated KVM execution and a shared execution-backend concept remain
-pending. A test-only arithmetic translation harness exists, but its actual guest
-execution is still blocked by device access; see doc/kvm-experiment.txt.
-Consumers must retain ordinary DSP headers and memory,
-event and I/O interfaces, with VM management hidden inside the library. Required
-isolation cannot silently fall back to this host-process JIT. See
-doc/compiler-research.txt for the accepted backend and runtime ABI constraints.
-
 Selection/control helper boundaries
 
 MAX/MAXM, NOT/TST and ANDI/ORI use general executor helpers, with no new native
@@ -296,7 +288,7 @@ The controller is private owner state; Cpu and generated-code offsets remain
 unchanged. Clang 19 x64 layouts show Cpu=384 and Core::Impl=131648 bytes before
 and after; the new 16-byte controller fits prior owner padding. This does not
 measure cache misses, latency or throughput. No native exception lowering,
-SIMD, benchmark or hardware-isolation result is claimed in this increment.
+SIMD or benchmark result is claimed in this increment.
 Full vector/mode/event/pipeline qualification remains open; doc/exceptions.txt
 records the software-exception conventions and unresolved manufacturer details.
 
@@ -349,3 +341,16 @@ The logical IME/SWO/pending byte uses Cpu padding; cached generated-code offsets
 remain subject to the layout audit. This introduces no debugger-loop execution,
 trace engine, native/SIMD lowering or protected backend. Complete OnCE/pipeline,
 mode/sequence/timing and performance qualification remains open.
+
+Retirement checkpoints
+
+Guarded native regions can defer instruction/base-cost publication and internal
+PC stores until transfer, loop-guard and return boundaries. Pure regions derive
+both common increments from the existing per-call R15D retirement count. Regions
+with possible transfer helpers use pending SSE2 qword lanes, materializing them
+before calls and reinitializing caller-saved temporaries afterwards. Numerical
+DSP arithmetic remains scalar x64. General helper blocks, short straight runs
+and aliased P stores keep scalar retirement. CPU and runtime layouts are unchanged.
+See doc/native-retirement.txt for exact admission, callback/fault/wrap tests,
+measured filter gains and FFT tradeoffs. This is not full-program native lowering
+or evidence that representative 270 MIPS execution has been achieved.

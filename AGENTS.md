@@ -20,11 +20,8 @@
 - Use reproducible single-instance benchmarks, including real source-built Blofeld routines.
   Distinguish arithmetic experiments, emulator execution and whole-device performance.
 - Keep host memory and event/I/O contracts explicit. Do not silently fabricate peripheral results.
-- KVM access is granted through membership in the kvm group. Existing agent
-  processes retain their old groups; run KVM tests through `sg kvm -c '...'`
-  in this session. Do not request access again because of stale process groups.
-  The transient named-user device ACL was removed; group access works.
+- The user canceled the hardware virtualization path. Build and optimize direct
+  native JIT execution; do not add a KVM/VMX backend, tests or permissions setup.
 - Keep local account names out of tracked instructions, code and documentation.
 - Do not run fuzz tests unless the user explicitly requests them.
-- Commit verified increments and push to the existing private origin, as
-  explicitly reauthorized by the user.
+- Commit verified increments locally. No publication destination is authorized.

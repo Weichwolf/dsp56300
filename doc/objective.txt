@@ -1,83 +1,51 @@
 Baue in ~/Git/dsp56000 einen eigenständigen, maximal auf x86-64 optimierten DSP56300-Emulatorkern, den blofeld-emu später als Bibliothek übernehmen kann. Übernimm dessen Projektsetup mit C++23, CMake/Ninja, LLVM 19, strikten Warnungen, clang-format, clang-tidy und ASan/UBSan. Unterstütze eine einzelne DSP-Instanz mit beliebigen Programmen und priorisiere die Audio-, Filter-, Oszillator- und Effektprogramme unter ~/Git/blofeld-src/src/dsp56371. Optimiere anhand reproduzierbarer Messungen durch Blockübersetzung/JIT, Registerhaltung, kompakte Datenstrukturen und bei nachgewiesenem Nutzen SSE/AVX/AVX2. Minimiere Cachezugriffe und den Umfang häufig verwendeter Code- und Datenbereiche. Bewahre die vollständige Befehlssemantik einschließlich Festkommaarithmetik, Rundung, Sättigung, Statusbits, paralleler Moves, Adressierungsmodi, Schleifen und Interruptzustände; spezialisierte Ausführungspfade benötigen geprüfte Voraussetzungen und einen allgemeinen Rückfallpfad. Verifiziere Korrektheit durch unabhängige Erwartungen und Vergleichstests sowie Leistung anhand tatsächlicher Blofeld-Programme. Implementiere ausschließlich den DSP-Kern mit klarer Speicher-, Ereignis- und I/O-Schnittstelle, Tests, Benchmarks und Integrationsdokumentation. Verändere weder blofeld-emu noch blofeld-src und übernimm keine Board-Emulation oder Herstellerprogramme in veröffentlichbare Quellen.
 
-Subsequent user clarifications (preserving the original objective above):
-- The project directory is now ~/Git/dsp56300.
+Current user clarifications (preserving the original objective above):
+- The project directory is now ~/Git/dsp56300. Use src/Core/core.cpp naming.
+- Build only the DSP56300 CPU. blofeld-emu owns DSP56371 derivative peripherals
+  and board integration; both neighboring repositories remain read-only.
 - Implement independently: no dsp56kEmu dependency in build, API, tests or runtime.
-- Use Core/core.cpp naming. Implement only the DSP56300 CPU; blofeld-emu owns
-  the DSP56371 derivative peripherals and board integration.
-- Investigate packing DSP registers in SIMD registers and recognizing repeated,
-  independent per-voice work inside one DSP program (up to 24 Blofeld voices).
-  Preserve shared-state dependencies, quantization, output order and interrupt
-  boundaries, with a general fallback when batching is inadmissible.
-- Commit and push each verified increment to the existing private origin.
-- Use binary test fixtures for reproducible instruction/program inputs and
-  independently derived expectations. Keep manufacturer workloads local.
-- Consider C++ concepts for portable, compile-time-checked internal interfaces.
-- Current workspace instructions supersede the earlier publication instruction:
-  commit verified increments locally; no publication destination is authorized.
-- The user subsequently explicitly requested commit and push again. The existing
-  private origin/main is the authorized destination.
-- Organize implementation files in concern-specific subdirectories under src/.
-- Construct additional demanding tests from complete Blofeld DSP source routines.
-  Reverb is one example, not a user-imposed priority. Select priorities according
-  to their value for validation and optimization.
-- The latest workspace instructions supersede the previous push authorization:
-  commit verified increments locally; no publication destination is authorized.
-- Performance target: 270 million emulated DSP instructions per second on one
-  host core. Qualify throughput with actual guest retirement, complete instruction
-  semantics and representative Blofeld audio programs; isolated host arithmetic
-  or NOP throughput cannot establish the target. Verify sustained realtime CPU
-  consumption separately on the complete workload.
-- Treat the work as research into efficient native transpilation of a single
-  DSP program inside a safe VM. Investigate multicore execution and SIMD for
-  proven independent work, including serially expressed polyphonic processing.
-  Preserve dependencies and ordered observable effects, with general fallback.
-- Plan for near-full DSP load; faster host execution and additional headroom
-  are welcome without accelerating emulated time or changing event boundaries.
-  Investigate energy per audio block as well as throughput/latency; frequency
-  alone does not establish the energy benefit of additional host cores.
-- Include FFT as an additional benchmark, with fixed-point correctness and
-  distinct emulator/native-algorithm measurements. Use its dependency structure
-  to evaluate SIMD and multicore opportunities rather than assuming a gain.
-- Investigate hardware-isolated execution of translated x86 code using VMX/KVM.
-  The VM must remain transparent to consumers: ordinary DSP56300 headers and
-  CPU interfaces expose caller-owned shared memory, events and data-line/I/O
-  communication. Consumers must not manage a guest OS, vCPU, VM lifecycle or
-  transport protocol. Preserve the same observable CPU and communication contract
-  across execution backends. Hardware isolation remains unimplemented.
-- Use concepts where useful to establish a shared execution contract for a
-  direct JIT reference backend and a hardware VM backend. Share decoding and
-  translation; keep backend details behind the ordinary consumer API and retain
-  the independent-expectation tests and interpreter correctness reference.
-- Accepted backend design: separate translation/execution with a defined runtime
-  ABI; required isolation must fail explicitly if unavailable, never silently
-  fall back to unprotected execution. Hide eligible shared-memory allocation and
-  VM mapping in DSP interfaces, specifying ownership/concurrency. Concepts check
-  interfaces; shared semantic tests qualify behavior. Optimize native regions
-  and measure hardware isolation separately from translation speed.
-- Latest user instruction reauthorizes pushing every verified commit to the
-  existing private origin, including accumulated local
-  progress. This supersedes the earlier local-only publication restriction.
-- 270 MIPS is a reference workload and baseline, not an optimization ceiling
-  or stopping criterion. Continue maximizing real guest throughput and minimizing
-  host CPU time/load and latency required to sustain 270 MIPS on representative
-  full-semantics workloads. Qualify energy separately when measurable.
-- The VMX/KVM approach must be tried concretely, not left as an optional design
-  idea. Preserve the transparent consumer API and required-isolation guarantee;
-  compare direct JIT and protected execution with the same architectural tests
-  and actual DSP workload, including boundary/exit overhead.
-- The latest user-supplied AGENTS.md instructions again supersede prior push
-  authorization: commit verified increments locally; no publication destination
-  is authorized. Keep the on-disk workspace instructions consistent with this.
-- The user explicitly reiterates that the complete DSP56300 instruction set must
-  be implemented and tested. Representative workloads, native subsets and a
-  passing current test suite do not replace full ISA qualification. Audit every
-  instruction, encoding/operand form, numerical mode, flag and observable effect;
-  keep unimplemented and unqualified cases visible until closed independently.
-- The latest user instruction again explicitly requests a push after committing.
-  Verified commits may be pushed to the existing private
-  origin; this supersedes the preceding local-only publication restrictions.
-- KVM access is now granted through group membership. Existing agent processes
-  can run KVM commands with `sg kvm -c '...'` without requesting access again.
-- Keep local account names out of tracked instructions/code/documentation;
-  describe the current user and existing private origin generically.
+  Keep manufacturer programs/manuals/source extracts and private analysis local.
+- The complete DSP56300 instruction set must be implemented and independently
+  tested, including every encoding/operand form, numerical mode, flag, fixed-point
+  precision, parallel-move ordering, addressing, loop, stack, cache and interrupt
+  effect. Passing current tests or selected workloads does not establish this.
+- Use reproducible binary fixtures with independently derived expectations.
+  Construct demanding tests from complete source-built Blofeld routines. Reverb
+  is one example, not a priority; choose workloads by validation/optimization value.
+- Organize implementation by concern under src/. Consider C++ concepts for
+  portable compile-time-checked interfaces and common execution contracts.
+- Treat this as research into native transpilation of one DSP program. The direct
+  JIT writes real x64 instructions to RAM, publishes executable pages and enters
+  that code on the host CPU. Retain reference/cached execution and guarded general
+  fallbacks while extending native lowering and register/flag holding.
+- The user explicitly canceled the complete hardware-virtualization path after
+  clarifying that direct JIT code already executes natively. Remove its backend,
+  runtime/test/benchmark code and setup instructions. Earlier VMX/KVM, hardware
+  isolation, transparent hardware-VM and protected-backend requirements are
+  superseded, not outstanding completion criteria. Ordinary DSP memory bounds,
+  event/I/O contracts, hardening and correctness requirements remain in force.
+- Investigate packing DSP state in SIMD registers and recognizing repeated,
+  independent per-voice work (up to 24 Blofeld voices) or independent loop work
+  inside one program. Preserve shared-state dependencies, quantization, observable
+  order and interrupt boundaries; keep a general fallback when inadmissible.
+- Include FFT as a fixed-point benchmark, distinguishing actual DSP execution
+  from separately written native algorithms. Use its dependencies to evaluate
+  SIMD and multicore opportunities rather than assuming either improves speed.
+- Performance target: at least 270 million actual emulated DSP instructions/s per
+  host core on representative full-semantics workloads. Aim to reach or exceed
+  the DSP's processing capacity with minimum host load. Host-native execution
+  alone does not establish that capacity; helper/dispatch and state costs matter.
+- 270 MIPS is a reference load and baseline, not a throughput cap or stopping
+  criterion. Continue maximizing real guest throughput and minimizing host CPU
+  time/load and latency at that fixed load after reaching it. Qualify sustained
+  realtime performance and energy per audio block separately on complete work.
+- Plan for near-full DSP utilization. Faster host completion must not advance
+  emulated time or alter event boundaries. Core count/GHz alone does not prove
+  an energy benefit; measure voltage/load/cache/synchronization effects as needed.
+- Consumers include ordinary DSP56300 headers and communicate through explicitly
+  owned shared memory, events and synchronous data-line/I/O interfaces. Preserve
+  aliasing, host writes, exact budgets, failures and ordered observable effects.
+- Commit verified increments locally. The latest repository instructions do not
+  authorize a publication destination and supersede earlier push instructions.
+  Keep local account names out of tracked instructions/code/docs.

@@ -172,7 +172,7 @@ void run(const int argc, const char *const *const argv) {
     throw std::invalid_argument("Workers must be in [1,64]; replays in [1,1048576]");
   }
   std::cout << std::fixed << std::setprecision(2) << item.name << '\n'
-            << "Native algorithm only: no DSP registers, events, timing or VM execution.\n"
+            << "Native algorithm only: no DSP registers, events, timing or emulator execution.\n"
             << "64 warmups, median of 9 x " << replays
             << " calls; input restoration excluded, stage synchronization included.\n";
   benchmark(item, {.workers = workers, .replays = replays});
