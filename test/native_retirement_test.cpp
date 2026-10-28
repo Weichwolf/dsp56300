@@ -163,6 +163,8 @@ void generated(const std::span<const Step> steps, const Word mode, const bool lo
     const bool expected_admission = !steps.empty() && (loop || steps.size() >= 4);
     require(emitter.packed_retirement() == expected_admission,
             "Only the specified straight-run or native-loop admission selects packed retirement");
+    require(emitter.cached_status() == expected_admission,
+            "Status holding shares the qualified native-only admission");
     const native::Direct code(bytes);
     const auto size = static_cast<Word>(steps.size());
     for (const auto progress : seeds) {
@@ -215,6 +217,7 @@ void admission_guards() {
     static_cast<void>(emitter.generate(input));
     require(!emitter.packed_retirement(),
             "General helpers, unsupported modes, invalid costs and aliased stores reject packing");
+    require(!emitter.cached_status(), "Rejected native regions retain canonical status in memory");
   };
   check(ops, {}, false);
   auto changed = ops;

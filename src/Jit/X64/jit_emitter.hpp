@@ -27,6 +27,8 @@ public:
 
   [[nodiscard]] bool packed_retirement() const noexcept { return packed_retirement_; }
 
+  [[nodiscard]] bool cached_status() const noexcept { return cached_status_; }
+
 private:
   [[nodiscard]] bool lowerable(const NativeOp &operation) const;
   [[nodiscard]] static bool has_moves(const NativeOp &operation);
@@ -50,6 +52,11 @@ private:
   void addition(const NativeOp &operation);
   void round(Word mode);
   void arithmetic_flags(Word mode, bool carry_changed = false);
+  [[nodiscard]] bool admit_cached_status() const;
+  void initialize_status();
+  void materialize_status();
+  void read_status(x64::Reg destination);
+  void merge_status(x64::Reg source, Word changed = 0, x64::Reg scratch = x64::Reg::ax);
   [[nodiscard]] std::vector<Word> plan_flags(std::span<const NativeOp> operations) const;
   [[nodiscard]] static Word written_flags(const NativeOp &operation);
   void input(x64::Reg destination, unsigned selector, bool destination_b, bool latched);
@@ -81,6 +88,7 @@ private:
   bool optimize_;
   bool packed_retirement_ = false;
   bool retirement_helpers_ = false;
+  bool cached_status_ = false;
   NativeDataflow dataflow_;
   // Only native writes establish a live host value; dirty also implies valid.
   std::array<bool, 2> accumulator_dirty_{};

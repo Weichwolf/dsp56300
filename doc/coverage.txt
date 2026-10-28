@@ -74,15 +74,21 @@ and aliased-program stores retain scalar retirement. PC checkpoints remain at
 transfers, loop guards, dirty exits and returns. CPU/register/runtime layouts
 are unchanged. This combines bookkeeping fields, not DSP voices or samples.
 
-76794 directed native checks pass in release and strict builds: qword carry/wrap,
+76931 directed native retirement checks pass in release and strict builds: qword carry/wrap,
 mixed one/two-cycle costs, repeated entries, 24-bit PC wrap, zero-retirement and
 partial-loop exits, saved targets/SP slots, literal SSE2 encodings, MOVD width
 and neighboring fields. Warm RAM paths are reused for I/O slow branches;
 callbacks check complete registers/progress, clobber SIMD state, invalidate P
 or reject requests. Prior arithmetic/retirement cannot be replayed or doubled.
-All 95 direct-only tests pass in both release (161.45 s) and strict (499.22 s),
-with no skips. Strict builds instrument all 97 C++ translation units with
-nonrecovering address/undefined/integer checks. All 131 project C++ source/header
+Native-only regions now also retain SR in R14D. Helpers and exits receive
+canonical SR; helpers' sticky transfer effects are reloaded before continuation.
+Old parallel-ALU inputs remain separate. All 196874 new status/old-input/callback
+assertions pass, including every initial CCR byte, six numeric modes, clipped
+stores, paired loads and partial failures. See doc/native-status.txt.
+
+All 96 direct-only tests pass in both release (166.93 s) and strict (469.07 s),
+with no skips. Strict builds instrument all 99 C++ translation units with
+nonrecovering address/undefined/integer checks. All 133 project C++ source/header
 files pass clang-format, and the 40 public binary archives are byte-identical
 to the parent. The structural ISA audit passes; full ISA qualification still
 fails as intended. See doc/native-retirement.txt for the bounded optimization,
@@ -107,11 +113,15 @@ full expected results and progress remain checked. Native/helper/transfer counts
 code mappings, raw trials and artifact identities establish the measured scope.
 A gain in one routine cannot establish a general gain. See doc/fixtures.txt.
 
-Alternating parent/control/candidate measurements on nine workload cases show
-roughly 0.9-3.2% shorter filter/LP12 calls against the parent, effectively flat
-reverb and 0.5-2.6% longer FFT calls. An admission-disabled control with the same
-other compiler objects is slower than the candidate in all nine median results,
-but the parent/control gap prevents a blanket whole-change speedup claim.
+Alternating parent/control/candidate status-holding measurements on nine workload
+cases show roughly 2.4%/3.4% shorter ordinary filter/LP12 calls against b415608,
+wide filter nearly flat, wide LP12 about 0.9% shorter and reverb about 0.9% longer.
+FFT16/64 calls are about 0.9-1.2% shorter, FFT256/1024 about 2.5%/1.9% longer.
+The admission-disabled control retains identical other compiler objects. Its
+filter/LP12 results support modest status-holding gains; its FFT/reverb results
+are nearly flat against the candidate. Parent/control/layout gaps prevent a
+blanket whole-change speedup claim. See doc/native-status.txt for the full table
+and doc/native-retirement.txt for the previous retirement-only comparison.
 These are noisy shared-host observations, not statistical or fixed-load proof.
 Actual candidate throughput is about 30-100 MIPS in these cases, substantially
 below the 270 MIPS reference target. General helpers, dispatch and exact state

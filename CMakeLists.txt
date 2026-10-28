@@ -33,7 +33,7 @@ add_library(dsp56300_core STATIC
   src/Jit/X64/jit_flags.cpp
   src/Jit/native_moves.cpp src/Jit/dataflow.cpp src/Jit/X64/jit_moves.cpp
   src/Jit/X64/jit_move_address.cpp src/Jit/X64/jit_move_register.cpp
-  src/Memory/memory_arena.cpp src/Jit/X64/jit_retirement.cpp)
+  src/Memory/memory_arena.cpp src/Jit/X64/jit_retirement.cpp src/Jit/X64/jit_status.cpp)
 add_library(dsp56300::core ALIAS dsp56300_core)
 target_include_directories(dsp56300_core PUBLIC include)
 target_link_libraries(dsp56300_core PUBLIC blofeld_quality)
@@ -55,6 +55,10 @@ if(BUILD_TESTING)
     target_include_directories(dsp56300_native_retirement_test PRIVATE
       src/Core src/Jit src/Jit/X64 test)
     add_test(NAME native-retirement-boundaries COMMAND dsp56300_native_retirement_test)
+    add_executable(dsp56300_native_status_test test/native_status_test.cpp)
+    target_link_libraries(dsp56300_native_status_test PRIVATE dsp56300::core)
+    target_include_directories(dsp56300_native_status_test PRIVATE test)
+    add_test(NAME native-status-boundaries COMMAND dsp56300_native_status_test)
   endif()
   add_executable(dsp56300_loop_control_test test/loop_control_test.cpp)
   target_link_libraries(dsp56300_loop_control_test PRIVATE dsp56300::core)

@@ -1,19 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "architecture.hpp"
-#include "dsp56300/core.hpp"
 #include "fields.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
 #include "jit_emitter.hpp"
 #include "x64.hpp"
 
-#include <cstddef>
-
 namespace dsp56300::detail {
 namespace {
 using x64::Reg;
 using x64::Width;
-constexpr auto status_offset = offsetof(Cpu, reg) + offsetof(Registers, sr);
 constexpr unsigned op_add = 0x01, op_sub = 0x29, op_or = 0x09, op_adc = 0x11, op_sbb = 0x19;
 constexpr unsigned group_and = 4, shift_right = 5;
 constexpr unsigned condition_overflow = 0x90, condition_below = 0x92;
@@ -52,7 +48,7 @@ void JitEmitter::addition(const NativeOp &operation) {
     input(Reg::dx, group, destination_b, has_moves(operation));
   }
   if (with_carry) {
-    code_.load(Reg::r11, Reg::r12, status_offset, Width::dword);
+    read_status(Reg::r11);
     code_.immediate(group_and, Reg::r11, carry, Width::dword);
     code_.unary(3, Reg::r11); // NEG: 0 or all ones.
     code_.immediate(group_and, Reg::r11, byte_mask, Width::dword);

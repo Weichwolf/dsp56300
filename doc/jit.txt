@@ -354,3 +354,13 @@ and aliased P stores keep scalar retirement. CPU and runtime layouts are unchang
 See doc/native-retirement.txt for exact admission, callback/fault/wrap tests,
 measured filter gains and FFT tradeoffs. This is not full-program native lowering
 or evidence that representative 270 MIPS execution has been achieved.
+
+Status-register holding
+
+The same guarded native-only domain can keep SR in R14D across arithmetic,
+transfers and loop backedges. Before every general move helper or return,
+generated code materializes SR. After helpers it reloads their updated status,
+including sticky transfer flags and partial failures. Old parallel inputs
+remain separate through the context's latched buffer. Other regions retain
+canonical memory SR and the previous pointer convention. See doc/native-status.txt
+for the independent CCR/old-input/callback matrix and controlled measurements.

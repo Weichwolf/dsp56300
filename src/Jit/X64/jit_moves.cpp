@@ -74,10 +74,14 @@ void JitEmitter::moves(const NativeOp &operation) {
   const auto first_guard = ring_guards_.size();
   for (const auto &move : transfers) { move_guard(move, slow); }
   if (dataflow_.old_inputs != 0) {
+    if (cached_status_) {
+      code_.load(
+          Reg::r11, Reg::r13, offsetof(NativeContext, runtime) + offsetof(JitRuntime, latched));
+    }
     for (unsigned index = 0; index < register_offsets.size(); ++index) {
       if ((dataflow_.old_inputs & (Word{1} << index)) == 0) { continue; }
       current_value(Reg::ax, index);
-      code_.store(Reg::r14, index * sizeof(std::uint64_t), Reg::ax);
+      code_.store(cached_status_ ? Reg::r11 : Reg::r14, index * sizeof(std::uint64_t), Reg::ax);
     }
   }
   for (const auto &move : transfers) { move_update(move); }

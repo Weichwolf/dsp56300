@@ -23,7 +23,6 @@ constexpr unsigned op_or = 0x09, op_xor = 0x31, op_test = 0x85;
 constexpr unsigned group_sub = 5, group_cmp = 7, group_and = 4, group_xor = 6;
 constexpr unsigned shift_left = 4, shift_right = 5;
 constexpr unsigned condition_zero = 0x94, condition_below = 0x92;
-constexpr auto status_offset = offsetof(Cpu, reg) + offsetof(Registers, sr);
 constexpr unsigned normal_integer_shift = 55, negative_shift = 60;
 
 enum TransferCode : std::uint8_t {
@@ -129,9 +128,6 @@ void JitEmitter::arithmetic_flags(const Word mode, const bool carry_changed) {
     code_.binary(op_or, {.destination = Reg::r8, .source = Reg::dx}, Width::dword);
   }
   const auto changed = live_flags_ & (arithmetic_changed | (carry_changed ? carry : 0));
-  code_.load(Reg::r9, Reg::r12, status_offset, Width::dword);
-  if (changed != 0) { code_.immediate(group_and, Reg::r9, ~changed, Width::dword); }
-  code_.binary(op_or, {.destination = Reg::r8, .source = Reg::r9}, Width::dword);
-  code_.store(Reg::r12, status_offset, Reg::r8, Width::dword);
+  merge_status(Reg::r8, changed, Reg::r9);
 }
 } // namespace dsp56300::detail

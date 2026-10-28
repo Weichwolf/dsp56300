@@ -99,7 +99,11 @@ bool JitEmitter::lowerable(const NativeOp &operation) const {
 
 void JitEmitter::value(const Reg destination, const unsigned index, const bool latched) {
   if (latched && (dataflow_.old_inputs & (Word{1} << index)) != 0) {
-    code_.load(destination, Reg::r14, index * sizeof(std::uint64_t));
+    if (cached_status_) {
+      code_.load(
+          destination, Reg::r13, offsetof(NativeContext, runtime) + offsetof(JitRuntime, latched));
+    }
+    code_.load(destination, cached_status_ ? destination : Reg::r14, index * sizeof(std::uint64_t));
     return;
   }
   current_value(destination, index);
@@ -155,6 +159,7 @@ void JitEmitter::finish() {
   }
   if (branched) { code_.bind(returned); }
   materialize_retirement();
+  materialize_status();
   code_.mov({.destination = Reg::ax, .source = Reg::r15}, Width::dword);
   code_.raw(restore_and_return);
 }
@@ -185,12 +190,14 @@ void JitEmitter::input(const Reg destination,
 
 void JitEmitter::helper(const JitHelper function, const NativeOp &operation) {
   materialize_retirement();
+  materialize_status();
   flush_accumulators(dirty_accumulators());
   code_.load(Reg::di, Reg::r13, offsetof(NativeContext, runtime) + offsetof(JitRuntime, owner));
   code_.constant(Reg::si, reinterpret_cast<std::uintptr_t>(&operation));
   code_.constant(Reg::ax, std::bit_cast<std::uintptr_t>(function));
   code_.raw(call_ax);
   initialize_retirement();
+  initialize_status();
 }
 
 void JitEmitter::multiply(const NativeOp &operation) {
@@ -317,12 +324,18 @@ std::vector<std::uint8_t> JitEmitter::generate(const std::span<const NativeOp> o
   }
   packed_retirement_ = admit_packed_retirement(operations);
   retirement_helpers_ = packed_retirement_ && std::ranges::any_of(operations, has_moves);
+  cached_status_ = admit_cached_status();
   code_.raw(entry_landing); // ENDBR64.
   code_.raw(save_nonvolatile);
   code_.mov({.destination = Reg::r12, .source = Reg::di});
   code_.mov({.destination = Reg::r13, .source = Reg::si});
   code_.binary(op_xor, {.destination = Reg::r15, .source = Reg::r15}, Width::dword);
-  code_.load(Reg::r14, Reg::r13, offsetof(NativeContext, runtime) + offsetof(JitRuntime, latched));
+  if (cached_status_) {
+    initialize_status();
+  } else {
+    code_.load(
+        Reg::r14, Reg::r13, offsetof(NativeContext, runtime) + offsetof(JitRuntime, latched));
+  }
   initialize_retirement();
   code_.bind(loop_header_);
   const auto flags = plan_flags(operations);

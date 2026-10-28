@@ -18,7 +18,6 @@ constexpr unsigned group_and = 4, shift_left = 4, shift_right = 5, shift_arithme
 constexpr unsigned condition_greater = 0x9f, condition_less = 0x9c;
 constexpr unsigned move_greater = 0x4f, move_less = 0x4c;
 constexpr unsigned aligned_growth_shift = 53, low_word_shift = 40;
-constexpr auto status_offset = offsetof(Cpu, reg) + offsetof(Registers, sr);
 
 std::size_t bank_offset(const unsigned reg) {
   if (reg >= a_register) {
@@ -52,9 +51,7 @@ void JitEmitter::move_read_register(const Reg value, const NativeMove &move, con
   code_.binary(op_xor, {.destination = Reg::r9, .source = Reg::r10});
   code_.immediate(group_and, Reg::r9, 1, Width::dword);
   code_.shift(shift_left, Reg::r9, 7, Width::dword);
-  code_.load(Reg::ax, Reg::r12, status_offset, Width::dword);
-  code_.binary(op_or, {.destination = Reg::ax, .source = Reg::r9}, Width::dword);
-  code_.store(Reg::r12, status_offset, Reg::ax, Width::dword);
+  merge_status(Reg::r9);
   code_.shift(shift_arithmetic, value, main_shift + scaling - up);
   code_.constant(Reg::r9, static_cast<std::uint64_t>(maximum_word));
   code_.binary(op_cmp, {.destination = value, .source = Reg::r9});
@@ -66,9 +63,7 @@ void JitEmitter::move_read_register(const Reg value, const NativeMove &move, con
   code_.move_if(move_less, {.destination = value, .source = Reg::r9});
   code_.binary(op_or, {.destination = Reg::r10, .source = Reg::r11}, Width::dword);
   code_.shift(shift_left, Reg::r10, 6, Width::dword);
-  code_.load(Reg::ax, Reg::r12, status_offset, Width::dword);
-  code_.binary(op_or, {.destination = Reg::ax, .source = Reg::r10}, Width::dword);
-  code_.store(Reg::r12, status_offset, Reg::ax, Width::dword);
+  merge_status(Reg::r10);
   code_.immediate(group_and, value, word_mask, Width::dword);
 }
 

@@ -38,9 +38,9 @@ existing memory/event contracts remain necessary; see doc/io.txt.
 
 Independent evidence
 
-native-retirement-boundaries performs 76794 directed assertions in release and
-strict builds. An independent raw-56 arithmetic model supplies full registers,
-frames and counts for mixed one/two-cycle bodies, six numerical modes, empty
+The retirement-only qualification at b415608 performed 76794 directed assertions
+in release and strict builds. An independent raw-56 arithmetic model supplies
+full registers, frames and counts for mixed one/two-cycle bodies, six numerical modes, empty
 entries, straight/loop regions, exact budgets, LC exit boundaries, stack slots,
 saved same/other loop targets and 24-bit PC wrap. Initial counters cross 2^32,
 2^63 and 2^64 independently. Literal SSE2 byte expectations are checked against
@@ -54,8 +54,8 @@ access. Subsequent execution must preserve committed results without replay.
 Negative admission tests include general helpers, unsupported numerical modes,
 zero synthetic costs and aliased P stores. These are directed tests, not fuzzing.
 
-Both complete direct-only suites pass all 95 tests without skips: release
-161.45 s and strict 499.22 s. All 40 public binary fixtures remain unchanged.
+At b415608 both complete direct-only suites passed all 95 tests without skips:
+release 161.45 s and strict 499.22 s. All 40 public binary fixtures remain unchanged.
 The structural ISA audit passes, while the complete-ISA gate still fails with
 118 partial catalogue entries and zero complete entries. These tests qualify
 the change's stated domains, not the complete DSP56300 architecture.
@@ -68,8 +68,9 @@ fixed-frequency, energy or statistical-confidence claim is made. Each executable
 uses 64 warmups and nine trials. Three process runs rotate parent/control/after
 order. The table is the median of their three trial medians, in ns/call.
 
-Parent is commit 5c7f4c8. The admission-disabled control uses the candidate
-compiler and runtime layouts, changing only the positive admission return.
+Parent is commit 5c7f4c8 and the retirement candidate is b415608. The admission-
+disabled control uses the candidate compiler and runtime layouts, changing only
+the positive admission return.
 All 37 other core archive objects are byte-identical to the candidate. This
 controls the selected optimization but does not equalize host text addresses
 with the parent. Raw trials, hashes and control provenance remain ignored local
