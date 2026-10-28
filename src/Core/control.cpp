@@ -12,12 +12,11 @@ namespace dsp56300 {
 using namespace detail;
 
 namespace {
-constexpr Word short_address_mask = 0xfff;
 constexpr unsigned control_byte_shift = 8;
 constexpr unsigned interrupt_level_shift = 8;
 constexpr Word interrupt_level_mask = 3;
 constexpr Word stack_pointer_mask = 0x3f;
-constexpr unsigned maximum_level = 2;
+constexpr unsigned maximum_level = 3;
 }
 
 void Core::Impl::push(const Word high, const Word low) {
@@ -46,6 +45,9 @@ void Core::Impl::execute(const Instruction &decoded) {
   const auto opcode = decoded.opcode;
   switch (decoded.operation) {
     case Operation::nop: return;
+    case Operation::illegal:
+    case Operation::trap:
+    case Operation::conditional_trap: execute_exception(decoded); return;
     case Operation::parallel: parallel(decoded); return;
     case Operation::move_displacement: displacement_move(decoded); return;
     case Operation::bit_register:
@@ -140,39 +142,11 @@ void Core::interrupt(const Word vector, const unsigned level) {
       !interruptible()) {
     throw std::invalid_argument("DSP interrupt is not admissible at this boundary");
   }
-  const auto foreground = state.pc;
-  for (unsigned offset = 0; offset < 2; ++offset) {
-    impl_->current_pc = vector + offset;
-    const auto decoded = impl_->instruction(vector + offset);
-    if (impl_->fault.kind != FaultKind::none) { return; }
-    if (decoded.operation == Operation::call_short ||
-        decoded.operation == Operation::call_effective) {
-      const auto target = decoded.operation == Operation::call_short
-                              ? decoded.opcode & short_address_mask
-                              : impl_->control_address(decoded);
-      if (impl_->fault.kind != FaultKind::none) { return; }
-      impl_->push(foreground, state.sr);
-      if (impl_->fault.kind != FaultKind::none) { return; }
-      constexpr Word cleared = scale_up | scale_down | arithmetic_16 | loop_flag | forever_flag |
-                               (interrupt_level_mask << interrupt_level_shift);
-      state.sr = (state.sr & ~cleared) | ((level + 1) << interrupt_level_shift);
-      state.pc = target;
-      ++impl_->cpu.instructions;
-      impl_->cpu.cycles += decoded.cycles;
-      return;
-    }
-    if ((decoded.operation != Operation::parallel && decoded.operation != Operation::nop) ||
-        decoded.words != 1) {
-      impl_->fail(
-          FaultKind::unsupported_instruction, Space::program, vector + offset, decoded.opcode);
-      return;
-    }
-    impl_->execute(decoded);
-    if (impl_->fault.kind != FaultKind::none) { return; }
-    ++impl_->cpu.instructions;
-    impl_->cpu.cycles += decoded.cycles;
+  impl_->vector = {
+      .resume = state.pc, .address = vector, .level = level, .phase = Impl::VectorPhase::first};
+  impl_->cpu.repeat_completed = false;
+  while (impl_->vector.phase != Impl::VectorPhase::none && impl_->fault.kind == FaultKind::none) {
+    impl_->step_vector();
   }
-  state.pc = foreground;
-  impl_->cpu.interrupt_inhibited = true;
 }
 } // namespace dsp56300

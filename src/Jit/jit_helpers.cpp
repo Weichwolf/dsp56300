@@ -15,7 +15,8 @@ std::uint32_t Core::Impl::jit_execute(void *const owner,
   if (self.fault.kind != FaultKind::none) { return 0; }
   self.jit->helper_retired();
   const auto next = (operation->pc + operation->instruction.words) & word_mask;
-  return self.cpu.reg.pc == next && self.cpu.repeat_remaining == 0 && !self.jit->dirty() &&
+  return self.vector.phase == VectorPhase::none && self.cpu.reg.pc == next &&
+                 self.cpu.repeat_remaining == 0 && !self.jit->dirty() &&
                  (self.cpu.reg.sr & detail::numeric_mode_mask) == operation->mode &&
                  detail::active_loop_address(self.cpu.reg) == operation->loop_address
              ? 2U

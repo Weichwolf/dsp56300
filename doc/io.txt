@@ -110,3 +110,24 @@ instructions use the general executor. Use architectural Progress for overall
 guest retirement. The existing post-RTI/fast-service admission exclusion lasts
 until one foreground instruction retires; run(0) cannot consume it. It remains
 an explicit library policy pending full hardware pipeline/event qualification.
+
+Pending software exceptions
+
+Explicit ILLEGAL/TRAP/taken TRAPcc retire the request before vector execution.
+Subsequent run budgets count each injected instruction, including one two-word
+fast instruction; zero budgets cannot enter or advance a vector. A first vector
+word may finish while the second remains pending. The callback pc identifies
+the vector instruction; visible register PC is the selected foreground resume
+address during a fast service. Canonical registers, prior vector/AGU effects and
+pre-retirement Progress are observable. Callback P edits/cache clearing follow
+the normal mutation contract and cannot discard pending work. Rejected I/O or
+invalid/missing vector operands stop without replay or fabricated retirement.
+Earlier accepted effects are retained; no transactional rollback is promised.
+Host interrupt admission cannot overwrite pending work. Level three is accepted
+even at IPL3 subject to the library's stopped-boundary/exclusion policy; long
+entry clamps IPL at three. reset cancels hidden continuation. Register views
+alone do not serialize pending/partially executed vectors. Internal instructions
+run through the general executor and count as JIT helpers when run retires them;
+synchronous Core::interrupt instructions count in architectural Progress only.
+No derivative arbitration, automatic hardware fault source or calibrated IRQ
+pipeline model follows from these contracts. See doc/exceptions.txt for details.

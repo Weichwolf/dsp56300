@@ -280,3 +280,22 @@ contributing architectural retirement/base costs but not native JIT counters.
 Binary interrupted-DO/nested-frame tests qualify their own successful state
 subsets; complete extended stacks, exceptions, numerical side effects and
 sequence/IRQ/event/pipeline behavior remain open. No throughput claim follows.
+
+Software-exception boundaries
+
+Explicit ILLEGAL/TRAP/TRAPcc use general execution and terminate native blocks.
+A pending request blocks native dispatch until its bounded vector completes or
+enters a long handler. REP ILLEGAL defers/coalesces that request until REP ends.
+Conditional traps read canonical current flags, including flags just produced
+by native arithmetic. Cache clearing invalidates translations while preserving
+pending vector state. After long entry and RTI, normal mode/loop keys select
+code for the new/restored state. Tests require actual native MACs and Carry/
+rounding consumers across these transitions, including warm old-mode code and
+short/long vector calls; backend agreement alone is insufficient evidence.
+The controller is private owner state; Cpu and generated-code offsets remain
+unchanged. Clang 19 x64 layouts show Cpu=384 and Core::Impl=131648 bytes before
+and after; the new 16-byte controller fits prior owner padding. This does not
+measure cache misses, latency or throughput. No native exception lowering,
+SIMD, benchmark or hardware-isolation result is claimed in this increment.
+Full vector/mode/event/pipeline qualification remains open; doc/exceptions.txt
+records the software-exception conventions and unresolved manufacturer details.

@@ -41,7 +41,7 @@ EXTRACT	13-70	partial	src/Core/bit_fields.cpp	test/generate_bit_fields.cpp;test/
 EXTRACTU	13-72	partial	src/Core/bit_fields.cpp	test/generate_bit_fields.cpp;test/fixtures/bit-fields.d56	SB/SC/DM semantics; complete event/sequence and pipeline timing qualification
 IFcc	13-74	partial	src/Core/conditional.cpp	test/generate_conditions.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 IFcc.U	13-75	partial	src/Core/conditional.cpp	test/generate_conditions.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
-ILLEGAL	13-76	missing	-	-	Instruction decoding and semantics; all operand/mode/sequence tests
+ILLEGAL	13-76	partial	src/Core/exceptions.cpp;src/Core/decode.cpp;src/Core/core.cpp;src/Jit/jit_helpers.cpp	test/generate_exceptions.cpp;test/exception_model.hpp;test/exception_test.cpp	All vector/conditional-call/fast forms; automatic illegal/stack exception sources; ILLEGAL-at-LA pipeline anomaly; TRAP resume/untaken-cost hardware confirmation; full mode/sequence/event timing
 INC	13-77	partial	src/Core/integer.cpp	test/generate_integer.cpp	SM/SB/SC/DM semantics and combinations; pipeline/IRQ/stack-extension sequences
 INSERT	13-78	partial	src/Core/bit_fields.cpp	test/generate_bit_fields.cpp;test/fixtures/bit-fields.d56	SB/SC/DM semantics; complete event/sequence and pipeline timing qualification
 Jcc	13-80	partial	src/Core/conditional.cpp	test/generate_conditions.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
@@ -50,7 +50,7 @@ JMP	13-83	partial	src/Core/conditional.cpp	test/generate_conditions.cpp	Other nu
 JScc	13-84	partial	src/Core/conditional.cpp	test/generate_conditions.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 JSCLR	13-85	partial	src/Core/bits.cpp	test/generate_bit_access.cpp;test/bit_access_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 JSET	13-87	partial	src/Core/bits.cpp	test/generate_bit_access.cpp;test/bit_access_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
-JSR	13-89	partial	src/Core/conditional.cpp;src/Core/control.cpp	test/generate_conditions.cpp;test/return_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
+JSR	13-89	partial	src/Core/conditional.cpp;src/Core/control.cpp;src/Core/exceptions.cpp	test/generate_conditions.cpp;test/return_test.cpp;test/exception_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 JSSET	13-90	partial	src/Core/bits.cpp	test/generate_bit_access.cpp;test/bit_access_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 LEA	13-98;A-5	partial	src/Core/agu.cpp	test/generate_address_calc.cpp;test/address_model.hpp;test/fixtures/address-calculations.d56	Other numeric modes; complete AGU/alias/sequence, pipeline and IRQ qualification; manual destination-note inconsistencies
 LRA	13-92	partial	src/Core/agu.cpp	test/generate_address_calc.cpp;test/address_model.hpp;test/fixtures/address-calculations.d56	Other numeric modes; complete AGU/alias/sequence, pipeline and IRQ qualification; manual destination-note inconsistencies
@@ -112,8 +112,8 @@ SUBL	13-174	partial	src/Core/arithmetic.cpp	test/generate_bit_operations.cpp	Oth
 SUBR	13-175	partial	src/Core/arithmetic.cpp	test/generate_bit_operations.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 Tcc	13-176	partial	src/Core/conditional.cpp	test/generate_conditions.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 TFR	13-178	partial	src/Core/arithmetic.cpp	test/generate_arithmetic.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
-TRAP	13-179	missing	-	-	Instruction decoding and semantics; all operand/mode/sequence tests
-TRAPcc	13-180	missing	-	-	Instruction decoding and semantics; all operand/mode/sequence tests
+TRAP	13-179	partial	src/Core/exceptions.cpp;src/Core/decode.cpp;src/Core/core.cpp;src/Jit/jit_helpers.cpp	test/generate_exceptions.cpp;test/exception_model.hpp;test/exception_test.cpp	All vector/conditional-call/fast forms; automatic illegal/stack exception sources; ILLEGAL-at-LA pipeline anomaly; TRAP resume/untaken-cost hardware confirmation; full mode/sequence/event timing
+TRAPcc	13-180	partial	src/Core/exceptions.cpp;src/Core/decode.cpp;src/Core/core.cpp;src/Jit/jit_helpers.cpp	test/generate_exceptions.cpp;test/exception_model.hpp;test/exception_test.cpp	All vector/conditional-call/fast forms; automatic illegal/stack exception sources; ILLEGAL-at-LA pipeline anomaly; TRAP resume/untaken-cost hardware confirmation; full mode/sequence/event timing
 TST	13-181	partial	src/Core/arithmetic.cpp	test/generate_selection.cpp;test/selection_model.hpp;test/selection_test.cpp	Other numerical modes; full parallel/operand/alias and IRQ/sequence/pipeline qualification
 VSL	13-182;A-8	partial	src/Core/viterbi.cpp	test/generate_viterbi.cpp;test/viterbi_test.cpp;test/fixtures/viterbi.d56	SB/SC/DM/SM; complete AGU/sequence and pipeline/IRQ qualification; hardware peripheral arbitration
 WAIT	13-183	missing	-	-	Instruction decoding and semantics; all operand/mode/sequence tests

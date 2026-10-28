@@ -146,6 +146,10 @@ detail::Instruction Core::Impl::instruction(const Word pc) {
 }
 
 void Core::Impl::step() {
+  if (exception_ready()) {
+    step_vector();
+    return;
+  }
   current_pc = cpu.reg.pc;
   const auto decoded =
       cpu.repeat_remaining != 0 && cpu.repeat_loaded ? repeated : instruction(current_pc);
@@ -200,6 +204,7 @@ Core::~Core() = default;
 void Core::reset() {
   if (impl_->executing) { throw std::logic_error("Reset requires stopped DSP execution"); }
   impl_->cpu = {};
+  impl_->vector = {};
   impl_->cpu.reg.m.fill(word_mask);
   impl_->fault = {};
   clear_code_cache();
@@ -267,7 +272,7 @@ RunResult Core::run(const std::uint32_t instruction_budget) {
     return result;
   }
   while (result.dispatches < instruction_budget && fault().kind == FaultKind::none) {
-    if (impl_->cpu.repeat_remaining == 0) {
+    if (impl_->cpu.repeat_remaining == 0 && impl_->vector.phase == Impl::VectorPhase::none) {
       const auto retired = impl_->jit->run(instruction_budget - result.dispatches);
       result.dispatches += retired;
       if (retired != 0 || fault().kind != FaultKind::none) { continue; }
@@ -284,8 +289,8 @@ RunResult Core::run(const std::uint32_t instruction_budget) {
 }
 
 bool Core::interruptible() const {
-  if (fault().kind != FaultKind::none || impl_->cpu.repeat_remaining != 0 ||
-      impl_->cpu.interrupt_inhibited) {
+  if (fault().kind != FaultKind::none || impl_->vector.phase != Impl::VectorPhase::none ||
+      impl_->cpu.repeat_remaining != 0 || impl_->cpu.interrupt_inhibited) {
     return false;
   }
   if (!impl_->cpu.repeat_completed) { return true; }

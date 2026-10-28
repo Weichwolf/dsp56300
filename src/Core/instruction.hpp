@@ -68,13 +68,17 @@ enum class Operation : std::uint8_t {
   bit_register,
   bit_memory,
   bit_jump,
-  bit_branch
+  bit_branch,
+  illegal,
+  trap,
+  conditional_trap
 };
 
 [[nodiscard]] constexpr bool repeatable(const Operation operation) noexcept {
   switch (operation) {
     case Operation::parallel:
     case Operation::nop:
+    case Operation::illegal:
     case Operation::and_control:
     case Operation::or_control:
     case Operation::arithmetic_shift_immediate:
@@ -113,6 +117,8 @@ enum class Operation : std::uint8_t {
     case Operation::bit_register:
     case Operation::bit_memory: return true;
     case Operation::unsupported:
+    case Operation::trap:
+    case Operation::conditional_trap:
     case Operation::jump_short:
     case Operation::jump_effective:
     case Operation::call_short:

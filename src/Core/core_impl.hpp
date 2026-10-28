@@ -15,6 +15,22 @@
 
 namespace dsp56300 {
 struct Core::Impl {
+  enum class VectorPhase : std::uint8_t { none, pending, first, second };
+
+  struct Vector {
+    Word resume = 0, address = 0;
+    unsigned level = 0;
+    VectorPhase phase = VectorPhase::none;
+  };
+
+  [[nodiscard]] bool exception_ready() const noexcept {
+    return vector.phase != VectorPhase::none && cpu.repeat_remaining == 0;
+  }
+
+  void execute_exception(const detail::Instruction &decoded);
+  void step_vector();
+  void call_vector(const detail::Instruction &decoded);
+
   explicit Impl(Buffers supplied, Io *io, Options settings);
   [[nodiscard]] std::span<Word> area(Space space) const;
   void fail(FaultKind kind, Space space, Word address, Word value = 0);
@@ -113,6 +129,7 @@ struct Core::Impl {
   unsigned current_words = 1;
   Options options;
   Fault fault;
+  Vector vector;
   bool executing = false;
 };
 } // namespace dsp56300

@@ -234,3 +234,25 @@ contract, not hardware underflow/SE/UF/NMI semantics. Full stack extension,
 automatic stack exceptions, restored-mode side effects, all legal sequences and
 fast/vector/NMI/event/pipeline qualification remain open. The totals are now
 15 missing, 0 untested, 103 partial, 0 complete; the full-ISA gate must still fail.
+
+Software-exception increment: explicit ILLEGAL, TRAP and all TRAPcc encodings
+now have independent state/sequence fixtures and native/vector boundary tests.
+The three rows move from missing to partial: 12 missing, 0 untested, 106 partial
+and 0 complete. Pending vector execution is bounded by the caller's instruction
+budget; REP ILLEGAL defers and coalesces entry, whereas TRAP/TRAPcc cannot be
+repeated. Native blocks stop before an outstanding vector, and cache clearing
+cannot discard it. Host level-three admission shares the vector executor.
+The CPU vector tables in DSP56300FM, AN1830 and DSP56303UM support VBA offsets
+04/08. The ILLEGAL instruction page's 3E address conflicts with them. The model
+uses the table addresses, aligned VBA banks and ILLEGAL's documented +2 return.
+TRAP continuation follows the generic saved-PC convention and still requires
+hardware confirmation. Literal 5/9 base costs are not a calibrated pipeline or
+untaken-TRAPcc measurement. See doc/exceptions.txt for sources and contracts.
+Independent models cover all CCR conditions, six supported numeric modes,
+ordinary frames, service/RTI/foreground prefixes, fast one-/two-word services,
+zero budgets and zero-encoded REP. Directed tests require actual native work,
+fresh flags/modes, callback mutation, short/long vector calls and fail-stop on
+missing operands, invalid addresses, full stacks or rejected I/O. They do not
+qualify every fast/vector class, automatic illegal/stack sources, extended
+stacks, VBA writable/readback masks, the ILLEGAL-at-LA pipeline anomaly, all
+numeric effects or event/arbitration timing. The completion gate still fails.

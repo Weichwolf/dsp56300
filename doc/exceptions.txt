@@ -1,0 +1,72 @@
+Software exceptions and vector execution
+
+The explicit ILLEGAL, TRAP and TRAPcc instructions use an internal pending
+vector controller. It is CPU behavior, not derivative peripheral emulation.
+The controller resides in Core::Impl and uses no new allocation per request;
+the hot Cpu layout and the generated-code ABI remain unchanged. The consumer
+continues using the same headers, caller-owned RAM, run and I/O interfaces.
+Registers alone are still not a complete REP/IRQ/exception checkpoint.
+
+A request retires without changing CCR. If its run budget ends there, no vector
+or successor instruction executes. A later positive budget fetches the vector.
+Every successfully executed vector instruction counts once, including a
+single two-word fast instruction. One-word vector pairs can stop between words.
+A long JSR saves the resume PC and SR, clears the qualified service-mode fields,
+sets IPL to at most three, then leaves execution at the handler. RTI restores
+the frame. A completed fast service resumes foreground execution without RTI.
+The register PC remains the selected foreground resume address during fast
+vector execution; the I/O callback pc argument identifies the vector access.
+Callback and host program edits use the normal P invalidation contract.
+
+Architectural Progress includes request and injected instruction retirement and
+listed base costs. Internal vectors executed by run count as general helpers
+in JIT statistics; direct host interrupt admission contributes to Progress but
+not generated-code counters. Extra exception/pipeline/wait latency is not a
+calibrated clock. Zero budgets never consume pending work or exclusion state.
+
+The pending controller survives clear_code_cache. reset clears it; set_registers
+is initialization of visible registers and does not restore hidden continuation.
+Host interrupt admission cannot replace an active/pending internal request.
+Level-three admission is supported even at IPL3, subject to the existing library
+boundary policy; a long service saturates the mask at three. This is not a
+complete nonmaskable-source arbiter or hardware pipeline model.
+
+The implemented vector subset comprises unconditional short/effective JSR,
+parallel ALU/data moves and NOP. One two-word fast instruction is admitted at
+the first vector word. Existing long-call entry can use either vector slot.
+Conditional/bit-call vector forms and other legal fast instruction classes are
+still explicit unsupported cases. Decoder, EA, stack and I/O failures do not
+retire the failed instruction; already accepted vector or address effects are
+retained and later run calls do not replay them. Selected failure-state checks
+are library contracts, not hardware bus-error/stack-exception rollback.
+
+REP ILLEGAL coalesces one pending request. It admits the vector only after the
+repeat finishes, including the encoded-zero count of 65536. TRAP and TRAPcc are
+prohibited repeat bodies, including untaken conditions. Unsupported decoded
+instructions and stack errors still use explicit library faults; this increment
+does not automatically turn every such fault into an illegal/stack exception.
+
+Sources and unresolved details
+
+DSP56300 Family Manual Rev.5 chapter 2 table 2-2 and sections 5.4.4.4/13/A,
+https://www.nxp.com/docs/en/reference-manual/DSP56300FM.pdf
+NXP AN1830 Rev.1 section 3.2/table 11,
+https://www.nxp.com/docs/en/application-note/AN1830.pdf
+DSP56303 User's Manual Rev.2 table 4-5,
+https://www.nxp.com/docs/en/reference-manual/DSP56303UM.pdf
+
+Those vector tables identify VBA offsets 04 (illegal) and 08 (trap), and
+VBA's low byte does not select the bank. The ILLEGAL entry's literal 3E vector
+conflicts with these core tables; the implementation uses 04. VBA register
+readback/writable masks themselves still need separate qualification.
+ILLEGAL's documented continuation is its instruction plus two. Its instruction
+entry recommends abort/reinitialization; the guest's handler determines that
+response. TRAP/TRAPcc continuation is modeled at the next instruction from the
+generic saved-PC convention. That inference still needs hardware confirmation.
+The timing table lists 5 cycles for ILLEGAL and 9 for TRAP/TRAPcc. The current
+base-cost model uses those values; true/false TRAPcc pipeline timing and overlap
+with injected vector costs remain uncalibrated. The documented ILLEGAL-at-LA
+pipeline anomaly is not implemented. Extended stacks, SE/UF and automatic
+exceptions, complete source arbitration/vector legality/numeric modes and
+pipeline/event qualification remain mandatory gaps. None of these ISA rows is
+complete, and this is not a protected VM backend or throughput qualification.
