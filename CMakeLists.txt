@@ -26,7 +26,7 @@ add_library(dsp56300_core STATIC
   src/Core/conditional.cpp src/Core/immediate.cpp src/Core/integer.cpp src/Core/decode.cpp src/Core/moves.cpp
   src/Core/transfers.cpp src/Core/registers.cpp src/Core/agu.cpp src/Core/control.cpp src/Core/exceptions.cpp
   src/Core/bits.cpp src/Core/bit_fields.cpp src/Core/loops.cpp src/Core/products.cpp src/Core/iteration.cpp
-  src/Core/viterbi.cpp
+  src/Core/viterbi.cpp src/Core/program_cache.cpp src/Core/cache_control.cpp
   src/Jit/jit.cpp src/Jit/jit_helpers.cpp src/Jit/X64/jit_emitter.cpp src/Jit/X64/x64.cpp
   src/Jit/X64/jit_addition.cpp
   src/Jit/X64/jit_loops.cpp
@@ -59,6 +59,13 @@ if(BUILD_TESTING)
   add_executable(dsp56300_loop_control_test test/loop_control_test.cpp)
   target_link_libraries(dsp56300_loop_control_test PRIVATE dsp56300::core)
   add_test(NAME loop-control-boundaries COMMAND dsp56300_loop_control_test)
+  add_executable(dsp56300_cache_control_test test/cache_control_test.cpp)
+  target_link_libraries(dsp56300_cache_control_test PRIVATE dsp56300::core)
+  add_test(NAME architectural-cache-integration COMMAND dsp56300_cache_control_test)
+  add_executable(dsp56300_cache_storage_test test/cache_storage_test.cpp)
+  target_link_libraries(dsp56300_cache_storage_test PRIVATE dsp56300::core)
+  target_include_directories(dsp56300_cache_storage_test PRIVATE src/Core)
+  add_test(NAME architectural-cache-storage COMMAND dsp56300_cache_storage_test)
   add_executable(dsp56300_core_test test/core_test.cpp)
   target_link_libraries(dsp56300_core_test PRIVATE dsp56300::core)
   add_test(NAME core-instructions COMMAND dsp56300_core_test)
@@ -137,6 +144,8 @@ if(BUILD_TESTING)
   target_link_libraries(dsp56300_generate_parallel_moves PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_displacement test/generate_displacement.cpp)
   target_link_libraries(dsp56300_generate_displacement PRIVATE dsp56300_fixture_format)
+  add_executable(dsp56300_generate_cache_controls test/generate_cache_controls.cpp)
+  target_link_libraries(dsp56300_generate_cache_controls PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_exceptions test/generate_exceptions.cpp)
   target_link_libraries(dsp56300_generate_exceptions PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_returns test/generate_returns.cpp)
@@ -199,6 +208,17 @@ if(BUILD_TESTING)
   add_test(NAME displacement-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/displacement-short.d56"
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/displacement-long.d56")
+  add_test(NAME cache-control-fixtures COMMAND dsp56300_fixture_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/cache-control-state.d56"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/cache-control-sequences.d56")
+  foreach(cache_group IN ITEMS state sequences)
+    add_test(NAME cache-control-${cache_group}-reproducibility COMMAND "${CMAKE_COMMAND}"
+      "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_cache_controls>"
+      "-DGENERATOR_ARGUMENTS=${cache_group}"
+      "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/cache-control-${cache_group}-regenerated.d56"
+      "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/cache-control-${cache_group}.d56"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
+  endforeach()
   add_test(NAME exception-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/exception-state.d56"
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/exception-sequences.d56")

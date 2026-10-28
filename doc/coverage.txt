@@ -4,12 +4,62 @@ Full-ISA completion requirement: the complete DSP56300 instruction set must be
 implemented and independently tested, as explicitly reiterated by the user.
 Neither a passing current CTest suite nor successful Blofeld workloads is a
 replacement. doc/isa-coverage.tsv inventories 118 instruction/family/MOVE-form
-and alias entries against DSP56300FM Rev.5. The current audit records 12 missing,
-0 without dedicated independent tests and 106 partially tested entries; none
+and alias entries against DSP56300FM Rev.5. The current audit records 5 missing,
+0 without dedicated independent tests and 113 partially tested entries; none
 claims complete support. These counts are catalogue rows, not disjoint opcode
 counts or an ISA-support percentage. Detailed format/mode/sequence expansion
 remains mandatory. python3 tools/isa_audit.py --require-complete deliberately
 returns failure while any entry remains incomplete; see doc/isa-qualification.txt.
+
+Architectural-cache ISA increment: PFLUSH, PFLUSHUN, PFREE, PLOCK/PUNLOCK and
+PLOCKR/PUNLOCKR now operate on separate DSP cache storage, not host decoded/JIT
+caches. Eight associative sectors track tags, valid words, locks and LRU order.
+The host explicitly declares a cacheable external P interval and 128-/256-word
+sectors; default is an empty interval, without a fabricated derivative map.
+Fetches fill/touch sectors; PMOVE reads hit data without allocating/touching, and
+guest P writes update RAM plus a matching cache sector without allocating.
+Host/aliased data writes retain DSP-cached instructions while invalidating host
+translations. Global/selective flush, unlock-all, all-locked controls, relative
+wrap and memory-alterable EA updates have independent models and witnesses.
+CE-enabled execution uses the general executor on all three backends. Native
+helpers stop immediately when CE is set, and native execution can resume after
+CE clearing. This is an explicit correctness fallback; optimized native execution
+with the architectural cache enabled remains future performance work.
+The CPU remains 384 bytes and the private owner 131648 bytes on Clang 19 x64.
+Lazy cache storage is a 416-byte cold object plus 4096/8192 contiguous word-data
+bytes for 1K/2K geometries, without per-hit/control allocation after creation.
+These are layout/allocation results, not measured cache locality or throughput.
+60928 state and 11204 sequence fixtures (72132 cases per backend) enumerate all
+119 legal cache-control opcode/form combinations and all old CCR bytes, six
+rotating supported numeric modes and representative independent linear/modulo/
+reverse/multiple-wrap coordinates. Sequences cover every enabled-foreground or
+CE-disabled illegal-handler/RTI prefix, legal single-word REP, repeated EA
+updates, encoded-zero REP and two-word REP rejection. The format/earlier archive
+bytes stay unchanged; fixture generation does not link the emulator core.
+A separate associative-map/access-age model checks every tag, valid/data word,
+lock and LRU position, including all 256 lock masks and burst/span boundaries.
+Integration tests observe the selected locked sector for all 57 legal EA forms,
+exact R changes, stale RAM/cached data, P write-through, cache clearing/reset,
+invalid selectors and actual native/general/native CE transitions.
+All seven rows move from missing to partial. DSP pipeline prefetch and exact
+burst/bus timing, missing speculative burst requests, duplicate reset-tag
+selection, all-locked fetch bypass confirmation, CE separation rules, precise
+disabled-mode EA/exception/resume/cost behavior, all numerical/IRQ/event effects
+and derivative cache/PRAM remapping remain mandatory gaps. See doc/program-cache.txt.
+The complete ISA, optimized representative 270 MIPS host load/energy and
+transparent hardware-isolated execution objectives remain open. This increment
+adds no SIMD/native lowering or measured throughput/device/energy result.
+
+Architectural-cache validation: full release and strict suites each pass 85
+executable tests, with 86 registered and one explicit KVM permission skip.
+Times are 131.30 s and 472.40 s. Both reproduce the archives and pass 23724640
+storage-model assertions plus 6631 host integration assertions. All 89 strict
+translation units retain nonrecovering ASan/UBSan/integer instrumentation and
+clang-tidy; format-check and the structural ISA audit pass. The full-ISA gate
+still deliberately fails. All 34 earlier binary archives remain byte-identical.
+Only optional Options mapping/geometry fields extend the public API; Cpu and
+existing register/generated-code layouts are unchanged. No quality-policy
+weakening, new native dependency, fuzz run or publication is added.
 
 Software-exception ISA increment: explicit ILLEGAL, TRAP and all sixteen
 TRAPcc forms now execute through a bounded pending-vector controller. Request

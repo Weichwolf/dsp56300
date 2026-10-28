@@ -72,6 +72,11 @@ struct Options {
   Word instructions_per_block = 64;
   // False keeps generated blocks but executes every operation through the helpers.
   bool optimize = true;
+  // Half-open external P interval eligible for the architectural instruction cache.
+  // Empty by default: the embedder must declare its derivative's external map.
+  Word cacheable_begin = address_words, cacheable_end = address_words;
+  // Eight sectors, each 128 (1K total) or 256 (2K total) DSP words.
+  unsigned cache_sector_words = 128;
 };
 
 struct JitStatistics {

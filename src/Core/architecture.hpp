@@ -47,6 +47,7 @@ inline constexpr Word loop_flag = Word{1} << 15, rounding_mode = Word{1} << 21;
 inline constexpr Word compatibility_mode = Word{1} << 13;
 inline constexpr Word multiply_mode = Word{1} << 14;
 inline constexpr Word arithmetic_16 = Word{1} << 17, arithmetic_saturation = Word{1} << 20;
+inline constexpr Word cache_enable = Word{1} << 19, burst_enable = Word{1} << 10;
 inline constexpr Word io_begin = 0xffff80;
 inline constexpr Word numeric_mode_mask = scale_up | scale_down | compatibility_mode |
                                           multiply_mode | arithmetic_16 | arithmetic_saturation |

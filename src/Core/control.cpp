@@ -45,6 +45,13 @@ void Core::Impl::execute(const Instruction &decoded) {
   const auto opcode = decoded.opcode;
   switch (decoded.operation) {
     case Operation::nop: return;
+    case Operation::cache_flush:
+    case Operation::cache_flush_unlocked:
+    case Operation::cache_free:
+    case Operation::cache_lock:
+    case Operation::cache_unlock:
+    case Operation::cache_lock_relative:
+    case Operation::cache_unlock_relative: execute_cache(decoded); return;
     case Operation::illegal:
     case Operation::trap:
     case Operation::conditional_trap: execute_exception(decoded); return;

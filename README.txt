@@ -7,8 +7,10 @@ and no manufacturer program assets.
 
 Current state: early implementation, not a complete DSP56300 emulator. The
 reference and cached paths share an instruction executor and have independent
-numeric expectations in tests. The instruction cache stores decoded words in
-pages allocated on demand. A/B use a left-aligned 56-bit representation so
+numeric expectations in tests. The host decode cache stores decoded words in
+pages allocated on demand. Separate architectural DSP cache storage implements
+the seven cache-control instructions; see doc/program-cache.txt for the external
+P mapping/geometry options, CE-enabled general fallback and qualification gaps. A/B use a left-aligned 56-bit representation so
 ordinary 64-bit wrapping arithmetic discards bits beyond DSP precision.
 An independent Linux x86-64 JIT emits selected scalar arithmetic and uses guarded
 general helpers for other implemented forms. Select Options.backend=Backend::jit;
@@ -42,7 +44,7 @@ The host retains buffer ownership and must use Core::load/write for program
 mutation. Core is owned by one execution thread; callbacks run synchronously.
 Unimplemented instructions/modes, unmapped accesses and rejected I/O stop the
 core with explicit context. Faulted execution requires reset. Register views
-are not complete checkpoints of REP/interrupt continuation.
+are not complete checkpoints of REP/interrupt continuation or DSP cache state.
 See doc/io.txt for synchronous word/atomic-bit callbacks and mutation boundaries.
 
 The host supplies derivative interrupt arbitration and admits an interrupt at

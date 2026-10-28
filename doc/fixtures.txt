@@ -640,6 +640,35 @@ base timing remain explicitly provisional; see doc/exceptions.txt. Full vector,
 mode, stack and event/pipeline qualification remains open. Both archives are
 synthetic project-authored data; earlier archive bytes and format are unchanged.
 
+test/fixtures/cache-control-state.d56 and cache-control-sequences.d56 contain
+60928 and 11204 independent cases per backend. Regenerate explicitly:
+
+  build/release/dsp56300_generate_cache_controls state build/cache-control-state.d56
+  build/release/dsp56300_generate_cache_controls sequences build/cache-control-sequences.d56
+  cmp build/cache-control-state.d56 test/fixtures/cache-control-state.d56
+  cmp build/cache-control-sequences.d56 test/fixtures/cache-control-sequences.d56
+
+The producer links only fixture-format. All 119 legal opcode/form combinations
+and every old CCR byte run with CE clear/set; six supported numeric modes and
+linear/reverse/modulo/multiple-wrap coordinates rotate across that matrix.
+Independent addressing models qualify raw R/N/M updates. All enabled-foreground
+and disabled-illegal-handler/RTI prefixes, single-word REP (including selected
+encoded-zero 65536 cases), coalesced requests and prohibited two-word bodies are
+represented. The archives use the default empty external interval: they qualify
+visible instruction/exception state, not cache replacement by themselves.
+23724640 separate storage assertions use an associative map and increasing ages,
+rather than the executor's arrays/valid bits and LRU list. They compare every
+sector tag/lock, every valid word and replacement order after directed fetches,
+PMOVEs, all 256 lock masks, selective/full flush and all-locked operations.
+6631 host assertions configure external P intervals and both geometries, observe each EA's
+selected sector through stale-code/flush behavior, and compare complete state,
+base costs, failed selectors and actual native/general/native CE execution.
+The storage/model tests are directed enumerations, not fuzz tests. Hardware
+prefetch, incomplete bursts, all-locked fetch behavior, duplicate-tag selection,
+precise disabled-mode exceptions, CE restrictions and other full-ISA gaps remain
+explicit in doc/program-cache.txt. Previous fixture bytes and wire format stay
+unchanged; manufacturer programs/manual extracts are not public fixtures.
+
 Wire format D56F, version 1
 
 Every integer is unsigned little-endian. u32/u64 always occupy 4/8 bytes.

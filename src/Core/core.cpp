@@ -27,6 +27,10 @@ Buffers validate(const Buffers buffers, const Options options) {
   if (options.instructions_per_block == 0 || options.instructions_per_block > maximum_block) {
     throw std::invalid_argument("Translation block length must be in [1,256]");
   }
+  if (options.cacheable_begin > options.cacheable_end || options.cacheable_end > address_words ||
+      (options.cache_sector_words != 128 && options.cache_sector_words != 256)) {
+    throw std::invalid_argument("Invalid DSP instruction cache interval or sector size");
+  }
   if (options.backend == Backend::jit && !detail::Jit::available()) {
     throw std::invalid_argument("Native translation requires Linux x86-64");
   }
@@ -104,6 +108,9 @@ Word Core::Impl::read_memory(const Space space, const Word address) {
     fail(FaultKind::memory_read, space, address);
     return 0;
   }
+  if (space == Space::program && cacheable(address) && icache) {
+    if (const auto cached = icache->peek(address)) { return *cached; }
+  }
   return memory[address] & word_mask;
 }
 
@@ -120,23 +127,25 @@ void Core::Impl::write_memory(const Space space, const Word address, const Word 
     return;
   }
   memory[address] = value & word_mask;
+  if (space == Space::program && cacheable(address) && icache) {
+    icache->write({.address = address, .value = value});
+  }
   if (aliases_program[static_cast<std::size_t>(space)]) {
     invalidate_program_word(&memory[address]);
   }
 }
 
 detail::Instruction Core::Impl::instruction(const Word pc) {
-  const auto opcode = read_memory(Space::program, pc);
+  const auto opcode = fetch_program(pc);
   if (options.backend != Backend::reference && pages[pc / page_words]) {
     const auto &cached = (*pages[pc / page_words])[pc % page_words];
     if (cached.operation != detail::Operation::unsupported && cached.opcode == opcode &&
-        (cached.words == 1 ||
-         cached.extension == read_memory(Space::program, (pc + 1) & word_mask))) {
+        (cached.words == 1 || cached.extension == fetch_program((pc + 1) & word_mask))) {
       return cached;
     }
   }
   auto decoded = detail::decode(opcode);
-  if (decoded.words == 2) { decoded.extension = read_memory(Space::program, (pc + 1) & word_mask); }
+  if (decoded.words == 2) { decoded.extension = fetch_program((pc + 1) & word_mask); }
   if (options.backend == Backend::reference) { return decoded; }
   auto &page = pages[pc / page_words];
   if (!page) { page = std::make_unique<Page>(); }
@@ -168,6 +177,7 @@ void Core::Impl::step_decoded(const detail::Instruction &decoded) {
   cpu.interrupt_inhibited = false;
   cpu.reg.pc = (current_pc + decoded.words) & word_mask;
   execute(decoded);
+  synchronize_cache_mode();
   if (fault.kind != FaultKind::none) { return; }
   if (repeating) {
     cpu.repeat_opcode = decoded.opcode;
@@ -205,6 +215,7 @@ void Core::reset() {
   if (impl_->executing) { throw std::logic_error("Reset requires stopped DSP execution"); }
   impl_->cpu = {};
   impl_->vector = {};
+  impl_->icache.reset();
   impl_->cpu.reg.m.fill(word_mask);
   impl_->fault = {};
   clear_code_cache();
@@ -272,7 +283,8 @@ RunResult Core::run(const std::uint32_t instruction_budget) {
     return result;
   }
   while (result.dispatches < instruction_budget && fault().kind == FaultKind::none) {
-    if (impl_->cpu.repeat_remaining == 0 && impl_->vector.phase == Impl::VectorPhase::none) {
+    if (impl_->cpu.repeat_remaining == 0 && impl_->vector.phase == Impl::VectorPhase::none &&
+        (impl_->cpu.reg.sr & detail::cache_enable) == 0) {
       const auto retired = impl_->jit->run(instruction_budget - result.dispatches);
       result.dispatches += retired;
       if (retired != 0 || fault().kind != FaultKind::none) { continue; }
@@ -296,7 +308,11 @@ bool Core::interruptible() const {
   if (!impl_->cpu.repeat_completed) { return true; }
   const auto pc = impl_->cpu.reg.pc;
   if (pc >= impl_->buffers.program.size()) { return false; }
-  return !detail::is_repeat(detail::decode(impl_->buffers.program[pc] & word_mask).operation);
+  auto opcode = impl_->buffers.program[pc] & word_mask;
+  if (impl_->cacheable(pc) && impl_->icache) {
+    if (const auto cached = impl_->icache->peek(pc)) { opcode = *cached; }
+  }
+  return !detail::is_repeat(detail::decode(opcode).operation);
 }
 
 void Core::clear_code_cache() {

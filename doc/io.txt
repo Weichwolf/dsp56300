@@ -131,3 +131,22 @@ run through the general executor and count as JIT helpers when run retires them;
 synchronous Core::interrupt instructions count in architectural Progress only.
 No derivative arbitration, automatic hardware fault source or calibrated IRQ
 pipeline model follows from these contracts. See doc/exceptions.txt for details.
+
+Architectural instruction-cache memory contract
+
+Options declares one external cacheable P interval and the sector size. Default
+eligibility is empty; no board map is inferred. With CE set, instruction fetch
+and guest P data transfers use the separate DSP cache model described in
+doc/program-cache.txt. Guest P writes are write-through on a sector hit; PMOVE
+reads hit valid words without allocating or changing LRU. Host read/write/load
+always access backing RAM. Host P-alias writes and guest data-space alias writes
+invalidate translations but do not make DSP instruction storage coherent.
+clear_code_cache preserves DSP cache contents/locks, just as it preserves pending
+vector work. CE clearing and reset discard architectural cache state. Requests
+outside supplied spans still fail; optional burst fills stop at interval/span
+boundaries rather than accessing unavailable host memory or fabricating data.
+This is a functional RAM contract, not a calibrated external bus or speculative
+burst failure model. Derivative cache/PRAM remapping stays with the embedder.
+Run budgets count retired guest instructions; CE-enabled general execution does
+not prefetch/retire successors through JIT lookahead. No protected VM, new I/O
+reply or native dependency is added.

@@ -6,6 +6,7 @@
 #include "dsp56300/core.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
+#include "program_cache.hpp"
 
 #include <array>
 #include <cstddef>
@@ -27,6 +28,19 @@ struct Core::Impl {
     return vector.phase != VectorPhase::none && cpu.repeat_remaining == 0;
   }
 
+  [[nodiscard]] bool cacheable(const Word address) const noexcept {
+    return (cpu.reg.sr & detail::cache_enable) != 0 && address >= options.cacheable_begin &&
+           address < options.cacheable_end;
+  }
+
+  [[nodiscard]] detail::ProgramCache &program_cache();
+
+  void synchronize_cache_mode() {
+    if ((cpu.reg.sr & detail::cache_enable) == 0) { icache.reset(); }
+  }
+
+  [[nodiscard]] Word fetch_program(Word address);
+  void execute_cache(const detail::Instruction &decoded);
   void execute_exception(const detail::Instruction &decoded);
   void step_vector();
   void call_vector(const detail::Instruction &decoded);
@@ -116,20 +130,21 @@ struct Core::Impl {
   [[nodiscard]] Word loop_count(const detail::Instruction &decoded);
   detail::Cpu cpu;
   Io *io;
-  std::array<std::uint64_t, 4> latched{};
-  detail::Instruction repeated;
   std::unique_ptr<detail::Jit> jit;
+  std::unique_ptr<detail::ProgramCache> icache;
+  std::array<std::uint64_t, 4> latched{};
   Buffers buffers;
-  std::array<bool, 3> aliases_program{true, false, false};
   static constexpr std::size_t page_words = 1024;
   static constexpr std::size_t page_count = address_words / page_words;
   using Page = std::array<detail::Instruction, page_words>;
   std::array<std::unique_ptr<Page>, page_count> pages{};
   Word current_pc = 0;
   unsigned current_words = 1;
-  Options options;
+  detail::Instruction repeated;
   Fault fault;
   Vector vector;
+  Options options;
   bool executing = false;
+  std::array<bool, 3> aliases_program{true, false, false};
 };
 } // namespace dsp56300

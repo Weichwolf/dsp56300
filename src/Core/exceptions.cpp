@@ -72,6 +72,7 @@ void Core::Impl::step_vector() {
       vector.phase = VectorPhase::second;
     }
   }
+  synchronize_cache_mode();
   if (fault.kind == FaultKind::none) {
     ++cpu.instructions;
     cpu.cycles += decoded.cycles;

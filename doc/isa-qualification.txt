@@ -256,3 +256,22 @@ missing operands, invalid addresses, full stacks or rejected I/O. They do not
 qualify every fast/vector class, automatic illegal/stack sources, extended
 stacks, VBA writable/readback masks, the ILLEGAL-at-LA pipeline anomaly, all
 numeric effects or event/arbitration timing. The completion gate still fails.
+
+Architectural-cache increment: all seven cache controls now have a functional
+implementation and independent tests, moving from missing to partial. Catalogue
+totals are 5 missing, 0 untested, 113 partial and 0 complete. This is not closure
+of all ISA semantics or a relaxation of the full-ISA gate. The model separates
+architectural tags/valid data/locks/replacement from host translation caches.
+Independent map/age expectations check cache state; binary expectations use
+separate opcode/EA/cost authoring, serial-carry/ring addressing and per-bit
+exception frames. Host tests observe actual sector selection, noncoherent RAM,
+P write-through, failure state and real native work across CE transitions.
+Cache-enabled execution intentionally uses the general executor; translator
+lookahead must not silently fill sectors or change LRU. Missing/invalid operands
+cannot fabricate addresses or retire. Illegal requests while CE is clear use
+bounded vectors/REP coalescing, with nominal base-cost and resume assumptions
+explicitly provisional. The host supplies external eligibility/geometry, without
+copying derivative mapping/peripherals. Full prefetch/burst/bus timing, CE-change
+separation, automatic exceptions, reset-tag priority/all-locked fetch confirmation,
+all modes/IRQ/events and cache/PRAM remapping remain mandatory qualification work.
+See doc/program-cache.txt for the precise functional subset and primary source.

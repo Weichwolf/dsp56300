@@ -21,6 +21,31 @@ struct Rule {
 
 // Family manual instruction encodings and documented base costs (appendix A).
 constexpr std::array rules{
+    Rule{.bits = encoding("000000000000000000000011"),
+         .operation = Operation::cache_flush,
+         .words = 1},
+    Rule{.bits = encoding("000000000000000000000001"),
+         .operation = Operation::cache_flush_unlocked,
+         .words = 1},
+    Rule{.bits = encoding("000000000000000000000010"),
+         .operation = Operation::cache_free,
+         .words = 1},
+    Rule{.bits = encoding("0000101111MMMRRR10000001"),
+         .operation = Operation::cache_lock,
+         .words = 1,
+         .cycles = 2},
+    Rule{.bits = encoding("0000101011MMMRRR10000001"),
+         .operation = Operation::cache_unlock,
+         .words = 1,
+         .cycles = 2},
+    Rule{.bits = encoding("000000000000000000001111"),
+         .operation = Operation::cache_lock_relative,
+         .words = 2,
+         .cycles = 4},
+    Rule{.bits = encoding("000000000000000000001110"),
+         .operation = Operation::cache_unlock_relative,
+         .words = 2,
+         .cycles = 4},
     Rule{.bits = encoding("000000000000000000000101"),
          .operation = Operation::illegal,
          .words = 1,
@@ -474,7 +499,8 @@ bool rule_penalty(const Rule &rule, const Word opcode) noexcept {
     return (mode == 5 || mode == 6 || mode == 7) && !immediate_peripheral;
   }
   return (rule.operation == Operation::jump_effective ||
-          rule.operation == Operation::call_effective) &&
+          rule.operation == Operation::call_effective || rule.operation == Operation::cache_lock ||
+          rule.operation == Operation::cache_unlock) &&
          address_penalty(opcode);
 }
 }
@@ -491,7 +517,8 @@ Instruction decode(const Word opcode) noexcept {
     if (!rule.bits.matches(opcode)) { continue; }
     auto words = rule.words;
     if ((rule.operation == Operation::jump_effective ||
-         rule.operation == Operation::call_effective || transfer_address(rule.operation) ||
+         rule.operation == Operation::call_effective || rule.operation == Operation::cache_lock ||
+         rule.operation == Operation::cache_unlock || transfer_address(rule.operation) ||
          (rule.operation == Operation::bit_memory &&
           bit_operand({.opcode = opcode, .operation = rule.operation}).location ==
               BitLocation::effective) ||

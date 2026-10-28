@@ -50,5 +50,6 @@ void Core::set_registers(const Registers &state) {
   impl_->cpu.reg = state;
   impl_->cpu.reg.a <<= detail::padding_bits;
   impl_->cpu.reg.b <<= detail::padding_bits;
+  impl_->synchronize_cache_mode();
 }
 } // namespace dsp56300
