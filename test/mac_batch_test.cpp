@@ -351,6 +351,90 @@ void proven_range(const BatchBackend backend) {
   }
 }
 
+void reduction_boundary_case(const Word count,
+                             const ArithmeticInput input,
+                             const std::uint64_t value) {
+  for (const Word length : {count, count + 4, count * 2}) {
+    Fixture fixture;
+    fixture.cpu.reg.lc = static_cast<Word>(fixture.x.size()) + 1;
+    fixture.context.budget = length;
+    fixture.operation.instruction =
+        detail::decode(paired_mac | (input.b ? 8U : 0U) | (input.subtract ? 4U : 0U));
+    (input.b ? fixture.cpu.reg.b : fixture.cpu.reg.a) = value << detail::padding_bits;
+    fixture.cpu.reg.x = sign24;
+    fixture.cpu.reg.y = sign24;
+    fixture.x.fill(sign24);
+    fixture.y.fill(sign24);
+    direct_check(fixture, input.backend, input.backend == BatchBackend::disabled ? 0U : length);
+  }
+}
+
+void reduction_boundaries(const BatchBackend backend) {
+  constexpr auto maximum_product = 2 * std::uint64_t{sign24} * sign24;
+  for (const Word count : {16U, 64U}) {
+    const auto margin = count * maximum_product;
+    const std::array raw{sign56 - margin - 1,
+                         sign56 - margin,
+                         sign56 - margin + 1,
+                         sign56 + margin - 1,
+                         sign56 + margin,
+                         sign56 + margin + 1};
+    for (const bool b : {false, true}) {
+      for (const bool subtract : {false, true}) {
+        for (const auto value : raw) {
+          reduction_boundary_case(count, {.backend = backend, .b = b, .subtract = subtract}, value);
+        }
+      }
+    }
+  }
+}
+
+void reduction_sequences(const ArithmeticInput input) {
+  constexpr Word flags = flag_c | flag_s | flag_l | ordinary_flags;
+  constexpr Word almost_wide = 60;
+  constexpr Word beyond_wide = 68;
+  constexpr Word mixed = 124;
+  constexpr std::array lengths{12U, 16U, 20U, 32U, almost_wide, 64U, beyond_wide, mixed, 128U};
+  for (const auto count : lengths) {
+    Fixture fixture;
+    fixture.operation.instruction =
+        detail::decode(paired_mac | (input.b ? 8U : 0U) | (input.subtract ? 4U : 0U));
+    fixture.operation.mode = input.mode;
+    fixture.cpu.reg.sr = loop | input.mode | flags;
+    fixture.cpu.reg.a = fixture.cpu.reg.b = 0;
+    fixture.cpu.reg.lc = static_cast<Word>(fixture.x.size()) + 1;
+    fixture.context.budget = count;
+    direct_check(fixture, input.backend, input.backend == BatchBackend::disabled ? 0U : count);
+  }
+}
+
+void reductions(const BatchBackend backend) {
+  reduction_boundaries(backend);
+  for (const auto mode : modes) {
+    for (const bool b : {false, true}) {
+      for (const bool subtract : {false, true}) {
+        reduction_sequences({.backend = backend, .mode = mode, .b = b, .subtract = subtract});
+      }
+    }
+  }
+}
+
+void reduction_selection() {
+  constexpr auto product = std::int64_t{sign24} * sign24 * 2;
+  constexpr auto bound = std::int64_t{1} << (accumulator_bits - 1);
+  for (const unsigned count : {16U, 64U}) {
+    const auto low = -bound + (count * product);
+    const auto high = bound - (count * product) - 1;
+    require(detail::mac_batch_math::reduction_width(low, count) == count &&
+                detail::mac_batch_math::reduction_width(high, count) == count &&
+                detail::mac_batch_math::reduction_width(low - 1, count) < count &&
+                detail::mac_batch_math::reduction_width(high + 1, count) < count &&
+                detail::mac_batch_math::reduction_width(0, count - 1) < count,
+            "Larger reduction admission includes exact safe endpoints and excludes their neighbors "
+            "or an insufficient remaining span");
+  }
+}
+
 template <BatchBackend Variant> void core_prefixes(const Word mode) {
   std::array<Word, memory_words> p{};
   Fixture fixture;
@@ -358,11 +442,34 @@ template <BatchBackend Variant> void core_prefixes(const Word mode) {
   core.write(Space::program, start, paired_mac);
   auto initial = register_model::seed(mode | loop);
   initial.la = start;
-  initial.lc = initial_count;
+  initial.lc = static_cast<Word>(fixture.x.size()) + 1;
   initial.r[0] = initial.r[4] = 0;
   initial.m[0] = initial.m[4] = word_mask;
   initial.stack[2] = std::uint64_t{start} << word_bits;
-  for (const Word budget : {31U, 0U, 1U, 2U, 3U, 4U, 5U, 7U, 8U, 9U, 15U, 16U, 17U, 31U}) {
+  constexpr Word last = 127;
+  constexpr Word before_wide = 63;
+  constexpr Word after_wide = 65;
+  constexpr Word mixed = 124;
+  constexpr std::array budgets{last,
+                               0U,
+                               1U,
+                               2U,
+                               3U,
+                               4U,
+                               5U,
+                               7U,
+                               8U,
+                               9U,
+                               15U,
+                               16U,
+                               17U,
+                               32U,
+                               before_wide,
+                               64U,
+                               after_wide,
+                               mixed,
+                               last};
+  for (const Word budget : budgets) {
     auto expected = initial;
     for (Word step = 0; step < budget; ++step) {
       scalar_step(expected, {.next_x = fixture.x[step], .next_y = fixture.y[step]});
@@ -389,10 +496,12 @@ int main() {
     dsp56300::test::arithmetic();
     dsp56300::test::boundaries();
     dsp56300::test::rejections();
+    dsp56300::test::reduction_selection();
     for (const auto backend : dsp56300::test::variants) {
       dsp56300::test::addresses(backend);
       dsp56300::test::overflow_prefixes(backend);
       dsp56300::test::proven_range(backend);
+      dsp56300::test::reductions(backend);
     }
     for (const auto mode : dsp56300::test::modes) {
       dsp56300::test::core_prefixes<dsp56300::BatchBackend::disabled>(mode);

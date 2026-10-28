@@ -8,12 +8,15 @@
 
 #include <array>
 #include <bit>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
 
 namespace dsp56300::detail {
 inline constexpr unsigned mac_batch_width = SimdLayout<64, 256>::lanes;
+inline constexpr unsigned mac_reduction_width = mac_batch_width * mac_batch_width;
+inline constexpr unsigned mac_wide_reduction = mac_reduction_width * mac_batch_width;
 
 constexpr BatchBackend select_mac_batch(const BatchBackend requested, const bool avx2) noexcept {
   if (requested == BatchBackend::disabled) { return BatchBackend::disabled; }
@@ -40,9 +43,25 @@ struct MacBatchState {
 
 namespace mac_batch_math {
 inline constexpr std::int64_t sign = std::int64_t{1} << (accumulator_bits - 1);
-inline constexpr std::int64_t margin =
-    mac_batch_width * (std::int64_t{1} << (double_word_bits - 1));
-inline constexpr std::uint64_t safe_width = static_cast<std::uint64_t>((2 * (sign - margin)) - 1);
+
+template <unsigned Count> constexpr bool interior(const std::int64_t value) noexcept {
+  static_assert(Count == mac_batch_width || Count == mac_reduction_width ||
+                Count == mac_wide_reduction);
+  // Bound every ordered prefix, including subtract and minimum*minimum, before
+  // reassociating products. All admitted reductions also fit signed64.
+  constexpr auto margin = Count * (std::int64_t{1} << (double_word_bits - 1));
+  constexpr auto width = static_cast<std::uint64_t>((2 * (sign - margin)) - 1);
+  return static_cast<std::uint64_t>(value + sign - margin) <= width;
+}
+
+constexpr unsigned reduction_width(const std::int64_t value, const std::size_t remaining) noexcept {
+  if (remaining >= mac_wide_reduction && interior<mac_wide_reduction>(value)) {
+    return mac_wide_reduction;
+  }
+  return remaining >= mac_reduction_width && interior<mac_reduction_width>(value)
+             ? mac_reduction_width
+             : mac_batch_width;
+}
 
 constexpr bool outside(const std::int64_t value) noexcept {
   return static_cast<std::uint64_t>(value + sign) > accumulator_mask;
@@ -66,8 +85,7 @@ inline void consume_mac_products(MacBatchState &state,
   const auto fourth = third + products[3];
   // Each signed24 fractional product has magnitude <= 2^47. In this interval
   // no ordered prefix of four additions/subtractions can leave signed56.
-  if (static_cast<std::uint64_t>(state.accumulator + mac_batch_math::sign -
-                                 mac_batch_math::margin) <= mac_batch_math::safe_width) {
+  if (mac_batch_math::interior<mac_batch_width>(state.accumulator)) {
     state.accumulator = fourth;
     state.overflowed = false;
     return;

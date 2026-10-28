@@ -61,7 +61,9 @@ or 64. Its constrained packed_from/packed_to/packed_load_lane operations select
 MOVD/MOVQ encoding and exact zero extension. Retirement uses 32-bit transfers;
 parallel-input snapshots use all 64 bits. Other valid storage shapes require
 their own implemented backend operations and host-ISA admission. No AVX arithmetic
-backend is claimed by a valid SimdLayout<64,256> instantiation.
+backend is claimed by a valid SimdLayout<64,256> instantiation alone. The admitted
+MAC implementation uses this shape for actual signed64 products/reduction sums,
+with separate runtime AVX2 admission; see mac-reductions.txt.
 
 DSP 24/48/56-bit masking, signed coordinates, products, rounding and flags remain
 explicit architectural semantics. Neither lane width nor vector width changes

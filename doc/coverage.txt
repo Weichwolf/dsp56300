@@ -97,22 +97,27 @@ and old parallel operands without memory/I/O observation barriers. All 6758417
 directed ASR/register assertions pass; no ISA catalogue row becomes complete.
 See doc/native-shifts.txt for guards, witnesses, measurements and remaining work.
 
-The current configuration passes all 101 correctness tests in release (115.43 s)
-and strict (446.53 s), with no skips. Strict builds instrument all 112 C++
+The current configuration passes all 101 correctness tests in release (117.70 s)
+and strict (448.08 s), with no skips. Strict builds instrument all 112 C++
 translation units with nonrecovering address/undefined/integer checks. All 148
-project C++ source/header files pass clang-format. Forty independent fixture
-archives are unchanged; fir.d56 expands from 768 to 1728 original cases. The
-structural ISA audit passes; full ISA qualification still fails as intended.
+project C++ source/header files pass clang-format. All 41 independent fixture
+archives are unchanged in the reduction-window increment; fir.d56 retains its
+1728 original cases from the preceding expansion. The structural ISA audit
+passes; full ISA qualification still fails as intended.
 See doc/native-retirement.txt for the earlier bounded bookkeeping optimization.
 
 Guarded one-instruction MAC/paired-linear-load loops now use compiled scalar or
 AVX2 batches. Four products share one accumulator checkpoint; ordered prefix
 checks retain intermediate sticky L and terminal V. A signed56 interior proof
 omits impossible overflow reconstruction. General native execution handles
-unsupported patterns, states, RAM boundaries and loop cleanup. All 311604
-arithmetic/admission checks and 672 observation-boundary checks pass in both
+unsupported patterns, states, RAM boundaries and loop cleanup. All 316526
+arithmetic/admission checks and 1680 observation-boundary checks pass in both
 builds, including exact budgets, saved frames, faults, I/O, rejected callbacks
 and code invalidation. See doc/mac-batching.txt for scope and measurements.
+A per-checkpoint 16/64-step range proof additionally admits four independent
+signed64 reduction sums. Failed proof checks use the ordered-prefix path in
+groups of up to 16, with no change to architectural admission or observation
+contracts. See doc/mac-reductions.txt for proof boundaries and performance.
 
 Adaptive pattern-dependent register allocation, new SIMD bank formats and
 both-branch evaluation remain design/experiment work, not implemented features;
@@ -150,13 +155,16 @@ call by about 6% against a matched disabled-input-cache control (about 132 MIPS)
 FFT effects in that comparison are small and mixed. See doc/native-inputs.txt
 for the complete table, protocol, short-case variability and scope limitations.
 
-The current guarded MAC experiment reaches about 683 actual guest MIPS for the
-own 512-tap FIR, about 4.66 times the same-build unbatched JIT throughput. The
-held-out 129-tap length reaches about 324 MIPS; FFT1024 stays about 240 MIPS.
-Seven rotating-order repetitions use identical inputs/replay counts and one
-pinned DSP instance. This establishes a specific loop-pattern improvement only;
-representative full-semantics throughput, fixed-load CPU use and energy remain
-open. See doc/mac-batching.txt for short-case behavior and regression checks.
+The current guarded reduction-window experiment reaches about 1159 actual guest
+MIPS for the own 512-tap FIR: about 1.70 times the previous four-prefix kernel
+and 7.92 times the same-build unbatched JIT. The held-out 129-tap length reaches
+about 376 MIPS; FFT1024 stays about 239 MIPS. Seven rotating-order repetitions
+use identical inputs/replay counts and one pinned DSP instance. Whole-benchmark
+PMU counters show about 29% fewer host instructions and 27% fewer user cycles;
+they include the harness/preparation and do not isolate the core's cache misses.
+This establishes a specific pattern improvement only; representative full-
+semantics throughput, fixed-load CPU use and energy remain open. See
+doc/mac-reductions.txt for controls, near-limit fallback and working-set tradeoffs.
 
 The bench CMake target reuses all 41 public correctness fixture archives in a
 separate CTest tree. Default uniform sampling measures 304 cases across 38 sets;

@@ -5,7 +5,8 @@ allocation or SIMD register-bank caching is already implemented. Current native
 code holds dirty A/B in RBP/RBX and, in admitted regions, SR in R14D; SSE2
 combines retirement counters. Live instruction-local parallel-input snapshots
 use XMM3..6; they expire after that ALU and reload after successful helpers.
-X/Y and AGU values still use canonical memory across guest instructions.
+Ordinary native regions still use canonical X/Y and AGU memory across guest
+instructions; the guarded MAC region below has a separate working format.
 See native-inputs.txt; persistent bank caching and adaptive allocation remain open.
 
 Architectural aliases, unshifted DSP bit coordinates
@@ -123,11 +124,12 @@ Implemented MAC-region representation
 The guarded pure-MAC batch uses a different working representation from ordinary
 native instructions. It converts aligned canonical A/B into one signed56 value
 in signed64 storage, keeps X0/Y0 as separate host words and forms four signed64
-products in the AVX2 implementation. Local working state and stream descriptors
-remain unaliased; canonical state updates only after the validated run completes.
+products or four independent reduction sums in the AVX2 implementation. Local
+working state and stream descriptors are separate values; canonical state updates only after the validated run completes.
 The compiler can keep those locals in host registers across chunks. This is a
 specific guarded region lowering, not a general adaptive register allocator.
-See mac-batching.txt for prefix flags, safe-range proof, budgets and boundaries.
+See mac-batching.txt and mac-reductions.txt for prefix flags, safe-range proofs,
+16/64-step reduction admission, budgets and boundaries.
 
 First useful allocation experiments
 
@@ -141,12 +143,12 @@ keeps a nonzero unused B, so an accidental spill of a reused host slot is visibl
 in its independent full-register expectation. SIMD old-input caches and delayed
 flags similarly require tests that overwrite the corresponding canonical banks.
 
-Guarded loop-vectorization candidate
+Implemented guarded loop vectorization
 
 For a MAC loop with two read-only contiguous unit-stride input streams and no
 intermediate rounding, four ordered products can be evaluated with AVX2.
-This is a proposed compiler pattern, not a whole-program signature or a current
-native path. Required state adapters include:
+This decoded compiler pattern is implemented, with a compiled scalar fallback.
+Its state adapters and guard obligations include:
 
 DSP effect          Vector representation / proof obligation
 old X0/Y0           prepend old word before the next three loaded words

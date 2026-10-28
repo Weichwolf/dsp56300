@@ -15,7 +15,8 @@ Four signed products and their ordered prefix sums fit signed64 for one signed56
 initial accumulator. Sticky L records any prefix leaving signed56 range. Terminal
 V is derived from the wrapped third prefix and the last product. Final ordinary
 flags retain scaling rules; C/S and all inactive state remain preserved. Raw56 is
-masked once per chunk when overflow reconstruction is required. MACR/intermediate rounding are outside this admission.
+masked once per chunk when overflow reconstruction is required. MACR and
+intermediate rounding are outside this admission.
 
 Proven interior shortcut
 
@@ -52,7 +53,10 @@ chunks. Canonical CPU state commits once after the prevalidated span. This is a
 specific region representation; general adaptive register allocation and
 persistent SIMD banks across arbitrary instructions remain open.
 
-Qualification
+Initial qualification at revision dec7089
+
+The four-prefix version below is the baseline for mac-reductions.txt, which
+extends the working representation with proven 16/64-step reductions.
 
 All 101 release and strict correctness tests pass with no skips. Directed batch
 tests perform 311604 checks; observation-boundary tests perform 672 checks.
