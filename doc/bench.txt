@@ -17,11 +17,12 @@ Configuration, analogous to CTest selection:
                           cached, reference, or all
   DSP56300_BENCH_ENFORCE_DEADLINE  ON (default); fail when a package exceeds 1 s
 
-The current continuous list contains FIR and IIR banks. Spectral analysis is
-still planned in continuous-bench.txt. Old single-output FIR and FFT replay
-fixtures remain correctness/latency diagnostics outside the qualifying target.
+The current continuous list contains FIR, IIR and overlapping spectral analysis.
+All three shapes are described in continuous-bench.txt. Old single-output FIR
+and FFT replay fixtures remain correctness/latency diagnostics outside the qualifying target.
 Each current continuous archive has one full-duration case, so sample and all
-select the same case within each set. A numeric out-of-range index, invalid backend or an empty filter fails.
+select the same case within each set. A numeric out-of-range index, invalid
+backend or an empty filter fails.
 DSP56300_BENCH_REPLAYS does not control the continuous target. The target executes
 serially. Compare release binaries with the same fixture and host conditions;
 use external affinity when desired. No host clock policy is imposed here.
@@ -47,6 +48,14 @@ reference load. Overlapping linear histories, shared coefficients and an output
 ring continue over both seconds. The guarded one-instruction MAC batch handles
 qualified inner tap loops. It does not transform filter samples into independent
 time lanes. Full state and short-case direct-dot checks are in fir-stream.txt.
+
+The spectral program analyzes fifteen complex streams with periodic Hann windows,
+1024-point FFTs, natural-order permutation and mean I/Q power. A 480-sample hop
+represents 10 ms of input, repeated 100 times in the measured second. Its
+256704500 instructions / 266161100 base cycles use 96.7859% reference load;
+sixteen whole streams would exceed capacity. Cursors and a sixteen-spectrum
+output ring remain live. The exact oracle, DFT probes and region counters are
+in spectral-stream.txt. The old standalone FFT calls remain diagnostics.
 
 Metric                    Meaning
 wall_s                    full measured execution interval, including run/checks

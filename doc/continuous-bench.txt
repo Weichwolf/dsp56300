@@ -16,7 +16,7 @@ Use normal audio-block/hop budgets, not single-instruction API calls. Validate
 final registers and all RAM against independently generated expectations after
 measurement. Retain exact instruction/base-unit checks and the public contracts.
 
-The FIR and IIR programs are implemented; spectral analysis remains planned.
+The FIR, IIR and spectral-analysis programs are implemented.
 
 Scene                 Real input per measured second      Useful work
 FIR bank              11 channels at 48 kHz               symmetric 507-tap FIR
@@ -141,7 +141,7 @@ OS scheduling guarantee. Initial probes under a format-check job showed a few
 late blocks despite meeting the package deadline; those observations are kept
 in the local experiment logs rather than hidden as correctness exclusions.
 
-The linear input streams isolate convolution/core work and do not model an
+The linear FIR input streams isolate convolution/core work and do not model an
 external DMA/input service, board wait states or energy. Wrapped streaming
 histories and more application patterns still need qualification. Only final
 output-ring contents are retained; short complete-state cases independently
@@ -168,3 +168,49 @@ archives are unchanged; the total is 46. All 117 strict translation units retain
 required nonrecovering instrumentation, and all 157 C++ sources/headers pass
 format/Werror/tidy policies. The structural ISA audit passes; complete-ISA still
 fails with all 118 rows partial. The goal remains active and incomplete.
+
+Continuous spectral addition
+
+The third scenario applies periodic Hann windows, normalized 1024-point complex
+FFT, reverse-carry natural permutation and mean I/Q power to fifteen streams at
+48 kHz. A 480-sample hop gives 100 ten-millisecond analysis steps per input
+second. Histories, metadata, FFT scratch and a sixteen-spectrum power ring persist
+through both seconds. The measured interval contains 256704500 instructions and
+266161100 base cycles (96.7859% of reference); sixteen streams exceed the budget.
+
+Independent integer expectations reuse the original FFT oracle without changing
+old fixture bytes. Twelve short cases cover startup, overlapping full history,
+output wrap, both RM settings and incoming flags. Secondary direct DFT probes
+include each stream's tone and adjacent bins. Integer expectations remain exact,
+with complete registers/frames, all P/X/Y/guards and exact progress checks.
+The short producer checks 2880 DFT/power bins (maximum errors 3.2793 / 0.479911
+word units); the full producer checks 360 (1.51844 / 0.479911). See spectral-stream.txt.
+
+Two pinned production runs use 1.185048..1.194156 wall / 1.182036..1.188717 process
+CPU seconds per input second (214.97..216.62 guest MIPS). All hundred hops miss
+their 10 ms input budget. Generated page storage is 303104 bytes; actual batch
+and AVX2 counters are zero. A requested AVX2 variant does not vectorize this
+multi-instruction FFT region. This is the third qualifying measurement shape,
+not a claim that its performance qualifies realtime. Both IIR and spectral
+remain failures in the default optimized bench, and are retained explicitly.
+
+Spectral increment qualification
+
+The 113-test sweeps pass in release (106.46 s, two CTest processes) and strict
+(233.92 s, three), without skips. All six release backend variants independently
+match the full two-second spectral program; their loaded-host comparison is
+correctness evidence rather than the sequential performance capture above.
+Strict bench validates all three complete scenarios in report-only mode.
+The default optimized bench records FIR PASS (0.302763 wall / 0.302768 CPU s),
+IIR FAIL (1.398556 / 1.395154 s) and spectral FAIL (1.195956 / 1.195887 s).
+Those are a separate whole-target capture, not directly matched to older host
+conditions. Both deadline failures are retained; the target remains red.
+
+The 46 earlier archives regenerate unchanged, including the 112-case FFT model
+refactor. Two spectral archives bring the total to 48. All 118 strict C++ units
+retain required nonrecovering instrumentation and all 160 C++ files pass format,
+tidy and Werror checks. No fuzzing was run. The structural ISA audit passes;
+complete ISA still fails with all 118 rows partial. This increment adds genuine
+measurement/validation coverage, with no production compiler change. All usual
+application domains, the two failed deadlines, further host efficiency and
+precise ISA/event/memory/energy qualification remain part of the active goal.

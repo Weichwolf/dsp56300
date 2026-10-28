@@ -52,9 +52,10 @@ without explicit authorization; these are reproducible directed domains.
 Shared correctness/benchmark fixtures
 
 CTest checks complete independently declared fixture expectations. The bench
-target runs continuous one-second work packages: an eleven-channel 507-tap FIR
-and a 92-channel four-biquad bank with normalized mix. The same scheduled DSP program is checked
-in short fixtures through all three backends, with full independent expectations
+target runs continuous one-second work packages: an eleven-channel 507-tap FIR,
+a 92-channel four-biquad bank with normalized mix, and fifteen complex streams
+with Hann/FFT/power analysis. Each scheduled DSP program is checked in short
+fixtures through all three backends, with full independent expectations
 for the two-second input used by bench. No host restoration occurs across blocks
 or between the natural warmup second and the measured second. All final P/X/Y,
 registers and exact progress are checked. See bench.txt and iir-validation.txt.
@@ -71,9 +72,10 @@ initialization, natural cold warmup and measured continuous execution. Use one
 DSP instance per backend, complete-state checks and raw artifact identities.
 Reference/cached/JIT and scalar/AVX2 batch concepts remain comparable within one
 build. Current causal IIR execution does not use independent-time SIMD batches.
-The linear continuous FIR exercises actual guarded scalar/AVX2 batches. Spectral
-and wrapped-history workloads, plus other application domains above, remain
-pending. Microinstructions and a separately written native algorithm do
+The linear continuous FIR exercises actual guarded scalar/AVX2 batches. The
+continuous spectral scenario uses exact window/transform/power expectations and
+direct DFT probes. Wrapped-history filters and other application domains above
+remain pending. Microinstructions and a separately written native algorithm do
 not establish emulator throughput, fixed-load CPU use or energy efficiency.
 
 Manufacturer context used only to select algorithm families

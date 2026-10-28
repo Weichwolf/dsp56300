@@ -6,6 +6,7 @@
 #include "fir_stream_program.hpp"
 #include "fixture_memory.hpp"
 #include "iir_stream_program.hpp"
+#include "spectral_stream_program.hpp"
 #include "support.hpp"
 
 #include <algorithm>
@@ -48,6 +49,15 @@ Workload workload(const std::string_view name) {
             .block_budget = iir_stream::block_frames * iir_stream::frame_instructions,
             .blocks = iir_stream::sample_rate / iir_stream::block_frames,
             .block_cycles = std::uint64_t{iir_stream::block_frames} * iir_stream::frame_cycles,
+            .input_seconds = 1};
+  }
+  if (name == "spectral") {
+    const auto plan = spectral_stream::program();
+    const auto instructions = static_cast<Word>(plan.hop_progress.instructions);
+    return {.warmup_budget = 1 + (spectral_stream::hops_per_second * instructions),
+            .block_budget = instructions,
+            .blocks = spectral_stream::hops_per_second,
+            .block_cycles = plan.hop_progress.estimated_cycles,
             .input_seconds = 1};
   }
   throw std::invalid_argument("Unknown continuous workload");
@@ -237,7 +247,7 @@ bool run_cases(const std::vector<BinaryCase> &cases, const Workload spec, const 
 
 int execute(const int argc, const char *const *const argv) {
   if (argc < 3 || argc > 6) {
-    throw std::runtime_error("Usage: dsp56300_continuous_bench fir|iir FILE.d56 "
+    throw std::runtime_error("Usage: dsp56300_continuous_bench fir|iir|spectral FILE.d56 "
                              "[INDEX|sample|all [BACKEND [report|enforce]]]");
   }
   const auto spec = workload(argv[1]);

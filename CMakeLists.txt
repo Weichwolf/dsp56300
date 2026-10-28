@@ -222,7 +222,7 @@ if(BUILD_TESTING)
   include(cmake/Bench.cmake)
   add_executable(dsp56300_generate_fir test/generate_fir.cpp)
   target_link_libraries(dsp56300_generate_fir PRIVATE dsp56300_fixture_format)
-  foreach(workload fir iir)
+  foreach(workload fir iir spectral)
     add_executable(dsp56300_generate_${workload}_stream test/generate_${workload}_stream.cpp)
     target_link_libraries(dsp56300_generate_${workload}_stream PRIVATE dsp56300_fixture_format)
     add_test(NAME ${workload}-stream-fixtures COMMAND dsp56300_fixture_test

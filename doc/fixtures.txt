@@ -1,3 +1,21 @@
+Continuous spectral fixtures
+
+- spectral-stream-check.d56: twelve original Hann/FFT/mean-IQ-power cases,
+  fifteen complex streams, 1024-point FFT, 480-sample hop, 1/2/3 hops, both RM
+  settings and incoming zero/C/S/L. An independent exact integer oracle predicts
+  all registers, residual nested frames, P/X/Y/guards and progress. Direct DFT
+  probes check tones and sidebands with declared quantization-error bounds.
+- spectral-stream.d56: the identical relocated program for 200 hops, two input
+  seconds at 48 kHz. The same DSP warms for 100 hops before timing the next 100.
+  A sixteen-spectrum power ring and saved overlapping input cursors remain live;
+  the host does not restore state at hop/warmup boundaries. The full program
+  retires 513409001 instructions / 532322205 documented base cycles.
+
+The producer links only the codec and uses exact integer window/FFT/power
+models. DFT tolerance applies only to the separate mathematical probe; serialized
+emulator expectations compare bit-for-bit. The default-entry FFT refactor
+regenerates its existing archive unchanged. See spectral-stream.txt and bench.txt.
+
 Continuous FIR fixtures
 
 - fir-stream-check.d56: 60 project-authored eleven-channel 507-tap cases,

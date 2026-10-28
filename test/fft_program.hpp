@@ -32,7 +32,7 @@ struct Program {
   std::vector<Word> words;
   std::vector<Stage> stages;
   Progress progress;
-  Word copy_body = 0;
+  Word copy_body = 0, entry = start;
 };
 
 struct RegisterValue {
@@ -72,12 +72,12 @@ inline void stage(Program &program, Stage input) {
   immediate(program, {.selector = address_register_base + 2, .value = twiddle_base});
   immediate(program, {.selector = address_register_base + 6, .value = twiddle_base});
   const auto inner = loop(program, half);
-  input.inner_body = start + static_cast<Word>(program.words.size());
+  input.inner_body = program.entry + static_cast<Word>(program.words.size());
   program.words.insert(program.words.end(), butterfly.begin(), butterfly.end());
-  program.words[inner] = start + static_cast<Word>(program.words.size()) - 1;
+  program.words[inner] = program.entry + static_cast<Word>(program.words.size()) - 1;
   constexpr Word update = 0x204800;
   for (const Word index : {0U, 1U, 4U, 5U}) { program.words.push_back(update | (index << 8)); }
-  input.outer_end = start + static_cast<Word>(program.words.size()) - 1;
+  input.outer_end = program.entry + static_cast<Word>(program.words.size()) - 1;
   program.words[outer] = input.outer_end;
   program.stages.push_back(input);
   // Ten two-word setup moves, one outer DO, and G*(two moves, inner DO,
@@ -88,11 +88,17 @@ inline void stage(Program &program, Stage input) {
       stage_cycles + input.groups * (group_cycles + half * butterfly.size());
 }
 
-inline Program make_program(const Word size) {
+struct Location {
+  Word size = 0, entry = start;
+};
+
+inline Program make_at(const Location location) {
+  const auto size = location.size;
   if (size < 16 || size > maximum_size || !std::has_single_bit(size)) {
     throw std::invalid_argument("FFT size must be a power of two in [16,1024]");
   }
   Program program;
+  program.entry = location.entry;
   for (Word length = size; length > 1; length /= 2) {
     stage(program, {.length = length, .groups = size / length, .step = size / length});
   }
@@ -107,11 +113,11 @@ inline Program make_program(const Word size) {
     program.words.push_back(clear_modifier | index);
   }
   const auto copy = loop(program, size);
-  program.copy_body = start + static_cast<Word>(program.words.size());
+  program.copy_body = program.entry + static_cast<Word>(program.words.size());
   constexpr Word load_reversed = 0xd08800;
   constexpr Word store_linear = 0xb03900;
   program.words.insert(program.words.end(), {load_reversed, store_linear});
-  program.words[copy] = start + static_cast<Word>(program.words.size()) - 1;
+  program.words[copy] = program.entry + static_cast<Word>(program.words.size()) - 1;
   for (const Word index : {0U, 4U}) {
     constexpr Word load_modifier = 0x05f420;
     program.words.insert(program.words.end(), {load_modifier | index, word_mask});
@@ -119,5 +125,9 @@ inline Program make_program(const Word size) {
   program.progress.instructions += copy_instructions + 2 * size;
   program.progress.estimated_cycles += copy_cycles + 2 * size;
   return program;
+}
+
+inline Program make_program(const Word size) {
+  return make_at({.size = size});
 }
 } // namespace dsp56300::test::fft
