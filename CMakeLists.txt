@@ -31,7 +31,8 @@ add_library(dsp56300_core STATIC
   src/jit/x64/jit_addition.cpp
   src/jit/x64/jit_loops.cpp
   src/jit/x64/jit_flags.cpp
-  src/jit/native_moves.cpp src/jit/dataflow.cpp src/jit/x64/jit_moves.cpp
+  src/jit/native_moves.cpp src/jit/native_region.cpp src/jit/dataflow.cpp src/jit/x64/jit_moves.cpp
+  src/jit/x64/jit_regions.cpp
   src/jit/x64/jit_move_address.cpp src/jit/x64/jit_move_register.cpp
   src/core/memory.cpp src/jit/x64/jit_retirement.cpp src/jit/x64/jit_status.cpp
   src/jit/x64/jit_shifts.cpp src/jit/native_register_moves.cpp src/jit/x64/jit_inputs.cpp
@@ -73,6 +74,10 @@ if(BUILD_TESTING)
     target_link_libraries(dsp56300_native_loop_setup_test PRIVATE dsp56300::core)
     target_include_directories(dsp56300_native_loop_setup_test PRIVATE src/core src/jit src/jit/x64 test)
     add_test(NAME native-loop-setup COMMAND dsp56300_native_loop_setup_test)
+    add_executable(dsp56300_native_region_test test/native_region_test.cpp test/native/direct.cpp)
+    target_link_libraries(dsp56300_native_region_test PRIVATE dsp56300::core)
+    target_include_directories(dsp56300_native_region_test PRIVATE src/core src/jit src/jit/x64 test)
+    add_test(NAME native-ram-regions COMMAND dsp56300_native_region_test)
     add_executable(dsp56300_mac_batch_test test/mac_batch_test.cpp)
     target_link_libraries(dsp56300_mac_batch_test PRIVATE dsp56300::core)
     target_include_directories(dsp56300_mac_batch_test PRIVATE src/core src/jit src/jit/x64 test)

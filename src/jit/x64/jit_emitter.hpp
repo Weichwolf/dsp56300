@@ -4,6 +4,7 @@
 #include "dataflow.hpp"
 #include "jit.hpp"
 #include "native_moves.hpp"
+#include "native_region.hpp"
 #include "x64.hpp"
 
 #include <array>
@@ -18,7 +19,8 @@ public:
   JitEmitter(JitRuntime runtime,
              bool optimize,
              BatchBackend batch = BatchBackend::automatic,
-             std::array<Word, agu_registers> modifiers = {});
+             std::array<Word, agu_registers> modifiers = {},
+             RegionMode region = RegionMode::automatic);
   [[nodiscard]] std::vector<std::uint8_t> generate(std::span<const NativeOp> operations);
 
   [[nodiscard]] bool packed_retirement() const noexcept { return packed_retirement_; }
@@ -29,10 +31,16 @@ public:
 
   [[nodiscard]] bool mac_batches() const noexcept { return mac_batches_; }
 
+  [[nodiscard]] bool guarded_region() const noexcept { return region_.valid; }
+
 private:
   [[nodiscard]] bool lowerable(const NativeOp &operation) const;
   [[nodiscard]] static bool has_moves(const NativeOp &operation);
-  [[nodiscard]] static bool observable_moves(const NativeOp &operation);
+  [[nodiscard]] bool observable_moves(const NativeOp &operation) const;
+  [[nodiscard]] std::vector<std::uint8_t> generate_body(std::span<const NativeOp> operations);
+  [[nodiscard]] std::vector<std::uint8_t> generate_selected(std::span<const NativeOp> operations);
+  void region_guard(x64::Code &code, x64::Reg cpu, x64::Label &failed) const;
+  void region_address(const NativeMove &move);
   [[nodiscard]] static bool is_addition(const NativeOp &operation);
   [[nodiscard]] bool is_right_shift(const NativeOp &operation) const;
   void helper(JitHelper function, const NativeOp &operation);
@@ -103,6 +111,8 @@ private:
   std::array<Word, agu_registers> modifiers_;
   bool optimize_;
   BatchBackend batch_backend_;
+  RegionMode region_mode_;
+  NativeRegion region_;
   bool mac_batches_ = false;
   bool packed_retirement_ = false;
   bool retirement_helpers_ = false;

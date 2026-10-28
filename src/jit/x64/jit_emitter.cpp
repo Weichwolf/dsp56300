@@ -8,6 +8,7 @@
 #include "instruction.hpp"
 #include "jit.hpp"
 #include "native_moves.hpp"
+#include "native_region.hpp"
 #include "x64.hpp"
 
 #include <algorithm>
@@ -64,16 +65,22 @@ static_assert(offsetof(Cpu, interrupt_inhibited) == offsetof(Cpu, repeat_complet
 JitEmitter::JitEmitter(const JitRuntime runtime,
                        const bool optimize,
                        const BatchBackend batch,
-                       const std::array<Word, agu_registers> modifiers)
-    : runtime_(runtime), modifiers_(modifiers), optimize_(optimize), batch_backend_(batch) {}
+                       const std::array<Word, agu_registers> modifiers,
+                       const RegionMode region)
+    : runtime_(runtime),
+      modifiers_(modifiers),
+      optimize_(optimize),
+      batch_backend_(batch),
+      region_mode_(region) {}
 
 bool JitEmitter::has_moves(const NativeOp &operation) {
   return operation.instruction.operation == Operation::parallel &&
          (operation.instruction.opcode & upper_move_mask) != no_move_group;
 }
 
-bool JitEmitter::observable_moves(const NativeOp &operation) {
-  return has_moves(operation) && !plan_register_move(operation.instruction).valid() &&
+bool JitEmitter::observable_moves(const NativeOp &operation) const {
+  return region_mode_ != RegionMode::guarded && has_moves(operation) &&
+         !plan_register_move(operation.instruction).valid() &&
          !plan_address_immediate(operation.instruction).valid();
 }
 
@@ -303,7 +310,9 @@ void JitEmitter::retire(const NativeOp &operation, const bool publish) {
                          Width::dword,
                          (operation.pc + operation.instruction.words) & word_mask);
   }
-  code_.store_constant(Reg::r12, offsetof(Cpu, repeat_completed), Width::word, 0);
+  if (region_mode_ != RegionMode::guarded || publish) {
+    code_.store_constant(Reg::r12, offsetof(Cpu, repeat_completed), Width::word, 0);
+  }
   retire_progress(operation);
   code_.raw(increment_retired); // INC R15D (retired instructions).
   if (observable_moves(operation) && (!at_loop_end(operation) || loop_size_ != 0)) {
@@ -320,7 +329,7 @@ void JitEmitter::retire(const NativeOp &operation, const bool publish) {
   }
 }
 
-std::vector<std::uint8_t> JitEmitter::generate(const std::span<const NativeOp> operations) {
+std::vector<std::uint8_t> JitEmitter::generate_body(const std::span<const NativeOp> operations) {
   // Full helpers continue only after checking sequential PC, numeric/loop
   // context, REP state and code validity. The ending itself must be native.
   if (!operations.empty() && at_loop_end(operations.back()) && lowerable(operations.back())) {
@@ -328,7 +337,9 @@ std::vector<std::uint8_t> JitEmitter::generate(const std::span<const NativeOp> o
     loop_pc_ = operations.front().pc;
   }
   packed_retirement_ = admit_packed_retirement(operations);
-  retirement_helpers_ = packed_retirement_ && std::ranges::any_of(operations, observable_moves);
+  retirement_helpers_ =
+      packed_retirement_ &&
+      std::ranges::any_of(operations, [this](const auto &op) { return observable_moves(op); });
   cached_status_ = admit_cached_status();
   cached_inputs_ = admit_cached_inputs(operations);
   code_.raw(entry_landing); // ENDBR64.
@@ -350,6 +361,7 @@ std::vector<std::uint8_t> JitEmitter::generate(const std::span<const NativeOp> o
     exit_if(Branch::equal);
   }
   code_.bind(loop_header_);
+  if (region_mode_ == RegionMode::guarded) { region_guard(code_, Reg::r12, exits_[0]); }
   const auto flags = plan_flags(operations);
   for (std::size_t operation_index = 0; operation_index < operations.size(); ++operation_index) {
     const auto &operation = operations[operation_index];

@@ -4,6 +4,7 @@
 #include "jit.hpp"
 #include "jit_emitter.hpp"
 #include "native_moves.hpp"
+#include "native_region.hpp"
 #include "x64.hpp"
 
 #include <array>
@@ -88,6 +89,16 @@ void JitEmitter::moves(const NativeOp &operation) {
   }
   if (transfers.empty()) {
     general_moves(operation);
+    return;
+  }
+  if (region_mode_ == RegionMode::guarded) {
+    for (const auto &move : transfers) { region_address(move); }
+    capture_inputs();
+    for (const auto &move : transfers) { move_update(move); }
+    for (const auto &move : transfers) { move_capture(move, operation.mode); }
+    for (const auto &move : transfers) { move_commit(move); }
+    code_.load(Reg::ax, Reg::r13, offsetof(NativeContext, native_moves));
+    code_.memory_immediate(group_add, Reg::ax, 0, Width::qword, 1);
     return;
   }
   x64::Label slow;

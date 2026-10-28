@@ -336,3 +336,54 @@ archives remain unchanged; all 124 strict C++ units retain instrumentation and
 163 files pass format/tidy/Werror. ISA structural audit passes, complete-ISA
 remains red with 118 partial rows. All usual application domains, IIR capacity,
 further host efficiency/cache/energy, ISA and integration remain active work.
+
+Generic guarded RAM region increment
+
+The compiler now preflights complete native-only traces with at least eight
+RAM transfers. Proved accesses retain ordered RAM/old-operand semantics while
+extending flag/publication holding across memory operations. Initial/backedge
+guard failures retain exact ordinary execution. Source programs/archives are
+unchanged; there is no DSP instruction skipping, padding, new arithmetic SIMD
+or multicore execution. The IIR instruction/native/helper/move counts do not
+change: this improvement removes host work inside already-native instructions.
+
+Matched release runs use the saved parent and candidate on CPU2, order parent/
+candidate/candidate/parent, one natural input second warmup plus one measured
+second. No project build/test/format process overlaps, and no overhead is
+subtracted. External scheduling/frequency remain uncontrolled. All states pass.
+
+Scenario   Parent CPU s         Candidate CPU s      Mean CPU change
+FIR        0.263384..0.264852    0.269985..0.270016   2.23% increase
+IIR        1.393240..1.393360    0.694454..0.696435   50.09% decrease
+spectral   0.951154..0.952828    0.944487..0.949045   0.55% decrease
+
+IIR is about 2.00 times CPU throughput at the same near-full reference load;
+wall is 0.705970..0.728525 s (376.67..388.71 actual guest MIPS). The other
+patterns do not establish a general improvement. Four extra FIR PMU captures
+retain its roughly 2% CPU regression with essentially identical whole-process
+host instruction/data-load counts and about 1.69% more user cycles. Placement/
+frequency effects are not isolated and the original observations are retained.
+
+The independent default release bench is now green for all three packages:
+FIR 0.277051 wall / 0.269510 CPU s, 982.35 MIPS; IIR 0.722809 / 0.694084 s,
+379.65 MIPS; spectral 0.999916 / 0.945180 s, 256.73 MIPS. All states pass.
+The spectral margin is just 84 microseconds. There are three/ten/fifteen late
+blocks or hops respectively; maxima 4.377 / 4.944 / 16.913 ms. Passing the
+one-second package does not establish block-hard-realtime or the 275-MIPS
+optimization reference. No repeat-until-pass or aggregate score replaces that.
+
+IIR page storage grows 45056 -> 53248 bytes; FIR/spectral remain 32768 / 344064.
+Separate whole-process IIR PMU runs show 41.34% fewer host instructions, 50.20%
+fewer cycles, 27.27% fewer L1 data loads and 18.36% fewer data misses, but
+356.50% more instruction misses. All five user events run 100% of enabled time.
+Scope includes setup/oracle/cold/warm/checks, not isolated region or energy
+attribution. Native-regions.txt records exact bounds, ranges and cache tradeoff.
+
+All 117 tests pass in release/strict (108.48 / 250.90 s), zero skips, plus all
+three strict report-only bench state checks. All six release variants match
+each full stream; loaded-host timing there is correctness evidence only.
+The new native-region test passes 79082 independent checks per build. All 48
+archives are unchanged; all 128 strict C++ units retain instrumentation and
+all 167 files pass format/tidy/Werror. ISA structural audit passes, while the
+complete gate still fails with all 118 rows partial. Wider applications,
+complete ISA/events/integration, reserve/latency, cache and energy remain open.

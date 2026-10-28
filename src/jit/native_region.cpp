@@ -1,0 +1,96 @@
+// SPDX-License-Identifier: GPL-3.0-only
+#include "native_region.hpp"
+
+#include "architecture.hpp"
+#include "dsp56300/core.hpp"
+#include "fields.hpp"
+#include "instruction.hpp"
+#include "jit.hpp"
+#include "native_moves.hpp"
+
+#include <algorithm>
+#include <array>
+#include <cstddef>
+#include <span>
+
+namespace dsp56300::detail {
+namespace {
+constexpr Word minimum_transfers = 8;
+
+bool transfer(NativeRegion &region,
+              const NativeMove &move,
+              const JitMemory &memory,
+              const std::array<Word, agu_registers> &modifiers) {
+  if (!move.load && memory.aliases_program) { return false; }
+  if (move.immediate()) { return true; }
+  if (memory.data == nullptr) { return false; }
+  const auto bound = static_cast<Word>(std::min(memory.words, std::size_t{io_begin}));
+  const auto &form = move.address;
+  ++region.transfers;
+  if (form.mode == 6) { return form.index == 0 && form.extra < bound; }
+  if (form.mode != 3 && form.mode != 4) { return false; }
+  auto &address = region.addresses.at(form.index);
+  address.accessed = true;
+  address.modifier = modifiers.at(form.index) & modifier_mask;
+  address.bound = std::min(address.bound, bound);
+  const auto limit = address.advances < bound ? bound - address.advances : 0U;
+  address.linear_limit = std::min(address.linear_limit, limit);
+  if (form.mode == 3) {
+    address.updated = true;
+    ++address.advances;
+  }
+  return true;
+}
+
+bool moves(NativeRegion &region,
+           const Instruction &instruction,
+           const std::array<JitMemory, 2> &memory,
+           const std::array<Word, agu_registers> &modifiers) {
+  if (instruction.operation != Operation::parallel ||
+      (instruction.opcode & upper_move_mask) == no_move_group ||
+      plan_register_move(instruction).valid()) {
+    return true;
+  }
+  const auto plan = plan_moves(instruction);
+  if (plan.count == 0) { return false; }
+  for (const auto &move : std::span(plan.transfers).first(plan.count)) {
+    if (!transfer(region, move, memory.at(move.space == Space::x ? 0 : 1), modifiers)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool address_supported(const RegionAddress &address) {
+  if (!address.accessed) { return true; }
+  if (!address.updated || address.modifier == modifier_mask) { return address.linear_limit != 0; }
+  return address.modifier > 0 && address.modifier < multiple_wrap_bit &&
+         address.modifier < address.bound;
+}
+}
+
+NativeRegion plan_native_region(const std::span<const NativeOp> operations,
+                                const std::array<JitMemory, 2> &memory,
+                                const std::array<Word, agu_registers> &modifiers) {
+  NativeRegion region;
+  if (operations.empty()) { return region; }
+  auto pc = operations.front().pc;
+  for (std::size_t index = 0; index < operations.size(); ++index) {
+    const auto &operation = operations[index];
+    const auto kind = operation.instruction.operation;
+    if ((kind != Operation::parallel && kind != Operation::nop &&
+         kind != Operation::immediate_alu) ||
+        operation.pc != pc || operation.mode != operations.front().mode ||
+        operation.loop_address != operations.front().loop_address ||
+        (at_loop_end(operation) && index + 1 != operations.size()) ||
+        !moves(region, operation.instruction, memory, modifiers)) {
+      return {};
+    }
+    pc = (pc + operation.instruction.words) & word_mask;
+  }
+  region.loop = at_loop_end(operations.back());
+  region.valid = region.transfers >= minimum_transfers &&
+                 std::ranges::all_of(region.addresses, address_supported);
+  return region;
+}
+} // namespace dsp56300::detail

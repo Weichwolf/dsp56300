@@ -263,6 +263,24 @@ The legacy native_alu retirement field also includes native control setup,
 in addition to arithmetic, pure moves and NOPs. It is not an arithmetic-only
 count or a measurement of every C++ call. Native-move counts do not include DO.
 
+Guarded RAM regions
+
+Contiguous native traces with at least eight proved RAM transfers can carry a
+guarded alternative plus the ordinary version. Initial selection and every
+loop header check R/M profiles, complete linear access bounds and full ordinary
+unit-ring geometry; LC<=1 remains ordinary. No-update accesses do not depend on
+M. Control/R/N/M assignments, other AGU forms, unknown transfers and P-aliasing
+stores are excluded. Guard failure has no next-body effects; after completed
+iterations it returns canonical state/progress and reentry selects ordinary code.
+Within the region no transfer can fault/call I/O/invalidate P. Its emitted code
+retains ordered X/Y capture/commit and old operands, while holding ordinary flags
+and publication fields across RAM transfers. Sticky S/L, quantization, exact
+costs, loop exits and full return state remain mandatory. No cross-instruction
+memory reordering or new DSP SIMD is implied. The private RegionMode supports
+explicit ordinary/guarded qualification; no consumer option or CPU/context
+layout changes. See native-regions.txt for the independent guard/observer tests,
+approximately doubled sustained IIR throughput, code/cache costs and limitations.
+
 The shared binary fixtures run through reference, cached and native backends.
 Directed host tests verify exact/partitioned budgets, numeric mode changes,
 stale-code replacement, I/O invalidation of executing code, failed memory moves,
