@@ -1,0 +1,80 @@
+Independently authored application validation
+
+Every active fixture program is designed for this project. Expected arithmetic,
+state, memory, control frames and progress come from independent finite-width,
+integer, quotient/remainder, bit-circuit or algorithm models. Emulator output is
+not an expectation producer. All backends run the same fixtures. No external
+application code, manufacturer program, opaque snapshot or application-specific
+opcode recognizer is used. Binary fixture reproducibility remains mandatory.
+
+Application matrix and intended stress
+
+Domain          Own DSP scenarios                    State/host mapping pressure
+audio filters   FIR dot/block, IIR cascade           MAC, causal feedback, AGU
+audio timing    resampling, delay, convolution       ring wrap, stride, aliasing
+sound control   oscillator, envelopes, mixing        phase wrap, selection, clip
+transforms      FFT/IFFT, small DCT, windows         X/Y pairing, scaling, shuffles
+speech          correlation, adaptive FIR, compand  history, bit/integer operations
+communications  complex I/Q, NCO/mixer, decimation   signed products, phase, packed data
+image/video     2D separable FIR, 8x8 block transform row stride, boundaries, saturation
+measurement     spectral/correlation blocks          reductions, dynamic range
+control         fixed-point recurrence/PID           latency, flags, events
+
+These are general algorithm tests, not claims to emulate complete codecs,
+medical equipment, radio peripherals or a complete video-processing device.
+The independent DSP FFT, FIR dot-product and ISA/AGU/control fixtures already
+exist. The remaining application programs above are a planned expansion, not
+completed coverage. FIR varies 4/16/64/512 taps, four signals, four coefficient
+families, six scaling/rounding modes and two incoming sticky/Carry states. Its
+768 cases validate full registers, frame remnants, progress and output memory,
+with an independent algebraic dot-product check as well as instruction models.
+
+Systematic variation, with deterministic declared domains
+
+Dimension             Cases to include
+length/shape          short tails, odd lengths, powers of two, multiple blocks
+data                  zero, impulse, DC, alternating extrema, ramps, tones
+coefficients          zero, signs, symmetry, stable/edge gains, interpolation
+precision/mode        supported scaling/RM, low-bit ties, growth, saturation
+layout                displaced bases, strides, supported wraps, X/Y/P aliases
+dependence            independent lanes, feedback, same-word old/new hazards
+flags                 Carry chains, sticky prefixes, saved loop/IRQ flags
+control               taken/untaken branches, finite loops, REP, exact budgets
+host boundaries       callbacks, rejected requests, invalidation, resume, sleep
+
+Choose parameters by algebraic boundaries and application structure rather than
+by measured speed. Hold out combinations of lengths, coefficients and layouts
+when evaluating a new mapping. Record independent vs dependent work explicitly;
+SIMD lanes and worker tasks require proven independence. Do not run fuzz tests
+without explicit authorization; these are reproducible directed domains.
+
+Shared correctness/benchmark fixtures
+
+CTest checks complete declared fixture expectations. The bench target selects
+from those same archives and reports selection/eligibility counts. Expected
+faults, unfinished control state or nonrepeatable side effects remain correctness
+cases and are excluded explicitly from warm replay metrics. They are not silently
+converted into successful workloads. Replayed successful cases must preserve
+full expected state/RAM and exact progress. Workload-specific cold measurements
+must retain their own label and reset/initialization contract.
+
+Report actual guest instructions/s, wall latency and host work with numeric
+units and timing scope. Separate preparation, cold compilation/execution, warm
+execution, native/helper mix and code storage. Use one DSP instance per backend,
+bounded warmups/trials, raw result logs and artifact identities. Run selected
+fixtures for diagnosis and all configured sets for cross-pattern effects.
+Microinstruction tests are not substitutes for representative application runs;
+a separately written native algorithm is not emulator throughput.
+
+Manufacturer context used only to select algorithm families
+
+NXP's DSP56300 introduction describes communications and multimedia use. Its
+historical selector guide also lists image processing and instrumentation.
+The audio-oriented DSP56371 overview lists effects, equalization and audio
+postprocessing. Our scenarios above are original engineering choices derived
+from these broad application domains, not extracted programs or licensed codecs.
+
+Primary references:
+https://www.nxp.com/docs/en/reference-manual/DSP56300FM.pdf
+https://www.nxp.com/docs/en/product-selector-guide/SPSSG1004.pdf
+https://www.nxp.com/assets/documents/data/en/fact-sheets/DSP56371FS.pdf

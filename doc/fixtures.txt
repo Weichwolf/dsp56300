@@ -1,7 +1,7 @@
 Binary instruction fixtures
 
 test/fixtures/arithmetic.d56 contains only synthetic instruction cases authored
-for this project. It contains no Blofeld program or extracted manufacturer data.
+for this project. It contains only original programs and no extracted manufacturer data.
 The 9447 checked-in arithmetic cases include all eight signed product selectors
 with MPY/MPYR/MAC/MACR variants, both accumulator destinations, three scaling
 modes and both rounding choices. Directed RND/zero-product MACR cases check
@@ -399,54 +399,31 @@ API sequences involving host writes or interrupts between execution steps stay
 in C++ tests. Registers alone do not capture hidden REP/IRQ continuation, so
 these files describe initialization and expectations, not resumable CPU snapshots.
 
-Private workload fixtures
+Independent application fixtures
 
-Assemble manufacturer programs outside the tracked tree, then construct local
-.d56 inputs with independently calculated expectations in build/ or doc/local/.
-Preparing these inputs can require an assembler; running them does not.
-Additional fixtures can be passed directly:
+fir.d56 adds 768 original pipelined dot-product cases. It preloads both ports,
+executes a counted MAC/load loop, rounds the final accumulator and stores one
+output word. Independent raw-56/word-transfer models and an algebraic integer
+sum qualify outputs, sticky/Carry state, old inputs, pointers, residual frames
+and exact instruction/base-cost counts. The generator never links the core.
+Both correctness and bench use this same public archive.
 
-  build/release/dsp56300_fixture_test build/workloads/filter.d56
-
-Or register a semicolon-separated list with CTest through a local CMake setting:
-
-  cmake --preset strict -DDSP56300_PRIVATE_FIXTURES=/absolute/path/filter.d56
-
-Do not add private fixture paths to tracked presets. Test binaries, generators
-and the fixture format are not part of the installed public CPU interface.
-
-An additional private source-built Comb- sample-loop corpus has 1536 independent
-cases. It starts after callback setup and stops before descriptor publication;
-it is a sixteen-sample loop, not a complete callback or device workload. Each
-case retires 101 instructions and 105 estimated base cycles. An original signed
-integer model derives raw-56 arithmetic, floor/clipped bus transfers, sticky
-flags, loop frames and causally updated ring memory without executing the core.
-It varies interpolation, feedback, both RM values, seeded sticky state, cursor
-wraps, clipping and cases whose reads consume earlier writes in the same block.
-The source, assembled words, private producer and expectations stay ignored.
-Assembling a local source file supplies opcode inputs only; it does not supply
-the expected state. Reproduce that assembly and fixture before comparing saved
-before/after executables with the protocol below. Existing binary archives and
-their byte-reproducibility tests are unchanged by native ring lowering.
-
-The displaced-MOVE increment additionally extends that original Comb- input
-through its unmodified descriptor publication and RTS. This separate private
-1536-case archive retires 105 guest instructions and 113 estimated base cycles
-per case. Expectations include the caller return frame, residual DO frames,
-unchanged histories, final descriptor cursor, all restored M bits and preserved
-computed status across RTS. It covers the sample entry through return; preceding
-coefficient/descriptor setup, the outer callback and the whole device remain
-unqualified. Neither the earlier loop-only archive nor any source words are
-silently rewritten or added to public fixtures.
+Tests and benchmarks use independently authored DSP programs and expectations.
+They cover instruction semantics and general application patterns, with no
+external application/firmware input or machine-specific fixture registration.
+All active CTest inputs are tracked project fixtures. See
+application-validation.txt for the application matrix and anti-overfitting plan.
+Test binaries, generators and the wire format are internal validation tools,
+not part of the installed public CPU interface.
 
 Warm single-instance benchmark
 
-  taskset -c 2 build/release/dsp56300_fixture_bench build/workloads/filter.d56 0
+  taskset -c 2 build/release/dsp56300_fixture_bench test/fixtures/fft.d56 24
 
 The optional case argument selects a zero-based case. An additional backend
 argument selects all (the default), reference, cached or jit. For example:
 
-  taskset -c 2 build/release/dsp56300_fixture_bench build/workloads/filter.d56 0 jit
+  taskset -c 2 build/release/dsp56300_fixture_bench test/fixtures/fft.d56 24 jit
 
 An optional REPLAYS argument after BACKEND selects calls per trial in [1,1048576],
 default 4096. The benchmark prints the actual count. Use smaller trials for a

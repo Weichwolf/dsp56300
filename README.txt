@@ -1,7 +1,9 @@
 Independent DSP56300 core
 
 This repository develops an independent C++23 DSP56300 CPU emulator for x86-64,
-with Blofeld audio programs as the primary optimization workload. It contains
+targeting efficient execution across all usual DSP56300 applications: audio,
+image/video, communications, measurement and control. Validation uses
+independently authored general DSP application workloads. It contains
 no dependency on another DSP emulator, no DSP56371 peripheral implementation
 and no manufacturer program assets.
 
@@ -16,14 +18,15 @@ An independent Linux x86-64 JIT emits selected scalar arithmetic and uses guarde
 general helpers for other implemented forms. Select Options.backend=Backend::jit;
 the cached interpreter remains the default. See doc/jit.txt for supported native
 operations, invalidation, execution budgets and instrumentation boundaries.
-Full ISA/mode/timing qualification and Blofeld performance measurements remain
+Full ISA/mode/timing qualification and representative performance measurements remain
 open; see doc/coverage.txt and the complete objective in doc/objective.txt.
 
 Source layout:
-  src/Core/       architectural state, instruction decoding and execution
-  src/Jit/        translation cache and general-execution bridges
-  src/Jit/X64/    native x64 emission and instruction encoding
-  src/Memory/     host memory reservation
+  src/core.cpp    CPU API and execution orchestration
+  src/jit.cpp     native translation cache and executable storage
+  src/core/       architectural state, instruction execution and host memory
+  src/jit/        dataflow, transfer plans and general-execution bridges
+  src/jit/x64/    native x64 emission and instruction encoding
   include/dsp56300/  public CPU interface
   test/           independent fixture generators, host tests and benchmarks
 
@@ -35,7 +38,19 @@ Build and check (LLVM 19, CMake >=3.25, Ninja, clang-format-19, clang-tidy-19):
   cmake --build build/strict --target format-check
 
 Use the release preset for performance work. No fuzzing runs automatically.
-Project setup and strict policies derive from blofeld-emu; see THIRD_PARTY.txt.
+Project setup and strict policies retain their source attribution in THIRD_PARTY.txt.
+
+Benchmarks reuse the correctness fixtures, with a separate CTest tree:
+
+  cmake --preset release
+  cmake --build --preset release --target bench
+  ctest --test-dir build/release/bench -R '^(fir|fft)$' --verbose
+
+The default covers all fixture sets with up to eight uniformly selected eligible
+cases each. Set DSP56300_BENCH_CASES=all or a numeric index for complete/targeted
+case selection, DSP56300_BENCH_FILTER for the target's fixture-name regex,
+DSP56300_BENCH_BACKEND for jit/cached/reference/all and DSP56300_BENCH_REPLAYS
+for auto or a fixed trial count. See doc/bench.txt for metrics and exclusions.
 
 Integration: link dsp56300::core and include <dsp56300/core.hpp>. Provide mutable
 P/X/Y spans and an optional Io implementation. DSP data words occupy uint32_t
@@ -62,5 +77,6 @@ interrupt-entry overhead and external wait states remain unqualified.
 Primary instruction/architecture references:
   https://www.nxp.com/docs/en/reference-manual/DSP56300FM.pdf
   https://sites.ecse.rpi.edu/courses/CStudio/dsp56303/56300%20Instruction%20Set.pdf
-Private reference downloads and Blofeld source extracts belong under ignored
-doc/local/ or build/. They are excluded from repository commits.
+Reference downloads belong under ignored doc/local/ or build/. Application and
+manufacturer programs are not used by tests or benchmarks. See
+doc/application-validation.txt for the independently authored workload plan.

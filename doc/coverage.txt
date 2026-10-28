@@ -6,12 +6,17 @@ The original objective and current clarifications are in doc/objective.txt.
 The user explicitly removed hardware virtualization. Its runtime, tests,
 benchmark and setup documentation are removed; direct native JIT execution is
 the compiler target. Independent CPU implementation, complete ISA, fixed-point
-precision, Blofeld integration, performance, SIMD/multicore research and explicit
+precision, general integration, performance, SIMD/multicore research and explicit
 memory/event/I/O contracts remain active. Earlier hardware-backend requirements
 are superseded, not pending completion criteria.
 
+Optimization targets all usual DSP56300 application domains, including audio,
+image/video, communications, measurement and control. Cross-domain workloads and
+regression comparisons are required; the current FIR and FFT programs establish
+only an initial subset of application validation, not general optimization.
+
 Original code remains GPL-3.0-only. No dsp56kEmu build/API/test/runtime dependency
-is permitted. Both neighboring Blofeld repositories stay read-only. Manufacturer
+is permitted. Neighboring application/firmware repositories stay read-only. Manufacturer
 programs/manuals/source extracts and private analysis stay ignored. This library
 contains no board/peripheral emulation; derivative integration belongs to the
 consumer through explicit contracts.
@@ -92,13 +97,16 @@ and old parallel operands without memory/I/O observation barriers. All 6758417
 directed ASR/register assertions pass; no ISA catalogue row becomes complete.
 See doc/native-shifts.txt for guards, witnesses, measurements and remaining work.
 
-All 97 direct-only tests pass in both release (133.47 s) and strict (435.83 s),
-with no skips. Strict builds instrument all 102 C++ translation units with
-nonrecovering address/undefined/integer checks. All 136 project C++ source/header
-files pass clang-format, and the 40 public binary archives are byte-identical
-to the parent. The structural ISA audit passes; full ISA qualification still
+The independent-only configuration passes all 98 correctness tests in both
+release (126.97 s) and strict (422.71 s), with no skips. Strict builds instrument all 103 C++ translation units with
+nonrecovering address/undefined/integer checks. All 137 project C++ source/header
+files pass clang-format. The 40 prior archives are unchanged, and fir.d56 adds
+the new independent application corpus. The structural ISA audit passes; full ISA qualification still
 fails as intended. See doc/native-retirement.txt for the bounded optimization,
 independent boundary evidence, matched control and performance tradeoffs.
+Adaptive pattern-dependent register allocation, new SIMD bank formats and
+both-branch evaluation remain design/experiment work, not implemented features;
+see doc/state-mapping.txt for inventory, layouts, guards and transition witnesses.
 
 Performance and realtime: reference target not established
 
@@ -111,30 +119,30 @@ instructions. One DSP instruction is not one x64 opcode. Distinguish guest
 retirement, estimated base units, native algorithm work and device clocks.
 Neither a family peak nor isolated arithmetic proves full-device realtime.
 
-Private fixtures execute source-built Blofeld filter/complete LP12 and demanding
-effect routines. Own DSP FFT programs independently qualify 16/64/256/1024-point
-integer transforms, complete registers/frames/RAM and output ordering. Warm
-initialized replay restores input outside the timer and excludes compilation;
-full expected results and progress remain checked. Native/helper/transfer counts,
-code mappings, raw trials and artifact identities establish the measured scope.
-A gain in one routine cannot establish a general gain. See doc/fixtures.txt.
+Active validation uses only independently authored DSP programs and shared
+public correctness fixtures. The own FFT qualifies 16/64/256/1024-point integer
+transforms, complete registers/frames/RAM and output ordering. Native ASR and
+register lowering reduces FFT256 general retirements from 8284 to 2140, while
+matching independently expected results. Earlier alternating parent/control
+measurements of the same own FFT show about 38-58% shorter calls, with the
+1024-point case about 235 actual guest MIPS. See doc/native-shifts.txt for scope.
+This does not establish the representative 270 MIPS target or fixed-load CPU use.
 
-Alternating parent/control/candidate ASR/register measurements on nine workload
-cases show FFT16/64/256/1024 calls taking about 37.7/48.7/54.4/58.4% less time
-than 273fea4. The matched control disables only the two new lowering admissions
-and reproduces parent native/helper/move counts. Its FFT reductions are similar.
-Complete LP12 calls take about 6.0-7.4% less time than the parent; filters are
-nearly flat. Reverb is about 2.8% shorter despite unchanged helper counts, so
-host text layout/noise remain relevant. See doc/native-shifts.txt for both
-comparisons; earlier retirement/status experiments retain their own reports.
-These are noisy shared-host observations, not statistical or fixed-load proof.
-Actual candidate throughput is about 34-235 MIPS in these cases, still
-below the 270 MIPS reference target. General helpers, dispatch and exact state
-bookkeeping remain material costs. An initialized call is not continuous audio, all
-voices/effects, derivative I/O or complete synthesizer host consumption. Full
-representative execution, sustained realtime and fixed-load CPU/latency tests
-remain mandatory. Energy requires measured joules per audio block; GHz/core
-count alone cannot establish an energy benefit.
+The bench CMake target reuses all 41 public correctness fixture archives in a
+separate CTest tree. Default uniform sampling measures 304 cases across 38 sets;
+three sets have no eligible warm replay and report explicit skips. Both release
+and sanitizer benchmark sweeps pass. The original FIR dot-product contributes
+768 cases with four lengths/signals/coefficient families and six numeric modes.
+Current architectural matrices are broad, but block FIR, IIR/resampling,
+image/video, communications and control applications still need qualification. See doc/application-validation.txt. Inputs from external applications
+are removed from active test/benchmark configuration. Historical application
+measurements are not current acceptance criteria or optimization signatures.
+
+Warm initialized replay excludes host restoration and cold compilation. It is
+not continuous device execution, a hardware clock or an energy measurement.
+Full representative execution, sustained realtime, fixed-load CPU/latency and
+joules per work block remain mandatory. More cores/lower GHz alone prove none
+of those properties. Report actual retirement separately from base-cost estimates.
 
 SIMD, parallelism and cache locality: research remains open
 
@@ -163,7 +171,7 @@ reentry, mutation, ordering and ownership contracts.
 
 The CPU-only library does not supply DSP56371 board clocks, DMA/serial/host-port
 peripherals, pin timing or a synthesizer. Installed package consumption,
-integration fixtures, full timing/events and actual Blofeld whole-program/device
+integration fixtures, full timing/events and general whole-program/device
 operation remain outstanding. Faster host completion must not advance emulated
 time or bypass observable event boundaries.
 
@@ -174,8 +182,8 @@ nonrecovering ASan/UBSan/integer instrumentation remain required. No checks are
 weakened or suppressed. No fuzz testing is authorized or run. Binary fixtures
 encode explicit portable fields; independent producers do not use emulator
 snapshots or another DSP emulator as expectations. Manufacturer assets remain
-local. Verified increments are committed locally. The latest repository
-instructions do not authorize publication. Local account names stay out of
-tracked instructions/code/docs.
+local. Verified increments are committed and every commit is pushed to the
+private origin repository, as authorized by the user. Local account names stay
+out of tracked instructions/code/docs.
 The full active objective remains incomplete and must be audited against every
 requirement above, including those that current tests do not yet establish.

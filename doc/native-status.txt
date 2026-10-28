@@ -76,34 +76,20 @@ Each executable uses 64 warmups and nine trials. Three process runs rotate
 parent/control/after order. Below are medians of their trial medians, ns/call.
 
 Workload           Parent       Control      After        Actual MIPS
-Filter ordinary      1102.18      1130.26      1076.16          96.6
-Filter wide          1185.96      1200.51      1184.91         101.3
-Complete LP12        1871.59      1839.86      1807.86          75.2
-Complete LP12 wide   1881.84      1901.61      1864.29          81.0
-Effect/reverb       51713.04     52060.01     52189.74          29.7
 DSP FFT16           17819.31     17685.59     17664.54          63.4
 DSP FFT64           83578.73     82794.91     82599.61          75.2
 DSP FFT256         378088.50    385707.69    387451.12          82.8
 DSP FFT1024       1759684.06   1799075.50   1793481.38          88.0
 
-Ordinary filter and complete LP12 calls are about 2.4% and 3.4% shorter than the
-parent; they are 4.8% and 1.7% shorter than the admission-disabled control. Wide
-filter is effectively flat against the parent, wide LP12 about 0.9% shorter.
-Reverb is about 0.9% longer; FFT16/64 about 0.9-1.2% shorter, FFT256/1024 about
-2.5%/1.9% longer. Against the matched control, FFT is close to flat (-0.5..+0.3%
-runtime reduction). This does not establish a general whole-change speedup.
-Small differences, parent/control layout effects and shared-host noise require
-careful interpretation; no confidence interval or exclusive-core claim is made.
+FFT16/64 are about 0.9-1.2% shorter than the parent; FFT256/1024 are
+about 2.5%/1.9% longer. The matched-control FFT differences are nearly flat.
+This does not establish a general whole-change speedup. Raw trials and artifact
+identities remain local historical analysis.
 
-All nine cases execute one actual DSP Core and validate identical independently
-expected registers/RAM, retirement and native/helper/move/block counts across
-versions. These are private source-built Blofeld filter/complete LP12/effect
-routines and the own independently modeled DSP FFT16/64/256/1024. The measured
-interval includes Core::run, timer and retirement-check overhead; host input
-restoration and compilation are outside it. There is no timer subtraction.
-Raw trials, executable/fixture identities and control provenance remain ignored
-local analysis. Reproduce with the fixture benchmark in doc/fixtures.txt and
-the same locally built workloads; no manufacturer assets are distributed.
+The four cases execute the project's independently modeled DSP FFT. The
+measured interval contains Core::run, timer and retirement-check overhead;
+input restoration and compilation are outside. No application firmware is
+used by current validation. The active target is general DSP execution.
 
 Remaining compiler work
 
@@ -118,5 +104,5 @@ Single-stepping is not the benchmark, and cannot measure region/loop speed.
 Native lowering must preserve rounding, carries, sticky flags, transfer
 precision and every observable exit before those helpers can be removed.
 
-The complete ISA, representative 270 MIPS, whole-program Blofeld execution,
+The complete ISA, representative 270 MIPS, general whole-program execution,
 continuous audio, fixed-load CPU/latency and energy requirements remain open.

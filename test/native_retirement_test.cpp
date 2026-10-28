@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "Native/direct.hpp"
 #include "architecture.hpp"
 #include "dsp56300/core.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
 #include "jit_emitter.hpp"
+#include "native/direct.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
 #include "support.hpp"

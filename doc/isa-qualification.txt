@@ -2,7 +2,7 @@ Complete DSP56300 ISA qualification
 
 Complete support and independent tests are a mandatory completion criterion.
 The current implementation is partial. A passing CTest suite and successful
-Blofeld/FFT routines prove only their tested subsets. Performance work does not
+Selected DSP routines prove only their tested subsets. Performance work does not
 waive missing instructions, operand forms, numerical modes or observable effects.
 
 Native ASR/register-transfer increment: single-bit ASR A/B and data-register
@@ -158,8 +158,7 @@ Native multiple-wrap lowering increment: valid power-of-two rings now execute
 through guarded x64 transfer code as well as the existing general executor.
 Independent coordinate tests require actual native transfers, including paired
 aliases, dynamic modifiers and failures before either prospective R commit.
-Private source-built Comb- sample-loop expectations additionally check causal
-feedback and transfer precision. This changes execution strategy for an already
+This changes execution strategy for an already
 implemented addressing subset; it closes no missing instruction, numerical mode,
 displacement form or full-ISA catalogue row. Complete ISA qualification remains
 mandatory regardless of any passing workload or performance improvement.
@@ -221,7 +220,7 @@ expectations follow the scaling-mode/rounding equations of table 5-1; that
 manual's later S-bit table has conflicting scale labels. Hardware confirmation,
 SB/SC/DM/SM, all IRQ/events and calibrated pipeline timing remain open.
 The catalogue has 15 missing, 1 untested (RTI), 102 partial and 0 complete rows.
-The completion gate must continue to fail; neither these tests nor any Blofeld
+The completion gate must continue to fail; neither these tests nor any application
 workload qualifies the complete DSP56300 instruction set or the full objective.
 
 Return/interrupt increment: RTI gains dedicated per-bit frame and sequence

@@ -100,27 +100,20 @@ parent/control/candidate order. Values below are medians of trial medians,
 ns/call. Host RAM/register restoration and compilation are outside the measured
 interval; Core::run, timer and retirement-check overhead remain inside. No timer
 subtraction is used. Raw trials, artifact hashes and control provenance stay in
-ignored local analysis. These are actual single-Core source-built Blofeld
-routines and independently modeled own DSP FFTs, not native algorithm rewrites.
+ignored local analysis. These execute actual single-Core independently modeled DSP FFT programs,
+not separately written native algorithms or external application code.
 
 Workload           Parent       Control      Candidate    Actual MIPS
-Filter ordinary       975.24       972.46       969.06         107.3
-Filter wide          1061.06      1057.04      1055.88         113.6
-Complete LP12        1602.32      1614.36      1505.93          90.3
-Complete LP12 wide   1657.25      1641.72      1535.41          98.3
-Effect/reverb       47107.56     46686.66     45809.77          33.9
 DSP FFT16           15773.10     15753.65      9822.13         114.0
 DSP FFT64           73507.34     72260.38     37731.05         164.7
 DSP FFT256         344005.75    344357.38    157018.25         204.4
 DSP FFT1024       1614668.62   1578590.12    671771.25         234.9
 
 FFT calls take about 37.7/48.7/54.4/58.4% less time than the parent (16..1024
-points); matched-control reductions are about 37.7/47.8/54.4/57.4%. Complete
-LP12 cases take 6.0/7.4% less time than the parent and 6.7/6.5% less than the
-control. Filter cases are nearly flat. Reverb is about 2.8%/1.9% shorter against
-parent/control, despite unchanged helper counts; code-layout/shared-host effects
-therefore remain relevant, and no causal instruction-mix claim follows for it.
-Small differences on this shared host are not a confidence or fixed-load result.
+points); matched-control reductions are about 37.7/47.8/54.4/57.4%. This
+comparison uses the project's independently designed FFT and public correctness
+fixtures. Shared-host noise and host text addresses remain relevant; no
+fixed-load, whole-device or energy result follows from these measurements.
 
 A separately validated single-step FFT256 profile matches the ordinary run's
 native/helper mix. General retirements fall from 8284 to 2140: all 4096 single-bit
@@ -131,4 +124,4 @@ cleanups and 354 other instructions. These guide further lowering experiments.
 
 Complete ISA, representative 270 MIPS and whole-device realtime, fixed-load
 CPU/latency, SIMD/multicore lifting and energy remain open requirements. A warm
-initialized routine is not continuous audio, all voices/effects or a whole DSP56371.
+initialized routine is not continuous audio, all voices/effects or a complete device.

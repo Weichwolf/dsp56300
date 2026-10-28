@@ -1,51 +1,71 @@
-Baue in ~/Git/dsp56000 einen eigenständigen, maximal auf x86-64 optimierten DSP56300-Emulatorkern, den blofeld-emu später als Bibliothek übernehmen kann. Übernimm dessen Projektsetup mit C++23, CMake/Ninja, LLVM 19, strikten Warnungen, clang-format, clang-tidy und ASan/UBSan. Unterstütze eine einzelne DSP-Instanz mit beliebigen Programmen und priorisiere die Audio-, Filter-, Oszillator- und Effektprogramme unter ~/Git/blofeld-src/src/dsp56371. Optimiere anhand reproduzierbarer Messungen durch Blockübersetzung/JIT, Registerhaltung, kompakte Datenstrukturen und bei nachgewiesenem Nutzen SSE/AVX/AVX2. Minimiere Cachezugriffe und den Umfang häufig verwendeter Code- und Datenbereiche. Bewahre die vollständige Befehlssemantik einschließlich Festkommaarithmetik, Rundung, Sättigung, Statusbits, paralleler Moves, Adressierungsmodi, Schleifen und Interruptzustände; spezialisierte Ausführungspfade benötigen geprüfte Voraussetzungen und einen allgemeinen Rückfallpfad. Verifiziere Korrektheit durch unabhängige Erwartungen und Vergleichstests sowie Leistung anhand tatsächlicher Blofeld-Programme. Implementiere ausschließlich den DSP-Kern mit klarer Speicher-, Ereignis- und I/O-Schnittstelle, Tests, Benchmarks und Integrationsdokumentation. Verändere weder blofeld-emu noch blofeld-src und übernimm keine Board-Emulation oder Herstellerprogramme in veröffentlichbare Quellen.
+Build an independent, maximally efficient DSP56300 emulator library for x86-64,
+optimized for all usual DSP56300 applications and supporting one DSP instance
+running arbitrary programs with the complete ISA.
+Preserve exact fixed-point precision, rounding, saturation, flags, parallel
+transfer ordering, AGU, loops, stack, interrupts and observable state. Translate
+guest code into native regions, keeping live values in suitable GPR/SIMD
+representations and minimizing host instructions, memory traffic and working set.
+Use guarded general fallbacks, explicit bounded memory/event/I/O contracts and
+independent correctness expectations. Keep the public integration interface
+ordinary and transparent. Implement the CPU only, with no board emulation or
+dependency on another DSP emulator in build, API, tests or runtime.
 
-Current user clarifications (preserving the original objective above):
-- The project directory is now ~/Git/dsp56300. Use src/Core/core.cpp naming.
-- Build only the DSP56300 CPU. blofeld-emu owns DSP56371 derivative peripherals
-  and board integration; both neighboring repositories remain read-only.
-- Implement independently: no dsp56kEmu dependency in build, API, tests or runtime.
-  Keep manufacturer programs/manuals/source extracts and private analysis local.
-- The complete DSP56300 instruction set must be implemented and independently
-  tested, including every encoding/operand form, numerical mode, flag, fixed-point
-  precision, parallel-move ordering, addressing, loop, stack, cache and interrupt
-  effect. Passing current tests or selected workloads does not establish this.
-- Use reproducible binary fixtures with independently derived expectations.
-  Construct demanding tests from complete source-built Blofeld routines. Reverb
-  is one example, not a priority; choose workloads by validation/optimization value.
-- Organize implementation by concern under src/. Consider C++ concepts for
-  portable compile-time-checked interfaces and common execution contracts.
-- Treat this as research into native transpilation of one DSP program. The direct
-  JIT writes real x64 instructions to RAM, publishes executable pages and enters
-  that code on the host CPU. Retain reference/cached execution and guarded general
-  fallbacks while extending native lowering and register/flag holding.
-- The user explicitly canceled the complete hardware-virtualization path after
-  clarifying that direct JIT code already executes natively. Remove its backend,
-  runtime/test/benchmark code and setup instructions. Earlier VMX/KVM, hardware
-  isolation, transparent hardware-VM and protected-backend requirements are
-  superseded, not outstanding completion criteria. Ordinary DSP memory bounds,
-  event/I/O contracts, hardening and correctness requirements remain in force.
-- Investigate packing DSP state in SIMD registers and recognizing repeated,
-  independent per-voice work (up to 24 Blofeld voices) or independent loop work
-  inside one program. Preserve shared-state dependencies, quantization, observable
-  order and interrupt boundaries; keep a general fallback when inadmissible.
-- Include FFT as a fixed-point benchmark, distinguishing actual DSP execution
-  from separately written native algorithms. Use its dependencies to evaluate
-  SIMD and multicore opportunities rather than assuming either improves speed.
-- Performance target: at least 270 million actual emulated DSP instructions/s per
-  host core on representative full-semantics workloads. Aim to reach or exceed
-  the DSP's processing capacity with minimum host load. Host-native execution
-  alone does not establish that capacity; helper/dispatch and state costs matter.
-- 270 MIPS is a reference load and baseline, not a throughput cap or stopping
-  criterion. Continue maximizing real guest throughput and minimizing host CPU
-  time/load and latency at that fixed load after reaching it. Qualify sustained
-  realtime performance and energy per audio block separately on complete work.
-- Plan for near-full DSP utilization. Faster host completion must not advance
-  emulated time or alter event boundaries. Core count/GHz alone does not prove
-  an energy benefit; measure voltage/load/cache/synchronization effects as needed.
-- Consumers include ordinary DSP56300 headers and communicate through explicitly
-  owned shared memory, events and synchronous data-line/I/O interfaces. Preserve
-  aliasing, host writes, exact budgets, failures and ordered observable effects.
-- Commit verified increments locally. The latest repository instructions do not
-  authorize a publication destination and supersede earlier push instructions.
-  Keep local account names out of tracked instructions/code/docs.
+Current user requirements
+
+- The complete DSP56300 ISA must be implemented and independently tested across
+  all legal encodings, operands, numerical modes, aliases and observable effects.
+  Representative workloads and a green current suite are insufficient evidence.
+- All tests and benchmarks use independently authored DSP programs. External
+  application/firmware programs and extracts are excluded from active inputs.
+  The user canceled all application-specific coupling to prevent overfitting.
+- Design representative audio, image/video, speech, communications, measurement
+  and control scenarios. Optimize across these application domains and qualify
+  cross-workload performance tradeoffs. Include filters, oscillators, effects,
+  resampling, FFT,
+  fixed-point transforms and dependency-heavy workloads. Compare independently
+  calculated expected registers/RAM/progress and retain reproducible binary fixtures.
+- Provide a CMake target named bench, analogous to correctness tests. Reuse the
+  same fixtures, support all or selected fixture sets/cases and report actual
+  guest MIPS, latency, host work, native/helper execution and code size. Keep
+  initialization, cold compilation and warm execution scopes explicit. Do not
+  turn faulting/nonrepeatable fixtures into misleading warm throughput numbers.
+- Treat native compilation as research into one DSP program, including SIMD and
+  multicore execution of proven independent work expressed serially. Preserve
+  feedback, shared state, quantization, ordering and event/interrupt boundaries.
+- Develop state/dataflow diagrams and small tables before major optimizations.
+  Account for the complete architectural and in-flight state, aliases, old
+  operands and all observation/exit classes. Use concrete layouts and cost models.
+- Select register allocation and representation per region/pattern at runtime,
+  including MAC/filter, FFT, address-heavy and control code. Compare qualified
+  candidates using live/read/write sets and measured costs. A single fixed host
+  assignment is not the final design. Use available GPR/SIMD registers and cache
+  as operation-appropriate storage, retaining complete canonical checkpoints.
+- Investigate both-branch evaluation with SIMD masks for suitable short pure
+  regions. Commit only the selected state/effects; preserve dependent recurrences,
+  failures, I/O and memory bounds. Measure whether prediction is a real bottleneck
+  rather than assuming branchless or speculative work must improve execution.
+- At least 270 million actual emulated DSP instructions/s per host core is a
+  reference load, not a ceiling or stopping criterion. Continue maximizing
+  throughput and minimizing CPU time/load and latency at that fixed load.
+  Qualify sustained realtime and energy per work block separately. Core count
+  and GHz alone do not establish energy efficiency; faster host completion must
+  not accelerate guest time or bypass observable event boundaries.
+- The user canceled hardware virtualization. Execute generated x64 directly in
+  the host process; do not add a hardware-VM backend, tests or permission setup.
+- Consumers use ordinary headers, owned/shared memory, events and synchronous
+  I/O. Keep ownership, bounds, aliases, host mutation and invalidation explicit.
+  Derivative clocks, peripherals and board/device behavior belong to consumers.
+- Use C++23, LLVM 19, CMake/Ninja, strict warnings, hardening, clang-format/tidy,
+  and nonrecovering ASan/UBSan with native dependencies instrumented in strict
+  builds. Keep functions at most 120 lines and do not suppress/weaken checks.
+  Consider concepts for portable compile-time interface contracts.
+- Keep entry points in src/core.cpp and src/jit.cpp; helpers in src/core/ and
+  src/jit/, native emission in src/jit/x64/, memory in src/core/memory.cpp.
+  Organize sources consistently and remove empty project directories.
+- Keep neighboring application/firmware repositories read-only. Preserve
+  GPL-3.0-only licensing and source/dependency attribution. Keep manufacturer
+  reference copies and private analysis outside the tracked source tree.
+- Do not run fuzz tests without an explicit user request. Commit verified
+  increments and push every commit to the private origin repository.
+- Speak German with the user; write code, comments, documentation and commits
+  in English. Keep local account names out of tracked source and instructions.

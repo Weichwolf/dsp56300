@@ -16,45 +16,45 @@ foreach(language C CXX)
   endif()
 endforeach()
 include(cmake/Quality.cmake)
-find_program(BLOFELD_CLANG_TIDY NAMES clang-tidy-19 REQUIRED)
-find_program(BLOFELD_CLANG_FORMAT NAMES clang-format-19 REQUIRED)
+find_program(DSP56300_CLANG_TIDY NAMES clang-tidy-19 REQUIRED)
+find_program(DSP56300_CLANG_FORMAT NAMES clang-format-19 REQUIRED)
 
-set(CMAKE_CXX_CLANG_TIDY "${BLOFELD_CLANG_TIDY};--warnings-as-errors=*")
+set(CMAKE_CXX_CLANG_TIDY "${DSP56300_CLANG_TIDY};--warnings-as-errors=*")
 
 add_library(dsp56300_core STATIC
-  src/Core/core.cpp src/Core/core_state.cpp src/Core/arithmetic.cpp src/Core/shifts.cpp
-  src/Core/conditional.cpp src/Core/immediate.cpp src/Core/integer.cpp src/Core/decode.cpp src/Core/moves.cpp
-  src/Core/transfers.cpp src/Core/registers.cpp src/Core/agu.cpp src/Core/control.cpp src/Core/exceptions.cpp
-  src/Core/bits.cpp src/Core/bit_fields.cpp src/Core/loops.cpp src/Core/products.cpp src/Core/iteration.cpp
-  src/Core/processing.cpp src/Core/debugging.cpp src/Core/viterbi.cpp src/Core/program_cache.cpp src/Core/cache_control.cpp
-  src/Jit/jit.cpp src/Jit/jit_helpers.cpp src/Jit/X64/jit_emitter.cpp src/Jit/X64/x64.cpp
-  src/Jit/X64/jit_addition.cpp
-  src/Jit/X64/jit_loops.cpp
-  src/Jit/X64/jit_flags.cpp
-  src/Jit/native_moves.cpp src/Jit/dataflow.cpp src/Jit/X64/jit_moves.cpp
-  src/Jit/X64/jit_move_address.cpp src/Jit/X64/jit_move_register.cpp
-  src/Memory/memory_arena.cpp src/Jit/X64/jit_retirement.cpp src/Jit/X64/jit_status.cpp
-  src/Jit/X64/jit_shifts.cpp src/Jit/native_register_moves.cpp)
+  src/core.cpp src/core/core_state.cpp src/core/arithmetic.cpp src/core/shifts.cpp
+  src/core/conditional.cpp src/core/immediate.cpp src/core/integer.cpp src/core/decode.cpp src/core/moves.cpp
+  src/core/transfers.cpp src/core/registers.cpp src/core/agu.cpp src/core/control.cpp src/core/exceptions.cpp
+  src/core/bits.cpp src/core/bit_fields.cpp src/core/loops.cpp src/core/products.cpp src/core/iteration.cpp
+  src/core/processing.cpp src/core/debugging.cpp src/core/viterbi.cpp src/core/program_cache.cpp src/core/cache_control.cpp
+  src/jit.cpp src/jit/jit_helpers.cpp src/jit/x64/jit_emitter.cpp src/jit/x64/x64.cpp
+  src/jit/x64/jit_addition.cpp
+  src/jit/x64/jit_loops.cpp
+  src/jit/x64/jit_flags.cpp
+  src/jit/native_moves.cpp src/jit/dataflow.cpp src/jit/x64/jit_moves.cpp
+  src/jit/x64/jit_move_address.cpp src/jit/x64/jit_move_register.cpp
+  src/core/memory.cpp src/jit/x64/jit_retirement.cpp src/jit/x64/jit_status.cpp
+  src/jit/x64/jit_shifts.cpp src/jit/native_register_moves.cpp)
 add_library(dsp56300::core ALIAS dsp56300_core)
 target_include_directories(dsp56300_core PUBLIC include)
-target_link_libraries(dsp56300_core PUBLIC blofeld_quality)
-target_include_directories(dsp56300_core PRIVATE src/Core src/Jit src/Jit/X64)
+target_link_libraries(dsp56300_core PUBLIC dsp56300_quality)
+target_include_directories(dsp56300_core PRIVATE src/core src/jit src/jit/x64)
 
 file(GLOB_RECURSE DSP56300_OWN_FILES CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/test/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/test/*.hpp")
 add_custom_target(format-check
-  COMMAND "${BLOFELD_CLANG_FORMAT}" --dry-run --Werror ${DSP56300_OWN_FILES}
+  COMMAND "${DSP56300_CLANG_FORMAT}" --dry-run --Werror ${DSP56300_OWN_FILES}
   VERBATIM)
 
 if(BUILD_TESTING)
   if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64)$")
     add_executable(dsp56300_native_retirement_test test/native_retirement_test.cpp
-      test/Native/direct.cpp)
+      test/native/direct.cpp)
     target_link_libraries(dsp56300_native_retirement_test PRIVATE dsp56300::core)
     target_include_directories(dsp56300_native_retirement_test PRIVATE
-      src/Core src/Jit src/Jit/X64 test)
+      src/core src/jit src/jit/x64 test)
     add_test(NAME native-retirement-boundaries COMMAND dsp56300_native_retirement_test)
     add_executable(dsp56300_native_status_test test/native_status_test.cpp)
     target_link_libraries(dsp56300_native_status_test PRIVATE dsp56300::core)
@@ -73,7 +73,7 @@ if(BUILD_TESTING)
   add_test(NAME architectural-cache-integration COMMAND dsp56300_cache_control_test)
   add_executable(dsp56300_cache_storage_test test/cache_storage_test.cpp)
   target_link_libraries(dsp56300_cache_storage_test PRIVATE dsp56300::core)
-  target_include_directories(dsp56300_cache_storage_test PRIVATE src/Core)
+  target_include_directories(dsp56300_cache_storage_test PRIVATE src/core)
   add_test(NAME architectural-cache-storage COMMAND dsp56300_cache_storage_test)
   add_executable(dsp56300_debug_test test/debug_test.cpp)
   target_link_libraries(dsp56300_debug_test PRIVATE dsp56300::core)
@@ -98,7 +98,7 @@ if(BUILD_TESTING)
   add_test(NAME native-loop-boundaries COMMAND dsp56300_native_loop_test)
   add_executable(dsp56300_native_backedge_test test/native_backedge_test.cpp)
   target_link_libraries(dsp56300_native_backedge_test PRIVATE dsp56300::core)
-  target_include_directories(dsp56300_native_backedge_test PRIVATE src/Core src/Jit)
+  target_include_directories(dsp56300_native_backedge_test PRIVATE src/core src/jit)
   add_test(NAME native-backedge-boundaries COMMAND dsp56300_native_backedge_test)
   add_executable(dsp56300_transfer_test test/transfer_test.cpp)
   target_link_libraries(dsp56300_transfer_test PRIVATE dsp56300::core)
@@ -138,7 +138,7 @@ if(BUILD_TESTING)
   add_test(NAME memory-alias-boundaries COMMAND dsp56300_memory_alias_test)
   add_library(dsp56300_fixture_format STATIC test/binary_fixture.cpp)
   target_include_directories(dsp56300_fixture_format PUBLIC test include)
-  target_link_libraries(dsp56300_fixture_format PUBLIC blofeld_quality)
+  target_link_libraries(dsp56300_fixture_format PUBLIC dsp56300_quality)
   add_executable(dsp56300_fixture_format_test test/fixture_format_test.cpp)
   target_link_libraries(dsp56300_fixture_format_test PRIVATE dsp56300_fixture_format)
   add_test(NAME fixture-format-versions COMMAND dsp56300_fixture_format_test
@@ -204,6 +204,16 @@ if(BUILD_TESTING)
   add_executable(dsp56300_fixture_test test/fixture_test.cpp)
   target_link_libraries(dsp56300_fixture_test PRIVATE dsp56300::core dsp56300_fixture_format)
   add_executable(dsp56300_fixture_bench test/fixture_bench.cpp)
+  include(cmake/Bench.cmake)
+  add_executable(dsp56300_generate_fir test/generate_fir.cpp)
+  target_link_libraries(dsp56300_generate_fir PRIVATE dsp56300_fixture_format)
+  add_test(NAME fir-fixtures COMMAND dsp56300_fixture_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/fir.d56")
+  add_test(NAME fir-reproducibility COMMAND "${CMAKE_COMMAND}"
+    "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_fir>"
+    "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/fir-regenerated.d56"
+    "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/fir.d56"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
   target_link_libraries(dsp56300_fixture_bench PRIVATE dsp56300::core dsp56300_fixture_format)
   find_package(Threads REQUIRED)
   add_executable(dsp56300_fft_native_bench test/fft_native_bench.cpp)
@@ -461,8 +471,4 @@ if(BUILD_TESTING)
     "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/arithmetic-regenerated.d56"
     "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/arithmetic.d56"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
-  set(DSP56300_PRIVATE_FIXTURES "" CACHE STRING "Semicolon-separated paths to local .d56 fixtures")
-  if(DSP56300_PRIVATE_FIXTURES)
-    add_test(NAME private-fixtures COMMAND dsp56300_fixture_test ${DSP56300_PRIVATE_FIXTURES})
-  endif()
 endif()

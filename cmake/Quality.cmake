@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Strict project checks; third-party source keeps its own warning policy.
-set(BLOFELD_SANITIZER "address-undefined" CACHE STRING "none, address-undefined, or thread")
-set_property(CACHE BLOFELD_SANITIZER PROPERTY STRINGS none address-undefined thread)
-option(BLOFELD_FUZZING "Build offline libFuzzer targets" OFF)
+set(DSP56300_SANITIZER "address-undefined" CACHE STRING "none, address-undefined, or thread")
+set_property(CACHE DSP56300_SANITIZER PROPERTY STRINGS none address-undefined thread)
+option(DSP56300_FUZZING "Build offline libFuzzer targets" OFF)
 
 include("${CMAKE_CURRENT_LIST_DIR}/Hardening.cmake")
-add_library(blofeld_quality INTERFACE)
-target_link_libraries(blofeld_quality INTERFACE blofeld_hardening)
-target_compile_options(blofeld_quality INTERFACE
+add_library(dsp56300_quality INTERFACE)
+target_link_libraries(dsp56300_quality INTERFACE dsp56300_hardening)
+target_compile_options(dsp56300_quality INTERFACE
   -Wall -Wextra -Wpedantic -Werror -pedantic-errors
   -Wconversion -Wsign-conversion -Wshadow -Wundef
   -Wcast-align -Wcast-qual -Wdouble-promotion -Wnull-dereference
@@ -15,26 +15,26 @@ target_compile_options(blofeld_quality INTERFACE
   -Woverloaded-virtual -Wextra-semi -Wvla -Wswitch-enum -Wswitch-default
   -ffp-contract=off -fno-omit-frame-pointer)
 # Setup and host API validation use exceptions; ordinary execution reports explicit faults.
-target_link_options(blofeld_quality INTERFACE
+target_link_options(dsp56300_quality INTERFACE
   -Wl,--fatal-warnings -Wl,-z,defs)
 
-if(BLOFELD_SANITIZER STREQUAL "address-undefined")
-  set(blofeld_sanitizers "address,undefined,float-divide-by-zero,unsigned-integer-overflow,implicit-conversion")
-  set(blofeld_dependency_sanitizers "address,undefined,float-divide-by-zero")
-elseif(BLOFELD_SANITIZER STREQUAL "thread")
-  set(blofeld_sanitizers "thread")
-  set(blofeld_dependency_sanitizers "thread")
-elseif(NOT BLOFELD_SANITIZER STREQUAL "none")
-  message(FATAL_ERROR "Unsupported BLOFELD_SANITIZER=${BLOFELD_SANITIZER}")
+if(DSP56300_SANITIZER STREQUAL "address-undefined")
+  set(dsp56300_sanitizers "address,undefined,float-divide-by-zero,unsigned-integer-overflow,implicit-conversion")
+  set(dsp56300_dependency_sanitizers "address,undefined,float-divide-by-zero")
+elseif(DSP56300_SANITIZER STREQUAL "thread")
+  set(dsp56300_sanitizers "thread")
+  set(dsp56300_dependency_sanitizers "thread")
+elseif(NOT DSP56300_SANITIZER STREQUAL "none")
+  message(FATAL_ERROR "Unsupported DSP56300_SANITIZER=${DSP56300_SANITIZER}")
 endif()
-if(DEFINED blofeld_sanitizers)
-  target_compile_options(blofeld_quality INTERFACE
-    "-fsanitize=${blofeld_sanitizers}" -fno-sanitize-recover=all -g)
-  target_link_options(blofeld_quality INTERFACE "-fsanitize=${blofeld_sanitizers}")
+if(DEFINED dsp56300_sanitizers)
+  target_compile_options(dsp56300_quality INTERFACE
+    "-fsanitize=${dsp56300_sanitizers}" -fno-sanitize-recover=all -g)
+  target_link_options(dsp56300_quality INTERFACE "-fsanitize=${dsp56300_sanitizers}")
 endif()
-if(BLOFELD_FUZZING)
-  if(NOT BLOFELD_SANITIZER STREQUAL "address-undefined")
+if(DSP56300_FUZZING)
+  if(NOT DSP56300_SANITIZER STREQUAL "address-undefined")
     message(FATAL_ERROR "Fuzzing requires address-undefined sanitizers")
   endif()
-  target_compile_options(blofeld_quality INTERFACE -fsanitize=fuzzer-no-link)
+  target_compile_options(dsp56300_quality INTERFACE -fsanitize=fuzzer-no-link)
 endif()

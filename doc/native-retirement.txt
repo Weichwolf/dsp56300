@@ -77,30 +77,21 @@ with the parent. Raw trials, hashes and control provenance remain ignored local
 analysis. Both comparisons are necessary to expose a whole-change regression.
 
 Workload           Parent       Control      After        Actual MIPS
-Filter ordinary      1125.75      1129.34      1107.55          93.9
-Filter wide          1236.76      1236.75      1196.85         100.3
-Complete LP12        1861.71      1880.24      1845.54          73.7
-Complete LP12 wide   1916.90      1929.95      1881.05          80.3
-Effect/reverb       52272.00     52484.46     52269.28          29.7
 DSP FFT16           17373.89     17780.89     17465.41          64.1
 DSP FFT64           79355.70     81934.80     81432.61          76.3
 DSP FFT256         371613.94    384090.94    377728.88          85.0
 DSP FFT1024       1726036.44   1785434.25   1755521.88          89.9
 
-Filter/LP12 calls are about 0.9-3.2% shorter than the parent. Reverb is effectively
-flat; FFT calls are about 0.5-2.6% longer. All candidate medians beat the matched
-control, by about 0.4-3.2%, but this does not cancel the observed FFT regression
-against the parent. Small differences on this shared host are not a general
-speedup guarantee. Further code-layout and helper/dispatch work remains open.
+FFT calls are about 0.5-2.6% longer against the parent. The candidate beats
+its admission-disabled control in these median results, but that does not
+cancel a whole-change regression. Small differences on a shared host and
+host text-layout effects require further controlled work.
 
-These execute actual single-Core DSP programs: private source-built Blofeld
-filter/complete LP12/effect routines and the independently modeled own DSP FFT.
-The measured interval includes Core::run and retirement-check/timer overhead;
-RAM/register restoration and compilation are outside it. All versions validate
-the same independent expected state/RAM, instruction count, native/helper/move
-counts and block counts. No timer subtraction is used. Reproduce with the
-fixture benchmark described in doc/fixtures.txt and the same locally built
-workloads; manufacturer code is not distributed here.
+These four cases execute one actual Core using the project's own independently
+modeled DSP FFT. Core::run and timer/retirement checks are inside timing; host
+RAM/register restoration and compilation are outside. Expected complete state,
+RAM and progress are checked against the same public correctness fixtures.
+No application or manufacturer program is required.
 
 Throughput counts actual retired DSP instructions, not base-cost estimates or
 host arithmetic. The representative 270 MIPS reference target is not achieved.

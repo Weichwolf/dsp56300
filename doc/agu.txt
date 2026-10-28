@@ -63,7 +63,7 @@ they execute guest DO/update instructions and compare complete expected state.
 The six single-bit cases show 5.0-6.5% lower median latency against b7b5299.
 The implementation's update_address symbol occupies 464 rather than 597 bytes
 in this LLVM 19 release object. Do not equate that size change with total
-resident memory or a whole-workload speedup. The separate Blofeld/FFT sweep
+resident memory or a whole-workload speedup. The separate historical workload sweep
 does not establish a speedup beyond its sub-1% final differences. Frequencies
 were not fixed, and no energy measurement or 270-MIPS qualification follows.
 
@@ -92,4 +92,4 @@ all address/memory/I/O guards. Failed nonlinear guards use each instruction's
 existing general helper before any native state/RAM effect. This does not
 extend the admitted numerical modes or qualify general modulo/reverse native
 execution. Details of the cold code and register contract are in doc/jit.txt;
-independent test and private workload scope are in doc/fixtures.txt.
+independent test scope is in doc/fixtures.txt.
