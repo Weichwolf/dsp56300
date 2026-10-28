@@ -97,8 +97,8 @@ and old parallel operands without memory/I/O observation barriers. All 6758417
 directed ASR/register assertions pass; no ISA catalogue row becomes complete.
 See doc/native-shifts.txt for guards, witnesses, measurements and remaining work.
 
-The current configuration passes all 117 correctness tests in release (108.48 s,
-two CTest processes) and strict ASan/UBSan (250.90 s, three processes), with no
+The current configuration passes all 117 correctness tests in release (99.69 s,
+two CTest processes) and strict ASan/UBSan (231.81 s, three processes), with no
 skips. All 128 C++ translation units retain the required strict nonrecovering
 address/undefined/integer instrumentation; all 167 project C++ source/header
 files pass clang-format. All 48 pre-existing archives remain byte-identical,
@@ -109,8 +109,9 @@ Full two-second FIR, IIR and spectral cases pass independent complete-state
 checks in all six release variants. The instrumented production bench passes
 all three correctness/report-only cases. Loaded-host comparisons qualify state,
 not release speed. The optimized default bench passes all three one-second
-packages: FIR 0.277051 s, IIR 0.722809 s, spectral 0.999916 s. All final states
-match, but late blocks/hops and the sub-275-MIPS spectral result remain open.
+packages: FIR 0.262642 s, IIR 0.688857 s, spectral 0.872246 s. All final states
+match, with zero late blocks in that capture. One controlled spectral hop is
+late; sustained latency/reserve and wider-scenario qualification remain open.
 These performance gates are separate from the 117 correctness tests. Retain the
 individual captures and host-condition limits in continuous-bench.txt.
 The expanded native-move boundary test passes all 78446 assertions in both builds.
@@ -349,3 +350,30 @@ currently authorized, so these increments are not pushed. Local account names
 stay out of tracked instructions/code/docs.
 The full active objective remains incomplete and must be audited against every
 requirement above, including those that current tests do not yet establish.
+
+
+Linear post-N region qualification
+
+The planner now proves native linear (Rn)+Nn traces through monotone unit/stride
+counts, runtime nonnegative-N checks when reused, and 64-bit address bounds.
+A final post-N result wraps canonically without requiring its next R to stay in
+RAM; every next loop body rechecks it. Nonlinear post-N, changed modifiers and
+unproved cases retain ordinary execution. Six independent mixed trace shapes
+qualify actual guarded bytes, equal/unequal/aliased banks, all CCR bytes and six
+numeric modes, N changes/sign/wrap, exact prefixes/progress and old operands.
+The expanded RAM test passes 1269134 checks per build. No fixture bytes change.
+
+Matched spectral CPU drops 7.46% (0.940453..0.941708 -> 0.869400..0.872367 s),
+with actual guest throughput 292.69..295.27 MIPS. FIR/IIR CPU changes are small.
+Both controlled spectral packages pass, but one hop is late. Default bench
+independently passes all packages with zero late blocks; its worst throughput
+is spectral 294.30 MIPS. These are qualified samples, not a global/long-run
+275-MIPS guarantee or completion of all application domains. All 18 backend/
+stream full states and strict report-only checks pass.
+
+Spectral page storage rises 344064 -> 385024. Separate whole-process user PMU
+captures show fewer instructions/cycles (6.56% / 7.08%) but more L1 data loads
+(2.03%) and instruction misses (56.50%). Do not claim complete cache locality
+or energy savings. See native-strides.txt for proof, full measurements and
+limitations. Full ISA, generic adaptive register placement, further performance,
+SIMD/multicore lifting, applications and integration remain active work.

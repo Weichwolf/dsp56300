@@ -28,16 +28,23 @@ bool transfer(NativeRegion &region,
   const auto &form = move.address;
   ++region.transfers;
   if (form.mode == 6) { return form.index == 0 && form.extra < bound; }
-  if (form.mode != 3 && form.mode != 4) { return false; }
+  if (form.mode != 1 && form.mode != 3 && form.mode != 4) { return false; }
   auto &address = region.addresses.at(form.index);
   address.accessed = true;
   address.modifier = modifiers.at(form.index) & modifier_mask;
   address.bound = std::min(address.bound, bound);
   const auto limit = address.advances < bound ? bound - address.advances : 0U;
   address.linear_limit = std::min(address.linear_limit, limit);
-  if (form.mode == 3) {
+  // Separate maxima conservatively bound every mixed unit/N access. A final
+  // post-N update has no later access to prove and may wrap normally.
+  address.stride_accesses = std::max(address.stride_accesses, address.stride_steps);
+  if (form.mode == 1 || form.mode == 3) {
     address.updated = true;
-    ++address.advances;
+    if (form.mode == 1) {
+      ++address.stride_steps;
+    } else {
+      ++address.advances;
+    }
   }
   return true;
 }
@@ -63,6 +70,7 @@ bool moves(NativeRegion &region,
 
 bool address_supported(const RegionAddress &address) {
   if (!address.accessed) { return true; }
+  if (address.stride_steps != 0 && address.modifier != modifier_mask) { return false; }
   if (!address.updated || address.modifier == modifier_mask) { return address.linear_limit != 0; }
   return address.modifier > 0 && address.modifier < multiple_wrap_bit &&
          address.modifier < address.bound;

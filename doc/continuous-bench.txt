@@ -387,3 +387,45 @@ archives are unchanged; all 128 strict C++ units retain instrumentation and
 all 167 files pass format/tidy/Werror. ISA structural audit passes, while the
 complete gate still fails with all 118 rows partial. Wider applications,
 complete ISA/events/integration, reserve/latency, cache and energy remain open.
+
+
+Linear post-N RAM proof increment
+
+Generic guarded regions now support linear post-N transfers, including mixed
+unit/N steps and a final canonical 24-bit R wrap. Reused N must pass a 64-bit
+monotone range proof; nonlinear/unproved cases keep ordinary execution. No DSP
+program/fixture, instruction/cycle count, CPU/context layout or consumer option
+changes. This enables guarded FFT traces without identifying FFT code.
+
+Matched parent/candidate/candidate/parent captures use CPU2, one natural warmup
+second then one measured input second. No build/test/format job from this repo
+overlaps, but other host activity/frequency/scheduling remain uncontrolled.
+All complete states pass. Process CPU ranges and mean reductions are:
+
+Scenario   Parent CPU s         Candidate CPU s      Mean reduction
+FIR        0.264720..0.265349    0.263208..0.263490   0.64%, small
+IIR        0.688064..0.690110    0.688471..0.689400   effectively unchanged, 0.02%
+spectral   0.940453..0.941708    0.869400..0.872367   7.46%
+
+Spectral wall is 0.869384..0.877046 s, 292.69..295.27 guest MIPS. Both packages
+pass; one candidate hop is late, and that observation is retained. The separate
+default bench passes FIR 0.262642 wall / 0.262643 CPU s (1036.24 MIPS), IIR
+0.688857 / 0.688869 s (398.36 MIPS), spectral 0.872246 / 0.872184 s (294.30 MIPS),
+with zero late blocks in that capture. Neither result proves hard realtime.
+
+Spectral generated page storage grows 344064 -> 385024 bytes; FIR/IIR code
+storage and all retirement/move/batch/AVX2 counts are unchanged. Whole-process
+spectral PMU captures show 6.56% fewer user instructions and 7.08% fewer cycles,
+but 2.03% more L1 data loads and 56.50% more instruction misses. L1 data misses
+fall 1.66%. All counters run 100%; scope includes setup/oracle/cold/warm/checks,
+not isolated interval attribution or energy. See native-strides.txt for proof,
+register table, limits and exact counter ranges.
+
+All 117 release/strict tests pass (99.69 / 231.81 s), without skips. The expanded
+RAM test passes 1269134 independent assertions per build. All 18 full-stream/
+backend comparisons and three strict report-only state checks pass. All 48
+archives are unchanged, all 128 strict units retain instrumentation and all 167
+C++ files pass formatting/tidy/Werror. ISA structural audit passes, while the
+complete-ISA gate still fails with 118 partial rows. Further reserve, sustained
+latency, complete ISA, all application domains, cache/energy, adaptive allocation
+and SIMD/multicore research remain open; the objective is unchanged/incomplete.

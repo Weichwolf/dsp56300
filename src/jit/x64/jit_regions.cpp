@@ -22,8 +22,9 @@ namespace {
 using x64::Branch;
 using x64::Reg;
 using x64::Width;
-constexpr unsigned group_add = 0, group_and = 4, group_cmp = 7, op_cmp = 0x39;
+constexpr unsigned group_add = 0, group_and = 4, group_cmp = 7, op_cmp = 0x39, op_add = 0x01;
 constexpr auto r_offset = offsetof(Cpu, reg) + offsetof(Registers, r);
+constexpr auto n_offset = offsetof(Cpu, reg) + offsetof(Registers, n);
 constexpr auto m_offset = offsetof(Cpu, reg) + offsetof(Registers, m);
 constexpr auto lc_offset = offsetof(Cpu, reg) + offsetof(Registers, lc);
 constexpr std::array<std::uint8_t, 4> landing{0xf3, 0x0f, 0x1e, 0xfa};
@@ -84,7 +85,20 @@ void JitEmitter::region_guard(x64::Code &code, const Reg cpu, x64::Label &failed
     }
     code.load(Reg::cx, cpu, r_offset + offset, Width::dword);
     if (!address.updated || address.modifier == modifier_mask) {
-      code.immediate(group_cmp, Reg::cx, address.linear_limit, Width::dword);
+      if (address.stride_accesses != 0) {
+        // Positive strides are monotone; use 64 bits so an overflowing 24/32-bit
+        // product cannot turn an out-of-bounds trace into an admitted one.
+        code.load(Reg::ax, cpu, n_offset + offset, Width::dword);
+        code.immediate(group_cmp, Reg::ax, sign24_bit, Width::dword);
+        code.jump_if(Branch::above_equal, failed);
+        code.constant(Reg::r9, address.stride_accesses);
+        code.multiply({.destination = Reg::ax, .source = Reg::r9});
+        code.binary(op_add, {.destination = Reg::cx, .source = Reg::ax});
+      }
+      code.immediate(group_cmp,
+                     Reg::cx,
+                     address.linear_limit,
+                     address.stride_accesses != 0 ? Width::qword : Width::dword);
       code.jump_if(Branch::above_equal, failed);
       continue;
     }
@@ -112,6 +126,12 @@ void JitEmitter::region_address(const NativeMove &move) {
     const auto modifier = modifiers_.at(form.index) & modifier_mask;
     if (modifier == modifier_mask) {
       move_delta(move);
+      if (form.mode == 1) {
+        // The last post-N result need not stay in RAM; it is canonical at exit
+        // and rechecked before a following loop body observes it.
+        code_.immediate(
+            group_and, move.space == Space::x ? Reg::si : Reg::di, word_mask, Width::dword);
+      }
     } else {
       move_profiled_next(move, modifier);
     }

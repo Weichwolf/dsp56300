@@ -140,3 +140,7 @@ savings. Entry/header alignment, shared cold fallback and smaller generated code
 are candidates for further measurement. Register/AGU holding, additional AGU
 forms, DSP SIMD/multicore lifting, wider application scenarios and complete ISA
 qualification remain active work; the current package gate is not completion.
+
+The subsequent linear post-N extension is specified in native-strides.txt. Its
+additional range proof and canonical final-R wrap preserve this original unit-
+step/ring qualification; its measurements are a separate controlled increment.

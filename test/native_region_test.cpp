@@ -25,7 +25,7 @@
 namespace dsp56300::test {
 namespace {
 constexpr Word io_begin = 0xffff80, lf = Word{1} << 15;
-constexpr std::size_t ram_words = 128;
+constexpr std::size_t ram_words = 128, short_x_words = 96, short_y_words = 120;
 constexpr Word ring = 19, ring_high = 0xab0013, high_linear = 0xabffff;
 constexpr unsigned selector_high_shift = 17, pair_x_shift = 18, pair_y_mode_shift = 20;
 constexpr Word single_base = 0x404000, reserved_modifier = 0x8002, low_modifier = 0xffff;
@@ -53,6 +53,25 @@ enum Alu : std::uint8_t {
 constexpr auto maximum = std::numeric_limits<std::uint64_t>::max();
 constexpr std::array modes{0U, mode_down, mode_up, mode_rm, mode_rm | mode_down, mode_rm | mode_up};
 
+enum class Shape : std::uint8_t {
+  unit,
+  strided,
+  mixed,
+  y_strided,
+  terminal_stride,
+  terminal_y_stride
+};
+constexpr std::array shapes{Shape::unit,
+                            Shape::strided,
+                            Shape::mixed,
+                            Shape::y_strided,
+                            Shape::terminal_stride,
+                            Shape::terminal_y_stride};
+
+bool terminal(const Shape shape) {
+  return shape == Shape::terminal_stride || shape == Shape::terminal_y_stride;
+}
+
 struct Transfer {
   unsigned reg = 4, index = 0, mode = 3;
   bool y = false, load = true;
@@ -76,14 +95,15 @@ Step single(const Transfer transfer, const Word alu) {
 Step pair(const Transfer x, const Transfer y, const Word alu) {
   const auto xreg = x.reg < 8 ? x.reg - 4 : x.reg - 12;
   const auto yreg = y.reg < 8 ? y.reg - 6 : y.reg - 12;
-  return {.word = 0x800000 | (3U << pair_y_mode_shift) | (3U << 11) | (xreg << pair_x_shift) |
-                  (yreg << 16) | (x.load ? 0x8000U : 0U) | (y.load ? 0x400000U : 0U) | alu,
+  return {.word = 0x800000 | ((y.mode == 4 ? 0U : y.mode) << pair_y_mode_shift) |
+                  ((x.mode == 4 ? 0U : x.mode) << 11) | (xreg << pair_x_shift) | (yreg << 16) |
+                  (x.load ? 0x8000U : 0U) | (y.load ? 0x400000U : 0U) | alu,
           .ports = {x, y},
           .count = 2};
 }
 
-std::vector<Step> trace() {
-  return {
+std::vector<Step> trace(const Shape shape = Shape::unit) {
+  std::vector<Step> result{
       single({}, mac_round_a),
       single({.reg = 6, .index = 4, .y = true}, mac_round_b),
       single({.reg = 14, .index = 1, .load = false}, clear_a),
@@ -102,22 +122,39 @@ std::vector<Step> trace() {
       single({.reg = 6, .index = 4, .y = true}, mac_round_a),
       single({.reg = 14, .index = 1, .load = false}, add_a_b),
       single({.reg = 5, .index = 2, .mode = 4}, adc_x_b)};
+  for (std::size_t index = 0; index < result.size(); ++index) {
+    auto &step = result[index];
+    for (auto &port : std::span(step.ports).first(step.count)) {
+      if (((shape == Shape::strided || (shape == Shape::mixed && index % 2 == 0)) &&
+           port.mode == 3 && !port.y) ||
+          (shape == Shape::y_strided && port.y && port.mode == 3) ||
+          (terminal(shape) && index + 1 == result.size())) {
+        port.mode = 1;
+        if (shape == Shape::terminal_y_stride) { port.y = true; }
+      }
+    }
+    step = step.count == 2 ? pair(step.ports[0], step.ports[1], step.word & status_byte)
+                           : single(step.ports[0], step.word & status_byte);
+  }
+  return result;
 }
 
-std::array<Word, agu_registers> modifiers() {
+std::array<Word, agu_registers> modifiers(const Shape shape = Shape::unit) {
   std::array<Word, agu_registers> result{};
   result.fill(word_mask);
-  result[2] = reserved_modifier; // No-update addresses must not depend on M.
-  result[4] = ring;
+  result[2] =
+      terminal(shape) ? word_mask : reserved_modifier; // No-update addresses must not depend on M.
+  result[4] = shape == Shape::y_strided ? word_mask : ring;
   return result;
 }
 
 struct Memory {
   std::array<Word, ram_words * 2> words{};
   bool alias = false;
+  std::array<std::size_t, 2> limits{ram_words, ram_words};
 
   [[nodiscard]] std::span<Word> bank(const bool y) {
-    return std::span(words).subspan(y && !alias ? ram_words : 0, ram_words);
+    return std::span(words).subspan(y && !alias ? ram_words : 0, limits[y ? 1 : 0]);
   }
 
   void initialize() {
@@ -136,11 +173,11 @@ void execute(Registers &state, Memory &memory, const Step step) {
   for (unsigned index = 0; index < step.count; ++index) {
     const auto &port = step.ports[index];
     addresses[index] = state.r[port.index];
-    if (port.mode == 3) {
+    if (port.mode != 4) {
       state.r[port.index] = address_model::updated({.modifier = state.m[port.index],
                                                     .cursor = addresses[index],
                                                     .offset = state.n[port.index],
-                                                    .mode = 3});
+                                                    .mode = port.mode});
     }
     values[index] = port.load ? memory.bank(port.y)[addresses[index]] & word_mask
                               : register_model::read(state, port.reg);
@@ -157,8 +194,9 @@ void execute(Registers &state, Memory &memory, const Step step) {
   state.pc = (state.pc + 1) & word_mask;
 }
 
-std::vector<detail::NativeOp> operations(const Word mode, const bool loop) {
-  const auto steps = trace();
+std::vector<detail::NativeOp>
+operations(const Word mode, const bool loop, const Shape shape = Shape::unit) {
+  const auto steps = trace(shape);
   const auto last = start + static_cast<Word>(steps.size()) - 1;
   std::vector<detail::NativeOp> result;
   for (std::size_t index = 0; index < steps.size(); ++index) {
@@ -177,24 +215,37 @@ std::vector<detail::NativeOp> operations(const Word mode, const bool loop) {
 struct Input {
   Word r0 = 0, r1 = output_begin, r2 = 64, r4 = coefficient_begin, m0 = word_mask, m4 = ring;
   Word flags = 0, lc = 4, bodies = 1;
+  Word n0 = 1, n1 = 1, n2 = 0, n4 = 1;
 };
 
-bool admitted(const Registers &state, const bool loop) {
-  const auto steps = trace();
-  std::array<Word, agu_registers> advances{};
-  for (const auto step : steps) {
-    for (unsigned index = 0; index < step.count; ++index) {
-      const auto &port = step.ports[index];
-      if (port.index != 4 && state.r[port.index] + advances[port.index] >= ram_words) {
-        return false;
-      }
-      if (port.mode == 3) { ++advances[port.index]; }
-    }
+bool admitted(const Registers &state, const bool loop, const Shape shape, const Memory &memory) {
+  if ((loop && state.lc <= 1) || (state.m[0] & low_modifier) != low_modifier ||
+      (state.m[1] & low_modifier) != low_modifier ||
+      (state.m[4] & low_modifier) != (shape == Shape::y_strided ? low_modifier : ring) ||
+      (terminal(shape) && (state.m[2] & low_modifier) != low_modifier) ||
+      ((shape == Shape::strided || shape == Shape::mixed) &&
+       (state.n[0] >= sign24 || state.n[1] >= sign24)) ||
+      (shape == Shape::y_strided && state.n[4] >= sign24)) {
+    return false;
   }
   const auto base = (state.r[4] / 32) * 32;
-  return (!loop || state.lc > 1) && (state.m[0] & low_modifier) == low_modifier &&
-         (state.m[1] & low_modifier) == low_modifier && (state.m[4] & low_modifier) == ring &&
-         state.r[4] < base + ring + 1 && base + ring + 1 <= ram_words;
+  if (shape != Shape::y_strided &&
+      (state.r[4] >= base + ring + 1 || base + ring + 1 > memory.limits[1])) {
+    return false;
+  }
+  auto cursors = state.r;
+  for (const auto step : trace(shape)) {
+    for (unsigned index = 0; index < step.count; ++index) {
+      const auto &port = step.ports[index];
+      const auto cursor = cursors[port.index];
+      if (cursor >= memory.limits[port.y ? 1 : 0]) { return false; }
+      cursors[port.index] = address_model::updated({.modifier = state.m[port.index],
+                                                    .cursor = cursor,
+                                                    .offset = state.n[port.index],
+                                                    .mode = port.mode});
+    }
+  }
+  return true;
 }
 
 std::uint64_t sum(const std::uint64_t a, const std::uint64_t b) {
@@ -206,22 +257,27 @@ void direct_case(const native::Direct &code,
                  Memory &actual_memory,
                  const Word mode,
                  const bool loop,
-                 const Input input) {
+                 const Input input,
+                 const Shape shape = Shape::unit) {
   actual_memory.initialize();
   auto expected_memory = actual_memory;
   auto expected = register_model::seed(mode);
   expected.sr = mode | input.flags | (loop ? lf : 0U);
   expected.n[0] = (input.flags & 1U) != 0 ? word_mask : sign24;
+  expected.n[1] = input.n1;
+  expected.n[2] = input.n2;
+  if (shape == Shape::strided || shape == Shape::mixed) { expected.n[0] = input.n0; }
   expected.n[4] = (input.flags & 2U) != 0 ? 0U : word_mask;
-  expected.m = modifiers();
+  if (shape == Shape::y_strided) { expected.n[4] = input.n4; }
+  expected.m = modifiers(shape);
   expected.m[0] = input.m0;
-  expected.m[4] = input.m4;
+  expected.m[4] = shape == Shape::y_strided && input.m4 == ring ? word_mask : input.m4;
   expected.r[0] = input.r0;
   expected.r[1] = input.r1;
   expected.r[2] = input.r2;
   expected.r[4] = input.r4;
   expected.lc = input.lc;
-  const auto steps = trace();
+  const auto steps = trace(shape);
   const auto size = static_cast<Word>(steps.size());
   expected.la = start + size - 1;
   expected.stack[expected.sp % stack_entries] = std::uint64_t{start} << word_bits;
@@ -233,7 +289,7 @@ void direct_case(const native::Direct &code,
   cpu.cycles = maximum - 3;
   cpu.repeat_completed = cpu.interrupt_inhibited = true;
   Word retired = 0;
-  while (input.bodies * size - retired >= size && admitted(expected, loop)) {
+  while (input.bodies * size - retired >= size && admitted(expected, loop, shape, actual_memory)) {
     for (const auto step : steps) { execute(expected, expected_memory, step); }
     retired += size;
     if (!loop) { break; }
@@ -254,19 +310,43 @@ void direct_case(const native::Direct &code,
           "Initial/backedge guard rejection preserves exact progress, moves and exclusion fields");
 }
 
-void direct_shape(const Word mode, const bool loop, const bool alias) {
+void stride_matrix(const native::Direct &code,
+                   Memory &memory,
+                   const Word mode,
+                   const bool loop,
+                   const Shape shape) {
+  if (shape != Shape::unit) {
+    for (const Word n0 :
+         {0U, 1U, 2U, 8U, 15U, 16U, 127U, 128U, sign24 - 1, sign24, word_mask, 0xffffffffU}) {
+      for (const Word n1 : {0U, 1U, 2U, 26U, 27U, sign24, word_mask}) {
+        for (const Word n2 : {0U, 1U, 64U, 65U, sign24 - 1, sign24, word_mask, 0xffffffffU}) {
+          direct_case(code,
+                      memory,
+                      mode,
+                      loop,
+                      {.flags = status_byte, .bodies = 3, .n0 = n0, .n1 = n1, .n2 = n2, .n4 = n0},
+                      shape);
+        }
+      }
+    }
+  }
+}
+
+void direct_shape(
+    const Word mode, const bool loop, const bool alias, const Shape shape, const bool shortened) {
   Memory memory{.alias = alias};
+  if (shortened) { memory.limits = {short_x_words, short_y_words}; }
   const detail::JitRuntime runtime{
-      .memory = {{{.data = memory.bank(false).data(), .words = ram_words},
-                  {.data = memory.bank(true).data(), .words = ram_words}}}};
-  const auto ops = operations(mode, loop);
+      .memory = {{{.data = memory.bank(false).data(), .words = memory.limits[0]},
+                  {.data = memory.bank(true).data(), .words = memory.limits[1]}}}};
+  const auto ops = operations(mode, loop, shape);
   detail::JitEmitter emitter(
-      runtime, true, BatchBackend::disabled, modifiers(), detail::RegionMode::guarded);
+      runtime, true, BatchBackend::disabled, modifiers(shape), detail::RegionMode::guarded);
   const native::Direct code(emitter.generate(ops));
   require(emitter.guarded_region() && emitter.cached_status() && emitter.packed_retirement(),
           "Actual guarded bytes qualify held status and helper-free packed retirement");
   for (Word flags = 0; flags <= status_byte; ++flags) {
-    direct_case(code, memory, mode, loop, {.flags = flags, .bodies = 3});
+    direct_case(code, memory, mode, loop, {.flags = flags, .bodies = 3}, shape);
   }
   for (const Word r0 : {0U, 64U, 115U, 116U, 127U, 128U, io_begin, word_mask}) {
     for (const Word m0 : {word_mask, high_linear, 15U, 0U, 0x800fU, 0x8002U}) {
@@ -276,27 +356,39 @@ void direct_shape(const Word mode, const bool loop, const bool alias) {
                       memory,
                       mode,
                       loop,
-                      {.r0 = r0, .r4 = r4, .m0 = m0, .m4 = m4, .flags = status_byte, .bodies = 3});
+                      {.r0 = r0, .r4 = r4, .m0 = m0, .m4 = m4, .flags = status_byte, .bodies = 3},
+                      shape);
         }
       }
     }
   }
   for (const Word lc : {0U, 1U, 2U, 3U, 7U}) {
-    direct_case(
-        code, memory, mode, loop, {.r0 = near_end, .flags = status_byte, .lc = lc, .bodies = 5});
+    direct_case(code,
+                memory,
+                mode,
+                loop,
+                {.r0 = near_end, .flags = status_byte, .lc = lc, .bodies = 5},
+                shape);
   }
   for (const Word r1 : {0U, 125U, 126U, 127U, 128U, io_begin}) {
     for (const Word r2 : {0U, 127U, 128U, io_begin}) {
       direct_case(
-          code, memory, mode, loop, {.r1 = r1, .r2 = r2, .flags = status_byte, .bodies = 3});
+          code, memory, mode, loop, {.r1 = r1, .r2 = r2, .flags = status_byte, .bodies = 3}, shape);
     }
   }
+  stride_matrix(code, memory, mode, loop, shape);
 }
 
 void direct_matrix() {
   for (const auto mode : modes) {
     for (const bool loop : {false, true}) {
-      for (const bool alias : {false, true}) { direct_shape(mode, loop, alias); }
+      for (const bool alias : {false, true}) {
+        for (const auto shape : shapes) {
+          for (const bool shortened : {false, true}) {
+            direct_shape(mode, loop, alias, shape, shortened);
+          }
+        }
+      }
     }
   }
 }
@@ -325,34 +417,47 @@ void admission() {
   mods[0] = 0;
   require(!detail::plan_native_region(ops, banks, mods).valid,
           "Reverse/multiple-wrap updates are outside this region proof");
+  const auto stride_ops = operations(0, false, Shape::strided);
+  require(detail::plan_native_region(stride_ops, banks, modifiers()).valid,
+          "A linear post-N trace admits a runtime range proof without sampling N");
+  for (const Word modifier : {0U, 15U, ring, 0x800fU, reserved_modifier}) {
+    mods = modifiers();
+    mods[0] = modifier;
+    require(!detail::plan_native_region(stride_ops, banks, mods).valid,
+            "Post-N modulo, reverse and reserved modes retain the general path");
+  }
 }
 
-Registers initial(const Word mode) {
+Registers initial(const Word mode, const Shape shape = Shape::unit) {
   auto state = register_model::seed(mode);
-  state.m = modifiers();
+  state.m = modifiers(shape);
+  state.n[0] = 2;
+  state.n[1] = 3;
+  state.n[2] = word_mask;
   state.r[0] = 0;
   state.r[1] = output_begin;
   state.r[2] = 64;
-  state.r[4] = near_end;
+  state.r[4] = shape == Shape::y_strided ? coefficient_begin : near_end;
+  state.n[4] = 1;
   return state;
 }
 
-std::vector<Word> program() {
+std::vector<Word> program(const Shape shape = Shape::unit) {
   std::vector<Word> words;
-  for (const auto step : trace()) { words.push_back(step.word); }
+  for (const auto step : trace(shape)) { words.push_back(step.word); }
   return words;
 }
 
-void prefixes(const Backend backend, const Word mode) {
+void prefixes(const Backend backend, const Word mode, const Shape shape) {
   Memory memory;
   std::array<Word, memory_words> p{};
   Core core({.program = p, .x = memory.bank(false), .y = memory.bank(true)},
             nullptr,
             {.backend = backend});
-  const auto words = program();
+  const auto words = program(shape);
   core.load(Space::program, start, words);
-  const auto state = initial(mode);
-  const auto steps = trace();
+  const auto state = initial(mode, shape);
+  const auto steps = trace(shape);
   memory.initialize();
   core.set_registers(state);
   require(core.run(static_cast<Word>(steps.size())).dispatches == steps.size(),
@@ -372,6 +477,35 @@ void prefixes(const Backend backend, const Word mode) {
                 run.progress == Progress{.instructions = base.instructions + budget,
                                          .estimated_cycles = base.estimated_cycles + budget},
             "Every warm API budget exposes exact full state, sticky flags and all RAM");
+  }
+}
+
+void changed_offsets(const Backend backend, const Word mode, const Shape shape) {
+  Memory memory;
+  std::array<Word, memory_words> p{};
+  Core core({.program = p, .x = memory.bank(false), .y = memory.bank(true)},
+            nullptr,
+            {.backend = backend});
+  core.load(Space::program, start, program(shape));
+  const auto steps = trace(shape);
+  for (const Word offset : {1U, 0U, 2U, word_mask, 1U}) {
+    auto state = initial(mode, shape);
+    state.r[0] = 32;
+    state.n[0] = state.n[1] = state.n[2] = offset;
+    if (shape == Shape::y_strided) { state.n[4] = offset; }
+    memory.initialize();
+    auto expected_memory = memory;
+    auto expected = state;
+    for (const auto step : steps) { execute(expected, expected_memory, step); }
+    core.set_registers(state);
+    const auto base = core.progress();
+    const auto run = core.run(static_cast<Word>(steps.size()));
+    require(run.dispatches == steps.size() && run.fault.kind == FaultKind::none &&
+                core.registers() == expected && memory.words == expected_memory.words &&
+                core.progress() ==
+                    Progress{.instructions = base.instructions + steps.size(),
+                             .estimated_cycles = base.estimated_cycles + steps.size()},
+            "Same-PC changed N selects proved or ordinary execution without stale addresses");
   }
 }
 
@@ -510,7 +644,12 @@ int main() {
     dsp56300::test::direct_matrix();
     for (const auto backend :
          {dsp56300::Backend::reference, dsp56300::Backend::cached, dsp56300::Backend::jit}) {
-      for (const auto mode : dsp56300::test::modes) { dsp56300::test::prefixes(backend, mode); }
+      for (const auto mode : dsp56300::test::modes) {
+        for (const auto shape : dsp56300::test::shapes) {
+          dsp56300::test::prefixes(backend, mode, shape);
+          dsp56300::test::changed_offsets(backend, mode, shape);
+        }
+      }
       dsp56300::test::interrupt_boundary(backend);
       for (const bool accept : {false, true}) {
         for (const bool replace_next : {false, true}) {
