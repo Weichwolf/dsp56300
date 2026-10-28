@@ -175,43 +175,52 @@ void Core::Impl::displacement_move(const Instruction &decoded) {
   }
 }
 
+void Core::Impl::load_long(const Instruction &decoded, const std::uint64_t value) {
+  const auto selector = ((decoded.opcode >> 16) & 3) | ((decoded.opcode >> 17) & 4);
+  switch (selector) {
+    case 0: cpu.reg.a = (cpu.reg.a & ~(long_mask << padding_bits)) | (value << padding_bits); break;
+    case 1: cpu.reg.b = (cpu.reg.b & ~(long_mask << padding_bits)) | (value << padding_bits); break;
+    case 2: cpu.reg.x = value; break;
+    case 3: cpu.reg.y = value; break;
+    case 4: cpu.reg.a = signed_long(value) << padding_bits; break;
+    case 5: cpu.reg.b = signed_long(value) << padding_bits; break;
+    case 6:
+      write_register(a_register, static_cast<Word>(value >> word_bits));
+      write_register(b_register, static_cast<Word>(value) & word_mask);
+      break;
+    case 7:
+      write_register(b_register, static_cast<Word>(value >> word_bits));
+      write_register(a_register, static_cast<Word>(value) & word_mask);
+      break;
+    default: break;
+  }
+}
+
 void Core::Impl::long_move(const Instruction &decoded) {
   const auto opcode = decoded.opcode;
   const auto selector = ((opcode >> 16) & 3) | ((opcode >> 17) & 4);
   const bool load = (opcode & store_to_register) != 0;
-  const auto address = (opcode & effective_address_field) != 0 ? effective(address_form(decoded))
-                                                               : (opcode >> 8) & six_bit_mask;
+  const bool extended = (opcode & effective_address_field) != 0;
+  const auto form = address_form(decoded);
+  if (extended && form.mode == 6 && form.index != 0) {
+    fail(FaultKind::invalid_instruction, Space::program, current_pc, form.index);
+    return;
+  }
+  const auto address = extended ? effective(form) : (opcode >> 8) & six_bit_mask;
+  if (fault.kind != FaultKind::none) { return; }
   if (load) {
     const auto high = read_memory(Space::x, address);
+    if (fault.kind != FaultKind::none) { return; }
     const auto low = read_memory(Space::y, address);
-    const auto value = (std::uint64_t{high} << word_bits) | low;
-    switch (selector) {
-      case 0:
-        cpu.reg.a = (cpu.reg.a & ~(long_mask << padding_bits)) | (value << padding_bits);
-        break;
-      case 1:
-        cpu.reg.b = (cpu.reg.b & ~(long_mask << padding_bits)) | (value << padding_bits);
-        break;
-      case 2: cpu.reg.x = value; break;
-      case 3: cpu.reg.y = value; break;
-      case 4: cpu.reg.a = signed_long(value) << padding_bits; break;
-      case 5: cpu.reg.b = signed_long(value) << padding_bits; break;
-      case 6:
-        write_register(a_register, high);
-        write_register(b_register, low);
-        break;
-      case 7:
-        write_register(b_register, high);
-        write_register(a_register, low);
-        break;
-      default: break;
-    }
+    if (fault.kind != FaultKind::none) { return; }
+    load_long(decoded, (std::uint64_t{high} << word_bits) | low);
     return;
   }
   if (selector >= 6) {
     const auto first = read_register(selector == 6 ? a_register : b_register);
     const auto second = read_register(selector == 6 ? b_register : a_register);
     write_memory(Space::x, address, first);
+    if (fault.kind != FaultKind::none) { return; }
     write_memory(Space::y, address, second);
     return;
   }
@@ -226,6 +235,7 @@ void Core::Impl::long_move(const Instruction &decoded) {
     if (selector >= 4) { value = transfer_long(accumulator); }
   }
   write_memory(Space::x, address, static_cast<Word>(value >> word_bits) & word_mask);
+  if (fault.kind != FaultKind::none) { return; }
   write_memory(Space::y, address, static_cast<Word>(value) & word_mask);
 }
 
@@ -233,22 +243,30 @@ void Core::Impl::mixed_move(const Instruction &decoded) {
   const auto opcode = decoded.opcode;
   const auto form = address_form(decoded);
   const bool yspace = (opcode & effective_address_field) != 0;
+  const bool load = (opcode & store_to_register) != 0;
+  if (form.mode == 6 && form.index == 4 && !load) {
+    fail(FaultKind::invalid_instruction, Space::program, current_pc, form.index);
+    return;
+  }
   const unsigned source_acc = (opcode & (1U << (yspace ? 19 : 17))) != 0 ? b_register : a_register;
   const unsigned second_target =
       yspace ? x0_register + ((opcode >> 18) & 1) : y0_register + ((opcode >> 16) & 1);
   const unsigned first_target =
       yspace ? y_registers[(opcode >> 16) & 3] : x_registers[(opcode >> 18) & 3];
-  const auto secondary = read_register(source_acc);
   const auto address = effective(form);
+  if (fault.kind != FaultKind::none) { return; }
+  const auto secondary = read_register(source_acc);
   const auto space = yspace ? Space::y : Space::x;
-  if ((opcode & store_to_register) == 0) {
+  if (!load) {
     write_memory(space, address, read_register(first_target));
   } else if (form.mode == 6 && form.index == 4) {
     write_register(first_target, decoded.extension);
   } else {
-    write_register(first_target, read_memory(space, address));
+    const auto value = read_memory(space, address);
+    if (fault.kind != FaultKind::none) { return; }
+    write_register(first_target, value);
   }
-  write_register(second_target, secondary);
+  if (fault.kind == FaultKind::none) { write_register(second_target, secondary); }
 }
 
 void Core::Impl::class_two_move(const Instruction &decoded) {
@@ -260,10 +278,12 @@ void Core::Impl::class_two_move(const Instruction &decoded) {
   }
   const bool yspace = (opcode & store_to_register) != 0;
   const unsigned accumulator = (opcode & (1U << 16)) != 0 ? b_register : a_register;
+  const auto address = effective(form);
+  if (fault.kind != FaultKind::none) { return; }
   const auto value = read_register(accumulator);
   const auto operand = read_register(yspace ? y0_register : x0_register);
-  write_memory(yspace ? Space::y : Space::x, effective(form), value);
-  write_register(accumulator, operand);
+  write_memory(yspace ? Space::y : Space::x, address, value);
+  if (fault.kind == FaultKind::none) { write_register(accumulator, operand); }
 }
 
 void Core::Impl::moves(const Instruction &decoded) {

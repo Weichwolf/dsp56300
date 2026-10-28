@@ -66,14 +66,14 @@ MAX	13-106	partial	src/Core/arithmetic.cpp	test/generate_selection.cpp;test/sele
 MAXM	13-107	partial	src/Core/arithmetic.cpp	test/generate_selection.cpp;test/selection_model.hpp;test/selection_test.cpp	Other numerical modes; full parallel/operand/alias and IRQ/sequence/pipeline qualification
 MERGE	13-108	partial	src/Core/bit_fields.cpp	test/generate_bit_fields.cpp;test/fixtures/bit-fields.d56	SB/SC/DM semantics; complete event/sequence and pipeline timing qualification
 MOVE	13-110	partial	src/Core/moves.cpp	test/generate_parallel_moves.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
-MOVE.I	13-113	untested	src/Core/moves.cpp	-	Dedicated independent instruction/operand tests; other modes and sequences
-MOVE.L	13-126	untested	src/Core/moves.cpp	-	Dedicated independent instruction/operand tests; other modes and sequences
+MOVE.I	13-113	partial	src/Core/moves.cpp	test/generate_extended_moves.cpp;test/move_model.hpp;test/extended_move_test.cpp	SB/SC/DM/SM; every parallel ALU/alias/sequence and IRQ/event/pipeline qualification
+MOVE.L	13-126	partial	src/Core/moves.cpp	test/generate_extended_moves.cpp;test/move_model.hpp;test/extended_move_test.cpp	SB/SC/DM/SM; every parallel ALU/alias/sequence and IRQ/event/pipeline qualification
 MOVE.none	13-112	partial	src/Core/moves.cpp	test/generate_arithmetic.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 MOVE.R	13-115	partial	src/Core/moves.cpp	test/native_dataflow_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
-MOVE.RY	13-124	untested	src/Core/moves.cpp	-	Dedicated independent instruction/operand tests; other modes and sequences
+MOVE.RY	13-124	partial	src/Core/moves.cpp	test/generate_extended_moves.cpp;test/move_model.hpp;test/extended_move_test.cpp	SB/SC/DM/SM; every parallel ALU/alias/sequence and IRQ/event/pipeline qualification
 MOVE.U	13-117	partial	src/Core/moves.cpp;src/Core/agu.cpp	test/generate_addressing.cpp;test/reverse_carry_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 MOVE.X	13-118	partial	src/Core/moves.cpp;src/Jit/X64/jit_move_address.cpp	test/generate_parallel_moves.cpp;test/native_move_test.cpp;test/generate_displacement.cpp;test/displacement_test.cpp	Other numerical modes; fast-IRQ admission; full address/alias/sequence and timing qualification
-MOVE.XR	13-120	untested	src/Core/moves.cpp	-	Dedicated independent instruction/operand tests; other modes and sequences
+MOVE.XR	13-120	partial	src/Core/moves.cpp	test/generate_extended_moves.cpp;test/move_model.hpp;test/extended_move_test.cpp	SB/SC/DM/SM; every parallel ALU/alias/sequence and IRQ/event/pipeline qualification
 MOVE.XY	13-123	partial	src/Core/moves.cpp;src/Jit/X64/jit_move_address.cpp	test/generate_parallel_moves.cpp;test/native_move_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 MOVE.Y	13-122	partial	src/Core/moves.cpp;src/Jit/X64/jit_move_address.cpp	test/generate_parallel_moves.cpp;test/native_move_test.cpp;test/generate_displacement.cpp;test/displacement_test.cpp	Other numerical modes; fast-IRQ admission; full address/alias/sequence and timing qualification
 MOVEC	13-130	partial	src/Core/transfers.cpp	test/generate_transfers.cpp;test/transfer_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification

@@ -84,6 +84,9 @@ if(BUILD_TESTING)
   add_executable(dsp56300_displacement_test test/displacement_test.cpp)
   target_link_libraries(dsp56300_displacement_test PRIVATE dsp56300::core)
   add_test(NAME displacement-boundaries COMMAND dsp56300_displacement_test)
+  add_executable(dsp56300_extended_move_test test/extended_move_test.cpp)
+  target_link_libraries(dsp56300_extended_move_test PRIVATE dsp56300::core)
+  add_test(NAME extended-move-boundaries COMMAND dsp56300_extended_move_test)
   add_executable(dsp56300_control_byte_test test/control_byte_test.cpp)
   target_link_libraries(dsp56300_control_byte_test PRIVATE dsp56300::core)
   add_test(NAME control-byte-boundaries COMMAND dsp56300_control_byte_test)
@@ -128,6 +131,8 @@ if(BUILD_TESTING)
   target_link_libraries(dsp56300_generate_parallel_moves PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_displacement test/generate_displacement.cpp)
   target_link_libraries(dsp56300_generate_displacement PRIVATE dsp56300_fixture_format)
+  add_executable(dsp56300_generate_extended_moves test/generate_extended_moves.cpp)
+  target_link_libraries(dsp56300_generate_extended_moves PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_control_bytes test/generate_control_bytes.cpp)
   target_link_libraries(dsp56300_generate_control_bytes PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_selection test/generate_selection.cpp)
@@ -184,6 +189,18 @@ if(BUILD_TESTING)
   add_test(NAME displacement-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/displacement-short.d56"
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/displacement-long.d56")
+  add_test(NAME extended-move-fixtures COMMAND dsp56300_fixture_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/immediate-moves.d56"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/long-moves.d56"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/mixed-moves.d56")
+  foreach(move_form IN ITEMS immediate long mixed)
+    add_test(NAME ${move_form}-move-reproducibility COMMAND "${CMAKE_COMMAND}"
+      "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_extended_moves>"
+      "-DGENERATOR_ARGUMENTS=${move_form}"
+      "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/${move_form}-moves-regenerated.d56"
+      "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/${move_form}-moves.d56"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
+  endforeach()
   add_test(NAME selection-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/selection.d56"
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/test-complement.d56"

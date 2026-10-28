@@ -194,3 +194,24 @@ rollback. Other numerical modes, full parallel/operand expansion, fast IRQ and
 sequence/pipeline/event qualification remain open. All six rows move from
 untested to partial; none becomes complete. Current catalogue totals are
 15 missing, 5 untested, 98 partial, 0 complete. No speed/device claim follows.
+
+Extended-MOVE increment: independent tests now qualify MOVE.I, MOVE.L and both
+Class I/II MOVE.XR/MOVE.RY forms as partial. Every legal standalone bus-field
+encoding is present, with all short immediate bytes/destinations, all eight
+long registers, all valid addressing selectors and six supported numeric modes.
+The authoring assembler separately validates the input words, never semantic
+expectations. Signed quotient/remainder 48-bit scaling/limiting, raw field
+preservation and independent ring/serial-carry models verify data/flags/AGU.
+The long-load and mixed transfer failure paths now stop before subsequent
+bus/destination effects; immediate selectors cannot become memory-store or L:
+addresses. Independent failing witnesses precede these corrections. Host tests
+qualify the explicit library I/O failure contract, including accepted first
+stores, canonical native state, P aliases, wrapped extensions and no replay.
+Tests cover representative old-input parallel ALUs, REP/DO prefixes/frames and
+native consumers, not every legal ALU/bus/alias/sequence combination. S-scale
+expectations follow the scaling-mode/rounding equations of table 5-1; that
+manual's later S-bit table has conflicting scale labels. Hardware confirmation,
+SB/SC/DM/SM, all IRQ/events and calibrated pipeline timing remain open.
+The catalogue has 15 missing, 1 untested (RTI), 102 partial and 0 complete rows.
+The completion gate must continue to fail; neither these tests nor any Blofeld
+workload qualifies the complete DSP56300 instruction set or the full objective.

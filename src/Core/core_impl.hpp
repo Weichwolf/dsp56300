@@ -61,6 +61,7 @@ struct Core::Impl {
   void paired_move(Word opcode);
   void memory_move(const detail::Instruction &decoded);
   void displacement_move(const detail::Instruction &decoded);
+  void load_long(const detail::Instruction &decoded, std::uint64_t value);
   void long_move(const detail::Instruction &decoded);
   void mixed_move(const detail::Instruction &decoded);
   void class_two_move(const detail::Instruction &decoded);

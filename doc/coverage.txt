@@ -5,11 +5,57 @@ implemented and independently tested, as explicitly reiterated by the user.
 Neither a passing current CTest suite nor successful Blofeld workloads is a
 replacement. doc/isa-coverage.tsv inventories 118 instruction/family/MOVE-form
 and alias entries against DSP56300FM Rev.5. The current audit records 15 missing,
-5 without dedicated independent tests and 98 partially tested entries; none
+1 without dedicated independent tests and 102 partially tested entries; none
 claims complete support. These counts are catalogue rows, not disjoint opcode
 counts or an ISA-support percentage. Detailed format/mode/sequence expansion
 remains mandatory. python3 tools/isa_audit.py --require-complete deliberately
 returns failure while any entry remains incomplete; see doc/isa-qualification.txt.
+
+Extended-MOVE ISA increment: MOVE.I, MOVE.L, MOVE.XR and MOVE.RY now have
+dedicated independent qualification. The general executor rejects immediate EA
+selectors for L: memory and mixed Class I stores. Address/transfer failures stop
+before later bus requests or destination writes. Long loads commit only after
+both reads succeed; an accepted X store is retained if Y later fails. Mixed
+Class I captures its secondary source before a primary load overwrites that
+accumulator; Class II stores the old accumulator before loading old X0/Y0.
+Already computed AGU/transfer flags remain visible on transfer failure; these
+are explicit library contracts, not hardware bus-error rollback/arbitration.
+Independent pre-fix counterexamples exposed executed invalid immediates, stray
+memory effects and the Y request after a rejected X half. No CPU state, public
+API, native dependency, board behavior or numerical-mode admission is added.
+Three synthetic reproducible archives contain 51968 immediate-short, 22880 long
+and 35568 mixed cases, 110416 total per backend. They enumerate all 13008 legal
+standalone move-field encodings with six supported numeric-mode choices,
+including all 256 short immediates for all 28 destinations, eight long register
+combinations and both mixed classes/spaces. Separate raw fields, signed-48
+floor/clamp and ring/serial-carry models derive expectations without executing
+or linking the core. The optional authoring assembler agrees on 13120 input
+words; its opcode set is present in the archives, and it supplies no semantic
+oracle or build/runtime dependency. Existing public archives remain unchanged.
+Raw extrema/bit bases, old CCR bytes, partial accumulator fields, fractional vs
+integer immediate placement, 24/48-bit transfer precision, preserved sticky
+flags, current AGU state, old-input ALUs, REP/DO partial prefixes and saved
+LF/FV/stack frames are exercised. Missing extensions and reserved/unsupported
+inputs retain explicit diagnostics. Parallel ALU expansion is representative,
+not all legal ALU/bus combinations. SB/SC/DM/SM remain unqualified.
+252728 host assertions additionally cover every I/O port, both long halves,
+all mixed selectors, accepted/rejected reads/writes, exact callback state,
+reentry, fail-stop without replay, partial RAM failure and actual native
+prefix/suffix execution. Guest X/Y aliases invalidate P successors; the second
+long store wins when both spaces share a word. Wrapped P extensions resume
+correct retirement and subsequent arithmetic. Full ISA, interrupt/event/pipeline
+qualification, representative 270 MIPS host-load/energy results and transparent
+hardware isolation remain outstanding. No speed/SIMD/device claim follows.
+Full release and ASan/UBSan strict suites pass all 72 executable tests
+(90.26 s and 352.40 s). Both register 73 tests, with inaccessible /dev/kvm as
+the sole explicit skip. Final native-boundary refinement adds a parallel CMP
+using old inputs and fresh Carry consumption across every long/mixed I/O form;
+actual native retirement is required, and rejected transfers execute no ALU.
+The affected host test passes again in release/strict (1.02 s and 3.91 s).
+All 27 previous public archives remain byte-identical. LLVM 19 diagnostics,
+tidy, formatting and the structural ISA audit pass. --require-complete still
+fails on 15 missing, 1 untested and 102 partial rows, with none complete.
+No fuzz tests were run. This increment is committed locally; the goal stays active.
 
 Selection/control ISA increment: ANDI/ORI now accept the legal EOM byte,
 OMR[15:8], in addition to MR/CCR/COM. Both instructions are admitted after REP

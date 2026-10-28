@@ -43,6 +43,26 @@ Callbacks observe the advanced PC, pre-retirement progress and any already
 performed source effects. This is the library's explicit fail-stop contract,
 not a qualification of chip bus-error arbitration or rollback.
 
+L: long MOVE uses one effective address and requests X before Y. Both outgoing
+words and their transfer flags are captured before the first write callback.
+A rejected X half prevents the Y request. Long loads commit their register
+result only after both reads succeed; no rejected half supplies destination
+data. A rejected Y store does not undo the accepted X write. The computed AGU
+update and already computed sticky transfer flags remain visible on failure.
+No failure retires the guest instruction, and later run calls do not replay it.
+Immediate and reserved EA-extension selectors are invalid for L: memory.
+
+Class I X:R/R:Y MOVE snapshots the secondary accumulator source before the
+primary transfer overwrites any accumulator/input register. It then commits
+the destinations only after its memory read/write succeeds. Class II snapshots
+the old accumulator and old X0/Y0, stores the accumulator, then commits X0/Y0
+to that accumulator only on success. Address failures prevent bus activity;
+rejected transfers preserve the already computed AGU/transfer flags and do not
+commit the later register move or a parallel ALU. Both classes remain stopped
+without replay after failure. Class II prohibits EA extensions; Class I permits
+immediate data as a source only. These are the explicit synchronous library
+transfer/error contracts, not hardware bus-error rollback or arbitration.
+
 All callbacks run synchronously on the CPU execution thread. The host can inspect
 state and read/write/load supplied RAM, including P, or clear code caches.
 Host Core::read/write/load access the supplied spans directly. Program mutations

@@ -249,3 +249,19 @@ Rejected transfers execute no following ALU and retire no guest instruction;
 existing partial-transfer effects and fail-stop semantics remain authoritative.
 These tests qualify helper integration only; other numerical modes, full ISA,
 pipeline/IRQ behavior and workload performance remain separate requirements.
+
+Extended MOVE qualification
+
+Immediate-short, L: and Class I/II X:R/R:Y moves continue through general move
+helpers. No native lowering, new CPU state, SIMD or throughput claim is added.
+Independent fixtures test every legal standalone bus-field encoding with six
+supported numeric-mode choices, plus raw/partial-field precision and old-input
+parallel ALU witnesses. Native prefix/suffix cases check materialization and
+fresh Carry/data consumers. Host tests separately require actual native ALU
+execution around long/mixed I/O helpers and after successor P invalidation.
+A parallel native CMP must use old inputs, followed by an ADC consuming its
+new Carry/input state; rejected transfers execute neither ALU operation.
+Guest X/Y stores sharing the same P word must execute the final stored successor,
+including the second L: half winning a shared X/Y word. Wrapped P extensions
+resume normal instruction budgets and subsequent arithmetic. Explicit unsupported
+numeric modes and unqualified IRQ/pipeline/event behavior remain gaps.

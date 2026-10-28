@@ -534,6 +534,51 @@ Other modes, every parallel format/alias, all IRQ/event and calibrated pipeline
 behavior remain unqualified; all six ISA rows remain partial. Archives keep the
 existing version and 65536 per-file limit; no old fixture bytes are replaced.
 
+Extended MOVE fixtures
+
+Three original synthetic archives add 110416 independent cases per backend:
+- immediate-moves.d56: 51968 cases, including all 7168 short immediate encodings.
+- long-moves.d56: 22880 cases, including all 1936 valid L: move-field encodings.
+- mixed-moves.d56: 35568 cases, including all 3904 valid Class I/II X:R/R:Y fields.
+
+Regenerate explicitly:
+  build/release/dsp56300_generate_extended_moves immediate build/immediate-moves.d56
+  build/release/dsp56300_generate_extended_moves long build/long-moves.d56
+  build/release/dsp56300_generate_extended_moves mixed build/mixed-moves.d56
+  cmp build/immediate-moves.d56 test/fixtures/immediate-moves.d56
+  cmp build/long-moves.d56 test/fixtures/long-moves.d56
+  cmp build/mixed-moves.d56 test/fixtures/mixed-moves.d56
+
+The producer links only fixture-format. The separate model constructs raw
+register fields, sign extension/zero fill, signed 48-bit floor/scaling/limiting,
+ring coordinates and serial carry. Immediate bytes move to integer or fractional
+positions according to the destination; long A10/B10 preserve extension bytes,
+A/B sign extend, AB/BA zero low words and use separate 24-bit limiters. Other
+long pairs remain raw, without implicit limiter flags. Models retain old ALU
+and secondary source values when the primary load overwrites their registers.
+All legal standalone fields appear under six admitted numeric-mode choices.
+Directed extrema, bit/complement bases, all old CCR values, qualified modifiers,
+old-input parallel TST/CMP, REP/DO prefixes with saved LF/FV/stack frames and
+native/helper/native Carry/rounding sequences add semantic witnesses. Missing P
+extensions, reserved selectors, forbidden immediate stores/L: addresses and
+unimplemented numeric modes are explicit library diagnostics, not asserted
+hardware exceptions. The optional authoring assembler checks all 13008 legal
+input encodings (13120 words); expectations never come from its execution.
+252728 separate host assertions test every I/O port with full-span RAM backing,
+all long/mixed selectors, callback canonical state/reentry, failed first/second
+halves, partial RAM failure, accepted writes retained on later failure and
+fail-stop without destination fabrication/replay. Actual native prefix/suffix
+instructions surround callbacks; an actual native parallel CMP consumes old
+operands and never executes after a rejected transfer. Callback and guest-alias
+P writes invalidate
+the successor. A second long store wins an overlapping X/Y/P word, and P
+extensions wrap at 24 bits before subsequent arithmetic.
+All four catalogue rows remain partial: SB/SC/DM/SM, every parallel ALU/bus/alias
+and IRQ/event/pipeline sequence remain unqualified. Numerical tests use table
+5-1's scaling-mode equations; conflicting labels in its later S-bit table still
+need hardware confirmation. No workload or protected-execution claim follows.
+Archive limits, schema/version and all earlier fixture bytes remain unchanged.
+
 Wire format D56F, version 1
 
 Every integer is unsigned little-endian. u32/u64 always occupy 4/8 bytes.
