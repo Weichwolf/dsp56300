@@ -2,6 +2,7 @@
 #include "architecture.hpp"
 #include "dsp56300/core.hpp"
 #include "fields.hpp"
+#include "jit.hpp"
 #include "jit_emitter.hpp"
 #include "native_moves.hpp"
 #include "x64.hpp"
@@ -25,6 +26,26 @@ constexpr auto r_offset = offsetof(Cpu, reg) + offsetof(Registers, r);
 constexpr auto n_offset = offsetof(Cpu, reg) + offsetof(Registers, n);
 constexpr auto m_offset = offsetof(Cpu, reg) + offsetof(Registers, m);
 
+}
+
+// Address generation touches CPU registers only; no RAM/I/O address is dereferenced.
+void JitEmitter::address_update(const NativeOp &operation) {
+  const auto opcode = operation.instruction.opcode;
+  const NativeMove update{.address = {.mode = (opcode >> 11) & 3, .index = (opcode >> 8) & 7}};
+  const auto offset = update.address.index * sizeof(Word);
+  x64::Label slow;
+  x64::Label done;
+  code_.load(Reg::ax, Reg::r12, m_offset + offset, Width::dword);
+  code_.immediate(group_and, Reg::ax, modifier_mask, Width::dword);
+  code_.immediate(group_cmp, Reg::ax, modifier_mask, Width::dword);
+  code_.jump_if(Branch::not_equal, slow);
+  move_delta(update);
+  code_.immediate(group_and, Reg::si, word_mask, Width::dword);
+  code_.store(Reg::r12, r_offset + offset, Reg::si, Width::dword);
+  code_.jump(done);
+  code_.bind(slow);
+  general_moves(operation);
+  code_.bind(done);
 }
 
 // Keep prospective R updates in SI/DI until every transfer guard has passed.

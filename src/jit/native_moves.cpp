@@ -14,6 +14,12 @@ constexpr unsigned pair_bit = 23, y_mode_shift = 20, x_register_shift = 18, y_lo
 constexpr unsigned high_register_shift = 17;
 }
 
+bool pure_address_update(const Instruction &instruction) {
+  return instruction.operation == Operation::parallel &&
+         (instruction.opcode & update_group_mask) == update_group &&
+         (instruction.opcode & byte_mask) == 0;
+}
+
 NativeMoves plan_moves(const Instruction &instruction) {
   NativeMoves result;
   if (instruction.operation != Operation::parallel) { return result; }

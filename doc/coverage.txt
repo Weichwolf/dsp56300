@@ -97,27 +97,35 @@ and old parallel operands without memory/I/O observation barriers. All 6758417
 directed ASR/register assertions pass; no ISA catalogue row becomes complete.
 See doc/native-shifts.txt for guards, witnesses, measurements and remaining work.
 
-The current configuration passes all 113 correctness tests in release (106.46 s,
-two CTest processes) and strict ASan/UBSan (233.92 s, three processes), with no
-skips. All 118 C++ translation units retain the required strict nonrecovering
-address/undefined/integer instrumentation; all 160 project C++ source/header
-files pass clang-format. The 46 pre-existing archives remain byte-identical,
-including the 112-case FFT archive after oracle extraction and relocation
-support. Two spectral additions bring the archive total to 48. All registered
-regeneration checks pass. No fuzzing was run.
+The current configuration passes all 114 correctness tests in release (119.24 s,
+two CTest processes) and strict ASan/UBSan (253.89 s, three processes), with no
+skips. All 120 C++ translation units retain the required strict nonrecovering
+address/undefined/integer instrumentation; all 161 project C++ source/header
+files pass clang-format. All 48 pre-existing archives remain byte-identical,
+including the 112-case FFT archive. All registered regeneration checks pass.
+No fuzzing was run.
 The structural ISA audit passes; full ISA qualification still fails as intended.
 Full two-second FIR, IIR and spectral cases pass independent complete-state
 checks in all six release variants. The instrumented production bench passes
 all three correctness/report-only cases. Loaded-host comparisons qualify state,
-not release speed. The optimized default bench passes FIR (0.302763 s) and fails
-IIR (1.398556 s) and spectral (1.195956 s) in this capture; all final states match.
-These performance gates are separate from the 113 correctness tests. Retain the
+not release speed. The optimized default bench passes FIR (0.278491 s) and fails
+IIR (1.401406 s) and spectral (1.161694 s) in this capture; all final states match.
+These performance gates are separate from the 114 correctness tests. Retain the
 individual captures and host-condition limits in continuous-bench.txt.
 The expanded native-move boundary test passes all 78446 assertions in both builds.
 It includes exact same-code reuse after modifier changes and paired aliased X/Y
 wraps/I/O fallback. Profiled modulo checks compile ring constants but guard every
 current M, retaining dynamic fallbacks. No public or persistent CPU layout changes.
 See profiled-modulo.txt and the earlier bookkeeping work in native-retirement.txt.
+
+Pure address updates now lower -N/+N/-1/+1 natively when current M low16 is
+ffff, with no memory access or transfer-counter increment. Non-linear/reserved
+modifiers keep the existing guarded general path. Explicit zero data-bank
+writes preserve dirty A/B across AGU changes. All 7096453 new independent native
+address checks pass in both builds. Matched continuous runs reduce FIR CPU time
+8.22% and spectral 8.12%; IIR is effectively unchanged. Code storage grows and
+both slow package deadlines remain failures. See native-address-updates.txt
+for guards, counters, complete-state witnesses and comparison limits.
 
 Guarded one-instruction MAC/paired-linear-load loops now use compiled scalar or
 AVX2 batches. Four products share one accumulator checkpoint; ordered prefix
@@ -295,8 +303,8 @@ nonrecovering ASan/UBSan/integer instrumentation remain required. No checks are
 weakened or suppressed. No fuzz testing is authorized or run. Binary fixtures
 encode explicit portable fields; independent producers do not use emulator
 snapshots or another DSP emulator as expectations. Manufacturer assets remain
-local. Verified increments are committed and every commit is pushed to the
-private origin repository, as authorized by the user. Local account names stay
-out of tracked instructions/code/docs.
+local. Verified increments are committed locally. No publication destination is
+currently authorized, so these increments are not pushed. Local account names
+stay out of tracked instructions/code/docs.
 The full active objective remains incomplete and must be audited against every
 requirement above, including those that current tests do not yet establish.

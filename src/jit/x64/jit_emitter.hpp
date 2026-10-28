@@ -47,6 +47,7 @@ private:
   void move_next(const NativeMove &move);
   void move_profiled_next(const NativeMove &move, Word modifier);
   void move_delta(const NativeMove &move);
+  void address_update(const NativeOp &operation);
   void move_ring_delta(const NativeMove &move);
   void emit_ring_guards();
   void emit_ring_check(x64::Label &entry);

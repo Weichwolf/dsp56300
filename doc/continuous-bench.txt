@@ -8,6 +8,13 @@ separately; the family clock is not an assertion of one cycle for every opcode.
 The 275-MIPS reference remains a minimum optimization target, not a cap or an
 aggregate score that can hide a slow scenario.
 
+At 275 MHz, full compute load corresponds to approximately 275 million modeled
+DSP cycles per input second. It corresponds to 275 million retired instructions
+only when the workload averages one modeled cycle per instruction. Multi-cycle
+work can saturate that reference at lower instruction throughput. The decisive
+package acceptance remains wall <= input duration, with instruction rate and
+modeled load reported separately. Base costs are not complete pipeline/bus timing.
+
 Initialize the DSP and caller-owned P/X/Y buffers once. Run one input second as
 natural warmup, then measure the following input second in the same instance.
 Registers, history, rings, counters and loop frames continue across all slices.
@@ -214,3 +221,34 @@ complete ISA still fails with all 118 rows partial. This increment adds genuine
 measurement/validation coverage, with no production compiler change. All usual
 application domains, the two failed deadlines, further host efficiency and
 precise ISA/event/memory/energy qualification remain part of the active goal.
+
+Native linear address-update increment
+
+Pure update-group moves now avoid C++ for linear M while preserving dynamic
+fallback and dirty accumulators. Fixture bytes and the three work packages are
+unchanged. Matched baseline/candidate/candidate/baseline runs use the same CPU
+affinity and one natural warmup second followed by one measured second. FIR is
+recaptured after a formatter overlaps the initial comparison. Original logs and
+all observed slow cases are retained. There are no project compile/correctness
+jobs during final captures; unrelated scheduling/frequency variation persists.
+
+Scenario   Baseline process CPU s    Candidate process CPU s    CPU reduction
+FIR        0.306152..0.307333         0.280980..0.282056         8.22%
+IIR        1.379493..1.389149         1.381854..1.386351         effectively zero
+spectral   1.185930..1.190713         1.090533..1.093068         8.12%
+
+All full states pass. Spectral still takes 1.093444..1.159071 wall seconds and
+misses every hop deadline. The default release target independently records
+FIR PASS (0.278491 wall / 0.278335 CPU s, 977.27 actual guest MIPS), IIR FAIL
+(1.401406 / 1.395270 s, 195.81 MIPS) and spectral FAIL (1.161694 / 1.084368 s,
+220.97 MIPS). No average or retest replaces the failures. Strict report-only
+bench checks all three complete states, while explicitly reporting late packages.
+
+All 114 release/strict correctness tests pass (119.24 / 253.89 s), without skips.
+All six release variants match each of the three complete streams; those runs
+overlap correctness work and qualify state rather than controlled speed. The
+new address test adds 7096453 independent checks per configuration; 48 archives
+are unchanged. All 120 strict C++ units retain instrumentation and all 161 C++
+files pass formatting. ISA structural audit passes, complete-ISA remains red.
+See native-address-updates.txt for the register plan, guard tests, code-size
+tradeoff and distinction between retired helpers and actual C++ transitions.

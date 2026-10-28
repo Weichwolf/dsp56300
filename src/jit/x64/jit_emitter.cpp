@@ -95,7 +95,10 @@ bool JitEmitter::lowerable(const NativeOp &operation) const {
     if (reg >= m_register_base) { return false; }
   }
   const auto alu = opcode & byte_mask;
-  if (alu == 0) { return plan_moves(decoded).count != 0 || plan_register_move(decoded).valid(); }
+  if (alu == 0) {
+    return pure_address_update(decoded) || plan_moves(decoded).count != 0 ||
+           plan_register_move(decoded).valid();
+  }
   if (is_addition(operation)) { return true; }
   if (is_right_shift(operation)) { return true; }
   if ((alu & 0x80U) != 0) { return true; }

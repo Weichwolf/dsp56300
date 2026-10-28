@@ -226,6 +226,16 @@ execution. native_move_instructions overlaps that count and records only complet
 transfers executed by emitted code, not helper fallback or failed instructions.
 These counters make fallback use visible in correctness tests and benchmarks.
 
+Pure AGU updates
+
+Update-group MOVE words with zero ALU byte use native -N/+N/-1/+1 when the
+current M low16 is ffff. No RAM address is dereferenced and dirty A/B remain
+live. Other modifiers branch to the existing moves-only helper before changing
+R. Numeric admission and conservative observation/retirement boundaries remain
+unchanged. Native retirement can therefore include a non-linear helper branch;
+native_move_instructions stays zero for these address-only instructions.
+See native-address-updates.txt for independent guard/state tests and measurements.
+
 The shared binary fixtures run through reference, cached and native backends.
 Directed host tests verify exact/partitioned budgets, numeric mode changes,
 stale-code replacement, I/O invalidation of executing code, failed memory moves,

@@ -64,6 +64,10 @@ void JitEmitter::register_move(const NativeRegisterMove &move, const Word mode) 
 }
 
 void JitEmitter::moves(const NativeOp &operation) {
+  if (pure_address_update(operation.instruction)) {
+    address_update(operation);
+    return;
+  }
   const auto reg = plan_register_move(operation.instruction);
   if (reg.valid()) {
     register_move(reg, operation.mode);

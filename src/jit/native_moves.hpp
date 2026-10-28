@@ -27,6 +27,7 @@ struct NativeRegisterMove {
 };
 
 // Compile-time transfer description, independent of the host instruction set.
+[[nodiscard]] bool pure_address_update(const Instruction &instruction);
 [[nodiscard]] NativeMoves plan_moves(const Instruction &instruction);
 [[nodiscard]] NativeRegisterMove plan_register_move(const Instruction &instruction);
 } // namespace dsp56300::detail
