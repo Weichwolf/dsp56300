@@ -15,7 +15,9 @@
 #include <exception>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <span>
+#include <stdexcept>
 #include <tuple>
 #include <vector>
 
@@ -109,7 +111,10 @@ void scalar_step(Registers &state, const Step step) {
   --state.lc;
 }
 
-void direct_check(Fixture &fixture, const BatchBackend backend, const Word expected_count) {
+void direct_check(Fixture &fixture,
+                  const BatchBackend backend,
+                  const Word expected_count,
+                  const detail::MacBatchCall *const prepared = nullptr) {
   auto expected = fixture.cpu.reg;
   expected.a >>= detail::padding_bits;
   expected.b >>= detail::padding_bits;
@@ -130,8 +135,10 @@ void direct_check(Fixture &fixture, const BatchBackend backend, const Word expec
                  .next_y = ports[1].data[expected.r[fixture.indices[1]]],
                  .indices = fixture.indices});
   }
+  const auto call = prepared != nullptr ? std::optional{*prepared}
+                                        : detail::compile_mac_batch(fixture.operation, backend);
   const auto count =
-      detail::execute_mac_batch(fixture.cpu, fixture.context, fixture.operation, backend);
+      call ? call->entry(fixture.cpu, fixture.context, fixture.operation, call->operands) : 0U;
   require(count == expected_count, "A guarded batch retires the exact expected multiple of four");
   if (count == 0) {
     require(snapshot(fixture.cpu) == before && fixture.moves == before_moves &&
@@ -275,14 +282,15 @@ void rejections() {
 struct AddressInput {
   BatchBackend backend;
   unsigned x = 0, y = 0, sp = 0;
-  bool alias = false;
+  bool alias = false, b = false, subtract = false;
 };
 
 void address_case(const AddressInput input) {
   Fixture fixture;
   constexpr Word fields = (7U << 8) | (3U << 13);
   fixture.operation.instruction =
-      detail::decode((paired_mac & ~fields) | (input.x << 8) | (input.y << 13));
+      detail::decode((paired_mac & ~fields) | (input.x << 8) | (input.y << 13) |
+                     (input.b ? 8U : 0U) | (input.subtract ? 4U : 0U));
   fixture.indices = {input.x, input.y + (input.x < 4 ? 4U : 0U)};
   for (const auto index : fixture.indices) {
     fixture.cpu.reg.r[index] = 0;
@@ -296,15 +304,86 @@ void address_case(const AddressInput input) {
   direct_check(fixture, input.backend, input.backend == BatchBackend::disabled ? 0U : 8U);
 }
 
+void address_roles(const AddressInput input) {
+  for (const bool b : {false, true}) {
+    for (const bool subtract : {false, true}) {
+      auto role = input;
+      role.b = b;
+      role.subtract = subtract;
+      address_case(role);
+    }
+  }
+}
+
 void addresses(const BatchBackend backend) {
   for (unsigned x = 0; x < agu_registers; ++x) {
     for (unsigned y = 0; y < 4; ++y) {
       for (const unsigned sp : {0U, 15U, 31U, 63U}) {
         for (const bool alias : {false, true}) {
-          address_case({.backend = backend, .x = x, .y = y, .sp = sp, .alias = alias});
+          address_roles({.backend = backend, .x = x, .y = y, .sp = sp, .alias = alias});
         }
       }
     }
+  }
+}
+
+void prepared_selection() {
+  const Fixture fixture;
+  const auto scalar = detail::compile_mac_batch(fixture.operation, BatchBackend::scalar);
+  const auto vector = detail::compile_mac_batch(fixture.operation, BatchBackend::avx2);
+  const auto automatic = detail::compile_mac_batch(fixture.operation, BatchBackend::automatic);
+  if (!scalar || !vector || !automatic) {
+    throw std::runtime_error("An admitted MAC must produce a call for every enabled policy");
+  }
+  require(
+      scalar->entry != nullptr && automatic->operands == scalar->operands &&
+          vector->operands == scalar->operands,
+      "Prepared policies share the same operand plan and publish real compiler-emitted entries");
+  require(automatic->entry == vector->entry &&
+              ((vector->entry != scalar->entry) == detail::avx2_mac_available()),
+          "Host feature admission selects the scalar or AVX2 entry once during compilation");
+}
+
+void prepared_reuse(const BatchBackend backend) {
+  Fixture fixture;
+  const auto call = detail::compile_mac_batch(fixture.operation, backend);
+  if (!call) {
+    require(backend == BatchBackend::disabled, "Disabled batches publish no prepared entry");
+    return;
+  }
+  const auto initial = fixture.cpu;
+  constexpr Word long_count = 124;
+  for (const Word budget : {4U, 16U, 64U, long_count}) {
+    fixture.cpu = initial;
+    fixture.cpu.reg.lc = static_cast<Word>(fixture.x.size()) + 1;
+    fixture.cpu.reg.a = 0;
+    fixture.cpu.reg.r[0] = 3;
+    fixture.cpu.reg.r[4] = 1;
+    fixture.cpu.reg.sp = stack_entries - 1;
+    fixture.cpu.reg.stack.back() = std::uint64_t{start} << word_bits;
+    fixture.context.budget = budget;
+    fixture.context.runtime.memory[1] = {.data = fixture.x.data() + 1,
+                                         .words = fixture.x.size() - 1};
+    direct_check(fixture, backend, budget, &*call);
+  }
+  const std::array mutations{
+      +[](Fixture &f) { f.cpu.reg.pc = start + 1; },
+      +[](Fixture &f) { f.cpu.reg.la = start + 1; },
+      +[](Fixture &f) { f.cpu.reg.sr |= mode_up; },
+      +[](Fixture &f) { f.cpu.reg.sr |= detail::cache_enable; },
+      +[](Fixture &f) { f.cpu.reg.sr |= detail::forever_flag; },
+      +[](Fixture &f) { f.cpu.reg.lc = word_mask + 1; },
+      +[](Fixture &f) { f.cpu.reg.stack[2] = std::uint64_t{start + 1} << word_bits; },
+      +[](Fixture &f) { f.cpu.reg.m[0] = unsupported_modifier; },
+      +[](Fixture &f) { f.context.runtime.memory[0].data = nullptr; },
+      +[](Fixture &f) { f.cpu.repeat_remaining = 1; },
+      +[](Fixture &f) { f.cpu.debug_flags |= detail::debug_interrupt_pending; },
+      +[](Fixture &f) { f.cpu.processing = ProcessingState::stopped; },
+      +[](Fixture &f) { f.dirty = true; }};
+  for (const auto mutation : mutations) {
+    Fixture changed;
+    mutation(changed);
+    direct_check(changed, backend, 0, &*call);
   }
 }
 
@@ -497,11 +576,13 @@ int main() {
     dsp56300::test::boundaries();
     dsp56300::test::rejections();
     dsp56300::test::reduction_selection();
+    dsp56300::test::prepared_selection();
     for (const auto backend : dsp56300::test::variants) {
       dsp56300::test::addresses(backend);
       dsp56300::test::overflow_prefixes(backend);
       dsp56300::test::proven_range(backend);
       dsp56300::test::reductions(backend);
+      dsp56300::test::prepared_reuse(backend);
     }
     for (const auto mode : dsp56300::test::modes) {
       dsp56300::test::core_prefixes<dsp56300::BatchBackend::disabled>(mode);

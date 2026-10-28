@@ -28,6 +28,15 @@ struct MacBatchPlan {
   bool destination_b = false, subtract = false;
 };
 
+using MacBatchEntry = Word (*)(Cpu &, NativeContext &, const NativeOp &, Word) noexcept;
+
+// Compilation-only value. Generated code embeds these immediates, while the
+// block retains the referenced NativeOp until every active entry returns.
+struct MacBatchCall {
+  MacBatchEntry entry = nullptr;
+  Word operands = 0;
+};
+
 struct MacBatchInput {
   std::span<const Word> x, y;
   bool subtract = false;
@@ -40,6 +49,8 @@ struct MacBatchState {
 };
 
 [[nodiscard]] std::optional<MacBatchPlan> plan_mac_batch(const NativeOp &operation);
+[[nodiscard]] std::optional<MacBatchCall> compile_mac_batch(const NativeOp &operation,
+                                                            BatchBackend backend);
 
 namespace mac_batch_math {
 inline constexpr std::int64_t sign = std::int64_t{1} << (accumulator_bits - 1);
@@ -100,8 +111,4 @@ inline void consume_mac_products(MacBatchState &state,
 void scalar_mac_batch(MacBatchState &state, const MacBatchInput &input) noexcept;
 void avx2_mac_batch(MacBatchState &state, const MacBatchInput &input) noexcept;
 [[nodiscard]] bool avx2_mac_available() noexcept;
-[[nodiscard]] Word execute_mac_batch(Cpu &cpu,
-                                     NativeContext &context,
-                                     const NativeOp &operation,
-                                     BatchBackend backend) noexcept;
 } // namespace dsp56300::detail

@@ -97,11 +97,11 @@ and old parallel operands without memory/I/O observation barriers. All 6758417
 directed ASR/register assertions pass; no ISA catalogue row becomes complete.
 See doc/native-shifts.txt for guards, witnesses, measurements and remaining work.
 
-The current configuration passes all 101 correctness tests in release (117.70 s)
-and strict (448.08 s), with no skips. Strict builds instrument all 112 C++
+The current configuration passes all 101 correctness tests in release (166.44 s)
+and strict (540.01 s), with no skips. Strict builds instrument all 112 C++
 translation units with nonrecovering address/undefined/integer checks. All 148
 project C++ source/header files pass clang-format. All 41 independent fixture
-archives are unchanged in the reduction-window increment; fir.d56 retains its
+archives are unchanged in the prepared-plan increment; fir.d56 retains its
 1728 original cases from the preceding expansion. The structural ISA audit
 passes; full ISA qualification still fails as intended.
 See doc/native-retirement.txt for the earlier bounded bookkeeping optimization.
@@ -110,7 +110,7 @@ Guarded one-instruction MAC/paired-linear-load loops now use compiled scalar or
 AVX2 batches. Four products share one accumulator checkpoint; ordered prefix
 checks retain intermediate sticky L and terminal V. A signed56 interior proof
 omits impossible overflow reconstruction. General native execution handles
-unsupported patterns, states, RAM boundaries and loop cleanup. All 316526
+unsupported patterns, states, RAM boundaries and loop cleanup. All 326635
 arithmetic/admission checks and 1680 observation-boundary checks pass in both
 builds, including exact budgets, saved frames, faults, I/O, rejected callbacks
 and code invalidation. See doc/mac-batching.txt for scope and measurements.
@@ -118,6 +118,11 @@ A per-checkpoint 16/64-step range proof additionally admits four independent
 signed64 reduction sums. Failed proof checks use the ordered-prefix path in
 groups of up to 16, with no change to architectural admission or observation
 contracts. See doc/mac-reductions.txt for proof boundaries and performance.
+Instruction-invariant MAC transfer slots, destination/sign and host-backend
+selection now compile into immediate operands and a selected entry address.
+Dynamic CPU, loop, budget, frame and memory guards remain. No persistent layout
+or allocation is added; prepared entries retain independent state/reuse tests.
+See doc/mac-plan-compilation.txt for lifetime, code-size and measured tradeoffs.
 
 Adaptive pattern-dependent register allocation, new SIMD bank formats and
 both-branch evaluation remain design/experiment work, not implemented features;
@@ -155,16 +160,18 @@ call by about 6% against a matched disabled-input-cache control (about 132 MIPS)
 FFT effects in that comparison are small and mixed. See doc/native-inputs.txt
 for the complete table, protocol, short-case variability and scope limitations.
 
-The current guarded reduction-window experiment reaches about 1159 actual guest
-MIPS for the own 512-tap FIR: about 1.70 times the previous four-prefix kernel
-and 7.92 times the same-build unbatched JIT. The held-out 129-tap length reaches
-about 376 MIPS; FFT1024 stays about 239 MIPS. Seven rotating-order repetitions
-use identical inputs/replay counts and one pinned DSP instance. Whole-benchmark
-PMU counters show about 29% fewer host instructions and 27% fewer user cycles;
-they include the harness/preparation and do not isolate the core's cache misses.
-This establishes a specific pattern improvement only; representative full-
-semantics throughput, fixed-load CPU use and energy remain open. See
-doc/mac-reductions.txt for controls, near-limit fallback and working-set tradeoffs.
+The guarded reduction-window experiment at revision e2cc205 reached about 1159
+actual guest MIPS for the own 512-tap FIR in its quiet-host comparison. The
+current prepared-entry comparison under background application/compiler load
+reduces the same long case from 500.12 to 483.95 ns (about 3.3% more throughput);
+other admitted FIR cases gain about 2-7%. The long case is about 8.17 times the
+same-build unbatched JIT in this capture. Whole-benchmark PMU counts decrease
+about 2.4% in host instructions and 2.0% in user cycles, including preparation
+and checks. External load/frequency and measurement scopes differ, so absolute
+MIPS must not be compared between these captures. FFT changes remain small/mixed.
+Representative full-semantics throughput, fixed-load CPU use and energy remain
+open. See doc/mac-plan-compilation.txt for the current protocol and individual
+controls; earlier arithmetic-window results remain in doc/mac-reductions.txt.
 
 The bench CMake target reuses all 41 public correctness fixture archives in a
 separate CTest tree. Default uniform sampling measures 304 cases across 38 sets;

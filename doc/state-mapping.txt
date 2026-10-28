@@ -130,6 +130,10 @@ The compiler can keep those locals in host registers across chunks. This is a
 specific guarded region lowering, not a general adaptive register allocator.
 See mac-batching.txt and mac-reductions.txt for prefix flags, safe-range proofs,
 16/64-step reduction admission, budgets and boundaries.
+The prepared-entry stage in mac-plan-compilation.txt moves invariant transfer
+slots, destination/sign and backend selection into code immediates. Runtime
+state is still read and checked at each entry; no plan storage is added to Cpu,
+NativeOp, NativeContext or Block.
 
 First useful allocation experiments
 

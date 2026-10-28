@@ -57,7 +57,8 @@ consumers and the same fixture runner to compare reference/cached/JIT in one
 build. Host SIMD lane and vector widths are separate constrained parameters;
 see doc/backend-contracts.txt for API examples, supported operations and limits.
 Guarded MAC-loop scalar/AVX2 batching and proven reduction windows are described
-in doc/mac-batching.txt and doc/mac-reductions.txt.
+in doc/mac-batching.txt and doc/mac-reductions.txt. Compilation-time entry
+planning is described in doc/mac-plan-compilation.txt.
 
 Integration: link dsp56300::core and include <dsp56300/core.hpp>. Provide mutable
 P/X/Y spans and an optional Io implementation. DSP data words occupy uint32_t

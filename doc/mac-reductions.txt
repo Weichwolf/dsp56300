@@ -39,7 +39,10 @@ reduction occurs once per proven window. Independent lanes are partial sums of
 one DSP instance, not voices or concurrently emulated DSPs. Signed24 masking,
 24/48/56-bit state, transfer ordering and all general fallbacks remain exact.
 
-Qualification
+Qualification at revision e2cc205
+
+The numerical kernels remain unchanged by the later prepared-entry work in
+mac-plan-compilation.txt. The results below qualify this reduction increment.
 
 All 101 release and strict correctness tests pass with no skips (117.70 s and
 448.08 s). All 112 C++ translation units retain nonrecovering ASan/UBSan/integer

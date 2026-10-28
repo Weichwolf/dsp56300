@@ -19,9 +19,11 @@ constexpr std::array<std::uint8_t, 2> call_ax{0xff, 0xd0};
 
 void JitEmitter::batch_entry(const std::span<const NativeOp> operations) {
   if (!packed_retirement_ || !retirement_helpers_ || batch_backend_ == BatchBackend::disabled ||
-      operations.size() != 1 || !plan_mac_batch(operations.front())) {
+      operations.size() != 1) {
     return;
   }
+  const auto call = compile_mac_batch(operations.front(), batch_backend_);
+  if (!call) { return; }
   mac_batches_ = true;
   using x64::Branch;
   using x64::Reg;
@@ -51,8 +53,8 @@ void JitEmitter::batch_entry(const std::span<const NativeOp> operations) {
   code_.mov({.destination = Reg::di, .source = Reg::r12});
   code_.mov({.destination = Reg::si, .source = Reg::r13});
   code_.constant(Reg::dx, reinterpret_cast<std::uintptr_t>(&operations.front()));
-  code_.constant(Reg::cx, static_cast<unsigned>(batch_backend_));
-  code_.constant(Reg::ax, std::bit_cast<std::uintptr_t>(&execute_mac_batch));
+  code_.constant(Reg::cx, call->operands);
+  code_.constant(Reg::ax, std::bit_cast<std::uintptr_t>(call->entry));
   code_.raw(call_ax);
   code_.mov({.destination = Reg::r15, .source = Reg::ax}, Width::dword);
   code_.bind(skipped);
