@@ -1,0 +1,150 @@
+Native immediate DO/DOR setup
+
+Design recorded before implementation
+
+The continuous FFT still executes millions of general control instructions per
+input second. Immediate counted-loop setup can avoid general execution when
+both stack pushes are guaranteed to fit. Preserve source programs, fixtures,
+cycle accounting and the exact budget/observation model.
+
+Admit decoded two-word immediate DO/DOR with nonzero count, supported numeric
+mode, and neither an old nor new loop ending at the current extension word.
+Keep zero counts, other count sources, FOREVER, end-overlap and unsupported modes
+in general execution. At runtime guard SC < 14 before changing any state.
+SC=14 must fall back: its first push succeeds, its second fails, and the first
+frame/SP/SC/LC changes must survive without retiring the instruction.
+
+State/value          Placement                   Commit/observation
+SC                   AX for initial capacity     guard before either push
+LA:LC frame          AX (48 significant bits)    stack[(SP+1) & 15]
+sequential PC:SR     AX, saved SR in DX          stack[(SP+2) & 15]
+SP/SC                canonical CPU fields       two pushes, 6-bit SP wrap
+new LA / LC          embedded constants         current absolute/relative form
+SR                   canonical CPU field       preserve flags, clear FV, set LF
+live A/B             existing BP/BX allocation   keep dirty values to final exit
+PC / retirement      existing scalar path       PC+2, one instruction/five cycles
+
+Loop setup saves all current SR bits. It is a full flag-liveness boundary;
+never discard prior flags merely because the new control operation is native.
+Keep packed-retirement/status admission conservative for blocks containing DO.
+Every successful setup ends its native block so changed LF/LA select a fresh
+translation context. A runtime guard miss calls the complete existing executor,
+materializing prior A/B/SR/PC/progress and preserving partial failures.
+The current bounded contract uses 16 stack slots; extended-stack/SC behavior
+remains an explicit ISA gap. No RAM/I/O transfer or native-move diagnostic
+increment belongs to this path.
+Native retirement diagnostics already include pure moves/NOPs and will also
+include admitted control setup; they do not mean arithmetic-only execution.
+
+Independent validation needs exact frames and flags, both DO/DOR forms, high
+count bits, all SP slots/wrap and SC capacity boundaries. Direct generated-code
+probes must forbid general helpers for admitted state, prove guard misses before
+side effects, and mix dirty arithmetic prefixes with setup. Core cases must
+check partial-push failures, zero/overlapping endings, budget partitions, nested
+loops, callback observations, code edits, interrupt boundaries and all fallback
+forms. Existing fixtures must regenerate unchanged. Compare all three sustained
+scenarios against a saved parent executable; retain every missed deadline.
+
+Implementation and directed qualification
+
+The emitter checks capacity before either write, builds both 48-bit frames in
+GPRs and uses a qword indexed store. Stack indices remain bounded to 16 slots.
+Fast setup publishes its new loop state and exact scalar retirement, then exits
+through the normal dirty-accumulator checkpoint. A missed guard calls the full
+executor and exits through already-materialized state, retaining partial faults.
+Flag planning marks setup as a full observer because its saved SR is visible.
+Packed status/retirement remains disabled for blocks containing this operation.
+No public CPU/runtime/API layout or allocation ownership changes are introduced.
+
+The new native-loop-setup test passes 1779980 independent checks in both release
+and strict builds. Direct generated-code probes use the production RX ABI,
+rejecting helpers, no RAM and complete before-fallback snapshots. They cover
+every initial CCR byte, six numeric modes, all SP positions, SC capacity edges,
+high count bits, DO/DOR, negative displacement, PC24 wrap, qword counter wrap,
+dirty A/B prefixes, and preserved LF/FV/frames. Zero counts, unsupported modes
+and overlapping endings explicitly reach the existing general path.
+
+Core models separately cover successful and partial pushes, full failure state,
+latched fail-stop behavior/reset, count-zero orphan frames, self-ending setup,
+budget partitions, nesting and final cleanup, accepted/rejected RAM/I/O paths,
+callback successor edits, changed count/opcode/extension constants and eager
+host-admitted fast interrupts followed by the required exclusion. Expected state
+comes from explicit coordinates and the independent arithmetic model, not an
+emulator snapshot. Disabled optimization retains the same modeled behavior.
+
+The prior dataflow test still checks exact state/materialization and one general
+final cleanup. Its routing assertion now requires the additional native DO
+retirement instead of counting setup as a second general instruction. The
+obsolete expectation failed in initial sweeps; logs are retained and final
+qualification uses the corrected exact routing counts.
+
+Complete qualification
+
+The final 116-test sweeps pass in release (69.88 s, two CTest processes) and
+strict ASan/UBSan (184.99 s, three), without skips. The six release variants
+match independent complete state for each of the three continuous streams.
+Those backend comparisons overlap correctness work and do not qualify timing.
+Strict bench validates all three states in report-only mode. All 124 C++ units
+retain required nonrecovering sanitizer flags and all 163 C++ sources/headers
+pass formatting/tidy/Werror policies. All 48 fixture archives are unchanged.
+Structural ISA audit passes; complete-ISA still fails with all 118 rows partial.
+Complete stack extension, legal modes/sequences and event/pipeline timing remain
+open; bounded native setup is not a full hardware-stack implementation.
+
+Matched sustained comparison
+
+Saved parent and candidate binaries run identical fixture bytes and release
+settings on CPU2, baseline/candidate/candidate/baseline for each scenario. Each
+process warms one input second naturally then measures one in the same DSP.
+There is no host restoration, padding, replay or timing-overhead subtraction.
+No project build/test/format job overlaps the capture. External scheduling and
+frequency are not controlled. All complete states pass. Retain both samples:
+
+Scenario   Baseline CPU s       Candidate CPU s      Mean reduction
+FIR        0.245147..0.246180    0.235143..0.236112   4.09%
+IIR        1.269096..1.269931    1.268148..1.268631   effectively unchanged (0.09%)
+spectral   0.900599..0.935394    0.857801..0.858370   6.53%
+
+The spectral baseline varies substantially; the mean is not a precise causal
+speedup estimate. Candidate CPU is about 4.7..8.3% below the baseline observations.
+Whole-process counters below independently show reduced executed host work.
+These absolute timings must not be attributed solely to this increment by
+comparison with earlier captures on different host conditions.
+
+Candidate spectral wall is 0.857752..0.858324 s, 299.08..299.28 actual guest MIPS.
+Both packages pass; worst hops are 8.750 / 8.769 ms against 10 ms, zero late hops.
+FIR wall is 0.235137..0.236102 s, IIR 1.268080..1.268590 s. IIR still fails every
+64-frame block and the package deadline. Two short captures are not a long-run
+hard realtime or OS scheduling guarantee, and the wider objective remains open.
+
+The independent default release gate records FIR PASS (0.237332 wall / 0.237336
+CPU s, 1146.75 MIPS), IIR FAIL (1.267702 / 1.267646 s, 216.47 MIPS) and spectral
+PASS (0.858305 / 0.858322 s, 299.08 MIPS). Spectral worst hop is 8.827 ms, zero
+late hops; IIR has 750 late blocks. The target remains red because IIR fails.
+
+Native setup replaces 576000 general retirements per FIR input second, 48000
+for IIR and 1554100 for spectral. Remaining general retirements are respectively
+1680001, 48001 and 1567601. These are retirement classifications, not sampled
+function-call attribution. Native moves and arithmetic batch/AVX2 counters are
+unchanged. Page-rounded code storage remains 32768 / 45056 / 344064 bytes;
+this does not imply equal emitted-byte counts or hot instruction-cache occupancy.
+
+Host counters and cache tradeoff
+
+Four additional spectral perf captures use the same alternating order and CPU.
+All five user-mode counters report 100% running time. Scope is the whole process,
+including setup, oracle, compilation, natural warmup, measured work and checks;
+these counts are not isolated JIT/measurement-window attribution or energy.
+Every complete state passes. Baseline/candidate ranges are:
+
+user instructions    22.48549 / 21.68395 billion                  3.56% fewer
+user cycles          7.42967..7.43662 / 7.13363..7.14498 billion   3.95% fewer
+L1 data loads        3.59824 / 3.34970 billion                    6.91% fewer
+L1 data misses       3.91996..4.06686 / 4.03035..4.09007 million   1.67% more
+L1 instruction miss  4.95095..5.26696 / 5.49902..6.05687 million  13.09% more
+
+The cache observations are a real tradeoff in this capture: less host work and
+data traffic accompany more instruction misses. Do not claim complete cache
+locality or energy savings. Shared native control code and tighter code layout
+are candidates, not implemented results. IIR's remaining deficit needs work in
+already-native regions rather than just removing its few remaining helpers.

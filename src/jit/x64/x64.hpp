@@ -73,7 +73,7 @@ public:
   void load(Reg destination, Reg base, std::size_t offset, Width width = Width::qword);
   void store(Reg base, std::size_t offset, Reg source, Width width = Width::qword);
   void load_indexed(Reg destination, IndexedAddress address, Width width = Width::dword);
-  void store_indexed(IndexedAddress address, Reg source);
+  void store_indexed(IndexedAddress address, Reg source, Width width = Width::dword);
   void store_constant(Reg base, std::size_t offset, Width width, std::uint32_t value);
   void
   memory_immediate(unsigned group, Reg base, std::size_t offset, Width width, std::uint32_t value);

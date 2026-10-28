@@ -248,6 +248,21 @@ retirement, retaining its second base cycle. One completed native assignment
 increments native_move_instructions, as existing immediate/register transfers do.
 See native-address-immediates.txt for exact-state and invalidation qualification.
 
+Counted-loop setup
+
+Nonzero two-word immediate DO/DOR can emit native frame pushes when neither the
+old nor new ending overlaps the setup extension and current SC has room for
+both pushes in the bounded 16-slot stack. Zero/other count sources, FOREVER,
+unsupported modes and capacity misses retain the full executor. A missed second
+push must preserve the first frame, changed SP/SC/LC and precise failure state.
+Successful native setup ends the block so updated LF/LA select a new context.
+It preserves prior flags and saved SR, with scalar retirement and full canonical
+exit state. Final loop cleanup is still general. See native-loop-setup.txt for
+the independent frame/guard/observer tests and performance qualification.
+The legacy native_alu retirement field also includes native control setup,
+in addition to arithmetic, pure moves and NOPs. It is not an arithmetic-only
+count or a measurement of every C++ call. Native-move counts do not include DO.
+
 The shared binary fixtures run through reference, cached and native backends.
 Directed host tests verify exact/partitioned budgets, numeric mode changes,
 stale-code replacement, I/O invalidation of executing code, failed memory moves,

@@ -86,6 +86,7 @@ bool JitEmitter::lowerable(const NativeOp &operation) const {
       (operation.mode & (scale_up | scale_down)) == (scale_up | scale_down)) {
     return false;
   }
+  if (is_loop_setup(operation)) { return true; }
   if (decoded.operation == Operation::immediate_alu) { return is_addition(operation); }
   if (decoded.operation != Operation::parallel) { return false; }
   const auto opcode = decoded.opcode;
@@ -355,6 +356,10 @@ std::vector<std::uint8_t> JitEmitter::generate(const std::span<const NativeOp> o
     live_flags_ = flags[operation_index];
     dataflow_ = analyze_dataflow(operation.instruction);
     if (lowerable(operation)) {
+      if (is_loop_setup(operation)) {
+        loop_setup(operation);
+        continue;
+      }
       loop_guard(operation);
       if (has_moves(operation)) { moves(operation); }
       for (unsigned index = 0; index < accumulator_dirty_.size(); ++index) {

@@ -83,6 +83,9 @@ private:
   void retire_progress(const NativeOp &operation);
   [[nodiscard]] bool publish_pc(std::span<const NativeOp> operations, std::size_t index) const;
   void loop_guard(const NativeOp &operation);
+  [[nodiscard]] static bool is_loop_setup(const NativeOp &operation);
+  void loop_setup(const NativeOp &operation);
+  void loop_push(x64::Reg frame);
   void loop_continue();
   void loop_backedge();
   void batch_entry(std::span<const NativeOp> operations);

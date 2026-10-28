@@ -97,10 +97,10 @@ and old parallel operands without memory/I/O observation barriers. All 6758417
 directed ASR/register assertions pass; no ISA catalogue row becomes complete.
 See doc/native-shifts.txt for guards, witnesses, measurements and remaining work.
 
-The current configuration passes all 115 correctness tests in release (133.12 s,
-two CTest processes) and strict ASan/UBSan (243.23 s, three processes), with no
-skips. All 122 C++ translation units retain the required strict nonrecovering
-address/undefined/integer instrumentation; all 162 project C++ source/header
+The current configuration passes all 116 correctness tests in release (69.88 s,
+two CTest processes) and strict ASan/UBSan (184.99 s, three processes), with no
+skips. All 124 C++ translation units retain the required strict nonrecovering
+address/undefined/integer instrumentation; all 163 project C++ source/header
 files pass clang-format. All 48 pre-existing archives remain byte-identical,
 including the 112-case FFT archive. All registered regeneration checks pass.
 No fuzzing was run.
@@ -108,9 +108,9 @@ The structural ISA audit passes; full ISA qualification still fails as intended.
 Full two-second FIR, IIR and spectral cases pass independent complete-state
 checks in all six release variants. The instrumented production bench passes
 all three correctness/report-only cases. Loaded-host comparisons qualify state,
-not release speed. The optimized default bench passes FIR (0.282549 s) and fails
-IIR (1.386984 s) and spectral (1.009317 s) in this capture; all final states match.
-These performance gates are separate from the 115 correctness tests. Retain the
+not release speed. The optimized default bench passes FIR (0.237332 s) and
+spectral (0.858305 s), and fails IIR (1.267702 s); all final states match.
+These performance gates are separate from the 116 correctness tests. Retain the
 individual captures and host-condition limits in continuous-bench.txt.
 The expanded native-move boundary test passes all 78446 assertions in both builds.
 It includes exact same-code reuse after modifier changes and paired aliased X/Y
@@ -139,6 +139,19 @@ little IIR change. Spectral wall ranges 0.990399..1.011767 seconds: both the
 passing and failing packages remain recorded. Whole-process user counters
 decrease host instructions 8.43% and L1 data loads 12.44%, with mixed instruction
 cache misses. These are not isolated core/cache/energy or realtime guarantees.
+
+Immediate nonzero DO/DOR now emit native frame setup behind a current-capacity
+guard in the bounded 16-slot stack. Overlapping endings, zero/other counts,
+FOREVER, unsupported modes and guard misses retain full execution/partial faults.
+Setup saves current flags and ends its block, preserving exact new context and
+five base cycles. Final loop cleanup remains general. All 1779980 independent
+native setup checks pass in both builds. No ISA row becomes complete.
+Matched FIR CPU drops 4.09%; IIR is effectively unchanged. Spectral CPU drops
+6.53% on average with substantial baseline variation; its two candidate packages
+take 0.857752..0.858324 wall s (299.08..299.28 MIPS), zero late hops. The default
+gate still fails IIR. Whole-process spectral counters show 3.56% fewer host
+instructions and 6.91% fewer L1 data loads, but 13.09% more instruction misses.
+See native-loop-setup.txt for exact scope, fallback tests and cache tradeoffs.
 
 Guarded one-instruction MAC/paired-linear-load loops now use compiled scalar or
 AVX2 batches. Four products share one accumulator checkpoint; ordered prefix

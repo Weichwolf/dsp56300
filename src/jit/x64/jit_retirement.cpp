@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "architecture.hpp"
 #include "dsp56300/core.hpp"
+#include "instruction.hpp"
 #include "jit.hpp"
 #include "jit_emitter.hpp"
 #include "native_moves.hpp"
@@ -76,7 +77,10 @@ bool JitEmitter::admit_packed_retirement(const std::span<const NativeOp> operati
     return false;
   }
   for (const auto &operation : operations) {
-    if (!lowerable(operation) || operation.instruction.cycles == 0) { return false; }
+    if (!lowerable(operation) || operation.instruction.cycles == 0 ||
+        operation.instruction.operation == Operation::loop_immediate) {
+      return false;
+    }
     if (!has_moves(operation)) { continue; }
     if (plan_register_move(operation.instruction).valid() ||
         plan_address_immediate(operation.instruction).valid()) {

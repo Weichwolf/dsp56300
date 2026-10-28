@@ -66,7 +66,8 @@ MIPS                      actual retired DSP instructions / wall time / 1e6
 base_cycles/reference_load qualified base units and fraction of the 275 MHz budget
 max_block_s/late_blocks    worst block latency and count beyond its input budget
 cold_warmup_s             unmeasured first input second, including cold compilation
-native/helpers            ALU retirement categories, not a count of all helper calls
+native/helpers            retirement categories, including native control setup;
+                          not arithmetic-only work or a count of all helper calls
 batch/avx2                actual guest instructions processed by compiled batches
 code_bytes/new blocks     compiled storage and additional measured-interval blocks
 full_state                independent complete registers, P/X/Y and control checks

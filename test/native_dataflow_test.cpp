@@ -230,9 +230,9 @@ void loop_exit(const Options options, const unsigned written) {
           machine.core.registers() == expected && machine.core.interruptible(),
       "Loop-ending exits materialize any combination of updated accumulators and restore frames");
   if (options.backend == Backend::jit && options.optimize) {
-    require(machine.core.jit_statistics().native_alu_instructions == body.size() &&
-                machine.core.jit_statistics().helper_instructions == 2,
-            "Each loop boundary crosses a native exit and authoritative general cleanup");
+    require(machine.core.jit_statistics().native_alu_instructions == body.size() + 1 &&
+                machine.core.jit_statistics().helper_instructions == 1,
+            "Native DO setup and body materialization retain authoritative general final cleanup");
   }
 }
 

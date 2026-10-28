@@ -291,3 +291,48 @@ The new directed test passes 1390025 independent checks per build. All 122 C++
 units retain strict instrumentation, all 162 C++ files pass format/tidy/Werror,
 and all 48 archives are unchanged. ISA structural audit passes, complete gate
 still fails with 118 partial rows. Full objective remains active and incomplete.
+
+Native counted-loop setup increment
+
+Immediate nonzero DO/DOR setup now emits native pushes when the current bounded
+stack can fit both frames. Changed context exits normally; capacity/other cases
+keep full general execution and partial-failure semantics. Fixture/program bytes
+are unchanged. Compare saved parent/candidate on CPU2 in order baseline/candidate/
+candidate/baseline, one natural warmup second then one measured input second.
+No project build/test/format process overlaps. External frequency and scheduling
+remain uncontrolled; no overhead is subtracted. Every complete state passes.
+
+Scenario   Baseline CPU s       Candidate CPU s      Mean reduction
+FIR        0.245147..0.246180    0.235143..0.236112   4.09%
+IIR        1.269096..1.269931    1.268148..1.268631   effectively unchanged (0.09%)
+spectral   0.900599..0.935394    0.857801..0.858370   6.53%
+
+The varying spectral baseline limits that mean's precision. Candidate wall is
+0.857752..0.858324 s, 299.08..299.28 actual guest MIPS, zero missed hops; maxima
+8.750 / 8.769 ms against 10 ms. Both packages pass. This does not qualify long-run
+hard realtime or give a universal host-frequency improvement. IIR remains red.
+Do not compare these absolute values causally with older host-condition captures.
+
+Default release bench independently reports FIR PASS (0.237332 wall / 0.237336
+CPU s, 1146.75 MIPS), IIR FAIL (1.267702 / 1.267646 s, 216.47 MIPS) and spectral
+PASS (0.858305 / 0.858322 s, 299.08 MIPS). FIR and spectral have no late blocks;
+spectral maximum is 8.827 ms. IIR has 750 late blocks, max 1.855 ms against
+1.333 ms. Bench stays red; there is no averaging or repeat-until-pass acceptance.
+
+Remaining general retirements are FIR=1680001, IIR=48001, spectral=1567601.
+Native transfer/batch/AVX2 counters and page-rounded code storage are unchanged.
+Four additional whole-process user-counter captures show 3.56% fewer host
+instructions and 6.91% fewer L1 data loads, with 1.67% more L1 data misses and
+13.09% more instruction misses. The scope includes setup/oracle/cold/warm/checks,
+not isolated JIT misses or energy. See native-loop-setup.txt for ranges/tradeoffs.
+
+All 116 final correctness tests pass in release/strict (69.88 / 184.99 s), zero
+skips. Initial sweeps retain the obsolete DO-as-helper routing failure; its
+exact expectation now witnesses native setup plus one general final cleanup.
+The new loop test passes 1779980 independent checks per build. All six release
+variants validate each complete stream; their loaded-host timings are correctness
+evidence only. Strict bench validates all three in report-only mode. All 48
+archives remain unchanged; all 124 strict C++ units retain instrumentation and
+163 files pass format/tidy/Werror. ISA structural audit passes, complete-ISA
+remains red with 118 partial rows. All usual application domains, IIR capacity,
+further host efficiency/cache/energy, ISA and integration remain active work.

@@ -89,8 +89,8 @@ void Code::load_indexed(const Reg destination, const IndexedAddress address, con
   indexed(static_cast<unsigned>(destination), address);
 }
 
-void Code::store_indexed(const IndexedAddress address, const Reg source) {
-  rex(Width::dword,
+void Code::store_indexed(const IndexedAddress address, const Reg source, const Width width) {
+  rex(width,
       static_cast<unsigned>(source),
       static_cast<unsigned>(address.base),
       static_cast<unsigned>(address.index));
