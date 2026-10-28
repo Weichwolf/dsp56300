@@ -61,13 +61,15 @@ void check(const BinaryCase &item, const Backend backend) {
   Core core({.program = memory[0], .x = memory[1], .y = memory[2]},
             item.reset_actions.empty() ? nullptr : &script,
             {.backend = backend});
+  core.set_debug_interrupt_mode(item.debug_interrupt_mode);
   core.set_registers(item.initial);
   const auto result = core.run(item.budget);
   require(result.dispatches == item.dispatches, "Retired dispatch count");
   require(result.progress == item.progress, "Instruction count and documented base cost");
   require(result.fault == item.fault, "Expected fault context");
   require(result.state == item.state && core.processing_state() == item.state,
-          "Explicit running/WAIT/STOP state");
+          "Explicit running/WAIT/STOP/debug state");
+  require(core.debug_status() == item.debug, "Functional IME/SWO debug status");
   require(script.complete(), "RESET callback PC/order/count follows explicit host script");
   if (backend == Backend::jit) {
     const auto statistics = core.jit_statistics();

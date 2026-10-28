@@ -87,7 +87,8 @@ private:
 
 bool terminates(const Operation operation) {
   return !repeatable(operation) || operation == Operation::conditional_transfer ||
-         operation == Operation::illegal;
+         operation == Operation::illegal || operation == Operation::debug ||
+         operation == Operation::conditional_debug;
 }
 
 struct Block {

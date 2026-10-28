@@ -27,11 +27,12 @@ void word(std::vector<char> &bytes, const std::size_t offset, const std::uint32_
   }
 }
 
-std::vector<char> golden(const bool processing) {
+std::vector<char> golden(const FixtureVersion version) {
+  const bool processing = version != FixtureVersion::legacy;
   // Authored from the documented wire coordinates, never sizeof/native dumps.
   std::vector<char> result(legacy_bytes, 0);
   word(result, 0, magic);
-  word(result, 4, processing ? 2U : 1U);
+  word(result, 4, static_cast<std::uint32_t>(version));
   word(result, 8, 1);
   for (const std::size_t offset : {16U, 20U, 24U}) { word(result, offset, 1024); }
   for (const std::size_t offset : {28U, 32U, 36U, 44U, 72U}) { word(result, offset, 1); }
@@ -41,6 +42,13 @@ std::vector<char> golden(const bool processing) {
     word(result, state_offset + 4, 1);
     word(result, state_offset + 8, action_pc);
     word(result, state_offset + 12, 1);
+  }
+  if (version == FixtureVersion::debugging) {
+    constexpr std::size_t debug_offset = state_offset + 16;
+    constexpr std::size_t software_offset = debug_offset + 8;
+    result.insert(result.begin() + debug_offset, 12, 0);
+    word(result, state_offset, 3);
+    word(result, software_offset, 1);
   }
   return result;
 }
@@ -58,22 +66,29 @@ std::vector<char> get(const std::filesystem::path &path) {
 }
 
 void round_trip(const std::filesystem::path &path) {
-  for (const auto version : {FixtureVersion::legacy, FixtureVersion::processing}) {
-    const bool processing = version == FixtureVersion::processing;
+  for (const auto version :
+       {FixtureVersion::legacy, FixtureVersion::processing, FixtureVersion::debugging}) {
+    const bool processing = version != FixtureVersion::legacy;
     BinaryCase item;
     if (processing) {
       item.state = ProcessingState::waiting;
       item.reset_actions = {{.pc = action_pc, .accepted = true}};
     }
+    if (version == FixtureVersion::debugging) {
+      item.state = ProcessingState::debugging;
+      item.debug.software_occurrence = true;
+    }
     write_fixture(path, {item}, version);
-    const auto expected = golden(processing);
+    const auto expected = golden(version);
     require(get(path) == expected, "Fixture wire bytes equal the independently authored golden");
     put(path, expected);
     const auto decoded = read_fixture(path);
     require(decoded.size() == 1 && decoded[0].initial == item.initial &&
                 decoded[0].expected == item.expected && decoded[0].progress == item.progress &&
                 decoded[0].fault == item.fault && decoded[0].state == item.state &&
-                decoded[0].reset_actions == item.reset_actions,
+                decoded[0].reset_actions == item.reset_actions &&
+                decoded[0].debug_interrupt_mode == item.debug_interrupt_mode &&
+                decoded[0].debug == item.debug,
             "Both schema versions decode independent golden records");
   }
   BinaryCase item;
@@ -103,7 +118,7 @@ struct Corruption {
 void invalid_records(const std::filesystem::path &path) {
   constexpr std::array legacy{
       Corruption{.offset = 0},
-      Corruption{.offset = 4, .value = 3},
+      Corruption{.offset = 4, .value = 4},
       Corruption{.offset = 8, .value = excessive_count},
       Corruption{.offset = 16},
       Corruption{.offset = 16, .value = address_words + 1},
@@ -111,7 +126,7 @@ void invalid_records(const std::filesystem::path &path) {
       Corruption{.offset = 56, .value = 3},
       Corruption{.offset = 72, .value = 2}};
   for (const auto input : legacy) {
-    auto bytes = golden(false);
+    auto bytes = golden(FixtureVersion::legacy);
     word(bytes, input.offset, input.value);
     rejected(path, bytes);
   }
@@ -122,11 +137,11 @@ void invalid_records(const std::filesystem::path &path) {
       Corruption{.offset = 88, .value = 2},
       Corruption{.offset = 52, .value = static_cast<Word>(FaultKind::host_event) + 1}};
   for (const auto input : processing) {
-    auto bytes = golden(true);
+    auto bytes = golden(FixtureVersion::processing);
     word(bytes, input.offset, input.value);
     rejected(path, bytes);
   }
-  const auto complete = golden(true);
+  const auto complete = golden(FixtureVersion::processing);
   for (const std::size_t length : {0U, 1U, 7U, 11U, 12U, 20U, 75U, 76U, 80U, 83U, 84U, 88U, 91U}) {
     rejected(path, {complete.begin(), complete.begin() + static_cast<std::ptrdiff_t>(length)});
   }
@@ -136,6 +151,32 @@ void invalid_records(const std::filesystem::path &path) {
   auto trailing = complete;
   trailing.push_back(0);
   rejected(path, trailing);
+}
+
+void invalid_debug_records(const std::filesystem::path &path) {
+  constexpr std::size_t debug_offset = state_offset + 16;
+  constexpr std::array invalid{Corruption{.offset = state_offset, .value = 4},
+                               Corruption{.offset = debug_offset, .value = 2},
+                               Corruption{.offset = debug_offset + 4, .value = 2},
+                               Corruption{.offset = debug_offset + 8, .value = 2}};
+  for (const auto corruption : invalid) {
+    auto bytes = golden(FixtureVersion::debugging);
+    word(bytes, corruption.offset, corruption.value);
+    rejected(path, bytes);
+  }
+  for (const auto version : {FixtureVersion::legacy, FixtureVersion::processing}) {
+    for (unsigned choice = 0; choice < 3; ++choice) {
+      BinaryCase item;
+      if (choice == 0) { item.debug_interrupt_mode = true; }
+      if (choice == 1) { item.debug.interrupt_mode = true; }
+      if (choice == 2) { item.debug.software_occurrence = true; }
+      bool failed = false;
+      try {
+        write_fixture(path, {item}, version);
+      } catch (const std::exception &) { failed = true; }
+      require(failed, "Older schema cannot silently omit debug control/status expectations");
+    }
+  }
 }
 
 void reject_legacy_extensions(const std::filesystem::path &path) {
@@ -160,6 +201,7 @@ int main(const int argc, const char *const *const argv) {
     const std::filesystem::path path(argv[1]);
     dsp56300::test::round_trip(path);
     dsp56300::test::invalid_records(path);
+    dsp56300::test::invalid_debug_records(path);
     dsp56300::test::reject_legacy_extensions(path);
     std::filesystem::remove(path);
     std::cout << dsp56300::test::checks << " independent fixture format checks passed\n";

@@ -4,12 +4,67 @@ Full-ISA completion requirement: the complete DSP56300 instruction set must be
 implemented and independently tested, as explicitly reiterated by the user.
 Neither a passing current CTest suite nor successful Blofeld workloads is a
 replacement. doc/isa-coverage.tsv inventories 118 instruction/family/MOVE-form
-and alias entries against DSP56300FM Rev.5. The current audit records 2 missing,
-0 without dedicated independent tests and 116 partially tested entries; none
+and alias entries against DSP56300FM Rev.5. The current audit records 0 missing,
+0 without dedicated independent tests and 118 partially tested entries; none
 claims complete support. These counts are catalogue rows, not disjoint opcode
 counts or an ISA-support percentage. Detailed format/mode/sequence expansion
 remains mandatory. python3 tools/isa_audit.py --require-complete deliberately
 returns failure while any entry remains incomplete; see doc/isa-qualification.txt.
+
+Debug ISA increment: DEBUG and all sixteen DEBUGcc encodings now execute with
+an explicit debug halt or IME-selected level-three VBA:06 request. The new
+Core debug APIs report qualified IME/SWO state, accept host-completed DE/JTAG
+requests and explicitly resume halted execution without inventing OnCE/peripheral
+replies. False conditions preserve state and continue; taken conditions use
+fresh flags even immediately after native ALU work. Debug mode blocks ordinary
+IRQ admission and all further retirement until resume, while preserving hidden
+REP/partial-vector continuation, cache contents and debugger-visible edits.
+Queued requests coalesce/defer across REP and active vectors, retain their
+captured bank across configuration/cache changes and save actual post-vector
+PC/SR. A later failed entry cannot fabricate service state or replay work.
+54264 state and 36064 sequence binary cases (90328 per backend) independently
+cover all debug encodings/CCRs, six supported numeric modes, IPL/bank/ordinary
+frames, raw status copying, zero/excess budgets, every IME handler/RTI prefix,
+REP halts or deferred/coalesced requests and selected encoded-zero repeats.
+Schema v3 records initial IME and expected IME/SWO plus the debug state. All old
+v1/v2 defaults/bytes stay compatible; independent literal wire and invalid-field
+checks verify v3 and rejection of unsupported data by older writers.
+6960 host assertions require actual native warmup/prefix/handler/continuation
+work, fresh conditions, mode/Carry consumers, resume P/SR edits, external wake
+from WAIT/STOP, exact repeat latches, partial/long/fast vector nesting, queued
+configuration identity, cache retention, errors/no replay and API reentry guards.
+Clang 19 x64 layout preserves Cpu=384, Core::Impl=131648 and RunResult=40 bytes
+and every prior recorded field offset. Flags occupy former Cpu padding at 332,
+the resolved vector former owner padding at 131640; DebugStatus is two bytes.
+No per-request allocation is introduced. This is layout, not cache/throughput
+evidence; all existing generated-code coordinates remain unchanged.
+The two remaining missing catalogue rows move to partial: 0 missing, 0 untested,
+118 partial, 0 complete. This closes only the mnemonic-level implementation
+backlog. Entire encoding/form/mode/effect expansion and independent testing
+remain mandatory. Full OnCE serial/pipeline restoration, successor prefetch,
+trace/breakpoints/HIT/TO/MBO, ROM-security gating, exact REP/fast debug behavior,
+simultaneous-source/VBA/event timing, physical reset defaults, all numerical
+modes and complete loop/IRQ sequences remain open. See doc/debugging.txt.
+The full-ISA gate must continue to fail. Representative 270 MIPS host-load/
+latency/energy optimization, further native/SIMD work and transparent hardware
+isolation remain active; these tests/layout changes provide no speed/VM claim.
+
+Debug validation: full release/strict suites each pass 94 executable tests,
+with 95 registered and one explicit /dev/kvm permission skip. Times are
+156.59 s and 458.65 s. Both execute the 6960-assertion host test and reproduce
+both new v3 archives plus all earlier archives. The independent wire test now
+passes 48 assertions. All 38 old public archives remain byte-identical.
+All 96 strict translation units retain nonrecovering ASan/UBSan/integer
+instrumentation, clang-tidy and hardening. Format-check passes all 130 own
+C++ files. Structural ISA audit passes; --require-complete still fails.
+After both builds, one API comment clarifies debug wake from WAIT; identical
+preprocessed output confirms unchanged code semantics. Release full-console
+results and final targeted logs are retained; its detailed CTest log was
+overwritten by a concurrent inventory command. Strict full details are retained.
+No quality checks are weakened, no native dependency is added and no fuzz runs.
+The latest explicit user instruction authorizes pushing verified commits to
+the existing private Weichwolf/dsp56300 origin after commit; doc/objective.txt
+retains the full original objective and records that authorization.
 
 Processing-state ISA increment: RESET, WAIT and STOP now have explicit execution
 and independent tests. WAIT/STOP return early from run with an observable state;
@@ -44,8 +99,8 @@ fits RunResult padding at offset 4. Clang 19 x64 layouts retain Cpu=384,
 Core::Impl=131648 and RunResult=40 bytes and every recorded existing field offset.
 The extended Io interface requires consumer rebuild; this is data-layout,
 not vtable binary compatibility, cache-miss/latency or throughput evidence.
-The three rows move from missing to partial: DEBUG/DEBUGcc still have no
-implementation and every other catalogue row remains partial. Physical RESET
+At that increment, the three rows moved from missing to partial, leaving
+DEBUG/DEBUGcc missing until the later debug increment above. Physical RESET
 pin/boot/defaults (including the current library initializer's CP/IPL gap),
 DE/JTAG/debug and DMA wake, complete pending-event/pipeline/clock arbitration,
 derivative reset/cache side effects, all numeric effects and full legal

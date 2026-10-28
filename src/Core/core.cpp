@@ -155,6 +155,7 @@ detail::Instruction Core::Impl::instruction(const Word pc) {
 }
 
 void Core::Impl::step() {
+  if (debug_ready()) { admit_debug(); }
   if (exception_ready()) {
     step_vector();
     return;
@@ -215,6 +216,7 @@ void Core::reset() {
   if (impl_->executing) { throw std::logic_error("Reset requires stopped DSP execution"); }
   impl_->cpu = {};
   impl_->vector = {};
+  impl_->debug_vector = 0;
   impl_->cpu.processing = ProcessingState::running;
   impl_->icache.reset();
   impl_->cpu.reg.m.fill(word_mask);
@@ -288,7 +290,8 @@ RunResult Core::run(const std::uint32_t instruction_budget) {
   while (result.dispatches < instruction_budget && fault().kind == FaultKind::none &&
          impl_->cpu.processing == ProcessingState::running) {
     if (impl_->cpu.repeat_remaining == 0 && impl_->vector.phase == Impl::VectorPhase::none &&
-        (impl_->cpu.reg.sr & detail::cache_enable) == 0) {
+        (impl_->cpu.reg.sr & detail::cache_enable) == 0 &&
+        (impl_->cpu.debug_flags & detail::debug_interrupt_pending) == 0) {
       const auto retired = impl_->jit->run(instruction_budget - result.dispatches);
       result.dispatches += retired;
       if (retired != 0 || fault().kind != FaultKind::none) { continue; }
@@ -306,9 +309,11 @@ RunResult Core::run(const std::uint32_t instruction_budget) {
 }
 
 bool Core::interruptible() const {
-  if (impl_->cpu.processing == ProcessingState::stopped || fault().kind != FaultKind::none ||
-      impl_->vector.phase != Impl::VectorPhase::none || impl_->cpu.repeat_remaining != 0 ||
-      impl_->cpu.interrupt_inhibited) {
+  if ((impl_->cpu.processing != ProcessingState::running &&
+       impl_->cpu.processing != ProcessingState::waiting) ||
+      (impl_->cpu.debug_flags & detail::debug_interrupt_pending) != 0 ||
+      fault().kind != FaultKind::none || impl_->vector.phase != Impl::VectorPhase::none ||
+      impl_->cpu.repeat_remaining != 0 || impl_->cpu.interrupt_inhibited) {
     return false;
   }
   if (!impl_->cpu.repeat_completed) { return true; }

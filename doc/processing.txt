@@ -34,6 +34,9 @@ contents after noncoherent backing-RAM edits. run(0) does not consume an event
 or post-vector exclusion. Core::reset cancels sleep as part of the existing
 library initialization operation; it does not invoke the guest RESET callback.
 A register view alone is not a processing/cache/REP/vector checkpoint.
+The functional debug interface can also leave WAIT/STOP through a host DE/JTAG
+request, either halting in Debug mode or queuing an IME-selected interrupt. It
+is distinct from normal IRQ/IRQA completion; see doc/debugging.txt.
 
 Guest RESET
 

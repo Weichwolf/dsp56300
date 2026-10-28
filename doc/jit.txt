@@ -335,3 +335,17 @@ offset and Cpu size unchanged. RunResult.state uses prior result padding; Io
 has an extended callback interface and consumers rebuild. This is a layout
 result, not a speed/device/isolation claim. Full pipeline/clock/event and
 physical reset/debug qualification remains open; see doc/processing.txt.
+
+DEBUG/DEBUGcc boundaries
+
+Both debug operations terminate blocks even though the functional single-word
+REP model admits them. Helpers materialize fresh flags, evaluate conditions and
+either halt, queue an IME request or continue untaken. Pending debug blocks native
+dispatch until its budgeted vector is admitted after REP/active-vector completion.
+Debug halt stops all retirement; explicit resume preserves continuations, edits
+and mode keys. Actual native warmup, prefix, handler and continuation witnesses
+qualify state rather than inferring native execution from Backend::jit selection.
+The logical IME/SWO/pending byte uses Cpu padding; cached generated-code offsets
+remain subject to the layout audit. This introduces no debugger-loop execution,
+trace engine, native/SIMD lowering or protected backend. Complete OnCE/pipeline,
+mode/sequence/timing and performance qualification remains open.

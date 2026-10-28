@@ -49,6 +49,9 @@ See doc/io.txt for synchronous word/atomic-bit callbacks and mutation boundaries
 run returns an explicit waiting/stopped state for WAIT/STOP. Guest RESET needs
 Io::reset_peripherals acknowledgement; the default is an explicit event fault.
 See doc/processing.txt for wake, callback, clock and qualification contracts.
+DEBUG/DEBUGcc support a functional halt or IME-selected debug interrupt. Host
+request/resume and IME/SWO inspection are described in doc/debugging.txt; this
+is not a complete OnCE/JTAG debugger or a full ISA qualification claim.
 
 The host supplies derivative interrupt arbitration and admits an interrupt at
 a stopped boundary. Hardware clocks, memory aliases, boot ROM, DMA, timers,

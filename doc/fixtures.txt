@@ -699,7 +699,31 @@ truncation/trailing data and refusal to drop v2 expectations into v1 output.
 These are directed tests, not fuzz tests. doc/processing.txt lists all remaining
 clock/pin/event/mode/debug and hardware qualification gaps.
 
-Wire format D56F, versions 1 and 2
+test/fixtures/debug-state.d56 and debug-sequences.d56 use version 3 and contain
+54264/36064 cases per backend (90328 total). Regenerate explicitly:
+
+  build/release/dsp56300_generate_debug state build/debug-state.d56
+  build/release/dsp56300_generate_debug sequences build/debug-sequences.d56
+  cmp build/debug-state.d56 test/fixtures/debug-state.d56
+  cmp build/debug-sequences.d56 test/fixtures/debug-sequences.d56
+
+The independent producer links only fixture-format. It uses a separate condition
+truth table, raw register/status model, integer ALU/rounding and per-bit frames.
+Every DEBUG/DEBUGcc encoding/CCR and six supported modes are checked in both IME
+selections, with bank/IPL/ordinary frame variation, status bit bases/complements,
+zero/excess budgets, all debug-handler/RTI prefixes and REP halt/deferred request
+cases, including selected encoded-zero repeats. Raw copying and the functional
+REP model do not qualify every hardware mode, readback or pipeline interaction.
+6960 host assertions additionally require actual native work, canonical fresh
+flags, old-mode warmup, P/SR resume edits, external sleep wake, hidden REP and
+partial/long/fast-vector continuation, queued identity, cache retention and
+failed entry/reentry. The debug interface exposes only qualified IME/SWO status;
+full OnCE/JTAG/security/trace/pipeline behavior remains open in doc/debugging.txt.
+The updated 48 wire tests compare literal v1/v2/v3 records, reject malformed
+fields/counts/truncation/trailing bytes and prevent older writers from dropping
+new expectations. They are directed boundary tests, not fuzz tests.
+
+Wire format D56F, versions 1, 2 and 3
 
 Every integer is unsigned little-endian. u32/u64 always occupy 4/8 bytes.
 No native structures, pointers, padding, enum layout or SIMD state are dumped.
@@ -712,9 +736,11 @@ Lengths count elements, not bytes, except string lengths. Strings contain their
 literal bytes without a terminator. The file ends immediately after its cases.
 
 Header:
-  u32 magic 0x46363544 (ASCII D56F), u32 version (1 or 2), u32 case_count.
+  u32 magic 0x46363544 (ASCII D56F), u32 version (1, 2 or 3), u32 case_count.
 Existing producers default to v1. New processing producers explicitly select
-FixtureVersion::processing (v2); readers accept both. A v1 writer rejects
+FixtureVersion::processing (v2); debug producers select FixtureVersion::debugging
+(v3). Readers accept all three. V1/v2 writers reject initial/expected debug
+control/status instead of silently discarding them. A v1 writer rejects
 non-running state, nonempty RESET scripts and the new host_event fault instead
 of silently dropping expectations. All previous wire bytes remain unchanged.
 
@@ -725,9 +751,11 @@ Each case, in order:
   u64 expected retired instructions, u64 expected estimated base cycles;
   five u32 expected fault fields (kind, space, address, value, pc);
   u32 expected interruptible (0 or 1);
-  v2 only: u32 expected processing state (running=0, waiting=1, stopped=2);
-  v2 only: u32 RESET action_count; for each action: u32 instruction PC,
+  v2/v3: u32 expected processing state (running=0, waiting=1, stopped=2);
+         v3 additionally accepts debugging=3;
+  v2/v3: u32 RESET action_count; for each action: u32 instruction PC,
            u32 acceptance (0 or 1), in expected request order;
+  v3 only: three u32 bits, initial IME, expected IME and expected SWO (each 0 or 1);
   initial register record, expected register record;
   before memory-block list, after memory-block list.
 
@@ -742,13 +770,13 @@ Memory-block list:
   followed by word_count u32 values, each limited to 24 bits.
   Space numbers are P=0, X=1, Y=2. Blocks apply in listed order.
   Fault kind numbers follow the documented FaultKind order in core.hpp.
-  V1 accepts none..invalid_instruction (0..9). V2 additionally accepts
+  V1 accepts none..invalid_instruction (0..9). V2/v3 additionally accept
   host_event (10); earlier numbers are unchanged.
 
 Limits: 65536 cases and RESET actions per case, 256 name bytes, 1024 blocks
 per list, and 2^24 words
 per address space/block. Zero-sized address spaces, unknown versions, invalid
-enums/processing states, RESET PCs exceeding 24 bits, invalid acceptance bits,
+enums/processing states, RESET PCs exceeding 24 bits, invalid acceptance/debug bits,
 truncated files and trailing bytes are rejected. Files are trusted local
 test assets; the reader is not an untrusted network input service. A schema
 change, including enum numbering, requires a new format version.

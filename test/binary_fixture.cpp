@@ -18,7 +18,7 @@
 namespace dsp56300::test {
 namespace {
 constexpr std::uint32_t format_magic = 0x46363544; // ASCII D56F
-constexpr std::uint32_t legacy_version = 1, processing_version = 2;
+constexpr std::uint32_t legacy_version = 1, processing_version = 2, debugging_version = 3;
 constexpr std::uint32_t maximum_reset_actions = 65536;
 constexpr std::uint32_t maximum_cases = 65536, maximum_blocks = 1024, maximum_name = 256;
 constexpr unsigned byte_bits = 8;
@@ -149,9 +149,12 @@ template <FixtureArchive Archive> void blocks(Archive &archive, std::vector<Memo
   }
 }
 
-template <FixtureArchive Archive> void processing(Archive &archive, BinaryCase &item) {
+template <FixtureArchive Archive>
+void processing(Archive &archive, BinaryCase &item, const std::uint32_t version) {
   auto state = static_cast<std::uint32_t>(item.state);
-  archive.count(state, static_cast<std::uint32_t>(ProcessingState::stopped));
+  const auto maximum_state =
+      version == debugging_version ? ProcessingState::debugging : ProcessingState::stopped;
+  archive.count(state, static_cast<std::uint32_t>(maximum_state));
   item.state = static_cast<ProcessingState>(state);
   auto count = static_cast<std::uint32_t>(item.reset_actions.size());
   archive.count(count, maximum_reset_actions);
@@ -165,11 +168,23 @@ template <FixtureArchive Archive> void processing(Archive &archive, BinaryCase &
   }
 }
 
+template <FixtureArchive Archive> void debugging(Archive &archive, BinaryCase &item) {
+  for (auto *value :
+       {&item.debug_interrupt_mode, &item.debug.interrupt_mode, &item.debug.software_occurrence}) {
+    std::uint32_t bit = *value ? 1U : 0U;
+    archive.count(bit, 1);
+    *value = bit != 0;
+  }
+}
+
 template <FixtureArchive Archive>
 void test_case(Archive &archive, BinaryCase &item, const std::uint32_t version) {
   if (version == legacy_version &&
       (item.state != ProcessingState::running || !item.reset_actions.empty())) {
     throw std::runtime_error("Processing expectations require fixture version 2");
+  }
+  if (version < debugging_version && (item.debug_interrupt_mode || item.debug != DebugStatus{})) {
+    throw std::runtime_error("Debug expectations require fixture version 3");
   }
   archive.text(item.name);
   for (auto &size : item.memory_words) {
@@ -200,7 +215,8 @@ void test_case(Archive &archive, BinaryCase &item, const std::uint32_t version) 
   std::uint32_t interruptible = item.interruptible ? 1U : 0U;
   archive.count(interruptible, 1);
   item.interruptible = interruptible != 0;
-  if (version == processing_version) { processing(archive, item); }
+  if (version >= processing_version) { processing(archive, item, version); }
+  if (version == debugging_version) { debugging(archive, item); }
   registers(archive, item.initial);
   registers(archive, item.expected);
   blocks(archive, item.before);
@@ -213,7 +229,8 @@ void contents(Archive &archive, std::vector<BinaryCase> &cases, const FixtureVer
   auto version = static_cast<std::uint32_t>(schema);
   archive.scalar(magic);
   archive.scalar(version);
-  if (magic != format_magic || (version != legacy_version && version != processing_version)) {
+  if (magic != format_magic || (version != legacy_version && version != processing_version &&
+                                version != debugging_version)) {
     throw std::runtime_error("Unsupported DSP fixture magic/version");
   }
   auto count = static_cast<std::uint32_t>(cases.size());

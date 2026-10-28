@@ -74,3 +74,6 @@ Subsequent user clarifications (preserving the original objective above):
   passing current test suite do not replace full ISA qualification. Audit every
   instruction, encoding/operand form, numerical mode, flag and observable effect;
   keep unimplemented and unqualified cases visible until closed independently.
+- The latest user instruction again explicitly requests a push after committing.
+  Verified commits may be pushed to the existing private Weichwolf/dsp56300
+  origin; this supersedes the preceding local-only publication restrictions.

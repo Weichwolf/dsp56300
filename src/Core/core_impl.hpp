@@ -28,6 +28,15 @@ struct Core::Impl {
     return vector.phase != VectorPhase::none && cpu.repeat_remaining == 0;
   }
 
+  [[nodiscard]] bool debug_ready() const noexcept {
+    return (cpu.debug_flags & detail::debug_interrupt_pending) != 0 && cpu.repeat_remaining == 0 &&
+           vector.phase == VectorPhase::none;
+  }
+
+  void request_debug(bool software);
+  void execute_debug(const detail::Instruction &decoded);
+  void admit_debug();
+
   [[nodiscard]] bool cacheable(const Word address) const noexcept {
     return (cpu.reg.sr & detail::cache_enable) != 0 && address >= options.cacheable_begin &&
            address < options.cacheable_end;
@@ -147,5 +156,6 @@ struct Core::Impl {
   Options options;
   bool executing = false;
   std::array<bool, 3> aliases_program{true, false, false};
+  Word debug_vector = 0;
 };
 } // namespace dsp56300

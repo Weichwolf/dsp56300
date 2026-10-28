@@ -293,3 +293,18 @@ a physical RESET/boot implementation; CP/IPL defaults and held-reset behavior
 remain open, alongside DE/debug/DMA wake, clock stabilization, precise pending
 arbitration, full legal sequences and derivative reset side effects. Full ISA
 qualification still fails by design; see doc/processing.txt for primary sources.
+
+Debug increment: DEBUG/DEBUGcc move from missing to partial. All 118 catalogue
+rows now have implementation/test evidence, but none is complete. Zero missing
+mnemonics is not full opcode/form, numerical-mode or observable-effect coverage.
+Conditional truth-table fixtures and integer/per-bit sequence models check the
+qualified halt/IME/SWO behavior. Host tests require actual native arithmetic,
+exact pending/repeat/vector state and failures, not only backend agreement.
+The functional model exposes IME and SWO without inventing a complete OSCR or
+OnCE serial monitor. Requests preserve active continuations and cache state;
+IME queues a nonmaskable banked vector, with return/bank/pipeline assumptions
+explicitly requiring hardware confirmation. Raw status copying is not complete
+mode/readback qualification. Full OnCE/JTAG, trace/breakpoints/security, pipeline
+latch/cache restoration, precise arbitration/timing, all REP/fast/loop interactions,
+physical reset defaults and remaining arithmetic modes remain mandatory work.
+Completion audit still deliberately fails; see doc/debugging.txt for sources.

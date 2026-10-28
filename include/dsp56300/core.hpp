@@ -18,7 +18,13 @@ inline constexpr std::size_t stack_entries = 16;
 
 enum class Space : std::uint8_t { program, x, y };
 enum class Backend : std::uint8_t { cached, reference, jit };
-enum class ProcessingState : std::uint8_t { running, waiting, stopped };
+enum class ProcessingState : std::uint8_t { running, waiting, stopped, debugging };
+
+// Qualified IME/SWO view, not a complete OnCE register or JTAG implementation.
+struct DebugStatus {
+  bool interrupt_mode = false, software_occurrence = false;
+  bool operator==(const DebugStatus &) const = default;
+};
 enum class BitAction : std::uint8_t { test, clear, set, change };
 enum class FaultKind : std::uint8_t {
   none,
@@ -166,9 +172,15 @@ public:
   // Faults require reset. CPU state after a failed dispatch is not committed evidence.
   [[nodiscard]] RunResult run(std::uint32_t instruction_budget);
   [[nodiscard]] ProcessingState processing_state() const noexcept;
+  [[nodiscard]] DebugStatus debug_status() const noexcept;
+  // Configure the functional OnCE interrupt-mode selection at stopped execution.
+  void set_debug_interrupt_mode(bool enabled);
+  // Complete a host DE/JTAG debug request; required clock stabilization is host-owned.
+  void request_debug();
+  void resume_from_debug();
   // Complete host-modeled IRQA wake/clock stabilization from STOP. The host then
   // admits its highest pending interrupt, or runs the next foreground instruction.
-  // This does not wake WAIT, which requires an admitted interrupt or reset.
+  // This does not wake WAIT; use an admitted interrupt, reset or the debug interface.
   void resume_from_stop();
   [[nodiscard]] bool interruptible() const;
   // Host-admitted vector/priority at a stopped boundary, not an on-chip IRQ controller.

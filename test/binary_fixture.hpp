@@ -16,7 +16,7 @@ struct MemoryBlock {
   Space space = Space::program;
 };
 
-enum class FixtureVersion : std::uint8_t { legacy = 1, processing = 2 };
+enum class FixtureVersion : std::uint8_t { legacy = 1, processing = 2, debugging = 3 };
 
 struct ResetAction {
   Word pc = 0;
@@ -35,6 +35,8 @@ struct BinaryCase {
   Word budget = 1, dispatches = 1;
   bool interruptible = true;
   ProcessingState state = ProcessingState::running;
+  bool debug_interrupt_mode = false;
+  DebugStatus debug;
 };
 
 // Versioned, little-endian fields; never a dump of compiler-dependent structures.

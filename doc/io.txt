@@ -172,3 +172,19 @@ rules apply. resume_from_stop is also prohibited callback reentry. Every legal
 REP iteration requires its own acknowledgement. Accepted prior host/vector
 and loop effects are retained after later failure. See doc/processing.txt for
 exact budgets, fault context, clock ownership and unresolved hardware details.
+
+Debug interface
+
+ProcessingState::debugging is a distinct nonfaulted halt. set_debug_interrupt_mode
+configures the functional IME selection, debug_status reports qualified IME/SWO,
+request_debug completes a host DE/JTAG request, and resume_from_debug explicitly
+leaves the halt and clears SWO. These mutations require stopped host execution;
+callback reentry is rejected. Host clocks/security/JTAG signaling are not invented.
+A host request from running/WAIT/STOP retires nothing, while IME-selected pending
+vectors consume later positive budgets. Requests never replace active vectors;
+repeat/partial-vector state and cache contents survive a debug halt or cache clear.
+External requests do not set software occurrence; taken guest DEBUG/DEBUGcc do
+so only when actually entering Debug mode. Configuring IME cannot erase a halt
+cause or alter an already queued request. All debugger edits obey normal memory/
+register mutation rules; they are not full OnCE pipeline/checkpoint restoration.
+See doc/debugging.txt for queue identity, rejection, timing and qualification gaps.

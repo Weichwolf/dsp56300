@@ -26,8 +26,8 @@ CLR	13-44	partial	src/Core/arithmetic.cpp	test/generate_flags.cpp	Other numerica
 CMP	13-45	partial	src/Core/arithmetic.cpp	test/generate_addition.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 CMPM	13-47	partial	src/Core/arithmetic.cpp	test/generate_bit_operations.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 CMPU	13-48	partial	src/Core/integer.cpp	test/generate_integer.cpp	SB/SC/DM qualification; REP/DO/conditional-consumer sequences and full timing
-DEBUG	13-49	missing	-	-	Instruction decoding and semantics; all operand/mode/sequence tests
-DEBUGcc	13-50	missing	-	-	Instruction decoding and semantics; all operand/mode/sequence tests
+DEBUG	13-49	partial	src/Core/debugging.cpp;src/Core/core.cpp;src/Core/decode.cpp;src/Core/exceptions.cpp;src/Jit/jit_helpers.cpp	test/generate_debug.cpp;test/debug_model.hpp;test/debug_test.cpp;test/fixture_format_test.cpp	Full OnCE/JTAG/trace/breakpoint/security behavior; instruction-latch/cache/prefetch restore; exact REP/fast-vector return and priority/VBA/pipeline timing; complete mode/loop/IRQ sequences
+DEBUGcc	13-50	partial	src/Core/debugging.cpp;src/Core/core.cpp;src/Core/decode.cpp;src/Core/exceptions.cpp;src/Jit/jit_helpers.cpp	test/generate_debug.cpp;test/debug_model.hpp;test/debug_test.cpp;test/fixture_format_test.cpp	Full OnCE/JTAG/trace/breakpoint/security behavior; instruction-latch/cache/prefetch restore; exact REP/fast-vector return and priority/VBA/pipeline timing; complete mode/loop/IRQ sequences
 DEC	13-51	partial	src/Core/integer.cpp	test/generate_integer.cpp	SM/SB/SC/DM semantics and combinations; pipeline/IRQ/stack-extension sequences
 DIV	13-52	partial	src/Core/iteration.cpp	test/generate_iteration.cpp;test/fixtures/iteration.d56	Other numeric modes; full operand/sequence, pipeline and IRQ qualification
 DMAC	13-55	partial	src/Core/products.cpp	test/generate_products.cpp;test/fixtures/products-mixed.d56	SB/SC/DM; SM for ss and specified SM-bypass for su/uu; full sequence/IRQ/timing and hardware shift confirmation
