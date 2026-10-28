@@ -265,3 +265,18 @@ Guest X/Y stores sharing the same P word must execute the final stored successor
 including the second L: half winning a shared X/Y word. Wrapped P extensions
 resume normal instruction budgets and subsequent arithmetic. Explicit unsupported
 numeric modes and unqualified IRQ/pipeline/event behavior remain gaps.
+
+RTI boundaries
+
+RTI uses a general executor helper after dirty native values are materialized.
+Successful return restores the raw PC/SR and reselects numeric specialization;
+independent tests warm the foreground under an old mode, execute actual native
+MAC/MAC before RTI, then require native ADC/rounding under restored Carry,
+scaling and RM. Zero budgets preserve the existing post-return exclusion.
+Failed returns do not load fabricated zero PC/SR. Failed long interrupt entry
+stops before service-state/retirement changes; existing EA effects survive a
+subsequent failed push. Host-injected vector instructions execute generally,
+contributing architectural retirement/base costs but not native JIT counters.
+Binary interrupted-DO/nested-frame tests qualify their own successful state
+subsets; complete extended stacks, exceptions, numerical side effects and
+sequence/IRQ/event/pipeline behavior remain open. No throughput claim follows.

@@ -5,11 +5,59 @@ implemented and independently tested, as explicitly reiterated by the user.
 Neither a passing current CTest suite nor successful Blofeld workloads is a
 replacement. doc/isa-coverage.tsv inventories 118 instruction/family/MOVE-form
 and alias entries against DSP56300FM Rev.5. The current audit records 15 missing,
-1 without dedicated independent tests and 102 partially tested entries; none
+0 without dedicated independent tests and 103 partially tested entries; none
 claims complete support. These counts are catalogue rows, not disjoint opcode
 counts or an ISA-support percentage. Detailed format/mode/sequence expansion
 remains mandatory. python3 tools/isa_audit.py --require-complete deliberately
 returns failure while any entry remains incomplete; see doc/isa-qualification.txt.
+
+Return/interrupt ISA increment: RTI now has dedicated independent fixtures
+and native/host boundary tests. RTI and RTS stop after failed stack pops instead
+of loading zero PC/SR values. Long interrupt entry stops after failed instruction
+fetch, effective-address calculation or stack push, without fabricating a new
+service PC/SR or guest retirement. Its EA validation now uses the same ordinary
+control-address rules, so immediate/reserved selectors cannot become jump
+addresses. Successful injected vector instructions add their documented base
+costs to Progress, alongside retired instruction counts; extra IRQ/pipeline
+latency remains excluded. The public API, CPU state and dependencies are unchanged.
+Independent failing host witnesses exposed both the return-state corruption and
+continued entry after a failed push before these corrections.
+7074 state and 10944 sequence fixtures, 18018 cases per backend, use per-bit
+48-bit frame reconstruction and separate raw-field/ALU models, never core
+execution or decoder/stack helpers. Successful physical SP positions are 1..15,
+with positive SC and stack extension disabled. All old CCR values, all 24 PC/SR
+bit bases/complements, six supported consumer modes, positive counts, nested
+returns and partial budgets are explicit. Sequence witnesses restore dirty A/B,
+Carry/scaling/RM and interrupted DO frames at LA/LA-1, preserving outer LF/FV.
+Raw status-copy matrices do not qualify reserved-bit readback or all restored
+numerical-mode effects. Forced missing-frame diagnostics remain library failure
+tests, not hardware stack-error/exception expectations.
+7416 host assertions additionally check failed RTI/RTS state and no replay;
+invalid/missing interrupt operands; failed full-stack entry, retaining an already
+computed R update; saved nested frames and priority masks; zero budgets and the
+existing post-return admission boundary; fresh native consumers despite warm
+old-mode code; and exact two-slot fast-vector retirement/base costs. Actual
+native arithmetic is required on both sides of RTI. Host vector execution still
+uses the general executor and is not native benchmark throughput.
+RTI moves from untested to partial and its manual page is corrected to 13-167.
+All currently implemented catalogue rows now have dedicated test evidence, but
+15 rows remain missing and 103 are partial; none is complete. The catalogue is
+not an ISA-support percentage. Extended stacks, SE/UF and automatic exceptions,
+all restored numerical-mode effects, complete legal sequence/vector/NMI/event
+admission and calibrated pipeline timing remain mandatory gaps. In particular,
+the existing post-RTI one-instruction exclusion is a tested library policy,
+not a new claim of hardware pipeline qualification. Full ISA, representative
+270 MIPS/host-load/energy qualification and transparent hardware isolation remain
+open parts of the objective. No new native/SIMD or performance claim follows.
+Full release and ASan/UBSan strict suites pass all 76 executable tests
+(91.60 s and 360.61 s). Both register 77 tests; the sole skip is inaccessible
+/dev/kvm, not qualified protected execution. The final host refinement adds
+successful two-slot fast-service base-cost/PC/stack assertions; the entire host
+test passes again in release and strict, 7416 assertions each. Both archives
+reproduce byte-for-byte, and all 30 previous public archives remain unchanged.
+LLVM 19 diagnostics/tidy, formatting and the structural ISA audit pass;
+--require-complete still fails on 15 missing and 103 partial rows. No fuzz tests
+were run. This increment is committed locally and the full goal stays active.
 
 Extended-MOVE ISA increment: MOVE.I, MOVE.L, MOVE.XR and MOVE.RY now have
 dedicated independent qualification. The general executor rejects immediate EA

@@ -215,3 +215,22 @@ SB/SC/DM/SM, all IRQ/events and calibrated pipeline timing remain open.
 The catalogue has 15 missing, 1 untested (RTI), 102 partial and 0 complete rows.
 The completion gate must continue to fail; neither these tests nor any Blofeld
 workload qualifies the complete DSP56300 instruction set or the full objective.
+
+Return/interrupt increment: RTI gains dedicated per-bit frame and sequence
+models, binary fixtures and host/native tests, moving the last untested row to
+partial. Its discussion is on 13-167; the old summary-derived 13-168 reference
+was incorrect. Successful frame tests use physical SP positions 1..15 and
+positive SC with extension disabled; SP error-bit/extended-stack operation is
+not modeled as a wrapping success case. Saved PC/SR bits, all CCR bytes,
+consumer mode changes, nested frames and interrupted DO cleanup have independent
+expectations. Failed RTI/RTS pops cannot supply zero return state. Failed long
+interrupt fetch/EA/push cannot fabricate service state or retirement; EA rules
+match ordinary control flow. Injected instructions now contribute documented
+base costs to Progress, without claiming IRQ/pipeline overhead calibration.
+Host tests require real native arithmetic across restored Carry/scaling/RM and
+warm old-mode code. The existing post-return interrupt exclusion is qualified as
+a library admission policy only. Forced missing-frame failure state is a library
+contract, not hardware underflow/SE/UF/NMI semantics. Full stack extension,
+automatic stack exceptions, restored-mode side effects, all legal sequences and
+fast/vector/NMI/event/pipeline qualification remain open. The totals are now
+15 missing, 0 untested, 103 partial, 0 complete; the full-ISA gate must still fail.

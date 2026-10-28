@@ -579,6 +579,38 @@ and IRQ/event/pipeline sequence remain unqualified. Numerical tests use table
 need hardware confirmation. No workload or protected-execution claim follows.
 Archive limits, schema/version and all earlier fixture bytes remain unchanged.
 
+Return/interrupt fixtures
+
+return-state.d56 contains 7074 original synthetic RTI cases; return-sequences.d56
+adds 10944 cases. Regenerate explicitly with the fixture-format-only producer:
+  build/release/dsp56300_generate_returns state build/return-state.d56
+  build/release/dsp56300_generate_returns sequences build/return-sequences.d56
+  cmp build/return-state.d56 test/fixtures/return-state.d56
+  cmp build/return-sequences.d56 test/fixtures/return-sequences.d56
+
+A separate per-bit model reconstructs SSH/SSL from the raw 48-bit frame and
+models explicit pointer/count arithmetic. All CCR bytes and 24-bit PC/SR bit
+bases/complements exercise full restoration while preserving other registers.
+Success cases restrict physical SP to 1..15, with positive SC and extension
+disabled. They do not encode forced error-bit SP values as ordinary hardware
+success. Raw saved status tests qualify copying, not reserved-bit readback or
+all resulting numerical-mode behavior. The sequence archive covers native
+MAC/MAC to RTI to Carry/rounding consumers, all partial budgets, nested returns,
+and interrupted finite DO endings at LA/LA-1 with saved LF/FV frames. REP rejects
+both return instructions. Missing-frame cases check library fault/retirement;
+the generic fixture runner intentionally compares post-state only on success.
+7416 separate host assertions check post-failure properties explicitly, rather
+than inferring them from negative binary expectations. They cover failed returns
+and long entry, both vector positions, invalid/missing EA operands, retained
+prior vector/AGU effects, exact nested frames/masks, zero budgets and warm native
+mode/Carry consumers. Native retirement is required around RTI. Two-slot fast
+services additionally retain foreground PC/stack and count each instruction's
+base cost. Uncalibrated IRQ overhead remains separate from those documented
+costs. Full stack extension, SE/UF/automatic exceptions, all numerical effects,
+complete fast/vector/NMI/event admission and pipeline delays remain unqualified.
+The post-return exclusion remains a tested library policy, not hardware timing
+proof. Earlier archive bytes, schema/version and limits remain unchanged.
+
 Wire format D56F, version 1
 
 Every integer is unsigned little-endian. u32/u64 always occupy 4/8 bytes.

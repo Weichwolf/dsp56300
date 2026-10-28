@@ -50,7 +50,7 @@ JMP	13-83	partial	src/Core/conditional.cpp	test/generate_conditions.cpp	Other nu
 JScc	13-84	partial	src/Core/conditional.cpp	test/generate_conditions.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 JSCLR	13-85	partial	src/Core/bits.cpp	test/generate_bit_access.cpp;test/bit_access_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 JSET	13-87	partial	src/Core/bits.cpp	test/generate_bit_access.cpp;test/bit_access_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
-JSR	13-89	partial	src/Core/conditional.cpp	test/generate_conditions.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
+JSR	13-89	partial	src/Core/conditional.cpp;src/Core/control.cpp	test/generate_conditions.cpp;test/return_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 JSSET	13-90	partial	src/Core/bits.cpp	test/generate_bit_access.cpp;test/bit_access_test.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 LEA	13-98;A-5	partial	src/Core/agu.cpp	test/generate_address_calc.cpp;test/address_model.hpp;test/fixtures/address-calculations.d56	Other numeric modes; complete AGU/alias/sequence, pipeline and IRQ qualification; manual destination-note inconsistencies
 LRA	13-92	partial	src/Core/agu.cpp	test/generate_address_calc.cpp;test/address_model.hpp;test/fixtures/address-calculations.d56	Other numeric modes; complete AGU/alias/sequence, pipeline and IRQ qualification; manual destination-note inconsistencies
@@ -103,8 +103,8 @@ RESET	13-162	missing	-	-	Instruction decoding and semantics; all operand/mode/se
 RND	13-163	partial	src/Core/arithmetic.cpp	test/generate_arithmetic.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 ROL	13-165	partial	src/Core/shifts.cpp	test/generate_bit_operations.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 ROR	13-166	partial	src/Core/shifts.cpp	test/generate_bit_operations.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
-RTI	13-168	untested	src/Core/control.cpp	-	Dedicated independent instruction/operand tests; other modes and sequences
-RTS	13-168	partial	src/Core/control.cpp	test/generate_conditions.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
+RTI	13-167	partial	src/Core/control.cpp	test/generate_returns.cpp;test/return_model.hpp;test/return_test.cpp	Stack extension and SE/UF/exception behavior; full numerical-mode side effects; NMI/fast admission, sequence and calibrated pipeline/event qualification
+RTS	13-168	partial	src/Core/control.cpp	test/generate_conditions.cpp;test/return_test.cpp	Stack extension and SE/UF/exception behavior; all legal operand/sequence/IRQ and pipeline qualification
 SBC	13-169	partial	src/Core/arithmetic.cpp	test/generate_arithmetic.cpp;test/generate_addition.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 STOP	13-170	missing	-	-	Instruction decoding and semantics; all operand/mode/sequence tests
 SUB	13-172	partial	src/Core/arithmetic.cpp	test/generate_addition.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification

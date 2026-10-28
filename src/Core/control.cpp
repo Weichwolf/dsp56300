@@ -90,9 +90,14 @@ void Core::Impl::execute(const Instruction &decoded) {
     case Operation::jump_effective:
     case Operation::call_short:
     case Operation::call_effective: execute_jump(decoded); return;
-    case Operation::return_subroutine: reg.pc = static_cast<Word>(pop() >> word_bits); return;
+    case Operation::return_subroutine: {
+      const auto frame = pop();
+      if (fault.kind == FaultKind::none) { reg.pc = static_cast<Word>(frame >> word_bits); }
+      return;
+    }
     case Operation::return_interrupt: {
       const auto frame = pop();
+      if (fault.kind != FaultKind::none) { return; }
       reg.pc = static_cast<Word>(frame >> word_bits);
       reg.sr = static_cast<Word>(frame) & word_mask;
       cpu.interrupt_inhibited = true;
@@ -139,19 +144,21 @@ void Core::interrupt(const Word vector, const unsigned level) {
   for (unsigned offset = 0; offset < 2; ++offset) {
     impl_->current_pc = vector + offset;
     const auto decoded = impl_->instruction(vector + offset);
+    if (impl_->fault.kind != FaultKind::none) { return; }
     if (decoded.operation == Operation::call_short ||
         decoded.operation == Operation::call_effective) {
       const auto target = decoded.operation == Operation::call_short
                               ? decoded.opcode & short_address_mask
-                              : impl_->effective({.mode = (decoded.opcode >> 11) & 7,
-                                                  .index = (decoded.opcode >> 8) & 7,
-                                                  .extra = decoded.extension});
+                              : impl_->control_address(decoded);
+      if (impl_->fault.kind != FaultKind::none) { return; }
       impl_->push(foreground, state.sr);
+      if (impl_->fault.kind != FaultKind::none) { return; }
       constexpr Word cleared = scale_up | scale_down | arithmetic_16 | loop_flag | forever_flag |
                                (interrupt_level_mask << interrupt_level_shift);
       state.sr = (state.sr & ~cleared) | ((level + 1) << interrupt_level_shift);
       state.pc = target;
       ++impl_->cpu.instructions;
+      impl_->cpu.cycles += decoded.cycles;
       return;
     }
     if ((decoded.operation != Operation::parallel && decoded.operation != Operation::nop) ||
@@ -163,6 +170,7 @@ void Core::interrupt(const Word vector, const unsigned level) {
     impl_->execute(decoded);
     if (impl_->fault.kind != FaultKind::none) { return; }
     ++impl_->cpu.instructions;
+    impl_->cpu.cycles += decoded.cycles;
   }
   state.pc = foreground;
   impl_->cpu.interrupt_inhibited = true;
