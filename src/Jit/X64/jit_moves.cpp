@@ -71,6 +71,7 @@ void JitEmitter::moves(const NativeOp &operation) {
   }
   x64::Label slow;
   x64::Label done;
+  const auto first_guard = ring_guards_.size();
   for (const auto &move : transfers) { move_guard(move, slow); }
   if (dataflow_.old_inputs != 0) {
     for (unsigned index = 0; index < register_offsets.size(); ++index) {
@@ -87,6 +88,11 @@ void JitEmitter::moves(const NativeOp &operation) {
   code_.memory_immediate(group_add, Reg::ax, 0, Width::qword, 1);
   code_.jump(done);
   code_.bind(slow);
+  // Late ring checks retain this instruction's target after its local label dies.
+  for (auto index = first_guard; index < ring_guards_.size(); ++index) {
+    ring_guards_[index].slow.offset = slow.offset;
+    ring_guards_[index].slow.bound = true;
+  }
   general_moves(operation);
   code_.bind(done);
 }

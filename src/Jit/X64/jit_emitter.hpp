@@ -34,6 +34,11 @@ private:
   void moves(const NativeOp &operation);
   void general_moves(const NativeOp &operation);
   void move_guard(const NativeMove &move, x64::Label &slow);
+  void move_next(const NativeMove &move);
+  void move_delta(const NativeMove &move);
+  void move_ring_delta(const NativeMove &move);
+  void emit_ring_guards();
+  void emit_ring_check(x64::Label &entry);
   void move_update(const NativeMove &move);
   void move_capture(const NativeMove &move, Word mode);
   void move_commit(const NativeMove &move);
@@ -58,6 +63,13 @@ private:
   void loop_backedge();
   void retire(const NativeOp &operation);
   x64::Code code_;
+
+  struct RingGuard {
+    x64::Label entry, resume, slow;
+    NativeMove move;
+  };
+
+  std::vector<RingGuard> ring_guards_;
   JitRuntime runtime_;
   bool optimize_;
   NativeDataflow dataflow_;

@@ -145,3 +145,13 @@ prefix or stopping-mask formula. Eight binary DO cases check current-pointer
 iteration and stack/CCR restoration. No instruction row becomes complete from
 this optimization. Numerical modes, full AGU restrictions and pipeline/event
 qualification remain open. Focused helper-loop speed is not audio/device speed.
+
+Native multiple-wrap lowering increment: valid power-of-two rings now execute
+through guarded x64 transfer code as well as the existing general executor.
+Independent coordinate tests require actual native transfers, including paired
+aliases, dynamic modifiers and failures before either prospective R commit.
+Private source-built Comb- sample-loop expectations additionally check causal
+feedback and transfer precision. This changes execution strategy for an already
+implemented addressing subset; it closes no missing instruction, numerical mode,
+displacement form or full-ISA catalogue row. Complete ISA qualification remains
+mandatory regardless of any passing workload or performance improvement.

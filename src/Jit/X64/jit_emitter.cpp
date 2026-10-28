@@ -346,6 +346,8 @@ std::vector<std::uint8_t> JitEmitter::generate(const std::span<const NativeOp> o
     }
   }
   finish();
+  // Keep non-linear checks beyond every return, outside the linear hot path.
+  emit_ring_guards();
   return code_.bytes();
 }
 } // namespace dsp56300::detail

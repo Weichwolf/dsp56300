@@ -74,6 +74,7 @@ public:
   void move_if(unsigned condition, RegisterPair registers);
   void jump_if(Branch condition, Label &label);
   void jump(Label &label);
+  void call(Label &label);
   void bind(Label &label);
 
   [[nodiscard]] const std::vector<std::uint8_t> &bytes() const noexcept { return bytes_; }

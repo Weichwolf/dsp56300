@@ -11,7 +11,63 @@ counts or an ISA-support percentage. Detailed format/mode/sequence expansion
 remains mandatory. python3 tools/isa_audit.py --require-complete deliberately
 returns failure while any entry remains incomplete; see doc/isa-qualification.txt.
 
-Reverse-carry optimization: the M-low16=0 path now uses a five-stage downward
+Native multiple-wrap transfer optimization: the x64 emitter now admits current
+M-low16=$8000..$bfff with a nonzero power-of-two-minus-one low-fourteen-bit mask.
+Linear and valid multiple-wrap updates compute prospective R values once;
+both X/Y modifier/span/I/O guards precede either R commit or RAM transfer.
+Ordinary modulo/reverse modes return directly to general execution before an
+internal call or R/N load. Invalid masks preserve the general diagnostic path.
+The cold code shares mask validation and repeated port/index/mode updates while
+retaining each transfer's own bounds and fallback continuation. It adds no CPU
+state, SIMD alignment, library dependency or assumption of independent samples.
+Native-move boundary tests now perform 60370 host assertions. Independent ring
+coordinates check all fourteen sizes, seven register address forms, eight AGUs,
+X/Y loads/stores, signed/raw offsets, ignored M high bytes and warm M changes.
+All sixteen paired addressing combinations exercise physical X/Y aliases,
+source capture/commit ordering and helper-only versus optimized execution.
+Reserved masks, maximum-ring span failures and a wrapped X update followed by
+Y I/O fallback retain single-update and callback boundaries. Existing independent
+parallel-transfer/dataflow/AGU archives remain unchanged and reproducible.
+An additional ignored source-built Blofeld Comb- corpus contains 1536 cases
+of the unmodified sixteen-sample loop, stopping before descriptor publication.
+Each retires 101 guest instructions and 105 estimated base cycles. An original
+signed-integer model derives raw-56 arithmetic, floor/clipped transfers, sticky
+flags, current ring memory and residual loop frames; expectations never come
+from the emulator. Cursor choices include causal feedback reads of earlier
+writes in the same block, so no independent-sample batching is assumed. Both
+RM values, clipping, negative fractions and seeded sticky state are exercised.
+This is a loop subset, not qualification of the complete callback or device.
+Three alternating before/after runs against a3fae3d on i5-10400 CPU2/powersave,
+with 64 warmups and nine trials, measure 1.80617 -> 1.12805 microseconds for
+the causal-feedback case and 1.78624 -> 1.13216 for the clipping case: 37.5% and
+36.6% lower initialized-loop latency. Native transfer instructions rise from
+33 to 66 per call; retirement stays 101, split between 83 native retirements and
+18 full helpers. Three compiled blocks and 12288 mapped executable bytes remain
+unchanged. These counters do not count each RAM word separately. Complete state
+and progress are validated; host restoration is outside the execution timer.
+The eleven-scenario sweep is mixed: filter/LP12 observations are 1.2-3.2% faster,
+reverb 1.6% slower and FFT16/64/256/1024 0.4-6.3% slower. Reverb mappings grow
+from 102400 to 110592 bytes; other scenario mappings are unchanged. Shared cold
+code reduces duplication, but does not establish a total cache-footprint gain.
+Earlier cold-code layouts also show the large Comb gain but inconsistent small
+FFT deltas. Frequencies are not fixed and unrelated host builds were observed;
+small workload deltas are not established gains or attributed causes. Retain
+these regressions as optimization work, rather than claiming a general speedup.
+The final FFT1024 observation is 1.628908 ms for 157810 guest instructions,
+about 96.88 MIPS. This does not qualify 270 MIPS, continuous-device CPU load or
+energy. The 270-MIPS reference remains unmet and is not an optimization ceiling.
+Full release and ASan/UBSan strict suites each pass all 57 executable tests,
+including private source-built workloads and unchanged archive reproduction.
+There are 58 registered tests; KVM is the sole skip because /dev/kvm returns
+Permission denied. This does not qualify protected execution. LLVM 19 strict
+warnings/tidy, formatting and the structural ISA audit pass. The separate
+--require-complete gate still fails on 15 missing, 11 untested and 92 partial
+catalogue rows. No fuzz tests were run, and this increment is committed locally.
+No missing ISA entry, numerical mode, MOVE displacement form or full timing/
+interrupt requirement is closed by this optimization. Full ISA completion
+remains mandatory, and the overall objective remains active.
+
+Previous reverse-carry optimization: the M-low16=0 path now uses a five-stage downward
 carry/borrow prefix instead of three bit reversals. A nonzero-single-bit guard
 selects a shorter stopping-bit mask; zero and dense magnitudes retain the full
 general prefix calculation. Raw N/sign ordering, 24-bit wrap and ignored high

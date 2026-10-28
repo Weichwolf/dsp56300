@@ -275,6 +275,12 @@ void Code::jump(Label &label) {
   reference(label);
 }
 
+void Code::call(Label &label) {
+  constexpr unsigned near_call = 0xe8;
+  byte(near_call);
+  reference(label);
+}
+
 void Code::bind(Label &label) {
   if (label.bound) { throw std::logic_error("x64 label already bound"); }
   label.offset = bytes_.size();

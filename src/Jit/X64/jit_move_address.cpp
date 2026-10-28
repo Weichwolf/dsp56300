@@ -8,17 +8,131 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <stdexcept>
+#include <vector>
 
 namespace dsp56300::detail {
 namespace {
 using x64::Branch;
 using x64::Reg;
 using x64::Width;
-constexpr unsigned op_add = 0x01, op_sub = 0x29;
-constexpr unsigned group_and = 4, group_sub = 5, group_cmp = 7;
+constexpr unsigned op_add = 0x01, op_sub = 0x29, op_xor = 0x31, op_and = 0x21, op_test = 0x85;
+constexpr unsigned op_return = 0xc3;
+constexpr unsigned group_add = 0, group_and = 4, group_sub = 5, group_cmp = 7;
 constexpr auto r_offset = offsetof(Cpu, reg) + offsetof(Registers, r);
 constexpr auto n_offset = offsetof(Cpu, reg) + offsetof(Registers, n);
 constexpr auto m_offset = offsetof(Cpu, reg) + offsetof(Registers, m);
+
+}
+
+// Keep prospective R updates in SI/DI until every transfer guard has passed.
+// move_update consumes them before those registers capture X/Y data values.
+void JitEmitter::move_delta(const NativeMove &move) {
+  const auto address = move.space == Space::x ? Reg::cx : Reg::r8;
+  const auto next = move.space == Space::x ? Reg::si : Reg::di;
+  const auto &form = move.address;
+  const auto offset = form.index * sizeof(Word);
+  const bool subtract = form.mode == 0 || form.mode == 2 || form.mode == 7;
+  code_.load(address, Reg::r12, r_offset + offset, Width::dword);
+  code_.mov({.destination = next, .source = address}, Width::dword);
+  if (form.mode < 2 || form.mode == 5) {
+    code_.load(Reg::r9, Reg::r12, n_offset + offset, Width::dword);
+    code_.binary(
+        subtract ? op_sub : op_add, {.destination = next, .source = Reg::r9}, Width::dword);
+  } else {
+    code_.immediate(subtract ? group_sub : group_add, next, 1, Width::dword);
+  }
+}
+
+void JitEmitter::move_next(const NativeMove &move) {
+  const auto next = move.space == Space::x ? Reg::si : Reg::di;
+  const auto offset = move.address.index * sizeof(Word);
+  code_.load(Reg::ax, Reg::r12, m_offset + offset, Width::dword);
+  code_.immediate(group_and, Reg::ax, modifier_mask, Width::dword);
+  code_.immediate(group_cmp, Reg::ax, modifier_mask, Width::dword);
+  auto &guard = ring_guards_.emplace_back();
+  guard.move = move;
+  code_.jump_if(Branch::not_equal, guard.entry);
+  move_delta(move);
+  code_.immediate(group_and, next, word_mask, Width::dword);
+  code_.bind(guard.resume);
+}
+
+// Internal leaf: AX >= $8000; return ZF=1 and AX=mask iff valid, preserving port state.
+void JitEmitter::emit_ring_check(x64::Label &entry) {
+  x64::Label invalid;
+  code_.bind(entry);
+  code_.immediate(group_cmp, Reg::ax, multiple_wrap_bit | multiple_reserved_bit, Width::dword);
+  code_.jump_if(Branch::above_equal, invalid);
+  code_.immediate(group_and, Reg::ax, multiple_wrap_mask, Width::dword);
+  code_.immediate(group_cmp, Reg::ax, 0, Width::dword);
+  code_.jump_if(Branch::equal, invalid);
+  code_.mov({.destination = Reg::r9, .source = Reg::ax}, Width::dword);
+  code_.immediate(group_add, Reg::r9, 1, Width::dword);
+  code_.binary(op_test, {.destination = Reg::ax, .source = Reg::r9}, Width::dword);
+  code_.raw({op_return}); // RET, retaining the validation flags.
+  code_.bind(invalid);
+  code_.constant(Reg::r9, 1);
+  code_.binary(op_test, {.destination = Reg::r9, .source = Reg::r9}, Width::dword);
+  code_.raw({op_return});
+}
+
+void JitEmitter::emit_ring_guards() {
+  if (ring_guards_.empty()) { return; }
+
+  struct Routine {
+    NativeMove move;
+    x64::Label entry;
+  };
+
+  std::vector<Routine> routines;
+  x64::Label check;
+  for (auto &guard : ring_guards_) {
+    if (!guard.slow.bound) { throw std::logic_error("Unbound native ring fallback"); }
+    code_.bind(guard.entry);
+    // Ordinary modulo/reverse fallback needs neither a call nor R/N loads.
+    code_.immediate(group_cmp, Reg::ax, multiple_wrap_bit - 1, Width::dword);
+    code_.jump_if(Branch::below_equal, guard.slow);
+    const auto matches = [&guard](const auto &candidate) {
+      return candidate.move.space == guard.move.space &&
+             candidate.move.address.mode == guard.move.address.mode &&
+             candidate.move.address.index == guard.move.address.index;
+    };
+    if (std::ranges::count_if(ring_guards_, matches) > 1) {
+      auto routine = std::ranges::find_if(routines, matches);
+      if (routine == routines.end()) {
+        routines.push_back({.move = guard.move, .entry = {}});
+        routine = routines.end() - 1;
+      }
+      code_.call(routine->entry);
+      code_.jump_if(Branch::not_equal, guard.slow);
+    } else {
+      code_.call(check);
+      code_.jump_if(Branch::not_equal, guard.slow);
+      move_ring_delta(guard.move);
+    }
+    code_.jump(guard.resume);
+  }
+  for (auto &routine : routines) {
+    x64::Label done;
+    code_.bind(routine.entry);
+    code_.call(check);
+    code_.jump_if(Branch::not_equal, done);
+    move_ring_delta(routine.move);
+    code_.binary(op_xor, {.destination = Reg::r9, .source = Reg::r9}, Width::dword);
+    code_.bind(done);
+    code_.raw({op_return});
+  }
+  emit_ring_check(check);
+}
+
+void JitEmitter::move_ring_delta(const NativeMove &move) {
+  const auto address = move.space == Space::x ? Reg::cx : Reg::r8;
+  const auto next = move.space == Space::x ? Reg::si : Reg::di;
+  move_delta(move);
+  code_.binary(op_xor, {.destination = next, .source = address}, Width::dword);
+  code_.binary(op_and, {.destination = next, .source = Reg::ax}, Width::dword);
+  code_.binary(op_xor, {.destination = next, .source = address}, Width::dword);
 }
 
 void JitEmitter::move_guard(const NativeMove &move, x64::Label &slow) {
@@ -26,21 +140,17 @@ void JitEmitter::move_guard(const NativeMove &move, x64::Label &slow) {
   const auto address = move.space == Space::x ? Reg::cx : Reg::r8;
   const auto &form = move.address;
   const auto offset = form.index * sizeof(Word);
-  if (form.mode != 4 && form.mode != 6) {
-    code_.load(Reg::ax, Reg::r12, m_offset + offset, Width::dword);
-    code_.immediate(group_and, Reg::ax, modifier_mask, Width::dword);
-    code_.immediate(group_cmp, Reg::ax, modifier_mask, Width::dword);
-    code_.jump_if(Branch::not_equal, slow);
-  }
   if (form.mode == 6) {
     code_.constant(address, form.extra);
   } else {
-    code_.load(address, Reg::r12, r_offset + offset, Width::dword);
-    if (form.mode == 5) {
-      code_.load(Reg::ax, Reg::r12, n_offset + offset, Width::dword);
-      code_.binary(op_add, {.destination = address, .source = Reg::ax}, Width::dword);
-    } else if (form.mode == 7) {
-      code_.immediate(group_sub, address, 1, Width::dword);
+    if (form.mode != 4) {
+      move_next(move);
+      if (form.mode == 5 || form.mode == 7) {
+        code_.mov({.destination = address, .source = move.space == Space::x ? Reg::si : Reg::di},
+                  Width::dword);
+      }
+    } else {
+      code_.load(address, Reg::r12, r_offset + offset, Width::dword);
     }
     code_.immediate(group_and, address, word_mask, Width::dword);
   }
@@ -54,21 +164,7 @@ void JitEmitter::move_update(const NativeMove &move) {
   const auto &form = move.address;
   if (form.mode == 4 || form.mode == 5 || form.mode == 6) { return; }
   const auto offset = form.index * sizeof(Word);
-  if (form.mode == 7) {
-    code_.store(
-        Reg::r12, r_offset + offset, move.space == Space::x ? Reg::cx : Reg::r8, Width::dword);
-    return;
-  }
-  code_.load(Reg::ax, Reg::r12, r_offset + offset, Width::dword);
-  if (form.mode < 2) {
-    code_.load(Reg::r9, Reg::r12, n_offset + offset, Width::dword);
-  } else {
-    code_.constant(Reg::r9, 1);
-  }
-  code_.binary((form.mode & 1U) != 0 ? op_add : op_sub,
-               {.destination = Reg::ax, .source = Reg::r9},
-               Width::dword);
-  code_.immediate(group_and, Reg::ax, word_mask, Width::dword);
-  code_.store(Reg::r12, r_offset + offset, Reg::ax, Width::dword);
+  code_.store(
+      Reg::r12, r_offset + offset, move.space == Space::x ? Reg::si : Reg::di, Width::dword);
 }
 } // namespace dsp56300::detail

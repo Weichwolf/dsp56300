@@ -3,7 +3,7 @@ Native x64 execution
 Select Options.backend=Backend::jit on Linux x86-64. The default remains cached.
 This is an independent scalar SysV x64 emitter. No external DSP emulator,
 assembler, LLVM runtime or JIT library is linked. SSE/AVX lowering, block linking,
-nonlinear native AGU lowering and general register allocation across instructions remain
+native reverse/ordinary-modulo AGU lowering and general register allocation remain
 future work; this first backend is not the final performance objective.
 
 Core::run has the same exact guest-instruction budget on every backend. One REP
@@ -43,14 +43,46 @@ still use the general executor.
 
 Single X/Y memory transfers for X0/X1/Y0/Y1/A/B and all ordinary paired X/Y
 transfer directions now have a host-independent transfer plan and native x64
-lowering. Short/absolute/immediate, no-update and linear pre/post/indexed forms
-are admitted. Updating/indexed forms check current low sixteen M bits for linear
-addressing; no-update and absolute forms ignore M. Every RAM address is checked
-against its supplied span and the I/O boundary before any architectural effect.
+lowering. Short/absolute/immediate, no-update and linear or valid multiple-wrap
+pre/post/indexed forms are admitted. Updating/indexed forms check current low
+sixteen M bits on every execution; no-update and absolute forms ignore M.
+Every RAM address is checked against its supplied span and the I/O boundary
+before any architectural effect.
 Failed guards use the same instrumented move helper as before, without duplicate
 address updates, callbacks or writes. Stores to any bank overlapping P use that
 helper conservatively, preserving program invalidation. Other transfer classes,
 PCU register transfers and conditional IFcc forms retain general execution.
+
+Multiple-wrap guards require M-low16 in [$8000,$c000), a nonzero low-fourteen-bit
+mask q and q&(q+1)=0. Thus the ring length is a power of two from 2 to 16384.
+With old cursor r and raw offset n, the prospective update is
+r XOR (((r +/- n) XOR r) & q); upper cursor bits stay fixed. Raw and signed
+24-bit N give the same ring coordinate because their difference is a multiple
+of every admitted ring length. Linear updates instead mask to 24 bits. Neither
+form changes DSP flags. Ordinary modulo, reverse carry and reserved masks return
+to the general helper; unsupported modifiers keep its explicit diagnostics.
+
+SI/DI stage prospective X/Y R values while CX/R8 retain effective addresses.
+Only after both ports pass modifier/span/I/O guards do R updates commit once;
+SI/DI can then capture data. Indexed forms compute the effective address without
+writing R, and predecrement uses the already checked prospective value.
+Nonlinear validation and its pointer calculation are emitted after all block
+returns, keeping linear fallthrough separate from that cold code. Ordinary
+modulo/reverse modes branch directly to their helper before any internal call
+or R/N load. An internal leaf check is shared within the block;
+CALL/RET balances the native stack and
+returns its verdict in host ZF, with the valid mask in AX. It clobbers only AX,
+R9 and host flags, preserving both ports' staged addresses/updates. Each cold
+continuation retains its own bound fallback offset, independent of the emitter's
+temporary label lifetime. No additional CPU state or aligned memory is required.
+Repeated port/index/address-mode combinations also share a cold update routine;
+its verdict returns in ZF before the caller selects its own continuation or
+fallback. This routine additionally clobbers only its own port's address and
+prospective update. M, R and N remain dynamic on every call; data-register
+selectors, RAM limits and fallback targets stay at each transfer site. Sharing
+generated code establishes no independence between guest operations or samples.
+These internal routines never call C++ or observers and preserve cached A/B;
+they do not require the materialization boundary of a runtime helper.
 
 Native moves preserve old register banks that an ALU reads and a transfer can
 overwrite, update both AGUs, capture both port values, then commit X before Y.
@@ -98,7 +130,7 @@ Unclassified/full helpers conservatively invalidate both copies. Fast transfer
 branches do not establish new cache-valid values, so their slow branches cannot
 skip initialization. Each new native entry starts with no cached values.
 
-Every helper call materializes all preceding dirty results before C++ execution
+Every runtime helper call materializes preceding dirty results before C++ execution
 or callbacks. Loop guards, invalidation exits and normal/partial-budget returns
 use shared epilogues for the four possible dirty A/B combinations. This restores
 complete canonical accumulator state before the host or general executor can

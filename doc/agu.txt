@@ -70,3 +70,26 @@ were not fixed, and no energy measurement or 270-MIPS qualification follows.
 To reproduce the before/after comparison, build b7b5299 separately with the
 same release preset/toolchain and retain its fixture-benchmark executable. Run
 both versions against the same current fixture bytes and alternate their order.
+
+Native multiple-wrap transfers
+
+The x64 transfer emitter admits the existing power-of-two multiple-wrap subset
+with current M-low16 in [$8000,$c000), nonzero q=M&$3fff and q&(q+1)=0.
+Let L=q+1 and decompose the old 24-bit cursor as r=b+c, where b is aligned to L
+and 0<=c<L. For an addition/subtraction d, the independent coordinate result is
+b+((c+d) modulo L). Generated code instead computes
+
+  r XOR (((r+d) XOR r) & q)
+
+This replaces exactly the low log2(L) bits and preserves b. Using raw24 N rather
+than signed24 N changes d by a multiple of 2^24, hence by a multiple of every
+admitted L. Unsigned host subtraction wrap likewise leaves these low bits
+unchanged. Linear addressing uses the ordinary low24 result. AGU operations
+leave all DSP condition codes unchanged.
+
+Prospective updates remain in scratch registers until both transfer ports pass
+all address/memory/I/O guards. Failed nonlinear guards use each instruction's
+existing general helper before any native state/RAM effect. This does not
+extend the admitted numerical modes or qualify general modulo/reverse native
+execution. Details of the cold code and register contract are in doc/jit.txt;
+independent test and private workload scope are in doc/fixtures.txt.
