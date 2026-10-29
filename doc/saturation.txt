@@ -129,7 +129,9 @@ Native/general/move/batch/AVX2 counts and page storage stay unchanged in all
 three ordinary scenarios (32768 / 49152 / 344064 bytes). This is a semantic
 extension with regression checking, not a new general throughput/cache/energy
 claim. The new single-instruction SM fixtures are not throughput benchmarks.
-SM continuous capacity/native speed remain unqualified.
+SM continuous capacity/native speed were unqualified at that increment. A later
+continuous nonlinear feedback workload now qualifies one useful SM stream; see
+nonlinear-stream.txt and native-constants.txt. Other programs/modes remain open.
 
 This increment does not complete full ISA, SM native performance, all application
 domains, cache/energy, SIMD/multicore, adaptive allocation or sustained realtime

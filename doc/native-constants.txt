@@ -1,0 +1,122 @@
+Guarded RAM regions with pre-use R constants
+
+Proof extension
+
+The region planner now records an optional 24-bit constant when an R0..R7
+immediate assignment precedes the first address access through that same R.
+A second constant before any such access may replace it. N-register assignments,
+late R redefinitions and all otherwise unproved transfers still retain ordinary
+execution. No program-specific signature, caller option or CPU layout is added.
+
+The selector and each guarded loop header use the recorded constant for their
+address range proof. They retain the original finite RAM bounds, M-profile,
+nonnegative stride-N, ring and saved-PC/LC checks. The actual R assignment still
+executes at its original guest instruction and retirement position. Thus the
+old R may point outside RAM, including I/O, without being observed before its
+replacement. Rejection changes no architectural state or memory.
+
+State / effect                 Proof obligation
+R immediate                    exact decoded low24 extension, before first use
+old R                          irrelevant only where an assignment dominates use
+R after prior loop body        never substituted for the next assigned constant
+M/N                            original dynamic guards; no unproved N rewrite
+aliased X/Y / finite bounds     original ordered transfers and combined bounds
+program aliases / I/O           ordinary invalidation/callback path retained
+PC / counters / flags / A/B     original complete checkpoints and flag liveness
+
+The same generated ordinary path remains available when a bound/modifier/
+stride/loop guard fails. An entry that starts after the assignment receives its
+own metadata and proves the real current R dynamically. Immediate zero is a
+valid known value, distinct from an absent constant. Constants neither remove
+program-alias boundaries nor authorize conditional control or other modes.
+The optional field is private compilation metadata; public canonical state and
+memory/event/I/O contracts are unchanged.
+
+Independent validation
+
+A new helper-forbidden RX test passes 775408 assertions per build. It uses its
+own declared transfer traces, raw arithmetic/status models and numerical AGU
+walks. It covers all eight R destinations, ordinary and SM arithmetic, six
+scaling/RM choices, all old CCR bytes, wrong old addresses including I/O and
+upper bits, 24-bit extension masking, shortened banks and X/Y aliases. Boundary
+shapes additionally cover linear unit/N/no-update and supported power-of-two/
+non-power-of-two rings, zero/positive/negative N, constants at/over finite bounds,
+changed modifiers, loop counts and every header return. Both progress lanes wrap
+through 64 bits, including the extra word/cycle of the constant assignment.
+
+Static witnesses retain rejection of N assignments, late R constants and P
+aliases, and admit consecutive constants with the last actual value. Public-Core
+checks compare every warm instruction prefix and same-PC host P-extension edit
+through all three backends, block limits 1/4/64 and a disabled optimizer. They
+compare complete registers, RAM/canaries, program memory and progress. Existing
+region I/O, partial failure, P-edit, AGU/loop and saturation witnesses remain in
+the full suite. These checks are selected domain witnesses, not full ISA or
+complete numerical-mode/sequence/timing qualification.
+
+The motivating continuous nonlinear feedback bank intentionally retains its
+per-channel coefficient-base assignment. Fixture bytes, channels, inputs,
+coefficients, arithmetic and guest instructions stay identical across the saved
+ordinary baseline and the optimized region comparison. See nonlinear-stream.txt.
+
+Qualification and matched continuous comparison
+
+Both 126-test suites pass: release 86.06 s (two CTest processes), strict
+ASan/UBSan 210.50 s (three), zero skips. All 775408 new constant-region checks
+and the existing 5120088 native-SM checks pass in both builds. All 24 complete
+ordinary/nonlinear workload/backend combinations agree, as do the four strict
+report-only streams. Concurrent report captures retain every timing failure;
+those runs qualify state, not optimized speed. All 51 archives regenerate;
+49 previous archives/producers are unchanged. All 139 strict C++ translation
+units retain required nonrecovering address/undefined/integer instrumentation;
+all 179 C++ files pass format/tidy/Werror. ISA audit remains 118 partial and
+zero complete rows; require-complete deliberately fails. No fuzzing/publication.
+
+The saved baseline uses the verified production implementation from 078d820
+with the identical new nonlinear fixture/driver. Only the generic R-constant
+region proof differs in the production candidate. The controlled sequence is
+parent/candidate/candidate/parent for each of four streams, pinned to CPU2. Each
+run naturally warms one input second and measures the next in the same DSP.
+No restoration/replay, overhead subtraction or concurrent project build/test/
+format job. External activity/frequency/scheduling remain uncontrolled.
+
+Scenario   Baseline CPU s       Candidate CPU s       Mean observation
+FIR        0.231696..0.232995    0.232545..0.233054     0.20% increase, retained
+IIR        0.601025..0.602320    0.596947..0.600513     0.49% decrease
+spectral   0.775365..0.781661    0.768491..0.779409     0.59% decrease
+nonlinear  0.894505..0.895084    0.622187..0.623368    30.40% decrease
+
+Nonlinear guest throughput rises 295.76..295.93 -> 424.67..425.48 MIPS, about
+44% more throughput. The exact guest instructions, base cycles, native/helper/
+move/batch/AVX2 counts, all final state and fixture bytes remain identical.
+All sixteen packages meet their one-second deadlines. The two nonlinear
+baseline captures retain six/five late blocks; every candidate block meets its
+budget. Other small differences are not proof of a causal speed improvement.
+Page storage remains 32768/49152/344064/40960 bytes in FIR/IIR/spectral/nonlinear.
+The initial pre-optimization nonlinear capture (0.909137 wall /0.909164 CPU s,
+291.18 MIPS, zero late blocks) also remains recorded.
+
+The separate optimized default bench passes all four meaningful input seconds:
+
+Scenario   Wall s     Process CPU s  Guest MIPS  Max block ms / budget ms  Late
+FIR        0.229964   0.229975       1183.49     0.409 /1.333              0
+IIR        0.602104   0.602131        455.76     1.045 /1.333              0
+spectral   0.776340   0.776339        330.66     8.276 /10                 0
+nonlinear  0.624891   0.624924        423.63     1.009 /1.333              0
+
+Separate nonlinear PMU captures use the same matched order and CPU affinity,
+all requested events counted without multiplex loss. Scope is whole-process
+user-mode execution, including setup/cold/warm/oracle checks, not an isolated
+measured JIT interval. CPU cycles/instructions/cache events are not energy.
+
+Event                  Baseline range          Candidate range        Mean change
+host instructions      23831347220..23831347407 15783845482..15783846508 33.77% decrease
+host cycles             7237231031..7320297692   5077328723..5088722433  30.17% decrease
+L1 data loads           3510098750..3510098819   2658847639..2658847841  24.25% decrease
+L1 data load misses        1135819..1427523         1349097..1517577     11.83% increase
+L1 instruction misses      1430945..1659804         2476308..2735684     68.63% increase
+
+The lower host instruction/load demand supports the intended removal of repeated
+proof work. Both cache-miss increases remain recorded; page storage alone is not
+a cache-locality result. Layout/cache behavior, energy, indefinite realtime,
+adaptive register allocation, SIMD/multicore, wider application domains,
+integration and complete ISA/numerical/timing coverage remain active work.

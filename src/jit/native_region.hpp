@@ -5,6 +5,7 @@
 #include "jit.hpp"
 
 #include <array>
+#include <optional>
 #include <span>
 
 namespace dsp56300::detail {
@@ -13,6 +14,7 @@ enum class RegionMode : unsigned char { automatic, ordinary, guarded };
 struct RegionAddress {
   Word bound = io_begin, linear_limit = io_begin, advances = 0, modifier = 0;
   Word stride_steps = 0, stride_accesses = 0;
+  std::optional<Word> constant;
   bool accessed = false, updated = false;
 };
 

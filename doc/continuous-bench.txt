@@ -23,14 +23,15 @@ Use normal audio-block/hop budgets, not single-instruction API calls. Validate
 final registers and all RAM against independently generated expectations after
 measurement. Retain exact instruction/base-unit checks and the public contracts.
 
-The FIR, IIR and spectral-analysis programs are implemented.
+The FIR, IIR, spectral-analysis and nonlinear-feedback programs are implemented.
 
 Scene                 Real input per measured second      Useful work
 FIR bank              11 channels at 48 kHz               symmetric 507-tap FIR
 IIR bank and mix      92 channels at 48 kHz               four biquads/channel, mix
 spectral analysis     15 complex streams at 48 kHz        Hann STFT/power, 1024/480
+nonlinear feedback    204 channels at 48 kHz              four driven feedback stages
 
-The FIR/IIR packages contain approximately 275 million base units per input
+The FIR/IIR/nonlinear packages contain approximately 275 million base units per input
 second. The spectral package uses the largest whole stream count near that
 budget. There are no padding instructions to manufacture a MIPS score.
 
@@ -546,3 +547,50 @@ optimized captures above qualify speed. Structural ISA audit remains 118 partial
 rows. SM continuous capacity, broader domains, indefinite realtime, allocation,
 SIMD/multicore, integration, cache and energy remain active work. See
 native-saturation.txt for admission, exact-state witnesses and remaining domains.
+
+
+Continuous nonlinear stream and generic pre-use R-constant proof
+
+The fourth default scenario performs meaningful SM nonlinear feedback work:
+204 channels at 48 kHz, four serial driven/rounded/limited stages, changing input
+ring and persistent histories/output. Per input second it retires 264720000
+instructions /274896000 base cycles, 99.9622% of the reference. There is no
+padding, restoration or completed-program replay. Full 96000-frame state is
+independently derived; first 48000 are natural warmup, next 48000 measured in 750
+blocks of 64 frames. All three correctness backends agree on 48 short cases;
+all six bench variants agree on the full state. See nonlinear-stream.txt.
+
+The original per-channel R4 coefficient-base assignment is preserved. A generic
+RAM-region proof now admits R constants preceding their first access, retaining
+M/N/bound/ring/loop guards and actual assignment timing. Other unproved writes
+keep ordinary execution. The saved baseline uses production 078d820 plus the
+same new fixture/driver; candidate changes no guest work. CPU2, matched baseline/
+candidate/candidate/baseline order per stream, one warm then one measured input
+second, no concurrent project build/test/format work. External host conditions
+remain uncontrolled.
+
+Scenario   Baseline CPU s       Candidate CPU s       Mean observation
+FIR        0.231696..0.232995    0.232545..0.233054     0.20% increase, retained
+IIR        0.601025..0.602320    0.596947..0.600513     0.49% decrease
+spectral   0.775365..0.781661    0.768491..0.779409     0.59% decrease
+nonlinear  0.894505..0.895084    0.622187..0.623368    30.40% decrease
+
+All sixteen complete states/packages pass. The two nonlinear baselines retain
+six/five late blocks; every candidate block meets budget. Nonlinear throughput
+rises 295.76..295.93 -> 424.67..425.48 MIPS, with all native/helper/move/batch/AVX2
+counts unchanged. The other small differences are not strong causal evidence.
+Page storage remains 32768/49152/344064/40960 bytes respectively. Separate default
+bench passes all four packages: FIR 0.229964 wall /0.229975 CPU s (1183.49 MIPS),
+IIR 0.602104 /0.602131 (455.76), spectral 0.776340 /0.776339 (330.66), nonlinear
+0.624891 /0.624924 (423.63). Zero late blocks, maxima 0.409/1.045/8.276/1.009 ms
+against 1.333/1.333/10/1.333 ms. These are samples, not indefinite realtime.
+
+All 126 tests pass release/strict, zero skips, all 51 archives regenerate and 49
+old archives/producers stay unchanged. All 24 full stream/backend states and four
+strict report-only states pass, retaining concurrent timing failures. There are
+775408 new independent constant-region assertions per build, 139 instrumented
+strict C++ translation units and 179 formatted C++ files. Full ISA remains 118
+partial rows. Separate whole-process user PMU captures show nonlinear host
+instructions/cycles/L1 data loads falling33.77%/30.17%/24.25%, while L1 data and
+instruction misses rise 11.83%/68.63%. No isolated-JIT/cache-locality/energy claim.
+See native-constants.txt for exact guard, counter scopes and remaining goals.

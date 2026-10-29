@@ -845,3 +845,27 @@ brings the total to 49 archives. Saturation.txt records exact promoted counts,
 mode/bypass scope, callback/alias/native boundary checks and remaining ISA gaps.
 These single-instruction cases qualify semantics, not continuous throughput.
 The continuous bench retains its unchanged FIR/IIR/spectral work packages.
+
+
+Continuous nonlinear feedback fixtures
+
+Two new independently authored archives model 204 channels/four driven feedback
+stages at 48 kHz with persistent input/history/output rings and real nested DO
+frames. nonlinear-stream.d56 covers96000 frames: one natural input second warmup
+then one measured second in the same instance. nonlinear-stream-check.d56 covers
+48 combinations of 1/7/33/257 frames, six scaling/RM choices and old CCR 0/255.
+The shared numeric model uses algebraic products, quotient/remainder rounding,
+limiting and word quantization; an independent raw56 instruction/transfer model
+crosschecks its numerical domain. The producer never links/runs the emulator.
+All 1345 short-case assertions pass through reference/cached/JIT in both builds.
+Full states agree through all six bench variants. All 49 old archives/producers
+remain unchanged; total 51 archives. Regenerate with:
+
+  build/release/dsp56300_generate_nonlinear_stream check test/fixtures/nonlinear-stream-check.d56
+  build/release/dsp56300_generate_nonlinear_stream full test/fixtures/nonlinear-stream.d56
+
+Both use the existing binary format and CTest reproducibility checks. The default
+bench includes nonlinear-stream; filter it through DSP56300_BENCH_FILTER or use
+the existing case/backend selection. Short fixtures remain correctness evidence,
+not throughput runs. See nonlinear-stream.txt and native-constants.txt for the
+meaningful work, exact guest costs, state proof and performance limitations.

@@ -17,8 +17,9 @@ Configuration, analogous to CTest selection:
                           cached, reference, or all
   DSP56300_BENCH_ENFORCE_DEADLINE  ON (default); fail when a package exceeds 1 s
 
-The current continuous list contains FIR, IIR and overlapping spectral analysis.
-All three shapes are described in continuous-bench.txt. Old single-output FIR
+The current continuous list contains FIR, IIR, overlapping spectral analysis
+and nonlinear driven feedback.
+All four shapes are described in continuous-bench.txt. Old single-output FIR
 and FFT replay fixtures remain correctness/latency diagnostics outside the qualifying target.
 Each current continuous archive has one full-duration case, so sample and all
 select the same case within each set. A numeric out-of-range index, invalid
@@ -94,3 +95,10 @@ host or this causal program uses vector batches. The ordinary fallback remains.
 Results stay in bench/Testing/Temporary/LastTest.log. The broader ISA, application,
 SIMD/multicore, sustained performance and energy objectives remain incomplete.
 See replay-diagnostics.txt for superseded single-call experiments.
+
+The nonlinear stream uses 204 channels/four stages at 48 kHz, retaining quantized
+history, changing input and output rings. Its 48 short correctness cases share
+the same original program and independent numerical model as the full two-second
+archive. See nonlinear-stream.txt for exact costs and native-constants.txt for
+the matched optimization and increased cache-miss observations. The default
+bench includes all four scenarios and preserves every package failure.

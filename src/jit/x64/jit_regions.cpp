@@ -83,7 +83,11 @@ void JitEmitter::region_guard(x64::Code &code, const Reg cpu, x64::Label &failed
       code.immediate(group_cmp, Reg::ax, address.modifier, Width::dword);
       code.jump_if(Branch::not_equal, failed);
     }
-    code.load(Reg::cx, cpu, r_offset + offset, Width::dword);
+    if (address.constant) {
+      code.constant(Reg::cx, *address.constant);
+    } else {
+      code.load(Reg::cx, cpu, r_offset + offset, Width::dword);
+    }
     if (!address.updated || address.modifier == modifier_mask) {
       if (address.stride_accesses != 0) {
         // Positive strides are monotone; use 64 bits so an overflowing 24/32-bit

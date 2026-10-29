@@ -111,3 +111,11 @@ spectral   0.780783   0.780819        328.78     7.892 / 10                0
 These samples preserve the one-second acceptance criterion and separate guest
 instructions from modeled base cycles. They do not qualify indefinite hard
 realtime or all-program/all-domain performance. The full objective remains open.
+
+
+A subsequent increment adds an independently authored continuous nonlinear SM
+feedback workload and a generic pre-use R-constant RAM proof. It qualifies one
+meaningful SM stream, retaining full numerical witnesses and all old fixture
+bytes. Broader SM programs/modes remain open. See nonlinear-stream.txt and
+native-constants.txt for exact work, complete-state checks and performance/cache
+tradeoffs. The original single-instruction fixtures remain correctness witnesses.

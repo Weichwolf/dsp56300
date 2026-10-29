@@ -348,3 +348,15 @@ mode-transition witnesses now require actual native execution in eligible cases.
 Other SM forms retain qualified general execution or explicit diagnostics, and
 all 118 rows remain partial. See native-saturation.txt. Native lowering and a
 green suite do not establish complete ISA, timing or full numerical-mode support.
+
+
+The generic pre-use R-constant proof adds 775408 independent guarded-RX/Core
+checks per build across R0..R7, ordinary/SM arithmetic, all CCR/six scaling/RM,
+address bounds/strides/rings, aliases, wrapped costs and same-PC extension edits.
+It changes private address-proof metadata, not numerical semantics or canonical
+state. The nonlinear stream adds a separate independent recurrence and meaningful
+continuous SM work, with 48 short cases and full-state agreement in all six bench
+variants. All 49 previous archives/producers remain unchanged. All 126 tests pass
+in both builds and all 118 catalogue rows remain partial. See native-constants.txt
+and nonlinear-stream.txt. Full numerical modes, encoding/operand/sequence coverage,
+interrupt/pipeline/timing and broader application qualification remain open.

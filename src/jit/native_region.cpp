@@ -58,6 +58,14 @@ bool moves(NativeRegion &region,
       plan_register_move(instruction).valid()) {
     return true;
   }
+  const auto immediate = plan_address_immediate(instruction);
+  if (immediate.valid()) {
+    if (immediate.destination >= n_register_base) { return false; }
+    auto &address = region.addresses.at(immediate.destination - r_register_base);
+    if (address.accessed) { return false; }
+    address.constant = immediate.value;
+    return true;
+  }
   const auto plan = plan_moves(instruction);
   if (plan.count == 0) { return false; }
   for (const auto &move : std::span(plan.transfers).first(plan.count)) {

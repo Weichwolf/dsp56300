@@ -460,3 +460,17 @@ complete canonical state. MAC batching still rejects SM, because intermediate
 saturation cannot be reassociated. Other numerical modes and SM forms retain
 explicit general fallback/diagnostics. See saturation.txt and native-saturation.txt
 for the independent witnesses, admitted domains and throughput qualification limits.
+
+
+Pre-use address constants in RAM regions
+
+The region planner now records decoded R0..R7 constants that precede the first
+access through that R. The selector and every loop header prove the assigned
+value with the existing M/N/bound/ring/loop guards, preserving the assignment's
+actual instruction/retirement position and all read-only rejection boundaries.
+Old R is irrelevant only where the assignment dominates its uses; entries after
+it prove real current R dynamically. N writes, late resets and P aliases retain
+ordinary execution. This is generic compilation metadata, not program-specific
+recognition or a public CPU-layout change. Independent RX/Core checks and the
+new nonlinear stream qualify the change; see native-constants.txt for exact
+proof/coverage and cache/performance tradeoffs. The full objective remains open.
