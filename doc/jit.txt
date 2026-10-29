@@ -449,11 +449,14 @@ modest CPU gains and complete qualification limits. No public option/state chang
 
 Arithmetic saturation mode
 
-Qualified SM operations now have exact general execution, but native admission
-still excludes SR.SM. A mode change exits/rekeys a translated block; ordinary
-native regions can resume after SM clears. General SM helpers preserve raw
-carry/overflow, after-rounding saturation and canonical full state. Bypass forms
-retain their separate behavior. Same-PC and native/SM/native prefix tests assert
-actual native/helper counters, old parallel operands and callback/P-invalidation/
-fault publication. This adds semantic coverage, not native SM speed or complete
-numeric-mode support. See saturation.txt for implemented and rejected domains.
+Qualified SM operations have exact general execution. Selected parallel arithmetic,
+transfer bypasses and immediate ADD/SUB also lower to native x64 under a separate
+SM whitelist. The three-bit limiter follows rounding and preserves raw carry and
+overflow; the existing flag planner computes flags from the limited stored value
+and retains every sticky-L event. No additional arithmetic bytes are emitted
+with SM clear. A mode change exits/rekeys the block. Same-PC, loop-prefix and
+callback/P-invalidation/failure tests assert real native/helper counters and
+complete canonical state. MAC batching still rejects SM, because intermediate
+saturation cannot be reassociated. Other numerical modes and SM forms retain
+explicit general fallback/diagnostics. See saturation.txt and native-saturation.txt
+for the independent witnesses, admitted domains and throughput qualification limits.

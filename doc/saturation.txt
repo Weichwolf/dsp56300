@@ -42,10 +42,12 @@ Current implemented SM domains
   SM ALU forms and unqualified nonparallel/count transfers are still rejected
   explicitly. The full SM numerical mode is not claimed complete.
 
-The x64 compiler still rejects SM native lowering. Qualified SM instructions
-execute through the general implementation with exact mode keys and publication.
-Ordinary native code remains available before/after an SM change. No CPU/context
-layout, public option, board behavior or other-emulator dependency is introduced.
+The first increment qualified general SM execution. Selected parallel arithmetic,
+transfers and immediate ADD/SUB now also lower directly to x64; see
+native-saturation.txt for its additional whitelist and independent RX witnesses.
+Other qualified instructions retain general execution with exact mode keys and
+publication. No CPU/context layout, public option, board behavior or other-emulator
+dependency is introduced.
 
 Independent qualification
 
@@ -67,8 +69,8 @@ All 65536 new cases pass complete-state checks in each of the reference, cached
 and JIT backends (1835009 fixture assertions). The separate host boundary test
 passes 9774 independent checks per build.
 
-Host boundary tests require actual ordinary native / SM general / native
-execution. They check same-PC mode reuse, every call prefix, exact instruction/
+The original boundary tests required ordinary native / SM general / native
+execution; they now require actual native SM arithmetic as well. They check same-PC mode reuse, every call prefix, exact instruction/
 base-cost publication, old parallel operands, aliased X-before-Y stores, MOVE's
 V/L behavior, synchronous I/O observation, P changes during callbacks and rejected
 requests' partial destination/fail-stop state. Unqualified SM operations and

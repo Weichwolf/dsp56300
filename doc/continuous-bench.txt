@@ -514,3 +514,35 @@ promoted across six archives with unchanged stimuli and unrelated records;
 strict units retain required instrumentation, all 173 C++ files pass formatting/
 tidy/Werror. Complete-ISA remains red with 118 partial rows. See saturation.txt
 for exact admission, after-rounding/bypass semantics and remaining objective.
+
+
+Selected native SM lowering: ordinary regression qualification
+
+Selected independently qualified SM arithmetic now lowers directly to x64. The
+existing continuous streams use SM=0, so they qualify cross-workload regressions,
+not a native-SM throughput claim. Same verified parent c61060f and final candidate
+run on CPU2, parent/candidate/candidate/parent per scenario, with the identical
+fixtures, one natural warmup second then one measured input second. No state
+restoration/replay/overhead subtraction, nor concurrent project build/test/format
+work. External host activity, frequency and scheduling remain uncontrolled.
+
+Scenario   Parent CPU s         Candidate CPU s       Mean observation
+FIR        0.231629..0.233009    0.233454..0.234092     0.63% increase, retained
+IIR        0.608076..0.609336    0.606420..0.606910     0.34% decrease
+spectral   0.781461..0.782248    0.779902..0.780572     0.21% decrease
+
+All twelve complete states and package/block deadlines pass. Small differences
+are not proof of a causal limiter effect on SM-clear streams. Ordinary native/
+general/move/batch/AVX2 counts and page storage remain unchanged. The separate
+default optimized bench passes FIR 0.234511 wall / 0.234527 CPU s (1160.54 MIPS),
+IIR 0.607224 / 0.607259 s (451.92), spectral 0.780783 / 0.780819 s (328.78).
+Zero late blocks; maxima 0.436 / 0.841 / 7.892 ms against 1.333 / 1.333 / 10 ms.
+
+All 122 correctness tests pass in release/strict, with 5120088 additional native
+SM assertions per build and all 49 archives unchanged. All eighteen ordinary
+backend/stream states and three strict report-only states agree. Their concurrent
+captures retain every package/block miss; only the later controlled/default
+optimized captures above qualify speed. Structural ISA audit remains 118 partial
+rows. SM continuous capacity, broader domains, indefinite realtime, allocation,
+SIMD/multicore, integration, cache and energy remain active work. See
+native-saturation.txt for admission, exact-state witnesses and remaining domains.

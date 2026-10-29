@@ -228,7 +228,7 @@ void invalid_modes(const Options options) {
       require(result.dispatches == 1 && result.fault.kind == FaultKind::none &&
                   result.progress == Progress{.instructions = 2, .estimated_cycles = 2} &&
                   machine.core.registers() == expected,
-              "Changed SM loop context executes qualified general MAC semantics exactly");
+              "Changed SM loop context executes qualified saturation semantics exactly");
       continue;
     }
     require(result.dispatches == 0 && result.progress.instructions == 1 &&

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// General SM execution, native-mode transitions and exact callback boundaries.
+// Independent SM execution, native-mode transitions and exact callback boundaries.
 #include "dsp56300/core.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
@@ -140,8 +140,8 @@ void callback(const Backend backend, const Word mode, const bool accept, const b
           "Native/SM/native execution keeps old parallel operands, sticky flags and mode changes");
   if (backend == Backend::jit) {
     const auto stats = machine.core.jit_statistics();
-    require(stats.native_alu_instructions == 8 && stats.helper_instructions == 5,
-            "Actual SM helpers are distinguished from both native arithmetic regions");
+    require(stats.native_alu_instructions == 11 && stats.helper_instructions == 2,
+            "Ordinary and SM arithmetic execute natively; mode-control instructions use helpers");
   }
   auto expected_p = std::array<Word, memory_words>{};
   for (std::size_t index = 0; index < program.size(); ++index) {
@@ -172,9 +172,9 @@ void same_pc(const Backend backend, const Word mode) {
             "Same-PC SM changes preserve independent full state without reusing ordinary code");
     if (backend == Backend::jit) {
       const auto after = machine.core.jit_statistics();
-      require(after.native_alu_instructions == stats.native_alu_instructions + (sm ? 0 : 4) &&
-                  after.helper_instructions == stats.helper_instructions + (sm ? 4 : 0),
-              "The SM profile chooses general execution; ordinary mode retains native lowering");
+      require(after.native_alu_instructions == stats.native_alu_instructions + 4 &&
+                  after.helper_instructions == stats.helper_instructions,
+              "Both exact numeric profiles execute independent native arithmetic");
     }
   }
 }

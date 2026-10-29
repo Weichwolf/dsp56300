@@ -29,6 +29,7 @@ add_library(dsp56300_core STATIC
   src/core/processing.cpp src/core/debugging.cpp src/core/viterbi.cpp src/core/program_cache.cpp src/core/cache_control.cpp
   src/jit.cpp src/jit/jit_helpers.cpp src/jit/x64/jit_emitter.cpp src/jit/x64/x64.cpp
   src/jit/x64/jit_addition.cpp
+  src/jit/x64/jit_saturation.cpp
   src/jit/x64/jit_loops.cpp
   src/jit/x64/jit_flags.cpp
   src/jit/native_moves.cpp src/jit/native_region.cpp src/jit/dataflow.cpp src/jit/x64/jit_moves.cpp
@@ -82,6 +83,10 @@ if(BUILD_TESTING)
     target_link_libraries(dsp56300_x64_immediate_test PRIVATE dsp56300::core)
     target_include_directories(dsp56300_x64_immediate_test PRIVATE src/core src/jit src/jit/x64 test)
     add_test(NAME native-immediate-encodings COMMAND dsp56300_x64_immediate_test)
+    add_executable(dsp56300_native_saturation_test test/native_saturation_test.cpp test/native/direct.cpp)
+    target_link_libraries(dsp56300_native_saturation_test PRIVATE dsp56300::core)
+    target_include_directories(dsp56300_native_saturation_test PRIVATE src/core src/jit src/jit/x64 test)
+    add_test(NAME native-saturation-boundaries COMMAND dsp56300_native_saturation_test)
     add_executable(dsp56300_mac_batch_test test/mac_batch_test.cpp)
     target_link_libraries(dsp56300_mac_batch_test PRIVATE dsp56300::core)
     target_include_directories(dsp56300_mac_batch_test PRIVATE src/core src/jit src/jit/x64 test)

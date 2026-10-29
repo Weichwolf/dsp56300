@@ -202,9 +202,9 @@ void mode_guards() {
         require(result.dispatches == 1 && result.fault.kind == FaultKind::none &&
                     result.progress == Progress{.instructions = 1, .estimated_cycles = 1} &&
                     machine.core.registers() == expected &&
-                    machine.core.jit_statistics().native_alu_instructions == 0 &&
-                    machine.core.jit_statistics().helper_instructions == 1,
-                "Qualified SM MOVE keeps exact transfer flags through the general fallback");
+                    machine.core.jit_statistics().native_alu_instructions == 1 &&
+                    machine.core.jit_statistics().helper_instructions == 0,
+                "Qualified SM MOVE keeps exact transfer flags through native lowering");
         continue;
       }
       require(result.dispatches == 0 && result.progress == Progress{} &&

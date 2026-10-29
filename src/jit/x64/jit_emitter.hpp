@@ -35,6 +35,7 @@ public:
 
 private:
   [[nodiscard]] bool lowerable(const NativeOp &operation) const;
+  [[nodiscard]] static bool saturation_supported(const NativeOp &operation);
   [[nodiscard]] static bool has_moves(const NativeOp &operation);
   [[nodiscard]] bool observable_moves(const NativeOp &operation) const;
   [[nodiscard]] std::vector<std::uint8_t> generate_body(std::span<const NativeOp> operations);
@@ -69,6 +70,7 @@ private:
   void addition(const NativeOp &operation);
   void right_shift(const NativeOp &operation);
   void round(Word mode);
+  void saturate(Word mode, bool rounded = false);
   void arithmetic_flags(Word mode, bool carry_changed = false);
   [[nodiscard]] bool admit_cached_status() const;
   void initialize_status();

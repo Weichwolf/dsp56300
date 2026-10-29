@@ -34,8 +34,7 @@ constexpr unsigned shift_left = 4, shift_right = 5, shift_arithmetic = 7;
 constexpr unsigned condition_overflow = 0x90;
 constexpr unsigned low_word_shift = 40, high_word_shift = 16, aligned_shift = 8;
 constexpr unsigned product_shift = padding_bits + 1;
-constexpr Word unsupported_modes =
-    compatibility_mode | multiply_mode | arithmetic_16 | arithmetic_saturation;
+constexpr Word unsupported_modes = compatibility_mode | multiply_mode | arithmetic_16;
 constexpr std::array<std::uint8_t, 2> call_ax{0xff, 0xd0};
 constexpr std::array<std::uint8_t, 3> increment_retired{0x41, 0xff, 0xc7};
 constexpr std::array<std::uint8_t, 4> entry_landing{0xf3, 0x0f, 0x1e, 0xfa};
@@ -90,7 +89,8 @@ bool JitEmitter::lowerable(const NativeOp &operation) const {
   if (at_loop_end(operation) && (operation.mode & compatibility_mode) != 0) { return false; }
   if (decoded.operation == Operation::nop) { return true; }
   if ((operation.mode & unsupported_modes) != 0 ||
-      (operation.mode & (scale_up | scale_down)) == (scale_up | scale_down)) {
+      (operation.mode & (scale_up | scale_down)) == (scale_up | scale_down) ||
+      ((operation.mode & arithmetic_saturation) != 0 && !saturation_supported(operation))) {
     return false;
   }
   if (is_loop_setup(operation)) { return true; }
@@ -231,6 +231,7 @@ void JitEmitter::multiply(const NativeOp &operation) {
     code_.binary(op_xor, {.destination = Reg::r10, .source = Reg::r10}, Width::dword);
   }
   if ((opcode & 1U) != 0) { round(operation.mode); }
+  saturate(operation.mode, (opcode & 1U) != 0);
   store_accumulator((opcode & 8U) != 0, Reg::ax);
   arithmetic_flags(operation.mode);
 }
@@ -297,6 +298,7 @@ void JitEmitter::native(const NativeOp &operation) {
     }
     code_.set(condition_overflow, Reg::r10);
   }
+  if (kind != alu_clear) { saturate(operation.mode, kind == alu_round); }
   store_accumulator(destination_b, Reg::ax);
   arithmetic_flags(operation.mode);
 }

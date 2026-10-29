@@ -97,22 +97,21 @@ and old parallel operands without memory/I/O observation barriers. All 6758417
 directed ASR/register assertions pass; no ISA catalogue row becomes complete.
 See doc/native-shifts.txt for guards, witnesses, measurements and remaining work.
 
-The current configuration passes all 121 correctness tests in release (104.56 s,
-two CTest processes) and strict ASan/UBSan (234.69 s, three processes), with no
-skips. All 133 C++ translation units retain the required strict nonrecovering
-address/undefined/integer instrumentation; all 173 project C++ source/header
-files pass clang-format. Of 48 old archives, 42 remain byte-identical. Exactly
-77 obsolete unsupported-SM
-records are promoted in six archives, with identical inputs and every unrelated
-record byte-identical. A new 65536-case archive brings the total to 49. The
-112-case FFT archive is unchanged. All registered regeneration checks pass.
-No fuzzing was run.
+The current configuration passes all 122 correctness tests in release (103.48 s,
+two CTest processes) and strict ASan/UBSan (218.32 s, three processes), with no
+skips. All 136 C++ translation units retain the required strict nonrecovering
+address/undefined/integer instrumentation; all 175 project C++ source/header
+files pass clang-format. All 49 binary archives and all producer sources remain
+unchanged in the native-SM increment. The preceding general-SM increment added
+65536 independent cases and promoted 77 obsolete unsupported-SM records while
+preserving their initial registers/program/data and every unrelated record.
+All registered regeneration checks pass. No fuzzing was run.
 The structural ISA audit passes; full ISA qualification still fails as intended.
 Full two-second FIR, IIR and spectral cases pass independent complete-state
 checks in all six release variants. The instrumented production bench passes
 all three correctness/report-only cases. Loaded-host comparisons qualify state,
 not release speed. The optimized default bench passes all three one-second
-packages: FIR 0.231788 s, IIR 0.608268 s, spectral 0.781203 s. All final states
+packages: FIR 0.234511 s, IIR 0.607224 s, spectral 0.780783 s. All final states
 match, with zero late blocks in that capture and the matched ordinary regression comparison.
 Earlier late captures remain recorded; sustained latency/reserve and wider
 scenario qualification remain open.
@@ -446,3 +445,38 @@ native/general/move/batch/AVX2 counts and page storage. These qualify ordinary
 regression behavior, not SM continuous capacity or generic all-program 275 MIPS.
 Full objective, other numerical/application domains, further speed/cache/load,
 adaptive allocation, SIMD/multicore, integration, latency and energy remain open.
+
+
+Selected native saturation qualification
+
+The native compiler now intersects its existing admission with an explicit SM
+whitelist. Ordinary parallel signed arithmetic/rounding, documented bypass
+transfers and immediate ADD/SUB lower directly to x64. A branchless three-bit
+limiter follows rounding, preserves raw carry/overflow, and commits the exact
+stored value before ordinary flags. Sticky L still records every intermediate
+limiting event even when result flags are overwritten. SM-clear arithmetic emits
+no new limiting instructions. Existing modes, old operands, RAM bounds/aliases,
+callbacks, P invalidation, progress and dirty-state checkpoints remain explicit.
+Other qualified SM domains retain general execution; unqualified forms and
+combinations still reject. MAC batching remains SM-excluded.
+
+The new helper-forbidden RX test passes 5120088 independent checks in each build.
+It classifies all 256 ALU bytes, checks every old CCR/six modes on admitted forms,
+all signed multiply/MAC codes, raw extension/MSP boundaries, immediate sums,
+held-status/dirty-accumulator sequences and 64-bit progress wrapping. Public-Core
+checks cover all prefixes of real SM DO execution, multiple block limits, final
+stack cleanup and the disabled optimizer. Existing native/SM callbacks, aliases,
+P edits and same-PC tests retain full expectations and now require actual native
+SM execution. All 122 tests, eighteen ordinary complete states and three strict
+report-only states pass; all 49 archives and producers are unchanged. See
+native-saturation.txt. All 118 ISA rows remain partial, not complete.
+
+Matched ordinary streams retain FIR's small 0.63% CPU increase; IIR/spectral
+observe small 0.34% / 0.21% reductions. All twelve compared and three optimized
+default packages and blocks meet their deadlines. These differences do not prove
+a causal throughput improvement from SM lowering, since these streams use SM=0.
+The worst default production throughput is spectral 328.78 MIPS in this capture.
+No sustained SM stream/native-SM throughput, complete ISA, all application domains,
+adaptive register allocation, SIMD/multicore, cache/energy, indefinite realtime
+or consumer integration requirement is declared finished. The full objective is
+unchanged and active.

@@ -333,6 +333,18 @@ actions, with independent arithmetic/rounding models; the producer never links
 or runs the emulator. Existing unsupported-SM cases are promoted while preserving
 their input registers/program/data and every unrelated record. Native mode keys,
 old parallel inputs, alias order, I/O/P edits and failed requests have independent
-host boundary tests. Native lowering still rejects SM and uses exact general
-execution. See saturation.txt for precise domains, counts and qualification.
+host boundary tests. Selected SM operations now also have independently tested
+native lowering; other qualified domains keep general execution. See
+saturation.txt and native-saturation.txt for precise domains and qualification.
 No ISA catalogue row becomes complete merely because this mode domain is added.
+
+
+Selected SM native execution additionally has 5120088 independent helper-forbidden
+RX/public-Core assertions per build, including all CCR/six modes on admitted
+forms, every ordinary signed multiply/MAC code, all extension bytes, immediate
+sums, old operands, native flag planning, progress wrapping and real DO cleanup.
+All original 49 archives/producers remain unchanged. Existing SM I/O/P/alias and
+mode-transition witnesses now require actual native execution in eligible cases.
+Other SM forms retain qualified general execution or explicit diagnostics, and
+all 118 rows remain partial. See native-saturation.txt. Native lowering and a
+green suite do not establish complete ISA, timing or full numerical-mode support.
