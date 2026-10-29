@@ -119,3 +119,14 @@ meaningful SM stream, retaining full numerical witnesses and all old fixture
 bytes. Broader SM programs/modes remain open. See nonlinear-stream.txt and
 native-constants.txt for exact work, complete-state checks and performance/cache
 tradeoffs. The original single-instruction fixtures remain correctness witnesses.
+
+
+A later compiler increment tracks conservative per-body A/B signed widths, with
+unknown roots and explicit helper/observer erasure. Proved signed48 values omit
+the limiter; signed50 values use an equivalent canonical clamp, preserving raw,
+rounding and changed-value events independently. Rounded comparison still uses
+the full positive48 maximum. Wide/unknown EXT gaps retain the general table.
+All 5120088 native SM checks remain, with 8018957 independent certificate and
+2597667 expanded native accounting assertions per build. See value-ranges.txt
+for exact scope, continuous CPU reductions and mixed cache effects. Full SM/ISA
+qualification and broader application performance remain incomplete.

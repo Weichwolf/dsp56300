@@ -23,7 +23,9 @@ void JitEmitter::right_shift(const NativeOp &operation) {
   code_.shift(arithmetic_right, Reg::ax, padding_bits + 1);
   if ((live_flags_ & carry) != 0) { code_.set(condition_carry, Reg::dx); }
   code_.shift(shift_left, Reg::ax, padding_bits);
-  code_.binary(op_xor, {.destination = Reg::r10, .source = Reg::r10}, Width::dword);
+  if (value_proof_.overflow_value()) {
+    code_.binary(op_xor, {.destination = Reg::r10, .source = Reg::r10}, Width::dword);
+  }
   store_accumulator(destination_b, Reg::ax);
   arithmetic_flags(operation.mode, true);
 }

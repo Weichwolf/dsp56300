@@ -1,0 +1,166 @@
+Signed-width certificates in the native compiler
+
+Scope and abstract state
+
+The native compiler tracks conservative signed widths for A/B within each emitted
+body. Width zero means exactly zero; width w in 1..56 contains the signed range
+[-2^(w-1),2^(w-1)-1]. Both roots start at unknown 56-bit width. There are no sampled values,
+profile guesses or loop induction assumptions. Repeated headers are safe because
+unknown 56-bit width contains every next-iteration value. Tail/recompiled entries start anew.
+A private disabled mode preserves the general native emitter in the same build.
+No public CPU/context/API layout, guest instruction/cycle count or numerical
+mode admission changes. Unknown forms/modes retain existing general execution.
+
+Effect                       Conservative fact / obligation
+full A/B bus-word write      signed24 <<24, at most 48 bits
+TFR full accumulator         old source width; explicit SM bypass
+pure signed24 product        magnitude <=2^47, width49, no raw56 overflow
+MAC                           max(49,oldWidth+1); overflow possible only above56
+ADD/SUB/ADC/SBC/CMP            max+1; sound zero/negation/carry cases
+ABS/NEG                       width+1 unless zero; MIN56 remains unproved
+single ASR                   max(1,w-1), zero stays zero; no raw overflow
+RND/rounded product          conservative widening; unknown 56-bit width may round-overflow
+SM result width<=48          cannot limit
+SM result width<=50          exact signed48 clamp, with distinct rounded constant
+wider/unknown SM result      original three-bit decision table, never guessed clamp
+helper/observer/unknown       discard both facts; observer resets before AND after
+
+Product magnitude bounds tighten MAC beyond adding a generic signed49 operand:
+a canonical 48-bit accumulator plus the actual product fits 49 bits, rounding may need 50 bits.
+The analysis snapshots old widths before parallel moves, applies bus writes,
+then updates the arithmetic destination. CMP keeps the post-move stored bank;
+its flags describe the computed comparison result. Pure moves/opaque effects
+are separate. Observable transfer helpers cannot leak optimistic facts onward.
+Current independently bounded arithmetic, such as a pure product, can still
+use its own local certificate after a successful transfer.
+
+Saturation proof
+
+SM is not a general numeric signed48 clamp for arbitrary extension bytes. The
+qualified table observes exactly EXT7, EXT0 and MSP23. A signed50 interval restricts
+EXT to00/01/FE/FF: in that domain the table equals signed48 saturation. Wider
+values such as positive EXT7E can remain unchanged and must use the general table.
+This property is derived from the existing manufacturer model, not a new ISA
+interpretation. Rounded positive limiting keeps its fixed low24-cleared constant,
+independent of scaling. The upper comparison uses the full positive48 maximum,
+so an unlimited rounded value above the rounded saturation constant is preserved.
+
+The canonical emitter preserves the old result, performs signed positive/negative
+comparisons and conditional moves, then detects an actual changed value. Raw
+and rounding overflow remain independent sticky events. A proved result that cannot limit
+emits no limiter. No runtime bound branch is added: facts follow from
+supported instruction semantics, and unproved cases retain general emission.
+
+Flag publication
+
+Impossible raw/rounding overflow need no SETO/merge work. When no ALU overflow,
+rounding or limiting event can occur, sticky-L bookkeeping is omitted; prior L/S
+remain. Scaled/clipped transfers still produce their own original S/L effects.
+A live V still clears when false. Carry is captured before any scratch XOR or
+limiter comparison can alter host flags and is never inferred from signed width.
+For final width<=integer-position+1, E is false; width<=position makes U true.
+Zero domains give Z=1/N=0. Other result flags retain their original computation.
+
+The existing liveness boundaries remain: transfer observers, ending guards,
+helpers, returns, faults, code invalidation and admitted interrupts receive exact
+canonical state. Eliminated dead flags cannot become observable before their
+replacement. Retirement, native-move counts, PC/AGU/loop state and checkpoint
+positions are unchanged. These are compiler facts, not DSP-time shortcuts.
+
+Independent witnesses
+
+The new metadata test passes 8018957 assertions per build. It constructs all 57
+width classes through independent raw56 one-bit shifts/zero operations, probes
+boundary/extension-gap values with six scaling/RM choices, all 128 ordinary signed
+multiply/MAC encodings, arithmetic/unary/TFR variants, carry effects and both SM
+settings. Every returned width contains independently computed raw results; any
+omitted event must be absent. Canonical clamp equals the separate three-bit action
+model, including rounded constants. Constant bit/sign/zero/-1 values exercise
+short/long immediate and compare retention. Explicit helper/observer erasure,
+full-word conversion and old parallel wide-A/new-word-A distinctions are checked.
+These are finite declared matrices, not full encoding or hardware qualification.
+
+The expanded helper-forbidden RX/Core accounting matrix passes 2597667 checks per
+build with automatic/disabled range analysis and all three residency controls.
+Actual emitted execution compares independent complete registers/RAM/flags/costs,
+aliases/P wrap, all CCR bytes/modes, partial budgets/LC/targets, callbacks/P edits,
+rejected loads, fail-stop, fast-vector service and reentry. All existing 5120088
+native SM checks remain. The producer/expectation models never execute the DSP
+to obtain expected numerical results. All 52 guest archives/producers remain
+byte-identical; no manufacturer/application program or other emulator is used.
+
+
+Verification and continuous execution
+
+Both final builds pass all 131 correctness tests with zero skips: release 139.01 s
+(two CTest processes), strict 301.30 s (three). All 145 strict C++ translation
+units retain nonrecovering address/undefined/float/unsigned/conversion checks.
+All 186 project C++ source/header files pass the format target; strict builds
+retain clang-tidy, hardening and warnings as errors. All 24 complete stream states
+(six backends/policies across four workloads) and four strict report-only states
+agree. Strict timings overlapped correctness jobs: FIR/spectral packages fail,
+and FIR/IIR/spectral/nonlinear retain 221/123/100/140 late blocks. They qualify
+correctness, not optimized throughput. No fuzz tests or publication were run.
+
+Matched continuous comparison against the preceding automatic A/B policy:
+CPU2, baseline/candidate/candidate/baseline per workload, one natural input second
+warmup followed by the next measured second on the same DSP. No concurrent
+project build/test/format jobs; external scheduling/frequency remain uncontrolled.
+No resets, RAM/register restoration, replay, padding or overhead subtraction.
+The final release executable is byte-identical to the measured candidate.
+
+Scenario    Baseline CPU s       Candidate CPU s      Mean CPU reduction
+FIR         0.240550..0.241431    0.236185..0.236385        1.95%
+IIR         0.566067..0.566437    0.482097..0.482484       14.83%
+spectral    0.765636..0.781223    0.714198..0.715380        7.58%
+nonlinear   0.605831..0.606478    0.543533..0.543645       10.32%
+
+All sixteen complete states, packages and sampled block deadlines pass. FIR's
+small difference need not be caused by the range optimization: its guarded MAC
+batch is largely unchanged. All actual guest/native/helper/move/batch/AVX2 counts
+and allocated page bytes remain equal: 32768/49152/344064/40960. Arithmetic/flags
+are simplified without substituting a workload or removing guest retirements.
+
+The separate default release gate passes all states and one-second packages:
+Scenario    Wall s      Process CPU s   Actual MIPS   Max block / budget ms  Late
+FIR         0.236810    0.236808         1149.28        0.346 / 1.333           0
+IIR         0.484551    0.483927          566.33        1.249 / 1.333           0
+spectral    0.716709    0.716687          358.17        7.286 /10.000           0
+nonlinear   0.543809    0.543842          486.79        0.751 / 1.333           0
+
+The unchanged workloads retire 272160000/274416000/256704500/264720000 actual
+instructions, and model 274560000/274704000/266161100/274896000 base cycles per
+input second. The reference is 275 million base cycles/s, excluding bus/pipeline
+stalls. A 275-MIPS floor is additional optimization headroom, not a conversion
+that equates every guest instruction with a physical DSP cycle. Complete package
+timing includes API calls/clocks/budget checks. Short block misses are reported;
+the package gate itself does not enforce every block deadline or a MIPS floor.
+
+Hardware counter scope and tradeoffs
+
+A separate sixteen-process matched user-PMU capture uses the same CPU/order and
+natural warmup/measurement protocol, with no concurrent project build/test/format
+jobs. Five requested counters run at 100% in every process, without multiplexing;
+all complete states pass. The scope includes setup, compilation, cold/warm work
+and state checks. These are not isolated timed-JIT counters or energy measurements.
+
+Scenario    Host instructions   Host cycles   L1 data loads   D misses   I misses
+FIR              -0.45%            -1.72%          ~0.00%       +9.54%     -8.39%
+IIR             -13.64%           -14.67%          -0.00%       -3.15%    -13.92%
+spectral         -9.34%            -6.50%          -0.00%       -0.63%    -18.89%
+nonlinear        -7.04%           -10.34%          ~0.00%       -3.32%     +2.61%
+
+Signs report change relative to the baseline means. In particular the FIR data
+miss increase and nonlinear instruction miss increase remain recorded; fewer
+host instructions do not prove complete cache locality, multicore benefit or
+energy savings. Small load differences include setup noise, not a new register
+format. Page allocation is unchanged even where emitted work is smaller.
+
+Historical spectral 263/273-MIPS samples, the 1.037437-second baseline package
+failure and all prior block misses remain in continuous-bench.txt and
+loop-residency.txt. Passing current samples do not replace those observations or
+qualify indefinite/all-program hard realtime. All 118 ISA catalogue rows remain
+partial; no row becomes complete through compiler facts. Full numerical/mode,
+IRQ/exception/pipeline/timing, adaptive allocation, additional application domains,
+SIMD/multicore, integration, cache/energy and sustained reserve qualification
+remain open under the unchanged full objective.

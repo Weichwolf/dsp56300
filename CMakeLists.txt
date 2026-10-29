@@ -32,7 +32,7 @@ add_library(dsp56300_core STATIC
   src/jit/x64/jit_saturation.cpp
   src/jit/x64/jit_loops.cpp
   src/jit/x64/jit_flags.cpp
-  src/jit/native_moves.cpp src/jit/native_region.cpp src/jit/dataflow.cpp src/jit/x64/jit_moves.cpp
+  src/jit/native_moves.cpp src/jit/native_region.cpp src/jit/dataflow.cpp src/jit/value_ranges.cpp src/jit/x64/jit_moves.cpp
   src/jit/x64/jit_regions.cpp
   src/jit/x64/jit_move_address.cpp src/jit/x64/jit_move_register.cpp
   src/core/memory.cpp src/jit/x64/jit_retirement.cpp src/jit/x64/jit_status.cpp
@@ -87,6 +87,10 @@ if(BUILD_TESTING)
     target_link_libraries(dsp56300_native_accounting_test PRIVATE dsp56300::core)
     target_include_directories(dsp56300_native_accounting_test PRIVATE src/core src/jit src/jit/x64 test)
     add_test(NAME native-region-accounting COMMAND dsp56300_native_accounting_test)
+    add_executable(dsp56300_value_range_test test/value_range_test.cpp)
+    target_link_libraries(dsp56300_value_range_test PRIVATE dsp56300::core)
+    target_include_directories(dsp56300_value_range_test PRIVATE src/core src/jit test)
+    add_test(NAME native-value-ranges COMMAND dsp56300_value_range_test)
     add_executable(dsp56300_x64_immediate_test test/x64_immediate_test.cpp test/native/direct.cpp)
     target_link_libraries(dsp56300_x64_immediate_test PRIVATE dsp56300::core)
     target_include_directories(dsp56300_x64_immediate_test PRIVATE src/core src/jit src/jit/x64 test)

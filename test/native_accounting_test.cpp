@@ -13,6 +13,7 @@
 #include "saturation_model.hpp"
 #include "support.hpp"
 #include "translation.hpp"
+#include "value_ranges.hpp"
 
 #include <array>
 #include <cstddef>
@@ -136,6 +137,7 @@ struct Shape {
   std::size_t padding = 0;
   Pattern pattern = Pattern::mixed;
   detail::LoopResidency residency = detail::LoopResidency::automatic;
+  detail::RangeMode ranges = detail::RangeMode::automatic;
 };
 
 std::vector<Step> steps(const Shape shape) {
@@ -402,7 +404,8 @@ void direct_shape(const Shape shape) {
                              BatchBackend::disabled,
                              register_model::seed(0).m,
                              detail::RegionMode::guarded,
-                             shape.residency);
+                             shape.residency,
+                             shape.ranges);
   const native::Direct code(emitter.generate(ops));
   require(emitter.coalesced_accounting() == (ops.size() <= 256) && emitter.guarded_region() &&
               emitter.packed_retirement() && emitter.cached_status(),
@@ -456,6 +459,13 @@ void residency_patterns(const Word mode) {
                       .alias = alias,
                       .pattern = pattern,
                       .residency = residency});
+        direct_shape({.mode = mode,
+                      .first = word_mask - 5,
+                      .loop = true,
+                      .alias = alias,
+                      .pattern = pattern,
+                      .residency = residency,
+                      .ranges = detail::RangeMode::disabled});
       }
     }
   }

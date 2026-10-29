@@ -53,8 +53,13 @@ JitEmitter::generate_selected(const std::span<const NativeOp> operations) {
   if (!packed_retirement_) { return ordinary; }
   region_ = plan_native_region(operations, runtime_.memory, modifiers_);
   if (!region_.valid) { return ordinary; }
-  JitEmitter fast(
-      runtime_, optimize_, batch_backend_, modifiers_, RegionMode::guarded, residency_mode_);
+  JitEmitter fast(runtime_,
+                  optimize_,
+                  batch_backend_,
+                  modifiers_,
+                  RegionMode::guarded,
+                  residency_mode_,
+                  range_mode_);
   const auto guarded = fast.generate(operations);
   x64::Code selector;
   x64::Label fallback;

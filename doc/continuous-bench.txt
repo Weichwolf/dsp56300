@@ -740,3 +740,46 @@ floor. These block failures and earlier 264-MIPS captures are not replaced by
 new passing packages. No repeat-until-pass capture is used. This qualifies exact
 formats and research tradeoffs, not a general speed gain, indefinite realtime,
 full ISA, adaptive allocation, other domains, SIMD/multicore or cache/energy.
+
+
+Signed-width compiler optimization
+
+All fixtures/producers and actual guest work stay unchanged. Both 131-test suites
+pass, with all 24 complete backend/stream states and four strict report-only
+states. Concurrent strict captures retain FIR/spectral package failures and
+221/123/100/140 late blocks; their timings are correctness-only evidence.
+
+Matched CPU2 baseline/candidate/candidate/baseline captures use one natural input
+second warmup followed by one measured input second on the same DSP. There are
+no concurrent project build/test/format jobs; external host conditions remain
+uncontrolled. No restoration/replay/padding/overhead subtraction. All sixteen
+complete states, packages and measured block deadlines pass. Mean CPU reductions
+are FIR 1.95%, IIR 14.83%, spectral 7.58%, nonlinear 10.32%. The small FIR change
+has unproved attribution. Every work counter and code-page allocation stays equal.
+
+Separate final default gate, all states and packages pass:
+Scenario   Wall s      Process CPU s   MIPS       Max block / budget ms   Late
+FIR        0.236810    0.236808         1149.28      0.346 / 1.333            0
+IIR        0.484551    0.483927          566.33      1.249 / 1.333            0
+spectral   0.716709    0.716687          358.17      7.286 /10.000            0
+nonlinear  0.543809    0.543842          486.79      0.751 / 1.333            0
+
+The 275-million base-cycles/s reference is separate from actual guest MIPS: an
+instruction can cost multiple DSP cycles. The unchanged streams model near-full
+base-cycle demand without claiming physical bus/pipeline timing. The package
+gate reports short block misses and does not enforce a separate MIPS floor.
+
+A separate whole-process user PMU comparison confirms IIR/spectral/nonlinear
+host instruction reductions of 13.64%/9.34%/7.04% and cycle reductions of
+14.67%/6.50%/10.34%. All requested counters run at 100%; all sixteen states pass.
+Setup/compilation/cold/warm/checks are included, with no concurrent project
+build/test/format jobs. FIR data misses increase 9.54% and nonlinear instruction
+misses increase 2.61%. Data load counts remain effectively equal. Scope is not
+isolated JIT timing, complete locality or energy measurement. See value-ranges.txt
+for the full table, proof, witnesses and exact unchanged work/page counts.
+
+Historical failed packages, 263/273-MIPS spectral candidates and every old block
+miss remain recorded above and in loop-residency.txt. New passing samples do not
+replace them or establish indefinite/all-program realtime. No repeat-until-pass
+capture is used. Full numerical/ISA/IRQ/pipeline/timing, adaptive allocation,
+broader domains, SIMD/multicore, integration and cache/energy remain open.

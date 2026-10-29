@@ -5,6 +5,7 @@
 #include "instruction.hpp"
 #include "jit.hpp"
 #include "jit_emitter.hpp"
+#include "value_ranges.hpp"
 #include "x64.hpp"
 
 #include <cstdint>
@@ -52,6 +53,11 @@ bool JitEmitter::saturation_supported(const NativeOp &operation) {
 
 void JitEmitter::saturate(const Word mode, const bool rounded) {
   if ((mode & arithmetic_saturation) == 0) { return; }
+  if (value_proof_.saturation == SaturationProof::none) { return; }
+  if (value_proof_.saturation == SaturationProof::canonical) {
+    saturate_canonical(rounded);
+    return;
+  }
   // Only EXT[7], EXT[0], MSP[23] participate. Preserve raw C in EDX and OF in R10D.
   code_.mov({.destination = Reg::r8, .source = Reg::ax});
   code_.shift(shift_arithmetic, Reg::r8, host_sign_bit);
@@ -67,5 +73,23 @@ void JitEmitter::saturate(const Word mode, const bool rounded) {
   code_.move_if(condition_negative, {.destination = Reg::r11, .source = Reg::r8});
   code_.binary(op_test, {.destination = Reg::r9, .source = Reg::r9}, Width::dword);
   code_.move_if(condition_not_zero, {.destination = Reg::ax, .source = Reg::r11});
+}
+
+void JitEmitter::saturate_canonical(const bool rounded) {
+  constexpr unsigned op_cmp = 0x39;
+  constexpr unsigned condition_greater = 0x4f;
+  constexpr unsigned condition_less = 0x4c;
+  code_.mov({.destination = Reg::r8, .source = Reg::ax});
+  code_.constant(Reg::r11, positive);
+  code_.binary(op_cmp, {.destination = Reg::ax, .source = Reg::r11});
+  if (rounded) { code_.constant(Reg::r9, rounded_positive); }
+  code_.move_if(condition_greater,
+                {.destination = Reg::ax, .source = rounded ? Reg::r9 : Reg::r11});
+  code_.constant(Reg::r11, negative_limit);
+  code_.binary(op_cmp, {.destination = Reg::ax, .source = Reg::r11});
+  code_.move_if(condition_less, {.destination = Reg::ax, .source = Reg::r11});
+  code_.binary(op_cmp, {.destination = Reg::ax, .source = Reg::r8});
+  code_.set(set_not_zero, Reg::r9);
+  code_.binary(op_or, {.destination = Reg::r10, .source = Reg::r9}, Width::dword);
 }
 } // namespace dsp56300::detail

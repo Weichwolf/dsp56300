@@ -97,12 +97,12 @@ and old parallel operands without memory/I/O observation barriers. All 6758417
 directed ASR/register assertions pass; no ISA catalogue row becomes complete.
 See doc/native-shifts.txt for guards, witnesses, measurements and remaining work.
 
-The current configuration passes all 130 correctness tests in release (130.29 s,
-two CTest processes) and strict ASan/UBSan (260.47 s, three), zero skips. All 143
+The current configuration passes all 131 correctness tests in release (139.01 s,
+two CTest processes) and strict ASan/UBSan (301.30 s, three), zero skips. All 145
 C++ translation units retain strict nonrecovering address/undefined/integer
-instrumentation; all 183 project C++ source/header files pass clang-format/tidy/
+instrumentation; all 186 project C++ source/header files pass clang-format/tidy/
 Werror. All 52 binary archives and their producers remain unchanged in the
-current register-residency increment; all exact regeneration checks pass. No
+current signed-width compiler increment; all exact regeneration checks pass. No
 fuzzing was run. Structural ISA audit passes; require-complete remains a failing
 gate with 118 partial/zero complete entries.
 
@@ -116,15 +116,18 @@ stream/backend states and four strict report-only states. Concurrent reports
 retain timing failures and qualify correctness, not optimized speed.
 
 The latest optimized default bench passes all four one-second packages: FIR
-0.388605 s, IIR 0.675903 s, spectral 0.852032 s, nonlinear 0.695760 s. Every
-complete state matches. All four retain block misses (46/18/4/14); spectral's
-latest default is 301.28 MIPS. Matched spectral candidates retain 273.07/263.29
-MIPS below the reference, and one baseline package fails at 1.037437 wall s.
-Fifteen matched packages and all sixteen states pass. These and earlier default
-264-MIPS/block failures remain recorded; no passing sample replaces them.
-External scheduling/frequency causes are unproved. See continuous-bench.txt and
-loop-residency.txt. Sustained latency/reserve and wider qualification remain
-open; correctness/package gates do not prove all-program realtime.
+0.236810 s, IIR 0.484551 s, spectral 0.716709 s, nonlinear 0.543809 s. Every
+complete state matches; all four have zero late blocks in that capture. Actual
+rates are 1149.28/566.33/358.17/486.79 MIPS. All sixteen matched states/packages/
+block deadlines pass; mean CPU demand falls 1.95%/14.83%/7.58%/10.32%. The small
+FIR difference has unproved attribution. Work counts and page storage are equal.
+Earlier 264-MIPS/default block failures, 273.07/263.29-MIPS matched candidates
+and the 1.037437-second baseline package failure remain recorded. New passing
+samples do not replace those observations. External scheduling/frequency causes
+are unproved. See continuous-bench.txt, loop-residency.txt and value-ranges.txt.
+Sustained latency/reserve and wider qualification remain open; correctness/package
+gates do not prove all-program realtime.
+
 The expanded native-move boundary test passes all 78446 assertions in both builds.
 It includes exact same-code reuse after modifier changes and paired aliased X/Y
 wraps/I/O fallback. Profiled modulo checks compile ring constants but guard every
@@ -618,3 +621,32 @@ package fails and candidate spectral MIPS/block shortfalls stay visible. The
 latest default package gate passes but all four block budgets have misses.
 General adaptive allocation, broader domains, numerical/IRQ/pipeline/timing,
 SIMD/multicore, integration and cache/energy remain active with the full objective.
+
+
+Signed-width compiler certificates
+
+The native compiler now proves conservative A/B value widths within each body.
+Unknown roots/helpers/observers reset facts; parallel arithmetic consumes old
+widths before bus-word writes. Supported products/sums/unary/rounding semantics
+prove when raw/round overflow, SM limiting or result-flag work is impossible.
+SM uses a simpler signed48 clamp only for a proved signed50 domain; unknown/wide
+extension gaps retain the exact general table. Carry and sticky transfer effects
+remain separate, and complete state/counters/guards are unchanged. Automatic and
+private disabled modes compare in the same build. See value-ranges.txt.
+
+The new independent metadata matrix passes 8018957 assertions per build; the
+expanded helper-forbidden native accounting matrix passes 2597667, and all
+5120088 native SM assertions remain. All 52 archives and producers stay identical.
+No ISA semantics are added or catalogue rows completed. Both 131-test suites,
+24 complete backend/stream states and four strict report-only states pass.
+Concurrent strict timing retains FIR/spectral package failures and 221/123/100/140
+late blocks, not optimized throughput evidence.
+
+The matched continuous measurements reduce IIR/spectral/nonlinear CPU demand by
+14.83%/7.58%/10.32%. Whole-process user counters show 13.64%/9.34%/7.04% fewer
+instructions and 14.67%/6.50%/10.34% fewer host cycles. FIR data misses increase
+9.54%, nonlinear instruction misses increase 2.61%; both remain recorded. Counter
+scope includes setup/cold/warm/state checks; no cache-locality or energy claim.
+Previous failed packages/block deadlines remain evidence. Complete numerical/ISA,
+IRQ/pipeline/timing, adaptive placement, broader domains, SIMD/multicore,
+integration and sustained realtime/cache/energy remain active objective gaps.

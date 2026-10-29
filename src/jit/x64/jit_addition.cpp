@@ -12,6 +12,7 @@ using x64::Reg;
 using x64::Width;
 constexpr unsigned op_add = 0x01, op_sub = 0x29, op_or = 0x09, op_adc = 0x11, op_sbb = 0x19;
 constexpr unsigned group_and = 4, shift_right = 5;
+constexpr unsigned op_xor = 0x31;
 constexpr unsigned condition_overflow = 0x90, condition_below = 0x92;
 }
 
@@ -60,8 +61,11 @@ void JitEmitter::addition(const NativeOp &operation) {
   } else {
     code_.binary(subtract ? op_sub : op_add, {.destination = Reg::ax, .source = Reg::dx});
   }
-  code_.set(condition_overflow, Reg::r10);
+  if (value_proof_.raw_overflow) { code_.set(condition_overflow, Reg::r10); }
   if ((live_flags_ & carry) != 0) { code_.set(condition_below, Reg::dx); }
+  if (!value_proof_.raw_overflow && value_proof_.overflow_value()) {
+    code_.binary(op_xor, {.destination = Reg::r10, .source = Reg::r10}, Width::dword);
+  }
   saturate(operation.mode);
   if (!compare) { store_accumulator(destination_b, Reg::ax); }
   arithmetic_flags(operation.mode, true);

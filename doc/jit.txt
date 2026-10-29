@@ -503,3 +503,18 @@ saturation/flags and progress. Ordinary eligible single-bit ASR remains native.
 Independent same-PC mode changes and real dispatch counters verify this split;
 callbacks/P edits and rejected transfers retain their canonical boundaries.
 See saturated-shifts.txt for scope and independent binary/host witnesses.
+
+
+Value-domain certificates in native emission
+
+A forward conservative A/B signed-width analysis starts every body at the full
+56-bit domain. It models old parallel operands before bus-word writes and resets
+at helper/observer boundaries. Proved impossible raw/round overflow and selected
+result flags need no emitted calculation; live false bits still clear and Carry
+is captured before scratch flag clobbers. SM omits limiting for signed48 bounds
+or uses an exact canonical clamp within signed50; arbitrary extension values
+retain the general table. Numerical modes, public layout, checkpoints, actual
+guest work and general fallback admission are unchanged. A private disabled mode
+qualifies the original emitter in the same build. See value-ranges.txt for proof,
+independent metadata/RX witnesses and measured host CPU/cache tradeoffs. This
+does not complete ISA, adaptive register allocation or indefinite realtime.

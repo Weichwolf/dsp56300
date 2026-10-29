@@ -5,6 +5,7 @@
 #include "jit.hpp"
 #include "native_moves.hpp"
 #include "native_region.hpp"
+#include "value_ranges.hpp"
 #include "x64.hpp"
 
 #include <array>
@@ -21,7 +22,8 @@ public:
              BatchBackend batch = BatchBackend::automatic,
              std::array<Word, agu_registers> modifiers = {},
              RegionMode region = RegionMode::automatic,
-             LoopResidency residency = LoopResidency::automatic);
+             LoopResidency residency = LoopResidency::automatic,
+             RangeMode ranges = RangeMode::automatic);
   [[nodiscard]] std::vector<std::uint8_t> generate(std::span<const NativeOp> operations);
 
   [[nodiscard]] bool packed_retirement() const noexcept { return packed_retirement_; }
@@ -80,7 +82,12 @@ private:
   void right_shift(const NativeOp &operation);
   void round(Word mode);
   void saturate(Word mode, bool rounded = false);
+  void saturate_canonical(bool rounded);
   void arithmetic_flags(Word mode, bool carry_changed = false);
+  void merge_flag(x64::Reg value, bool &initialized);
+  void zero_negative_flags(bool &initialized);
+  void normalization_flags(Word mode, bool &initialized);
+  void prepare_value_proof(const NativeOp &operation, NativeValueRanges &ranges);
   [[nodiscard]] bool admit_cached_status() const;
   void initialize_status();
   void materialize_status();
@@ -128,6 +135,8 @@ private:
   BatchBackend batch_backend_;
   RegionMode region_mode_;
   LoopResidency residency_mode_;
+  RangeMode range_mode_;
+  NativeValueProof value_proof_;
   NativeRegion region_;
   bool mac_batches_ = false;
   bool packed_retirement_ = false;

@@ -9,6 +9,7 @@
 #include "jit.hpp"
 #include "native_moves.hpp"
 #include "native_region.hpp"
+#include "value_ranges.hpp"
 #include "x64.hpp"
 
 #include <algorithm>
@@ -67,13 +68,15 @@ JitEmitter::JitEmitter(const JitRuntime runtime,
                        const BatchBackend batch,
                        const std::array<Word, agu_registers> modifiers,
                        const RegionMode region,
-                       const LoopResidency residency)
+                       const LoopResidency residency,
+                       const RangeMode ranges)
     : runtime_(runtime),
       modifiers_(modifiers),
       optimize_(optimize),
       batch_backend_(batch),
       region_mode_(region),
-      residency_mode_(residency) {}
+      residency_mode_(residency),
+      range_mode_(ranges) {}
 
 bool JitEmitter::has_moves(const NativeOp &operation) {
   return operation.instruction.operation == Operation::parallel &&
@@ -239,9 +242,12 @@ void JitEmitter::multiply(const NativeOp &operation) {
   if ((opcode & 2U) != 0) {
     value(Reg::dx, (opcode & 8U) != 0 ? 1U : 0U, has_moves(operation));
     code_.binary(op_add, {.destination = Reg::ax, .source = Reg::dx});
-    code_.set(condition_overflow, Reg::r10);
-  } else {
-    code_.binary(op_xor, {.destination = Reg::r10, .source = Reg::r10}, Width::dword);
+    if (value_proof_.raw_overflow) { code_.set(condition_overflow, Reg::r10); }
+  }
+  if (!value_proof_.raw_overflow || (opcode & 2U) == 0) {
+    if (value_proof_.overflow_value()) {
+      code_.binary(op_xor, {.destination = Reg::r10, .source = Reg::r10}, Width::dword);
+    }
   }
   if ((opcode & 1U) != 0) { round(operation.mode); }
   saturate(operation.mode, (opcode & 1U) != 0);
@@ -264,8 +270,10 @@ void JitEmitter::round(const Word mode) {
     code_.binary(op_add, {.destination = Reg::r11, .source = Reg::dx});
   }
   code_.binary(op_add, {.destination = Reg::ax, .source = Reg::r11});
-  code_.set(condition_overflow, Reg::dx);
-  code_.binary(op_or, {.destination = Reg::r10, .source = Reg::dx}, Width::dword);
+  if (value_proof_.rounding_overflow) {
+    code_.set(condition_overflow, Reg::dx);
+    code_.binary(op_or, {.destination = Reg::r10, .source = Reg::dx}, Width::dword);
+  }
   code_.shift(shift_right, Reg::ax, cleared);
   code_.shift(shift_left, Reg::ax, cleared);
 }
@@ -290,10 +298,14 @@ void JitEmitter::native(const NativeOp &operation) {
   }
   if (kind == alu_clear) {
     code_.binary(op_xor, {.destination = Reg::ax, .source = Reg::ax}, Width::dword);
-    code_.binary(op_xor, {.destination = Reg::r10, .source = Reg::r10}, Width::dword);
+    if (value_proof_.overflow_value()) {
+      code_.binary(op_xor, {.destination = Reg::r10, .source = Reg::r10}, Width::dword);
+    }
   } else if (kind == alu_round) {
     value(Reg::ax, destination_b ? 1U : 0U, has_moves(operation));
-    code_.binary(op_xor, {.destination = Reg::r10, .source = Reg::r10}, Width::dword);
+    if (value_proof_.overflow_value()) {
+      code_.binary(op_xor, {.destination = Reg::r10, .source = Reg::r10}, Width::dword);
+    }
     round(operation.mode);
   } else if ((kind & 7U) == 1) {
     input(Reg::ax, (opcode >> 4) & 7, destination_b, has_moves(operation));
@@ -309,7 +321,11 @@ void JitEmitter::native(const NativeOp &operation) {
     } else {
       code_.unary(3, Reg::ax);
     }
-    code_.set(condition_overflow, Reg::r10);
+    if (value_proof_.raw_overflow) {
+      code_.set(condition_overflow, Reg::r10);
+    } else if (value_proof_.overflow_value()) {
+      code_.binary(op_xor, {.destination = Reg::r10, .source = Reg::r10}, Width::dword);
+    }
   }
   if (kind != alu_clear) { saturate(operation.mode, kind == alu_round); }
   store_accumulator(destination_b, Reg::ax);
@@ -392,10 +408,12 @@ std::vector<std::uint8_t> JitEmitter::generate_body(const std::span<const Native
     region_guard(code_, Reg::r12, exits_.at(dirty_accumulators()));
   }
   const auto flags = plan_flags(operations);
+  NativeValueRanges ranges;
   for (std::size_t operation_index = 0; operation_index < operations.size(); ++operation_index) {
     const auto &operation = operations[operation_index];
     live_flags_ = flags[operation_index];
     dataflow_ = analyze_dataflow(operation.instruction);
+    prepare_value_proof(operation, ranges);
     if (lowerable(operation)) {
       if (is_loop_setup(operation)) {
         loop_setup(operation);

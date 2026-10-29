@@ -5,6 +5,7 @@
 #include "instruction.hpp"
 #include "jit.hpp"
 #include "jit_emitter.hpp"
+#include "value_ranges.hpp"
 #include "x64.hpp"
 
 #include <cstddef>
@@ -79,31 +80,49 @@ std::vector<Word> JitEmitter::plan_flags(const std::span<const NativeOp> operati
   return result;
 }
 
-void JitEmitter::arithmetic_flags(const Word mode, const bool carry_changed) {
-  const unsigned shift = normal_integer_shift + ((mode & scale_down) != 0 ? 1U : 0U) -
-                         ((mode & scale_up) != 0 ? 1U : 0U);
-  bool initialized = false;
-  const auto merge = [this, &initialized](const Reg source) {
-    if (initialized) {
-      code_.binary(op_or, {.destination = Reg::r8, .source = source}, Width::dword);
-    } else {
-      code_.mov({.destination = Reg::r8, .source = source}, Width::dword);
-      initialized = true;
-    }
-  };
-  if ((live_flags_ & zero) != 0) {
-    code_.binary(op_test, {.destination = Reg::ax, .source = Reg::ax});
-    code_.set(condition_zero, Reg::r8);
-    code_.shift(shift_left, Reg::r8, 2, Width::dword);
+void JitEmitter::prepare_value_proof(const NativeOp &operation, NativeValueRanges &ranges) {
+  value_proof_ = {};
+  if ((operation.mode & arithmetic_saturation) == 0) {
+    value_proof_.saturation = SaturationProof::none;
+  }
+  if (range_mode_ == RangeMode::automatic) {
+    value_proof_ = ranges.advance(operation, lowerable(operation), observable_moves(operation));
+  }
+}
+
+void JitEmitter::merge_flag(const Reg value, bool &initialized) {
+  if (initialized) {
+    code_.binary(op_or, {.destination = Reg::r8, .source = value}, Width::dword);
+  } else {
+    code_.mov({.destination = Reg::r8, .source = value}, Width::dword);
     initialized = true;
   }
-  if ((live_flags_ & negative) != 0) {
+}
+
+void JitEmitter::zero_negative_flags(bool &initialized) {
+  if ((live_flags_ & zero) != 0) {
+    if (value_proof_.width == 0) {
+      code_.constant(Reg::r8, zero);
+    } else {
+      code_.binary(op_test, {.destination = Reg::ax, .source = Reg::ax});
+      code_.set(condition_zero, Reg::r8);
+      code_.shift(shift_left, Reg::r8, 2, Width::dword);
+    }
+    initialized = true;
+  }
+  if ((live_flags_ & negative) != 0 && value_proof_.width != 0) {
     code_.mov({.destination = Reg::r9, .source = Reg::ax});
     code_.shift(shift_right, Reg::r9, negative_shift);
     code_.immediate(group_and, Reg::r9, negative, Width::dword);
-    merge(Reg::r9);
+    merge_flag(Reg::r9, initialized);
   }
-  if ((live_flags_ & extension) != 0) {
+}
+
+void JitEmitter::normalization_flags(const Word mode, bool &initialized) {
+  const unsigned shift = normal_integer_shift + ((mode & scale_down) != 0 ? 1U : 0U) -
+                         ((mode & scale_up) != 0 ? 1U : 0U);
+  const auto position = shift - padding_bits;
+  if ((live_flags_ & extension) != 0 && value_proof_.width > position + 1) {
     code_.mov({.destination = Reg::r9, .source = Reg::ax});
     code_.shift(shift_right, Reg::r9, shift);
     code_.immediate(group_sub, Reg::r9, 1);
@@ -111,27 +130,40 @@ void JitEmitter::arithmetic_flags(const Word mode, const bool carry_changed) {
     code_.immediate(group_cmp, Reg::r9, maximum_integer - 1);
     code_.set(condition_below, Reg::r9);
     code_.shift(shift_left, Reg::r9, 5, Width::dword);
-    merge(Reg::r9);
+    merge_flag(Reg::r9, initialized);
   }
   if ((live_flags_ & unnormalized) != 0) {
-    code_.mov({.destination = Reg::r9, .source = Reg::ax});
-    code_.shift(shift_left, Reg::r9, 1);
-    code_.binary(op_xor, {.destination = Reg::r9, .source = Reg::ax});
-    code_.shift(shift_right, Reg::r9, shift);
-    code_.immediate(group_xor, Reg::r9, 1, Width::dword);
-    code_.immediate(group_and, Reg::r9, 1, Width::dword);
-    code_.shift(shift_left, Reg::r9, 4, Width::dword);
-    merge(Reg::r9);
+    if (value_proof_.width <= position) {
+      code_.constant(Reg::r9, unnormalized);
+    } else {
+      code_.mov({.destination = Reg::r9, .source = Reg::ax});
+      code_.shift(shift_left, Reg::r9, 1);
+      code_.binary(op_xor, {.destination = Reg::r9, .source = Reg::ax});
+      code_.shift(shift_right, Reg::r9, shift);
+      code_.immediate(group_xor, Reg::r9, 1, Width::dword);
+      code_.immediate(group_and, Reg::r9, 1, Width::dword);
+      code_.shift(shift_left, Reg::r9, 4, Width::dword);
+    }
+    merge_flag(Reg::r9, initialized);
   }
-  // Sticky L records every overflow, including operations whose ordinary
-  // result flags are overwritten before any possible observer or exit.
-  code_.constant(Reg::r11, limit | (live_flags_ & overflow));
-  code_.multiply({.destination = Reg::r10, .source = Reg::r11});
-  merge(Reg::r10);
-  if (carry_changed && (live_flags_ & carry) != 0) {
-    code_.binary(op_or, {.destination = Reg::r8, .source = Reg::dx}, Width::dword);
+}
+
+void JitEmitter::arithmetic_flags(const Word mode, const bool carry_changed) {
+  bool initialized = false;
+  zero_negative_flags(initialized);
+  normalization_flags(mode, initialized);
+  // Preserve every possible raw, rounding or limiting event in sticky L.
+  if (value_proof_.overflow_value()) {
+    code_.constant(Reg::r11, limit | (live_flags_ & overflow));
+    code_.multiply({.destination = Reg::r10, .source = Reg::r11});
+    merge_flag(Reg::r10, initialized);
   }
+  if (carry_changed && (live_flags_ & carry) != 0) { merge_flag(Reg::dx, initialized); }
   const auto changed = live_flags_ & (arithmetic_changed | (carry_changed ? carry : 0));
+  if (!initialized) {
+    if (changed == 0) { return; }
+    code_.constant(Reg::r8, 0);
+  }
   merge_status(Reg::r8, changed, Reg::r9);
 }
 } // namespace dsp56300::detail

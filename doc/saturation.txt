@@ -140,3 +140,12 @@ nonlinear-stream.txt and native-constants.txt. Other programs/modes remain open.
 This increment does not complete full ISA, SM native performance, all application
 domains, cache/energy, SIMD/multicore, adaptive allocation or sustained realtime
 objectives. The original objective remains active and unchanged.
+
+
+The native compiler can now derive signed-width certificates from supported
+instruction semantics. Within proved signed50 results the three-bit table equals
+signed48 limiting; rounded positive limiting retains its separate constant and
+full positive48 comparison. Proved signed48 results cannot limit. Arbitrary
+extension gaps still use the original table; no general SM semantics or admission
+changes. See value-ranges.txt for the proof, independent metadata/execution
+witnesses and continuous performance/cache results. Wider qualification stays open.
