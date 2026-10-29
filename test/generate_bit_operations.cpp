@@ -429,7 +429,8 @@ void rejected_modes(Cases &cases) {
         item.expected = item.initial;
         const unsigned count =
             opcode == immediate_asl ? 1U : static_cast<unsigned>(item.initial.x % 64);
-        shift_model::apply(item.expected, item.initial, {.count = count, .left = true});
+        shift_model::apply(
+            item.expected, item.initial, {.count = count, .left = true, .saturate = false});
         append(cases, std::move(item), opcode);
         continue;
       }

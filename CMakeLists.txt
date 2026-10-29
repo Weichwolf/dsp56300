@@ -260,6 +260,11 @@ if(BUILD_TESTING)
   add_executable(dsp56300_saturated_shift_test test/saturated_shift_test.cpp)
   target_link_libraries(dsp56300_saturated_shift_test PRIVATE dsp56300::core)
   add_test(NAME saturated-shift-boundaries COMMAND dsp56300_saturated_shift_test)
+  add_executable(dsp56300_generate_saturated_normalization test/generate_saturated_normalization.cpp)
+  target_link_libraries(dsp56300_generate_saturated_normalization PRIVATE dsp56300_fixture_format)
+  add_executable(dsp56300_saturated_normalization_test test/saturated_normalization_test.cpp)
+  target_link_libraries(dsp56300_saturated_normalization_test PRIVATE dsp56300::core)
+  add_test(NAME saturated-normalization-boundaries COMMAND dsp56300_saturated_normalization_test)
   add_executable(dsp56300_generate_integer test/generate_integer.cpp)
   target_link_libraries(dsp56300_generate_integer PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_address_calc test/generate_address_calc.cpp)
@@ -478,6 +483,16 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/iteration.d56")
   add_test(NAME normalization-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/normalization.d56")
+  foreach(kind fast iteration)
+    add_test(NAME saturated-normalization-${kind}-fixtures COMMAND dsp56300_fixture_test
+      "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/normalization-sm-${kind}.d56")
+    add_test(NAME saturated-normalization-${kind}-reproducibility COMMAND "${CMAKE_COMMAND}"
+      "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_saturated_normalization>"
+      "-DGENERATOR_ARGUMENTS=${kind}"
+      "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/normalization-sm-${kind}-regenerated.d56"
+      "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/normalization-sm-${kind}.d56"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
+  endforeach()
   add_test(NAME viterbi-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/viterbi.d56")
   add_test(NAME viterbi-reproducibility COMMAND "${CMAKE_COMMAND}"

@@ -15,6 +15,7 @@ namespace dsp56300::test::shift_model {
 struct Control {
   unsigned count = 1;
   bool left = false, source_b = false, destination_b = false;
+  bool saturate = true;
 };
 
 inline void apply(Registers &state, const Registers &old, const Control input) {
@@ -40,7 +41,8 @@ inline void apply(Registers &state, const Registers &old, const Control input) {
   for (std::size_t i = 0; i < bits.size(); ++i) {
     if (bits[i]) { result |= std::uint64_t{1} << i; }
   }
-  const auto limited = saturation_model::apply(result, {.status = state.sr});
+  const auto status = input.saturate ? state.sr : state.sr & ~saturation_model::mode;
+  const auto limited = saturation_model::apply(result, {.status = status});
   (input.destination_b ? state.b : state.a) = limited.value;
   sequence_model::flags(state,
                         {.full = signed56(limited.value),

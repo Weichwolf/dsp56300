@@ -97,12 +97,15 @@ and old parallel operands without memory/I/O observation barriers. All 6758417
 directed ASR/register assertions pass; no ISA catalogue row becomes complete.
 See doc/native-shifts.txt for guards, witnesses, measurements and remaining work.
 
-The current configuration passes all 134 correctness tests in release (120.93 s,
-two CTest processes) and strict ASan/UBSan (243.71 s, three), zero skips. All 154
+The current configuration passes all 139 correctness tests in release (150.28 s,
+two CTest processes) and strict ASan/UBSan (315.66 s, three), zero skips. All 156
 C++ translation units retain strict nonrecovering address/undefined/integer
-instrumentation; all 195 project C++ source/header files pass clang-format/tidy/
-Werror. All 52 binary archives and their producers remain unchanged in the
-current RAM loop-window increment; all exact regeneration checks pass. No
+instrumentation; all 198 project C++ source/header files pass clang-format/tidy/
+Werror. All 54 binary archives regenerate exactly. The normalization/BFU increment
+adds 79552 cases; four old archives have explicitly audited semantic corrections
+with every input and unrelated record unchanged. The other 48 old archives are
+byte-identical. See saturated-normalization.txt for the initial incorrect BFU
+interpretation, corrected producer expectations and exact record counts. No
 fuzzing was run. Structural ISA audit passes; require-complete remains a failing
 gate with 118 partial/zero complete entries.
 
@@ -115,22 +118,21 @@ state agrees in all six variants. Across all four scenarios this gives 24 full
 stream/backend states and four strict report-only states. Concurrent reports
 retain timing failures and qualify correctness, not optimized speed.
 
-The latest optimized default bench passes all four one-second packages: FIR
-0.235463 s, IIR 0.470453 s, spectral 0.689131 s, nonlinear 0.514553 s. Every
-complete state and block budget passes in this capture. Actual rates are
-1155.85/583.30/372.50/514.47 MIPS. The matched loop-window candidate reduces
-IIR/spectral/nonlinear CPU demand 1.30%/2.39%/3.16%; FIR's small difference has
-unproved attribution because its batch bypasses this path. All sixteen states,
-packages and block deadlines pass, with identical guest work and page storage.
-The previous word-reuse comparison's FIR +2.30% and candidate FIR1/0/spectral3/4
-late blocks remain recorded, as do its default FIR1/nonlinear9 misses.
-Earlier 264-MIPS/default block failures, 273.07/263.29-MIPS candidates and the
-1.037437-second baseline package failure
-remain recorded. Passing packages do not replace failed block budgets. External
-scheduling/frequency effects and causal FIR attribution are unproved. See
-continuous-bench.txt, loop-residency.txt, word-reuse.txt and loop-window.txt.
-Sustained latency/reserve and broader qualification remain open; no all-program
-realtime claim.
+The latest optimized default gate FAILS: FIR/IIR/nonlinear packages take
+0.536524/0.645986/0.594866 s, but spectral takes 1.222611 s (209.96 actual MIPS).
+All four full states agree; all four retain late blocks, 71/39/52/31 respectively.
+Process CPU demand is 0.261458/0.517318/0.758929/0.558503 s per input second.
+CPU time below one second does not waive a failed wall-time deadline or the
+275-MIPS reference. The matched capture retains seven package failures, three
+in candidate runs, including spectral 168.95/236.44MIPS and IIR 229.77MIPS. Large
+wall/CPU gaps suggest off-CPU time but its cause is not isolated; no causal speed
+change is claimed for the numerical-mode correction. Every native/helper/move/
+batch/AVX2/guest/base-cycle count and page size stays equal. Prior passing
+loop-window captures, older263/273-MIPS FFT rates, the1.037437-second baseline
+failure and every old block/cache regression remain historical evidence.
+See continuous-bench.txt and saturated-normalization.txt. Complete ISA, sustained
+latency/reserve and broader qualification remain open; no all-program realtime
+claim. Passing state/correctness checks do not turn the failed bench gate green.
 
 The expanded native-move boundary test passes all 78446 assertions in both builds.
 It includes exact same-code reuse after modifier changes and paired aliased X/Y
@@ -565,10 +567,12 @@ General arithmetic shifts with SM
 
 ASL/ASR now admit arithmetic saturation in parallel single-bit, immediate and
 register-controlled 56-bit forms. Counts 0..55 shift old operands, preserve
-shifted Carry and limit the final raw result. Stored flags and raw left-shift
-overflow remain exact, including sticky L. Native SM shift admission is unchanged;
-JIT falls back to the qualified general implementation. Other numerical modes,
-logical shifts and normalization/division retain their existing diagnostics.
+shifted Carry and update result flags. The later BFU review corrects the original
+all-forms limiting assumption: only single-bit parallel shifts limit; multi-bit
+BFU forms bypass SM, including counts zero/one. See saturated-normalization.txt.
+Native SM shift admission is unchanged; JIT retains general execution. NORM and
+NORMF now admit their distinct SM paths. Other numerical modes, logical shifts
+and DIV SM still retain explicit diagnostics.
 
 The standalone bit-serial producer adds 52632 original binary cases and 1473697
 complete-state assertions across reference/cached/JIT. All defined counts,
@@ -771,3 +775,43 @@ See loop-window.txt for mathematics, state tables and precise measurement scope.
 All 118 ISA rows remain partial. Full numerical/ISA, IRQ/pipeline/timing, general
 adaptive allocation, broader application domains, SIMD/multicore, integration,
 sustained realtime and cache/energy remain open under the unchanged objective.
+
+
+Normalization and BFU mode accuracy
+
+Primary-source cross-checking found an incorrect earlier SM interpretation:
+section3.1.5 places multi-bit ASL/ASR and NORMF in the BFU, which section3.2.3
+excludes from saturation. Multi-bit shifts now bypass SM, even for encoded count
+one. Single-bit parallel shifts and NORM retain limiting. NORM/NORMF now admit
+these distinct SM paths; complete NORM NOP and NORMF zero-count behavior remain
+separate. A private ShiftControl choice preserves public layouts and never
+transiently clears architectural SM. DIV SM/other unqualified modes still reject.
+
+The new independent bit-serial/action-table matrix contains 79552 cases in two
+archives. NORMF counts/sources/destinations, separate all-CCR/scaling-RM matrices,
+all eight exponents, EXT/MSP/bit patterns, old aliases, REP current-value rereads,
+partial prefixes and DO cleanup are explicit. Public-Core tests add 3516 checks
+across actual native/general prefixes, equal one-bit ALU/BFU forms, same-PC modes,
+invalid domains and I/O/P-edit/partial-failure boundaries. Both 139-test suites
+and all 54 exact archive regenerations pass; all 24 backend and four strict full
+states agree. Concurrent strict timing retains all four package failures and
+130/21/100/153 late blocks; this is correctness-only evidence.
+
+Exactly two old unsupported records become successes with identical initial
+programs/registers/data. 12870 old shift BFU expectations and two bit-operation
+expectations are corrected; 24 REP labels change. Full serialized-record auditing
+allows only the declared result changes and verifies every input/unrelated byte.
+The other 48 old archives remain identical. Old green tests and the initial
+pre-review design/captures are recorded as mistaken mode interpretation, not
+proof of final semantics. No checks/format bounds are weakened or cases dropped.
+
+The separate final-source timing gate FAILS as reported above; seven matched
+packages also fail, including three candidate runs. Process CPU differences are
+small and no causal speed gain is claimed. Exact guest/native/helper/move/batch/
+AVX2 counts and page sizes remain equal. PMU counters retain FIR/spectral/
+nonlinear instruction-miss increases 11.64%/1.31%/27.59% and spectral/nonlinear
+data-miss increases 0.94%/1.53%. Counter scope includes setup/cold/warm/checks,
+not isolated JIT or energy; off-CPU wall delays are not diagnosed. These failures
+remain under the full performance objective. Complete modes/ISA/IRQ/pipeline/
+timing, adaptive allocation, broader domains, SIMD/multicore, integration,
+sustained realtime and cache/energy remain active; all 118 ISA rows are partial.

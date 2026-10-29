@@ -49,7 +49,8 @@ void step(Registers &state, const Word opcode) {
                        state,
                        {.count = multi ? multi_count : 1U,
                         .left = opcode == asl_a || opcode == multi_left,
-                        .source_b = multi});
+                        .source_b = multi,
+                        .saturate = !multi});
   }
   ++state.pc;
 }

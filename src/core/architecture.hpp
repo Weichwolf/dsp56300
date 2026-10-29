@@ -21,6 +21,7 @@ struct AddressUpdate {
 struct ShiftControl {
   unsigned count = 1;
   bool destination_b = false, left = false;
+  bool saturate = true;
 };
 
 struct AddOperands {

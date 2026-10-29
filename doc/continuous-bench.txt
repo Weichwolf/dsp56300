@@ -920,3 +920,50 @@ agree, all five counters run 100% without multiplexing. Setup/compilation/cold/
 warm/state checks are included, not isolated timed JIT or energy. Full locality,
 energy, broader applications, adaptive allocation, SIMD/multicore, integration,
 complete numerical/ISA/IRQ/pipeline/timing and sustained realtime remain open.
+
+
+Normalization/BFU semantic correction: failed timing budgets retained
+
+NORM now admits saturating single-bit SM steps; NORMF admits its BFU bypass.
+The same primary-source review corrects multi-bit ASL/ASR's former erroneous
+limiter and independent expectations. See saturated-normalization.txt. Continuous
+programs, channel counts, inputs, precision, native/helper/batch work and page
+storage remain unchanged. The correction claims semantic progress, not speed.
+
+Final-source immutable baseline 07cd524/candidate captures use CPU2 in
+baseline/candidate/candidate/baseline order with a natural warmup input second
+followed by the next measured input second. No project build/test/format job
+runs concurrently. External scheduling/frequency/activity remain uncontrolled.
+No state restore/replay/overhead subtraction. All 16 full states agree, but seven
+packages fail: one candidate/one baseline IIR, both candidates/both baselines
+spectral, and one baseline nonlinear. Candidate IIR reaches 229.77MIPS and
+spectral 168.95/236.44MIPS. Every matched capture has late blocks. These are failed
+budgets; process CPU demand below one second is not an alternative passing gate.
+
+The one final default gate also FAILS, without a repeat-until-pass capture:
+
+scene      wall s    process CPU s  actual MIPS  max/budget block ms  late
+FIR         0.536524  0.261458        507.27       8.373 / 1.333        71
+IIR         0.645986  0.517318        424.80       9.242 / 1.333        39
+spectral    1.222611  0.758929        209.96      27.710 /10.000        52
+nonlinear   0.594866  0.558503        445.01       2.592 / 1.333        31
+
+Every full state agrees. Spectral fails both the seconds deadline and 275-MIPS
+reference, and all four workloads miss block budgets. The large wall/CPU gaps
+suggest off-CPU delay, but its source is not isolated by this capture; it cannot
+be attributed to scheduling alone or ignored as irrelevant to actual realtime.
+The matched process-CPU differences are small: FIR/nonlinear decrease 0.61%/1.31%,
+IIR/spectral increase 0.77%/0.41%. None establishes a causal throughput change.
+
+Separate whole-process requested user PMU captures all agree, with five counters
+100% running/no multiplexing. Host instruction/data-load counts are essentially
+unchanged; cycles change -1.00%/-1.01%/-0.38%/+0.02% for FIR/IIR/spectral/nonlinear.
+FIR/spectral/nonlinear instruction misses rise 11.64%/1.31%/27.59%; spectral/
+nonlinear data misses rise 0.94%/1.53%. All increases remain. Scope includes setup,
+compilation/cold/warm/state checks, not isolated timed JIT or energy. These
+counters do not diagnose the wall-time delays or establish complete locality.
+Pre-BFU-review captures used incorrect numerical semantics and are retained only
+as private diagnostics, not final qualification. Earlier passing packages and
+older failed budgets remain recorded; none replaces the current failed gate.
+Complete ISA/modes/IRQ/pipeline/timing, general allocation, broader applications,
+SIMD/multicore, integration, sustained realtime/reserve and cache/energy stay open.

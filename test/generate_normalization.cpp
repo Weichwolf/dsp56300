@@ -376,7 +376,12 @@ void fault(Cases &cases, const BinaryCase &original, const FaultKind kind, const
 
 void faults(Cases &cases) {
   for (const Word mode : {0x2000U, 0x4000U, 0x20000U, 0x100000U, mode_up | mode_down}) {
-    const auto item = single({.status = mode, .count = 1, .selector = 2});
+    auto item = single({.status = mode, .count = 1, .selector = 2});
+    if (mode == 0x100000U) {
+      item.name = "NORMF BFU shift bypasses arithmetic saturation with SM set";
+      cases.push_back(std::move(item));
+      continue;
+    }
     fault(cases, item, FaultKind::unsupported_mode, mode);
   }
   for (const Word selector : {0U, 1U}) {

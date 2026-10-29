@@ -18,7 +18,7 @@ constexpr std::array shift_sources{
 }
 
 void Core::Impl::normalize_fast(const Word opcode) {
-  if (!numeric_mode_supported()) { return; }
+  if (!numeric_mode_supported(arithmetic_saturation)) { return; }
   const auto selector = (opcode >> 1) & 7U;
   if (selector < 2) {
     fail(FaultKind::invalid_instruction, Space::program, current_pc, opcode);
@@ -40,13 +40,16 @@ void Core::Impl::normalize_fast(const Word opcode) {
     arithmetic_shift(destination,
                      {.count = static_cast<unsigned>(shift < 0 ? -shift : shift),
                       .destination_b = destination_b,
-                      .left = shift < 0});
+                      .left = shift < 0,
+                      .saturate = false});
   }
   cpu.reg.sr = (cpu.reg.sr & ~carry) | saved_carry;
 }
 
 void Core::Impl::execute_iteration(const Instruction &decoded) {
-  if (!numeric_mode_supported()) { return; }
+  const auto saturation =
+      decoded.operation == Operation::normalize_iteration ? arithmetic_saturation : 0U;
+  if (!numeric_mode_supported(saturation)) { return; }
   const auto opcode = decoded.opcode;
   const bool destination_b = (opcode & 8U) != 0;
   auto &destination = destination_b ? cpu.reg.b : cpu.reg.a;

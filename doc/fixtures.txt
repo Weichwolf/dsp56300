@@ -888,3 +888,30 @@ rejection to exact success. Their initial registers and program/data inputs are
 unchanged; all other records and all fifty other old archives are byte-identical.
 The new archive brings the total to 52. Regeneration uses the normal exact-byte
 CTest check. Single-instruction qualification cases are not throughput benchmarks.
+
+
+SM normalization fixtures
+
+normalization-sm-fast.d56 and normalization-sm-iteration.d56 contain 50240 and
+29312 original independently calculated cases. The codec's existing per-archive
+limit is unchanged. One standalone generator accepts fast/iteration plus an
+output path and reports selected/complete matrix counts; neither producer nor
+expectation model links the core. New CTest registrations validate and reproduce
+both archives. See saturated-normalization.txt for exact matrices, state/Carry/
+limiter ordering, public-Core boundary witnesses and remaining ISA gaps.
+
+Iteration ordinal31148 and normalization ordinal28451 are the only old records
+promoted from unsupported SM to success. Initial registers/program/data remain
+identical. The separately audited BFU corrections below change only qualified
+expected results/labels; every unrelated serialized record and the other 48
+whole old archives remain byte-identical. The new
+finite matrices are not full ISA or physical timing qualification, nor single-call
+microbenchmarks for continuous DSP capacity.
+
+The reference review for these matrices found that multi-bit ASL/ASR use the
+BFU and bypass SM. Earlier saturated-shifts and two bit-operations expectations
+incorrectly applied the limiter. Their producers now preserve raw BFU results;
+single-bit parallel expectations keep limiting. Inputs/programs/budgets are not
+changed. See saturated-normalization.txt for the explicit ALU/BFU form controls
+and the complete-record audit; earlier green tests are not evidence for that
+incorrect numerical-mode interpretation.

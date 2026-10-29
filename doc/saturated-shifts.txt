@@ -2,16 +2,16 @@ Arithmetic shifts in saturation mode
 
 Scope and specification
 
-General 56-bit ASL/ASR now support arithmetic saturation (SM), in single-bit
-parallel, immediate and register-controlled forms. The shift operates first;
-the final raw result then enters the existing three-bit saturation table. A
-negative or positive limit sets V/L and recomputes E/U/N/Z for the stored result;
-Carry remains the last bit shifted out of the original operand. ASL also retains
-any sign change during the raw shift, even if the final sign changes back.
-A zero count clears Carry and still produces the qualified result/flags.
-Existing sticky S/L, scaling-sensitive E/U and all unrelated state survive.
+General 56-bit ASL/ASR accept SM in single-bit parallel and immediate/register
+forms. Single-bit parallel results enter the existing three-bit limiter. The
+multi-bit immediate/register forms use the BFU and bypass arithmetic saturation,
+even for encoded count one or zero. This distinction corrects the earlier
+qualification, which incorrectly limited BFU results. See saturated-normalization.txt.
+Carry is the last shifted-out original bit, cleared at zero count. Raw left-shift
+sign changes set V/L; a single-bit limiting event also sets V/L. Result flags
+use the stored value. Sticky S/L and unrelated state remain intact.
 
-Primary evidence is DSP56300FM Rev.5 section 3.2.3/table 3-1 and the ASL/ASR
+Primary evidence is DSP56300FM Rev.5 sections 3.1.5 and 3.2.3/table 3-1 and the ASL/ASR
 entries (13-14..17):
 https://www.nxp.com/docs/en/reference-manual/DSP56300FM.pdf
 Manufacturer copies/extracts remain ignored. No manufacturer program, other
@@ -22,7 +22,8 @@ A/B source                old raw56, aligned in core   latch before parallel tra
 count                     immediate / old control word only low six bits participate
 shifted Carry             original shifted-out bit     independent of limiter
 raw shift overflow        every left-step sign change preserve V/L event
-saturated result          EXT7/EXT0/MSP23 decision     existing 48-bit constants
+single-bit result         EXT7/EXT0/MSP23 decision     existing 48-bit constants
+BFU multi-bit result      raw56 shift                 explicit SM bypass
 E/U/N/Z, V and sticky L    canonical SR                 stored result / raw overflow
 RAM/I/O/P changes         existing transfer contracts  no ALU after failed transfer
 PC/progress/loop state    existing canonical core       every budget/callback/return
@@ -30,7 +31,7 @@ PC/progress/loop state    existing canonical core       every budget/callback/re
 Defined counts 0..55 are admitted. Existing diagnostics for undefined larger
 counts remain explicit software contracts, not claims that hardware traps.
 SA/SC/DM, reserved scaling and logical-shift/other unqualified SM forms retain
-unsupported-mode diagnostics. Normalize/divide admission is unchanged. SM native
+unsupported-mode diagnostics. NORM/NORMF now admit their distinct SM paths; DIV SM remains unsupported. SM native
 shift admission is also unchanged: the JIT uses exact general execution while
 ordinary eligible single-bit ASR retains emitted x64. Public state/API/layouts
 and instruction costs are unchanged. No new speed claim for SM shifts is made.
@@ -39,7 +40,8 @@ Independent witnesses
 
 The producer links only the fixture codec. Its independent raw56 array moves
 one bit per iteration; it does not reuse the executor's multi-bit host shifts.
-It applies the independently tested action table and raw signed flag model.
+It applies the action table only for single-bit forms; BFU forms retain raw
+results. This corrects the original erroneous all-forms limiting expectation.
 52632 new cases compare complete registers, all memory, exact costs and fault/
 execution contracts through reference/cached/JIT, yielding 1473697 assertions.
 Matrices include all immediate counts, source/destination pairs, all six legal
@@ -118,3 +120,14 @@ these failures with earlier passing captures. The identical saved baseline is
 also slower than in its earlier capture; the specific external cause is not
 established. No repeat-until-pass capture or PMU/energy claim is made. Broader
 and sustained latency qualification remains open with the full objective.
+
+
+BFU reference-review correction
+
+The first SM shift qualification misclassified the multi-bit forms. Section3.1.5
+places them in the BFU; section3.2.3 bypasses SM for every BFU operation. The
+current compiler-independent producer now distinguishes forms explicitly, even
+when counts match. Original inputs, case counts and all unrelated records stay
+unchanged. Old timing captures remain historical; green old expectations do not
+prove the formerly assumed semantics. See saturated-normalization.txt for the
+new mode/normalization matrices, complete-record audit and final qualification.

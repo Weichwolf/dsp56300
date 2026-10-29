@@ -38,11 +38,13 @@ Current implemented SM domains
 - TFR, Tcc and pure parallel MOVE families retain their distinct transfer or
   bypass behavior. MOVE A,A can limit and set L without setting V. Existing CMPU
   and BFU bypass semantics remain available.
-- Parallel, immediate and register-controlled ASL/ASR now support SM for counts
-  0..55, preserving old operands and shifted Carry while limiting the final
-  raw56 result. All qualified SM shifts currently use general execution; see
-  saturated-shifts.txt for independent bit-serial and boundary witnesses.
-- SC/SA/DM combinations, reserved scaling, logical shifts/normalization/division, other
+- Parallel single-bit ASL/ASR limit their raw result. Multi-bit immediate/register
+  ASL/ASR use the BFU and bypass SM, including counts zero/one. This corrects the
+  earlier qualification's erroneous all-forms limiter. NORM's single-bit step
+  can limit; NORMF uses BFU bypass. Old control/flag inputs, Carry and complete
+  NORM NOP behavior remain explicit. All these qualified SM forms retain general
+  execution; see saturated-shifts.txt and saturated-normalization.txt.
+- SC/SA/DM combinations, reserved scaling, logical shifts/division, other
   SM ALU forms and unqualified nonparallel/count transfers are still rejected
   explicitly. The full SM numerical mode is not claimed complete.
 

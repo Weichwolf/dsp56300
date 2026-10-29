@@ -58,6 +58,7 @@ void variants(Cases &cases,
               const Registers &state,
               shift_model::Control input,
               const unsigned selector = 0) {
+  input.saturate = false;
   for (const bool source_b : {false, true}) {
     for (const bool destination_b : {false, true}) {
       input.source_b = source_b;
@@ -111,8 +112,10 @@ void decisions(Cases &cases) {
           auto state = seed(mode | (extension ^ status_byte));
           state.a = (std::uint64_t{extension} << extension_shift) |
                     (high ? std::uint64_t{1} << msp_sign : 0) | low;
-          const shift_model::Control input{
-              .count = counts.at(extension % counts.size()), .left = left, .destination_b = high};
+          const shift_model::Control input{.count = counts.at(extension % counts.size()),
+                                           .left = left,
+                                           .destination_b = high,
+                                           .saturate = false};
           append(cases, state, input, shift_model::immediate(input));
         }
       }
@@ -163,7 +166,8 @@ void repetitions(Cases &cases, const Word mode) {
       item.expected = item.initial;
       for (unsigned i = 0; i < 3; ++i) {
         const auto count = register_model::read(item.expected, controls.at(selector - 2)) % 64;
-        shift_model::apply(item.expected, item.expected, {.count = count, .left = left});
+        shift_model::apply(
+            item.expected, item.expected, {.count = count, .left = left, .saturate = false});
       }
       item.expected.pc = start + 2;
       item.before = {
@@ -171,7 +175,7 @@ void repetitions(Cases &cases, const Word mode) {
       item.budget = 4;
       item.dispatches = 4;
       item.progress = {.instructions = 4, .estimated_cycles = 8};
-      item.name = "SM REP reevaluates old count aliases and saturates after every shift";
+      item.name = "SM REP reevaluates old count aliases; BFU shifts bypass arithmetic saturation";
       cases.push_back(std::move(item));
     }
   }

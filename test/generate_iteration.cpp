@@ -454,6 +454,15 @@ void faults(Cases &cases) {
                     .value = mode,
                     .pc = start};
       item.name = "DIV/NORM unimplemented numeric mode is explicit";
+      if (kind == Kind::normalize && mode == 0x100000U) {
+        // E=U=Z=0 selects NOP; SM must not limit this untouched accumulator.
+        ++item.expected.pc;
+        item.dispatches = 1;
+        item.progress = {.instructions = 1, .estimated_cycles = 5};
+        item.interruptible = true;
+        item.fault = {};
+        item.name = "NORM SM NOP preserves the complete old result and flags";
+      }
       cases.push_back(std::move(item));
     }
   }

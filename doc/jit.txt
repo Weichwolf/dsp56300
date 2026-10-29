@@ -499,10 +499,15 @@ SM arithmetic shifts retain general execution
 Parallel ASL/ASR and immediate/register-controlled arithmetic shifts now have
 qualified general SM semantics. Existing SM native admission intentionally
 rejects them, so the JIT helper publishes exact old operands, shifted Carry,
-saturation/flags and progress. Ordinary eligible single-bit ASR remains native.
+applicable limiting/flags and progress. Single-bit parallel ASL/ASR can saturate;
+multi-bit BFU forms bypass SM even for count one. NORM's single-bit SM step and
+NORMF's BFU bypass now use the same general boundaries; no native admission is
+expanded. Ordinary eligible single-bit ASR remains native.
 Independent same-PC mode changes and real dispatch counters verify this split;
 callbacks/P edits and rejected transfers retain their canonical boundaries.
 See saturated-shifts.txt for scope and independent binary/host witnesses.
+The later BFU reference review corrects the original multi-bit limiting assumption;
+see saturated-normalization.txt for form controls and revised independent records.
 
 
 Value-domain certificates in native emission

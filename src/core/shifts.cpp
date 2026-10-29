@@ -44,7 +44,9 @@ void Core::Impl::arithmetic_shift(const std::uint64_t value, const ShiftControl 
     }
   }
   arithmetic_flags(result, overflowed);
-  if ((cpu.reg.sr & arithmetic_saturation) != 0) { saturate_arithmetic(result); }
+  if (control.saturate && (cpu.reg.sr & arithmetic_saturation) != 0) {
+    saturate_arithmetic(result);
+  }
   (control.destination_b ? cpu.reg.b : cpu.reg.a) = result;
   cpu.reg.sr = (cpu.reg.sr & ~carry) | (carried ? carry : 0);
 }
@@ -107,7 +109,8 @@ void Core::Impl::execute_shift(const Instruction &decoded) {
   const ShiftControl control{.count =
                                  count & (arithmetic ? arithmetic_count_mask : logical_count_mask),
                              .destination_b = (opcode & 1U) != 0,
-                             .left = left};
+                             .left = left,
+                             .saturate = false};
   if (arithmetic) {
     const bool source_b =
         (opcode & (1U << (immediate ? arithmetic_source_bit : register_source_bit))) != 0;

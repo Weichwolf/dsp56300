@@ -365,9 +365,10 @@ interrupt/pipeline/timing and broader application qualification remain open.
 ASL/ASR arithmetic-saturation qualification increment
 
 Parallel single-bit and immediate/register-controlled arithmetic shifts now admit
-SM in ordinary 56-bit operation. Counts 0..55 shift the original operand, retain
-the shifted-out Carry and apply the three-bit post-result saturation decision.
-Flags describe the stored value; shift overflow and limiting retain sticky L.
+SM in ordinary 56-bit operation. Counts 0..55 shift the original operand and retain shifted-out Carry. The
+later BFU review corrects the original all-forms limiting assumption: only
+single-bit parallel shifts apply SM; multi-bit BFU forms bypass it. Flags describe
+the stored value, with raw overflow and applicable limiting retaining sticky L.
 Native SM shift admission is intentionally unchanged, so JIT uses the qualified
 general implementation. Other modes and logical shifts retain diagnostics.
 
@@ -407,3 +408,26 @@ are not all legal operand pairs, physical timing or complete instruction-family
 qualification. All 118 catalogue entries remain partial; the structural audit
 must pass and require-complete must still fail. No numerical-mode/native ISA
 admission is expanded by holding derived word values.
+
+
+Normalization and BFU arithmetic-saturation qualification
+
+NORM now admits saturating single-bit SM steps; its old-E/U/Z NOP branch leaves
+all state intact. NORMF admits SM but bypasses limiting because section3.1.5
+classifies it as a BFU operation. The same source review corrects multi-bit
+ASL/ASR's previous limiting implementation and expectations: these BFU forms
+also bypass SM, even for encoded count one. Single-bit parallel shifts retain
+limiting. NORMF count zero updates result flags without changing raw value; old
+signed controls, Carry/S and sticky L remain exact. Other modes and DIV SM retain
+diagnostics. No public layout/native admission change.
+
+79552 new bit-serial/table-model cases cover fast counts/sources/destinations,
+scaling/RM, selected all-CCR matrices, all eight exponents, extension/bit patterns,
+REP reevaluation/partial prefixes and DO cleanup. Public-Core controls compare
+equal shifts across ALU/BFU forms, real native/general prefixes, same-PC modes,
+callbacks/P edits/failures and out-of-domain diagnostics. Old BFU expectations
+are corrected without changing inputs; unrelated serialized records stay equal.
+See saturated-normalization.txt. The original erroneous mode interpretation and
+pre-review artifacts are retained explicitly rather than treated as evidence of
+final correctness. Complete modes/ISA/IRQ/pipeline/timing and hardware ambiguities
+remain open; all 118 rows stay partial and require-complete must still fail.
