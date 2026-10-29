@@ -6,6 +6,7 @@
 #include "native_moves.hpp"
 #include "native_region.hpp"
 #include "value_ranges.hpp"
+#include "word_reuse.hpp"
 #include "x64.hpp"
 
 #include <array>
@@ -23,7 +24,8 @@ public:
              std::array<Word, agu_registers> modifiers = {},
              RegionMode region = RegionMode::automatic,
              LoopResidency residency = LoopResidency::automatic,
-             RangeMode ranges = RangeMode::automatic);
+             RangeMode ranges = RangeMode::automatic,
+             WordReuseMode words = WordReuseMode::automatic);
   [[nodiscard]] std::vector<std::uint8_t> generate(std::span<const NativeOp> operations);
 
   [[nodiscard]] bool packed_retirement() const noexcept { return packed_retirement_; }
@@ -41,6 +43,8 @@ public:
   [[nodiscard]] bool loop_residency() const noexcept { return loop_residency_; }
 
   [[nodiscard]] bool loop_bank_cache() const noexcept { return loop_bank_cache_; }
+
+  [[nodiscard]] bool word_reuse() const noexcept { return reused_words_; }
 
 private:
   [[nodiscard]] bool lowerable(const NativeOp &operation) const;
@@ -78,6 +82,11 @@ private:
   void move_read_register(x64::Reg value, const NativeMove &move, Word mode);
   void move_write_register(x64::Reg value, unsigned reg);
   void multiply(const NativeOp &operation);
+  [[nodiscard]] bool gpr_product(const NativeOp &operation);
+  void invalidate_word_reuse(const WordReuseStep &step);
+  void
+  product_word(x64::Reg destination, const NativeOp &operation, unsigned selector, bool scaled);
+  [[nodiscard]] std::vector<WordReuseStep> word_effects(std::span<const NativeOp> operations) const;
   void addition(const NativeOp &operation);
   void right_shift(const NativeOp &operation);
   void round(Word mode);
@@ -136,6 +145,9 @@ private:
   RegionMode region_mode_;
   LoopResidency residency_mode_;
   RangeMode range_mode_;
+  WordReuseMode word_mode_;
+  Word word_valid_ = 0, word_populate_ = 0, word_selected_ = 0;
+  bool reused_words_ = false;
   NativeValueProof value_proof_;
   NativeRegion region_;
   bool mac_batches_ = false;

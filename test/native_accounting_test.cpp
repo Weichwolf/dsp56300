@@ -14,6 +14,7 @@
 #include "support.hpp"
 #include "translation.hpp"
 #include "value_ranges.hpp"
+#include "word_reuse.hpp"
 
 #include <array>
 #include <cstddef>
@@ -129,7 +130,7 @@ bool moved(const Step step) {
          step.action == Action::reg;
 }
 
-enum class Pattern : std::uint8_t { mixed, loads, crossed, only_a, only_b };
+enum class Pattern : std::uint8_t { mixed, loads, crossed, only_a, only_b, reused };
 
 struct Shape {
   Word mode = 0, first = start;
@@ -138,10 +139,18 @@ struct Shape {
   Pattern pattern = Pattern::mixed;
   detail::LoopResidency residency = detail::LoopResidency::automatic;
   detail::RangeMode ranges = detail::RangeMode::automatic;
+  detail::WordReuseMode word_reuse = detail::WordReuseMode::automatic;
 };
 
 std::vector<Step> steps(const Shape shape) {
   auto result = body();
+  if (shape.pattern == Pattern::reused) {
+    constexpr std::array<Word, 8> products{
+        0x200080, 0x200090, 0x2000d2, 0x2000f3, 0x2000b0, 0x2000e1, 0x2000a2, 0x2000c3};
+    for (const auto product : products) {
+      result.insert(result.begin() + 3, {.word = product, .ports = {}});
+    }
+  }
   if (shape.pattern == Pattern::loads) {
     result[4] = single({.reg = 14}, mac_round_b);
     result[5] = single({.reg = 15, .cursor = 1, .y = true}, adc_x_a);
@@ -405,7 +414,8 @@ void direct_shape(const Shape shape) {
                              register_model::seed(0).m,
                              detail::RegionMode::guarded,
                              shape.residency,
-                             shape.ranges);
+                             shape.ranges,
+                             shape.word_reuse);
   const native::Direct code(emitter.generate(ops));
   require(emitter.coalesced_accounting() == (ops.size() <= 256) && emitter.guarded_region() &&
               emitter.packed_retirement() && emitter.cached_status(),
@@ -416,6 +426,10 @@ void direct_shape(const Shape shape) {
   require(emitter.loop_bank_cache() ==
               (shape.loop && shape.residency == detail::LoopResidency::vectors),
           "Only helper-free resident loops hold X/Y separately from old parallel snapshots");
+  if (shape.pattern == Pattern::reused) {
+    require(emitter.word_reuse() == (shape.word_reuse != detail::WordReuseMode::disabled),
+            "Only cost-admitted repeated words populate extra native slots");
+  }
   for (Word flags = 0; flags <= status_byte; ++flags) {
     direct_case(code,
                 memory,
@@ -447,8 +461,12 @@ void direct_matrix() {
 }
 
 void residency_patterns(const Word mode) {
-  for (const auto pattern :
-       {Pattern::mixed, Pattern::loads, Pattern::crossed, Pattern::only_a, Pattern::only_b}) {
+  for (const auto pattern : {Pattern::mixed,
+                             Pattern::loads,
+                             Pattern::crossed,
+                             Pattern::only_a,
+                             Pattern::only_b,
+                             Pattern::reused}) {
     for (const auto residency : {detail::LoopResidency::automatic,
                                  detail::LoopResidency::vectors,
                                  detail::LoopResidency::disabled}) {
@@ -466,6 +484,20 @@ void residency_patterns(const Word mode) {
                       .pattern = pattern,
                       .residency = residency,
                       .ranges = detail::RangeMode::disabled});
+        direct_shape({.mode = mode,
+                      .first = word_mask - 5,
+                      .loop = true,
+                      .alias = alias,
+                      .pattern = pattern,
+                      .residency = residency,
+                      .word_reuse = detail::WordReuseMode::disabled});
+        direct_shape({.mode = mode,
+                      .first = word_mask - 5,
+                      .loop = true,
+                      .alias = alias,
+                      .pattern = pattern,
+                      .residency = residency,
+                      .word_reuse = detail::WordReuseMode::vectors});
       }
     }
   }
@@ -622,6 +654,11 @@ public:
                core->registers() == expected && core->progress() == progress;
     if (observed && accept && patch) { core->write(Space::program, extension_address, datum); }
     value = datum;
+    asm volatile("pcmpeqd %%xmm8, %%xmm8\n\tpxor %%xmm9, %%xmm9\n\t"
+                 "pcmpeqd %%xmm10, %%xmm10\n\tpxor %%xmm11, %%xmm11"
+                 :
+                 :
+                 : "xmm8", "xmm9", "xmm10", "xmm11");
     return observed && accept;
   }
 

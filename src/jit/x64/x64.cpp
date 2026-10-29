@@ -178,15 +178,19 @@ void Code::store(const Reg base, const std::size_t offset, const Reg source, con
 
 void Code::packed(const Packed operation, const Xmm destination, const Xmm source) {
   byte(operand_prefix);
+  rex(Width::dword, static_cast<unsigned>(destination), static_cast<unsigned>(source));
   raw({0x0f, static_cast<std::uint8_t>(operation)});
-  byte(mod_register | (static_cast<unsigned>(destination) << 3) | static_cast<unsigned>(source));
+  byte(mod_register | ((static_cast<unsigned>(destination) & 7) << 3) |
+       (static_cast<unsigned>(source) & 7));
 }
 
 void Code::packed_shift_right(const Xmm destination, const unsigned count) {
   constexpr unsigned packed_shift = 0x73;
   constexpr unsigned logical_right_group = 2;
-  raw({operand_prefix, 0x0f, packed_shift});
-  byte(mod_register | (logical_right_group << 3) | static_cast<unsigned>(destination));
+  byte(operand_prefix);
+  rex(Width::dword, logical_right_group, static_cast<unsigned>(destination));
+  raw({0x0f, packed_shift});
+  byte(mod_register | (logical_right_group << 3) | (static_cast<unsigned>(destination) & 7));
   byte(count);
 }
 
@@ -195,7 +199,7 @@ void Code::scalar_from(const Xmm destination, const Reg source, const Width widt
   byte(operand_prefix);
   rex(width, static_cast<unsigned>(destination), static_cast<unsigned>(source));
   raw({0x0f, move_dword});
-  byte(mod_register | (static_cast<unsigned>(destination) << 3) |
+  byte(mod_register | ((static_cast<unsigned>(destination) & 7) << 3) |
        (static_cast<unsigned>(source) & 7));
 }
 
@@ -204,7 +208,7 @@ void Code::scalar_to(const Reg destination, const Xmm source, const Width width)
   byte(operand_prefix);
   rex(width, static_cast<unsigned>(source), static_cast<unsigned>(destination));
   raw({0x0f, move_qword});
-  byte(mod_register | (static_cast<unsigned>(source) << 3) |
+  byte(mod_register | ((static_cast<unsigned>(source) & 7) << 3) |
        (static_cast<unsigned>(destination) & 7));
 }
 

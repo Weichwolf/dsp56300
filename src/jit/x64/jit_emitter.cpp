@@ -10,6 +10,7 @@
 #include "native_moves.hpp"
 #include "native_region.hpp"
 #include "value_ranges.hpp"
+#include "word_reuse.hpp"
 #include "x64.hpp"
 
 #include <algorithm>
@@ -20,7 +21,6 @@
 #include <limits>
 #include <span>
 #include <type_traits>
-#include <utility>
 #include <vector>
 
 namespace dsp56300::detail {
@@ -70,14 +70,16 @@ JitEmitter::JitEmitter(const JitRuntime runtime,
                        const std::array<Word, agu_registers> modifiers,
                        const RegionMode region,
                        const LoopResidency residency,
-                       const RangeMode ranges)
+                       const RangeMode ranges,
+                       const WordReuseMode words)
     : runtime_(runtime),
       modifiers_(modifiers),
       optimize_(optimize),
       batch_backend_(batch),
       region_mode_(region),
       residency_mode_(residency),
-      range_mode_(ranges) {}
+      range_mode_(ranges),
+      word_mode_(words) {}
 
 bool JitEmitter::has_moves(const NativeOp &operation) {
   return operation.instruction.operation == Operation::parallel &&
@@ -227,22 +229,13 @@ void JitEmitter::helper(const JitHelper function, const NativeOp &operation) {
 
 void JitEmitter::multiply(const NativeOp &operation) {
   const auto opcode = operation.instruction.opcode;
-  constexpr std::array<std::array<unsigned, 2>, 8> pairs{
-      {{0, 0}, {2, 2}, {1, 0}, {3, 2}, {0, 3}, {2, 0}, {1, 2}, {3, 1}}};
-  auto pair = pairs.at((opcode >> 4) & 7);
-  if ((pair[0] & 1U) != 0 && (pair[1] & 1U) == 0) { std::swap(pair[0], pair[1]); }
-  const bool square = pair[0] == pair[1];
-  const bool scaled = !square && (pair[0] & 1U) == 0;
-  const auto operand = [this,
-                        &operation](const Reg reg, const unsigned selector, const bool aligned) {
-    value(reg, selector < 2 ? 2U : 3U, has_moves(operation));
-    code_.shift(shift_left, reg, (selector & 1U) == 0 ? low_word_shift : high_word_shift);
-    code_.shift(shift_arithmetic, reg, low_word_shift - (aligned ? product_shift : 0U));
-  };
-  operand(Reg::ax, pair[0], scaled);
-  if (!square) { operand(Reg::dx, pair[1], false); }
-  code_.multiply({.destination = Reg::ax, .source = square ? Reg::ax : Reg::dx});
-  if (!scaled) { code_.shift(shift_left, Reg::ax, product_shift); }
+  if (!gpr_product(operation)) {
+    const auto operands = product_operands(operation.instruction);
+    product_word(Reg::ax, operation, operands.words[0], operands.scaled);
+    if (!operands.square) { product_word(Reg::dx, operation, operands.words[1], false); }
+    code_.multiply({.destination = Reg::ax, .source = operands.square ? Reg::ax : Reg::dx});
+    if (!operands.scaled) { code_.shift(shift_left, Reg::ax, product_shift); }
+  }
   if ((opcode & 4U) != 0) { code_.unary(3, Reg::ax); }
   if ((opcode & 2U) != 0 && !value_proof_.zero_addend) {
     value(Reg::dx, (opcode & 8U) != 0 ? 1U : 0U, has_moves(operation));
@@ -413,11 +406,23 @@ std::vector<std::uint8_t> JitEmitter::generate_body(const std::span<const Native
     region_guard(code_, Reg::r12, exits_.at(dirty_accumulators()));
   }
   const auto flags = plan_flags(operations);
+  const auto effects = word_effects(operations);
+  const auto populations = word_mode_ == WordReuseMode::vectors
+                               ? plan_word_reuse(effects)
+                               : std::vector<Word>(operations.size());
+  const auto selections = word_mode_ == WordReuseMode::automatic
+                              ? plan_gpr_word_reuse(effects)
+                              : std::vector<Word>(operations.size());
+  word_valid_ = 0;
   NativeValueRanges ranges;
   for (std::size_t operation_index = 0; operation_index < operations.size(); ++operation_index) {
     const auto &operation = operations[operation_index];
     live_flags_ = flags[operation_index];
     dataflow_ = analyze_dataflow(operation.instruction);
+    const auto &effect = effects[operation_index];
+    if (effect.barrier) { word_valid_ = 0; }
+    word_populate_ = populations[operation_index];
+    word_selected_ = selections[operation_index];
     prepare_value_proof(operation, ranges);
     if (lowerable(operation)) {
       if (is_loop_setup(operation)) {
@@ -438,6 +443,7 @@ std::vector<std::uint8_t> JitEmitter::generate_body(const std::span<const Native
       code_.immediate(group_cmp, Reg::ax, 2, Width::dword);
       exit_if(Branch::not_equal);
     }
+    invalidate_word_reuse(effect);
   }
   materialize_pending_accounting();
   finish();

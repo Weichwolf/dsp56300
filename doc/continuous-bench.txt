@@ -822,3 +822,58 @@ Previous failed packages, 263/273-MIPS spectral captures and every old block mis
 remain evidence above and in loop-residency.txt. Current passing samples do not
 replace them or qualify indefinite/all-program realtime. The full objective,
 including complete ISA, remains active; this is another compiler increment.
+
+
+Cost-selected word reuse, with a rejected automatic SSE candidate
+
+All guest archives/producers and actual work counts remain unchanged. Both
+133-test suites pass; all 24 complete stream/backend states and four strict
+report-only states agree. Concurrent backend timing failures remain correctness
+only; strict FIR/spectral packages fail with 90/14/100/50 late blocks.
+
+An initial four-word SSE candidate reduces IIR data loads 6.61% but raises host
+cycles 0.14%, with no robust timed CPU benefit. Matched CPU demand increases
+0.86%/0.04%/0.001%/0.08% across FIR/IIR/spectral/nonlinear. It is not selected
+automatically; the explicit private path and full negative evidence remain.
+Initial whole-process FIR instruction misses rise 641.12%; no locality/energy
+claim follows from fewer loads. See word-reuse.txt for all metrics and scopes.
+
+A distinct one-GPR candidate uses RCX only within a cost-admitted pure segment,
+placing the chosen word directly in the IMUL source role. Separate CPU2 baseline/
+candidate/candidate/baseline captures use one natural input second warmup then
+the next measured second, with no restoration/replay/padding/overhead subtraction.
+No concurrent project compilation/test execution/format jobs; external host
+conditions remain uncontrolled. All sixteen exact states and seconds packages
+pass. Spectral CPU decreases 2.77%; FIR increases 2.30%, retained with unproved
+causal attribution (its MAC batch is largely unchanged). IIR/nonlinear small
+differences have no robust causal claim. All guest/native/helper/move/batch/AVX2
+work and page bytes remain equal. The initial SSE and final GPR captures have
+different host conditions; do not compare their absolute times as a speed gain.
+
+Matched block misses, baseline then candidate, both samples:
+FIR        baseline 0/0,   candidate 1/0
+IIR        baseline 0/13,  candidate 0/0
+spectral   baseline 13/11, candidate 3/4
+nonlinear  baseline 0/0,   candidate 0/0
+
+Separate final default gate, all states and one-second packages pass:
+Scenario   Wall s      Process CPU s   MIPS       Max block / budget ms   Late
+FIR        0.269736    0.267459         1008.98      1.436 / 1.333            1
+IIR        0.523179    0.522940          524.52      0.767 / 1.333            0
+spectral   0.792007    0.791523          324.12      8.089 /10.000            0
+nonlinear  0.609135    0.584442          434.58      4.792 / 1.333            9
+
+The package gate reports but does not enforce every block budget or a separate
+MIPS floor. These block failures remain; new passing packages do not replace
+older 263/273-MIPS spectral captures, the failed 1.037437-second baseline package
+or any historical late blocks. See loop-residency.txt. No repeat-until-pass
+capture is used. Full timing, reserve and indefinite/all-program realtime remain
+unqualified, as do complete ISA and the other full-objective requirements.
+
+A separate final GPR user-PMU comparison, all requested counters at 100%, gives
+spectral instruction/load/cycle decreases 0.20%/0.55%/2.16%. FIR cycles increase
+1.58%; FIR/spectral/nonlinear instruction misses increase 11.76%/15.97%/13.86%.
+All increases remain recorded. Scope includes setup/compilation/cold/warm/state
+checks, not isolated JIT or energy. The automatic policy uses the conservative
+pure GPR format; SSE remains explicit/private. This is a measured tradeoff with
+complete-state witnesses, not a universal speed or full allocation claim.

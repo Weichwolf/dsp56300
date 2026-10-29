@@ -1,14 +1,14 @@
 Native-region compiler research
 
 The objective is one DSP56300 program with arbitrary supported control flow,
-full architectural semantics and at least 270 million guest instructions/s per
+full architectural semantics and at least 275 million guest instructions/s per
 host core on representative workloads. SIMD and multicore execution should
 exploit independent work expressed serially by the guest. The emulator owns memory bounds, code versions, instruction/time budgets,
 interrupt/I/O boundaries and architectural commit. Host computation may finish early without advancing guest
 time early. Full ISA, precise timing and sustained realtime qualification remain
 incomplete; the current emitter is a partial compiler with many general helpers.
 
-270 MIPS is a baseline/reference load, not a throughput cap or reason to stop.
+275 MIPS is a baseline/reference load, not a throughput cap or reason to stop.
 Optimize maximum real guest throughput and measured host CPU time/load needed
 to sustain that load, while preserving latency/event constraints. Report both
 unthrottled throughput and fixed-load CPU consumption; energy needs its own

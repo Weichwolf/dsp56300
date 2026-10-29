@@ -396,3 +396,14 @@ See product-coordinates.txt. This is exact compiler representation qualification
 not exhaustive operand pairs, complete physical DSP timing or new immediate/
 power-of-two/mixed-signed support. The four catalogue rows remain partial, as do
 all 118 catalogue entries. Structural audit must pass; require-complete must fail.
+
+
+Word reuse expands the native ordinary-product matrix to 50452992 checks per
+build, including repeated and biased prefixes, all 128 forms, GPR/SSE/disabled
+controls, both width controls and six scaling/RM choices with SM clear/set.
+Additional independent planning/encoding/accounting witnesses qualify the new
+compiler representations; see word-reuse.txt. Finite word/flag/sequence matrices
+are not all legal operand pairs, physical timing or complete instruction-family
+qualification. All 118 catalogue entries remain partial; the structural audit
+must pass and require-complete must still fail. No numerical-mode/native ISA
+admission is expanded by holding derived word values.

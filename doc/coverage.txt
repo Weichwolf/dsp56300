@@ -97,12 +97,12 @@ and old parallel operands without memory/I/O observation barriers. All 6758417
 directed ASR/register assertions pass; no ISA catalogue row becomes complete.
 See doc/native-shifts.txt for guards, witnesses, measurements and remaining work.
 
-The current configuration passes all 132 correctness tests in release (102.79 s,
-two CTest processes) and strict ASan/UBSan (230.00 s, three), zero skips. All 147
+The current configuration passes all 133 correctness tests in release (133.32 s,
+two CTest processes) and strict ASan/UBSan (282.01 s, three), zero skips. All 150
 C++ translation units retain strict nonrecovering address/undefined/integer
-instrumentation; all 187 project C++ source/header files pass clang-format/tidy/
+instrumentation; all 191 project C++ source/header files pass clang-format/tidy/
 Werror. All 52 binary archives and their producers remain unchanged in the
-current product-coordinate increment; all exact regeneration checks pass. No
+current cost-selected word-reuse increment; all exact regeneration checks pass. No
 fuzzing was run. Structural ISA audit passes; require-complete remains a failing
 gate with 118 partial/zero complete entries.
 
@@ -116,18 +116,18 @@ stream/backend states and four strict report-only states. Concurrent reports
 retain timing failures and qualify correctness, not optimized speed.
 
 The latest optimized default bench passes all four one-second packages: FIR
-0.233063 s, IIR 0.473391 s, spectral 0.715774 s, nonlinear 0.531100 s. Every
-complete state matches; all four have zero late blocks in that capture. Actual
-rates are 1167.75/579.68/358.64/498.44 MIPS. All sixteen matched states/packages/
-block deadlines pass; mean CPU demand falls 1.02%/2.24%/0.13%/2.75%. FIR has
-unproved attribution, and the small FFT change is not a robust speed claim.
-Guest work counts and page storage are equal. Earlier 264-MIPS/default block
-failures, 273.07/263.29-MIPS matched candidates and the 1.037437-second baseline
-package failure remain recorded. New passing samples do not replace those
-observations. External scheduling/frequency causes are unproved. See
-continuous-bench.txt, loop-residency.txt, value-ranges.txt and product-coordinates.txt.
-Sustained latency/reserve and wider qualification remain open; correctness/package
-gates do not prove all-program realtime.
+0.269736 s, IIR 0.523179 s, spectral 0.792007 s, nonlinear 0.609135 s. Every
+complete state matches. FIR/nonlinear retain 1/9 late blocks; IIR/spectral have
+zero in this capture. Actual rates are 1008.98/524.52/324.12/434.58 MIPS. The
+matched one-GPR candidate reduces spectral CPU demand 2.77%, with a retained
+2.30% FIR increase and small/noncausal IIR/nonlinear differences. All sixteen
+states/packages pass; matched candidate block misses remain FIR1/0, spectral3/4.
+Guest work and page storage are equal. Earlier 264-MIPS/default block failures,
+273.07/263.29-MIPS candidates and the 1.037437-second baseline package failure
+remain recorded. Passing packages do not replace failed block budgets. External
+scheduling/frequency effects and causal FIR attribution are unproved. See
+continuous-bench.txt, loop-residency.txt and word-reuse.txt. Sustained latency/
+reserve and broader qualification remain open; no all-program realtime claim.
 
 The expanded native-move boundary test passes all 78446 assertions in both builds.
 It includes exact same-code reuse after modifier changes and paired aliased X/Y
@@ -683,3 +683,46 @@ The ISA catalogue remains 118 partial/zero complete; ordinary product compiler
 witnesses do not finish immediate/power-of-two/mixed-signed forms. Full numerical/
 ISA, IRQ/pipeline/timing, adaptive allocation, broader domains, SIMD/multicore,
 integration and sustained realtime/cache/energy remain active objective gaps.
+
+
+Cost-selected product-word representations
+
+A pure native segment can retain one sign-extended word in RCX and use it directly
+as an IMUL source. The compiler compares four choices and no-copy costs, admits
+only a positive winner and treats every move/helper/loop setup as a boundary.
+Canonical X/Y and all architectural writes remain authoritative; roots/headers
+start empty. A separate explicit SSE experiment holds four derived words with
+precise half invalidation after old parallel reads and erases around helpers.
+It reduces loads without a robust CPU benefit and is not selected automatically.
+High-XMM scalar/packed encodings are independently qualified. See word-reuse.txt.
+
+Both 133-test suites and all 52 archive regenerations pass. Per build, independent
+checks include 1857255 compiler decisions, 202020 input/encoding, 5773155 native
+accounting and 50452992 product assertions. The latter covers held-operand cases
+for all 128 ordinary forms with automatic-GPR/explicit-SSE/disabled controls,
+both range controls and six scaling/RM modes with SM clear/set. Existing width
+and native SM matrices remain. All archives/producers are unchanged; all 24
+complete backend states and four strict states agree. Concurrent all-backend
+package/block failures remain correctness-only evidence. Strict timing retains
+FIR/spectral package failures and 90/14/100/50 late blocks.
+
+SSE's IIR loads drop 6.61% while cycles rise 0.14%; no robust timed gain follows.
+The separate GPR comparison observes 2.77% lower spectral CPU demand and 2.16%
+fewer whole-process user cycles, with a retained 2.30% FIR CPU increase. IIR/
+nonlinear changes have no robust causal claim. Every matched GPR package/state
+passes; all baseline/candidate block misses stay in word-reuse.txt. The latest
+default retains FIR/nonlinear block failures despite passing seconds packages.
+GPR PMU instruction misses rise 11.76%/15.97%/13.86% for FIR/spectral/nonlinear;
+the initial SSE phase's 641.12% FIR instruction-miss increase remains recorded.
+Counters include setup/compilation/cold/warm/checks, not isolated JIT or energy.
+All 118 ISA catalogue rows remain partial. Full numerical/ISA, IRQ/pipeline/
+timing, general allocation, additional domains, SIMD/multicore, integration and
+sustained realtime/cache/energy remain open under the unchanged objective.
+
+
+After the full sweeps, a test-only review addition qualifies explicit SSE and
+automatic GPR reuse around real clobbering native helpers, including acceptance,
+partial rejection and invalidation with old current/new suffix inputs. Both
+builds pass the expanded input target (202020 assertions); production code and
+the measured runner stay unchanged. See word-reuse.txt for exact matrix and
+post-suite scope. All other previously green tests remain unchanged.

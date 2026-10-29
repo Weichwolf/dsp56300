@@ -12,6 +12,7 @@
 #include "saturation_model.hpp"
 #include "support.hpp"
 #include "value_ranges.hpp"
+#include "word_reuse.hpp"
 
 #include <array>
 #include <cstdint>
@@ -43,10 +44,20 @@ struct Step {
   unsigned source = 0, destination = 0;
 };
 
-enum class Shape : std::uint8_t { plain, zero, other_accumulator, crossed };
+enum class Shape : std::uint8_t { plain, zero, other_accumulator, crossed, repeated, biased_low };
 
 std::vector<Step> steps(const Word product, const Shape shape) {
   if (shape == Shape::plain) { return {{.code = parallel_none | product}}; }
+  if (shape == Shape::repeated) { return std::vector<Step>(3, {.code = parallel_none | product}); }
+  if (shape == Shape::biased_low) {
+    const auto group = (product >> 4) & 7U;
+    constexpr Word square_x0 = 0x80;
+    constexpr Word square_y0 = 0x90;
+    const auto square = group == 1 || group == 3 || group == 6 ? square_y0 : square_x0;
+    std::vector<Step> result(4, {.code = parallel_none | square});
+    result.push_back({.code = parallel_none | product});
+    return result;
+  }
   const Word destination = (product & 8U) != 0 ? 15U : 14U;
   std::vector<Step> result{{.code = parallel_none | clear | (product & 8U)}};
   if (shape == Shape::zero) {
@@ -174,19 +185,29 @@ void probes(const native::Direct &code, const std::span<const Step> body, const 
 
 void matrix(const Word mode) {
   for (Word product = 0x80; product <= status_byte; ++product) {
-    for (const auto shape : {Shape::plain, Shape::zero, Shape::other_accumulator, Shape::crossed}) {
+    for (const auto shape : {Shape::plain,
+                             Shape::zero,
+                             Shape::other_accumulator,
+                             Shape::crossed,
+                             Shape::repeated,
+                             Shape::biased_low}) {
       const auto body = steps(product, shape);
       const auto ops = operations(body, mode);
       for (const auto ranges : {detail::RangeMode::automatic, detail::RangeMode::disabled}) {
-        detail::JitEmitter emitter({.execute = forbidden, .moves = forbidden, .memory = {}},
-                                   true,
-                                   BatchBackend::disabled,
-                                   {},
-                                   detail::RegionMode::ordinary,
-                                   detail::LoopResidency::disabled,
-                                   ranges);
-        const native::Direct code(emitter.generate(ops));
-        probes(code, body, mode);
+        for (const auto words : {detail::WordReuseMode::automatic,
+                                 detail::WordReuseMode::vectors,
+                                 detail::WordReuseMode::disabled}) {
+          detail::JitEmitter emitter({.execute = forbidden, .moves = forbidden, .memory = {}},
+                                     true,
+                                     BatchBackend::disabled,
+                                     {},
+                                     detail::RegionMode::ordinary,
+                                     detail::LoopResidency::disabled,
+                                     ranges,
+                                     words);
+          const native::Direct code(emitter.generate(ops));
+          probes(code, body, mode);
+        }
       }
     }
   }

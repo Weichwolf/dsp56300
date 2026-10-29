@@ -59,7 +59,8 @@ JitEmitter::generate_selected(const std::span<const NativeOp> operations) {
                   modifiers_,
                   RegionMode::guarded,
                   residency_mode_,
-                  range_mode_);
+                  range_mode_,
+                  word_mode_);
   const auto guarded = fast.generate(operations);
   x64::Code selector;
   x64::Label fallback;

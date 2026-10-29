@@ -532,3 +532,18 @@ Old parallel snapshots, numerical/flag behavior and all checkpoints remain exact
 No public layout, host ISA or numerical-mode admission changes. See
 product-coordinates.txt for proofs, finite independent RX witnesses and measured
 tradeoffs. This does not complete the adaptive allocator or full ISA objective.
+
+
+Cost-selected product word reuse
+
+Native pure compute segments can keep one sign-extended X/Y word in RCX. The
+compiler enumerates per-word population/use costs and selects only a positive
+winner. It places the chosen value directly in the IMUL source role, preserving
+exact low-word scaling and high-word final scaling. All move-bearing operations,
+possible helpers and native loop setups are boundaries; roots/headers reload.
+Canonical X/Y and all original writes remain authoritative. A private disabled
+control and a separate four-word SSE experiment compare in the same build.
+The SSE experiment saves loads but gives no robust matched CPU benefit and is
+not automatic. See word-reuse.txt for proof, independent compiler/RX/numerical
+witnesses and complete measurement scopes including regressions and late blocks.
+No ISA row, full adaptive allocator or sustained realtime requirement is completed.

@@ -1,0 +1,229 @@
+Pattern-selected reuse of signed24 product words
+
+Scope and canonical state
+
+The native compiler can retain read-through signed24 words without changing the
+canonical X/Y register banks. Every guest write still updates its original
+raw48 storage. The additional values contain only derived old-read data, so no
+new dirty state needs publication at returns, faults, callbacks, invalidation
+or admitted interrupts. Public CPU/context/API layouts, numerical-mode admission,
+guest work and memory/event/I/O contracts are unchanged. Unknown/helper cases
+retain the existing general path. No new host instruction set is required.
+
+Host format             Representation and boundary
+one GPR word            RCX holds one immutable sign-extended word in a pure segment
+four explicit SSE words XMM8/9/10/11 hold signed64 X0/X1/Y0/Y1 read-through values
+canonical X/Y           authoritative raw48 banks; all original writes retained
+old parallel snapshots  existing XMM3..6 (or established bank format), kept separate
+root/header/entry       compiler facts empty; first selected read populates anew
+helper/observer         erase facts before AND after every possible call
+GPR scratch boundary    every move-bearing instruction and native loop setup
+SSE write boundary      invalidate precise written halves after current old ALU reads
+
+These are limited representation choices from static region effects/costs, not a
+complete adaptive allocator. No cache fact depends on a sampled register value,
+profile guess or unexecuted predecessor. At a repeated header the same first-load
+instructions execute again, including after the region preflight uses RCX. A
+short budget/guard exit cannot expose stale derived data: canonical X/Y already
+hold every completed guest write. Batch calls precede the empty-root loads.
+
+SSE experiment
+
+The four-word format uses a backward, bounded per-word future-savings analysis.
+Pure signed-word reuse costs MOVQ, plus SHL9 when used as a scaled first operand.
+Population costs one extra instruction for an unscaled/square role, two for a
+scaled role. Only strictly greater future savings select population. Future
+credit stops at helpers/observers/unknown effects and precise post-ALU writes.
+A parallel move may overwrite a word before its ALU; a hit still names the old
+word, and a miss uses the original latched-bank snapshot. Invalidate that old
+copy only after its current ALU. Writing the other half preserves the copy.
+Pure address updates and loop setups remain barriers because a slow path can
+call helpers. Ordinary observable memory paths are barriers even when their
+actual branch stays in RAM. Guarded helper-free RAM paths can retain copies.
+
+The measured four-word SSE candidate saves loads but gives no robust CPU gain;
+it remains a private explicit experiment. The baseline and candidate captures
+are preserved with exact work counts, all timing results and cache regressions.
+This does not establish that holding more state in SIMD makes execution faster.
+
+One-word GPR alternative
+
+RCX is unused by the qualified pure ALU/round/flag/retirement/loop-ending code.
+Transfers, address work and loop setup use it, so all such instructions are
+complete GPR barriers. Each straight pure segment chooses at most one word with
+the greatest positive total host-instruction savings, with no eviction. This
+explicit scratch rule is narrower than the SSE write policy and is independent
+of whether a particular runtime transfer takes its fast path.
+
+For a distinct pair the chosen word becomes the direct IMUL64 source in RCX;
+the other word goes to RAX. If that other word is low, fold the *512 scale into
+its extraction. A high other word retains unscaled extraction and final SHL9.
+The first chosen read also extracts it to RDX and copies it once into RCX.
+Squares use a single extraction/copy, then IMUL RAX,RCX; later squares copy RCX
+to RAX. First population costs one instruction, or two for commuting a formerly
+scaled low/high pair. Later reads save two or three instructions without an
+extra SIMD-domain transfer or RHS copy. Nonmatching products keep the existing
+coordinate lowering and leave RCX unchanged. All products still pass identical
+aligned results into negation, accumulation/overflow, rounding, SM and flags.
+
+The compiler sums first-population costs and later-use savings for each of four
+word choices within the pure segment. It selects only a positive winner; ties
+prefer the lower selector. This is optimal among these four single-word formats
+under the declared instruction-cost model, not a claim of optimal physical
+register allocation, latency or energy. Hardware measurements decide whether
+the format should be selected automatically.
+
+Independent qualification
+
+A finite, reproducible Cartesian matrix covers every trace of length 0..5 over
+nine declared read/write/parallel-old-read/barrier/no-op actions (66430 traces).
+An independent forward generation model verifies the backward SSE decisions,
+strict profitability and old-word identity. A separate virtual instruction
+schedule enumerates no-cache and all four one-GPR candidates to verify the
+selected segment and its boundaries. It does not use emulator execution to
+obtain expected results. These are explicit compiler matrices, not fuzzing or
+full instruction/operand enumeration.
+
+High-XMM support qualifies correct REX and low ModRM fields for scalar moves,
+packed copies, qword shifts and memory transfers. Literal bytes were checked
+independently against LLVM's assembler without adding an assembler dependency.
+RX witnesses cover high/low register copies, both qword lanes, shift boundaries,
+walking-bit/complement values and 32/64-bit transfer semantics. The expanded
+native accounting matrix executes actual automatic/vector/disabled paths with
+independent full registers/RAM/flags/progress: pure repeated-product patterns,
+precise parallel halves, old inputs, aliases, loop/root/budget/LC/target failures,
+counter wrap/canaries and canonical I/O/P-edit/fault/IRQ/reentry checkpoints.
+Callbacks deliberately clobber XMM8..11. All existing product/SM/width witnesses
+remain; all 52 guest archives and producers stay unchanged. No ISA catalogue
+entry becomes complete through this compiler work.
+
+
+Final verification
+
+Both full suites pass 133/133 tests with zero skips: release 133.32 s (two CTest
+processes), strict 282.01 s (three). All 150 strict C++ translation units retain
+nonrecovering address/undefined/float/unsigned/conversion instrumentation,
+hardening, clang-tidy and warnings as errors. All 191 project C++ source/header
+files pass the format target. No checks are weakened and no fuzz tests run.
+
+Per build, the final independent matrices pass 1857255 planner checks, 202020
+native input/encoding checks, 5773155 complete native accounting checks and
+50452992 native product checks. The product matrix now includes repeated and
+low-word-biased prefixes across automatic GPR, explicit SSE and disabled reuse,
+with both range-analysis controls. All 128 ordinary product forms exercise
+held-operand cases, including negation/rounding/MAC and both destinations, with
+six scaling/RM choices and SM clear/set. Independent numerical models remain
+raw56/bus/table models, not emulator snapshots or compiler-cost expectations.
+Existing 8909837 width and 5120088 native SM assertions remain. All 52 binary
+archives and their producers are byte-identical; 50 regeneration registrations
+check all 52 archives. All 24 complete stream/backend states and four strict
+report-only states agree. Concurrent all-backend package/block failures remain
+correctness-only evidence. Concurrent strict timing retains FIR/spectral package
+failures and 90/14/100/50 late blocks, not optimized throughput evidence.
+
+Measured format comparison
+
+Both separate captures use CPU2, baseline/candidate/candidate/baseline per
+workload, one natural input second warmup followed by the next measured second
+on the same DSP. No concurrent project compilation/test execution/format jobs;
+external host scheduling/frequency remain uncontrolled. No restoration, replay,
+padding, skipped workload or overhead subtraction. Each phase has sixteen exact
+complete states with identical guest/native/helper/move/batch/AVX2 work and page
+allocation (32768/49152/344064/40960). The two phases have different external
+conditions and are not compared by absolute timing. The saved initial SSE
+candidate remains immutable evidence; the final automatic GPR executable is
+byte-identical to the measured GPR candidate after full qualification.
+
+Initial four-word SSE phase, mean CPU-demand change relative to its baseline:
+fir          +0.861%
+iir          +0.039%
+spectral     +0.001%
+nonlinear    +0.084%
+All sixteen SSE states/packages/block deadlines pass. IIR data loads decrease
+6.61%, but cycles increase 0.14%; spectral loads decrease 1.02%, cycles decrease
+0.50% with unchanged timed CPU demand. This does not justify automatic SSE word
+selection. Initial-capture PMU scope includes setup/compilation/cold/warm/checks;
+all counters run at 100%. FIR instruction misses increase 641.12%, IIR 6.53%,
+spectral 6.06%, nonlinear 24.11%; FIR data misses increase 9.91% and spectral
+0.19%. All increases are retained, without attributing them specifically to
+native hot code or claiming energy/locality improvement.
+
+Initial SSE user-PMU changes, whole-process scope (all five counters at 100%):
+Scenario    Instructions   Cycles    L1 data loads   D misses   I misses
+fir           +0.000%    +0.375%    +0.000%    +9.909%  +641.116%
+iir           -1.087%    +0.136%    -6.610%    -0.119%    +6.529%
+spectral      -0.187%    -0.497%    -1.018%    +0.190%    +6.062%
+nonlinear     +0.000%    +0.088%    +0.000%    -1.842%   +24.112%
+
+Final one-GPR phase (separate capture):
+Scenario    Baseline CPU s       Candidate CPU s      Mean CPU-demand change
+fir         0.270455..0.271321    0.277064..0.277181     +2.302%
+iir         0.534040..0.538506    0.533101..0.533459     -0.558%
+spectral    0.808075..0.824557    0.793384..0.793989     -2.772%
+nonlinear   0.590855..0.592020    0.589416..0.592556     -0.076%
+All sixteen GPR complete states and seconds packages pass. The 2.77% spectral
+CPU decrease is accompanied by 2.16% fewer whole-process user cycles. FIR's 2.30%
+increase remains recorded; its guarded MAC batch is largely unchanged, so causal
+attribution is unproved. IIR/nonlinear small differences have no robust causal
+speed claim. All data are retained rather than rerunning a candidate until pass.
+
+Matched block misses, baseline then candidate in capture order:
+fir          baseline [0, 0], candidate [1, 0]
+iir          baseline [0, 13], candidate [0, 0]
+spectral     baseline [13, 11], candidate [3, 4]
+nonlinear    baseline [0, 0], candidate [0, 0]
+These are failed sampled block budgets despite passing seconds packages.
+
+Separate final default release package gate, all four complete states pass:
+Scenario    Wall s      Process CPU s   Actual MIPS   Max block / budget ms  Late
+FIR         0.269736    0.267459         1008.98        1.436 / 1.333           1
+IIR         0.523179    0.522940          524.52        0.767 / 1.333           0
+spectral    0.792007    0.791523          324.12        8.089 /10.000           0
+nonlinear   0.609135    0.584442          434.58        4.792 / 1.333           9
+
+The package gate enforces one-second completion, not every block deadline or a
+separate 275-MIPS floor. Actual guest instructions and modeled base cycles remain
+separate; the 275-million base-cycles/s reference excludes pipeline/bus stalls.
+Current block failures and older 263/273-MIPS spectral samples, the 1.037437-s
+baseline package failure and all past late blocks stay explicit evidence in
+continuous-bench.txt and loop-residency.txt. New captures never replace them or
+qualify indefinite/all-program hard realtime.
+
+Final GPR whole-process user-PMU comparison (five counters, 100% running):
+Scenario    Instructions   Cycles    L1 data loads   D misses   I misses
+fir           +0.000%    +1.581%    +0.000%    +2.031%   +11.760%
+iir           +0.001%    -1.385%    +0.001%    -1.111%   -25.933%
+spectral      -0.203%    -2.159%    -0.554%    -6.265%   +15.974%
+nonlinear     +0.000%    -0.124%    +0.001%    -4.400%   +13.865%
+
+All sixteen PMU states agree. Scope includes setup, compilation, cold/warm work
+and complete-state checks, not isolated timed JIT or energy. FIR cycles increase
+1.58%, instruction misses 11.76%; spectral/nonlinear instruction misses increase
+15.97%/13.86%. Spectral cycles fall 2.16% while instructions/loads fall 0.20%/0.55%.
+IIR/nonlinear instruction changes near zero are not gains from word reuse. All
+increases and capture variation remain recorded. Page allocation is not hot-cache
+occupancy, and these observations do not establish complete locality or energy.
+
+Automatic policy uses the conservative pure-segment GPR format; the SSE format
+remains explicit/private, with disabled controls in the same build. This is an
+incremental measured tradeoff, not a universal speed claim or full allocator.
+All 118 ISA catalogue rows remain partial. Full numerical/ISA, IRQ/exception/
+pipeline/timing, broader application domains, SIMD/multicore lifting, integration,
+cache/energy and sustained reserve qualification remain open under the unchanged
+full objective. No publication is authorized or performed.
+
+
+A post-suite review added 1764 targeted input/helper assertions without changing
+production code. Both builds pass the expanded native-input-snapshots target,
+now 202020 assertions. Automatic GPR and explicit SSE populations precede a
+helper that observes the exact canonical three-instruction prefix, clobbers
+RCX/XMM3..6/XMM8..11, supplies latched old inputs and a distinct new Y0, and
+accepts, rejects with partial fetch state, or invalidates. The current ALU uses
+old Y0; the admitted suffix reloads new Y0. Complete registers/progress/moves and
+partial-return boundaries agree for all twelve scaling/RM/SM choices, all three
+reuse controls and four CCR seeds. The helper ABI witness supplements actual
+Core I/O/P-edit/fault/IRQ/reentry tests; it is not board/peripheral emulation.
+The recorded 133-test sweeps preceded this test-only addition; the expanded
+single target was then requalified in both builds. Unchanged unrelated tests
+were not repeated, and the final production executable remains byte-identical
+to the controlled timing/PMU candidate.

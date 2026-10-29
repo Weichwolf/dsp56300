@@ -210,3 +210,21 @@ y[n]=f(x[n],y[n-1]). A short pure coefficient selection is a different candidate
 from a whole feedback loop. Compare extra arithmetic/extract work with measured
 branch behavior; predictable counted backedges alone do not justify speculation.
 Budget tails, events and unsupported effects retain general execution.
+
+
+Read-through product words, selected per pure segment
+
+The compiler now compares no-copy and four single-word GPR candidates under an
+explicit instruction-cost model. A positive winner occupies RCX only within a
+pure segment. The chosen word becomes a direct IMUL source; input coordinates
+commute exactly as required. Every move-bearing instruction/helper/loop setup
+ends that GPR format. Canonical X/Y stays authoritative, so no new dirty bank or
+checkpoint adapter is added. Roots and repeated headers start with empty facts.
+
+A separate private experiment uses signed64 X0/X1/Y0/Y1 copies in XMM8..11,
+with precise post-ALU half invalidation and helper/observer erasure. It reduces
+some loads without a robust matched CPU gain and is not automatic. High-XMM
+encoding is independently qualified. See word-reuse.txt for proofs, finite
+symbolic/RX controls, numerical witnesses and retained cache/timing tradeoffs.
+These limited cost-selected formats do not complete the general allocator or
+all-program ISA/cache-locality/realtime/energy objectives.

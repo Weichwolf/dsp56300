@@ -29,7 +29,7 @@ enum class Reg : std::uint8_t {
   r15
 };
 enum class Width : std::uint8_t { byte = 1, word = 2, dword = 4, qword = 8 };
-enum class Xmm : std::uint8_t { x0, x1, x2, x3, x4, x5, x6 };
+enum class Xmm : std::uint8_t { x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11 };
 enum class Packed : std::uint8_t {
   copy = 0x6f,
   add_qword = 0xd4,
