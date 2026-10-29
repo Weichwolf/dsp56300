@@ -25,7 +25,8 @@ public:
              RegionMode region = RegionMode::automatic,
              LoopResidency residency = LoopResidency::automatic,
              RangeMode ranges = RangeMode::automatic,
-             WordReuseMode words = WordReuseMode::automatic);
+             WordReuseMode words = WordReuseMode::automatic,
+             LoopWindowMode window = LoopWindowMode::automatic);
   [[nodiscard]] std::vector<std::uint8_t> generate(std::span<const NativeOp> operations);
 
   [[nodiscard]] bool packed_retirement() const noexcept { return packed_retirement_; }
@@ -45,6 +46,8 @@ public:
   [[nodiscard]] bool loop_bank_cache() const noexcept { return loop_bank_cache_; }
 
   [[nodiscard]] bool word_reuse() const noexcept { return reused_words_; }
+
+  [[nodiscard]] bool loop_window() const noexcept { return loop_window_; }
 
 private:
   [[nodiscard]] bool lowerable(const NativeOp &operation) const;
@@ -127,6 +130,8 @@ private:
   void loop_continue();
   void loop_backedge();
   void initialize_loop_residency();
+  void initialize_loop_window();
+  void guard_region_header();
   void batch_entry(std::span<const NativeOp> operations);
   void retire(const NativeOp &operation, bool publish);
   x64::Code code_;
@@ -146,6 +151,8 @@ private:
   LoopResidency residency_mode_;
   RangeMode range_mode_;
   WordReuseMode word_mode_;
+  LoopWindowMode window_mode_;
+  bool loop_window_ = false;
   Word word_valid_ = 0, word_populate_ = 0, word_selected_ = 0;
   bool reused_words_ = false;
   NativeValueProof value_proof_;

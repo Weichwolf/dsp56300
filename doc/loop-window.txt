@@ -1,0 +1,170 @@
+Read-only proofs for bounded RAM loop windows
+
+Scope and representation
+
+An already admitted helper-free RAM loop can prove its complete invocation's
+address window before entering the body. Successful proof removes repeated
+R/M/N address guards. Failure preserves the original per-header guards and
+partial execution; it does not reject an otherwise executable whole call.
+The planner, ISA admission, arithmetic, canonical state and public layouts are
+unchanged. The private automatic/disabled control permits same-build comparison.
+Only packed/coalesced regions with 1..256 instructions are eligible.
+
+Resource                     Representation / obligation
+existing RSP+0..3 padding     private dword proved iteration count
+existing RSP+4 padding       private byte success flag, initialized to zero
+Cpu / NativeContext / API    unchanged; no additional architectural field
+LC at each header           retain LC>1 before every prefix, even after proof
+saved target / budget       retain every original ending/backedge check
+R/M/N                       read once for a proved complete window
+failed proof                original read-only per-header address guards
+A/B, SR, X/Y, old inputs     existing formats and publication checkpoints
+
+The setup uses the existing eight bytes of private SysV stack padding. A guarded
+body cannot call a helper; MAC batching cannot coexist with this region's minimum
+eight transfers. No admitted body can overwrite the proof flag. The first
+ordinary residency preflight remains intact, and root/word facts remain empty.
+
+Count and address proof
+
+Let b be the number of instructions in a body and let
+
+  n = min(floor(context.budget / b), LC - 1).
+
+Require LC>2 and budget>=2*b before unsigned dword DIV, then require/prove n>=2.
+EDX is zero and b is a nonzero bounded constant, so division cannot trap or
+overflow. Guard failure changes only private scratch. The retained budget,
+LC and saved-frame target checks can stop execution before n iterations. The
+LC>1 test is essential: the LC=1 cleanup still belongs to general execution.
+
+For a nonconstant monotone linear cursor, the existing planner supplies:
+
+  U = unit updates per body
+  S = post-N updates per body
+  A = maximum post-N steps before an access
+  L = min(bound_i - unit_steps_before_i).
+
+The emitted unsigned64 comparison proves
+
+  R + (n-1)*U + ((n-1)*S + A)*N < L.
+
+Independent maxima conservatively cover all mixed accesses and both RAM banks.
+Every updated cursor retains the compiled low16 M check. A nonzero N coefficient
+also requires N<2^23. At most two transfers occur per instruction and n*b<=budget;
+the coefficients are at most twice the dword budget. Their products and sum fit
+64 bits, including raw dword LC/budget inputs. A wrap before another admitted
+access fails the widened proof; final post-update wrap is permitted when safe.
+Rejection retains original guards, including cases that execute a safe prefix.
+
+A pre-use R constant is reassigned before the first access every iteration, so
+the one-body proof suffices. A held cursor also needs only the one-body proof.
+Simple unit modulo cursors retain the complete-ring guard: aligned base,
+R in [base,base+M], entire ring below the RAM bound. A +1 step preserves that
+ring for arbitrary repetitions. Post-N modulo, unknown modes, N/M writes and
+later R assignments retain the established planner/general fallback. Constants
+and final post-N exceptions are not extended to unproved repeating cursors.
+
+Setup and every rejection are read-only for registers, RAM, counters and context.
+Existing canonical exits, exact retirement/move/cycle prefixes, memory aliases,
+P invalidation, callbacks, faults and interrupt/reentry contracts remain intact.
+The optimization changes guard frequency, not fixed-point or flag semantics.
+
+Independent qualification
+
+The test-only RX wrapper emits the identical production proof and executes it
+through the production SysV entry bridge. Expected safety comes from declared
+instruction/port traces and an independent forward AGU model, not execution by
+the emulator. Every success/rejection compares every Cpu/NativeContext byte.
+Literal DIV bytes and empty/oversized IR rejection are also checked.
+
+There are 41 declared profiles: 40 admitted planner shapes and one explicit
+paired modulo-ring fallback when the full ring exceeds the smaller bank.
+Patterns include unit, post-N, mixed, held, pre-use constants, final post-N,
+paired X/Y and one cursor alternating X/Y with unequal bank bounds. Unit and
+post-N variants cover all eight R/N/M fields; inactive fields carry invalid
+canaries. The finite matrix includes 17 initial cursors, 11 strides, seven LC
+values, seven budgets, matching/mismatching modifiers, high aliases, word/dword
+limits and modulo sizes 2,3,4,6,8,16,32,64,128. Repeated R states let the forward
+model prove huge invariant rings without artificial iteration limits.
+
+The expanded independent complete-state RX accounting matrix adds a disabled
+window control beside automatic, word/range controls and three residency formats.
+It preserves all six scaling/RM modes, SM clear/set, all CCR, old parallel inputs,
+aliases, P wrap, exact prefixes, LC/target/budget failures, 64-bit progress wrap,
+I/O/P-edit/fault/IRQ/reentry and helper-clobber witnesses. Guest archives and
+producers remain unchanged. This is compiler qualification, not complete ISA.
+
+Controlled continuous comparison
+
+Baseline is local0253fda. Each immutable executable runs on CPU2 in
+baseline/candidate/candidate/baseline order per workload, with one natural input
+second warmup followed by the next input second. No project build/test/format
+job overlaps these captures. External scheduling/frequency remain uncontrolled.
+No state restoration, replay, work reduction or overhead subtraction is used.
+
+scene       candidate CPU s/input s   mean CPU reduction   actual guest MIPS
+FIR         0.235319..0.235655         1.03%                1154.97..1156.62
+IIR         0.470022..0.470842         1.30%                 582.86..583.87
+spectral    0.687918..0.689732         2.39%                 372.20..373.18
+nonlinear   0.513846..0.514361         3.16%                 514.68..515.21
+
+All sixteen full states, packages and block deadlines pass. Guest instructions,
+base cycles, native/helper/move/batch/AVX2 counts and page storage are unchanged.
+FIR's AVX2 batch does not use the new loop window, so its small timed difference
+has no demonstrated causal attribution. Earlier failures/regressions remain
+recorded, including the previous increment's FIR CPU increase and block misses.
+
+The separate default gate passes all four full states/packages/block deadlines:
+
+scene       wall s    process CPU s   MIPS      max block ms / budget ms
+FIR         0.235463  0.235475        1155.85   0.338 / 1.333
+IIR         0.470453  0.470476         583.30   0.673 / 1.333
+spectral    0.689131  0.689169         372.50   7.195 /10.000
+nonlinear   0.514553  0.514589         514.47   0.725 / 1.333
+
+A near-full 275-million-base-cycle input second need not contain 275 million
+instructions. Rates above are actual retired guest instructions / wall time;
+the package and block deadlines are tested separately. Neither a passing second
+nor these MIPS qualify indefinite realtime, all programs or board/pipeline timing.
+
+PMU scope and retained tradeoffs
+
+Separate whole-process user-counter captures use the same order/CPU, without
+concurrent project compilation/testing. All sixteen states pass; all requested
+counters run 100% without multiplexing. Setup/compilation/cold/warm/checks are
+included; these are not isolated timed-JIT or energy counters.
+
+Percent change versus mean baseline (negative means fewer):
+
+scene       instructions  cycles  L1 data loads  data misses  instruction misses
+FIR           ~0.00       -1.10      ~0.00        -0.45         -6.77
+IIR           -2.40       -0.79      -3.78        -0.89        +12.30
+spectral      -2.44       -0.65      -3.31        +1.72         +0.49
+nonlinear     -6.22       -2.90      -8.40        -1.27        -48.75
+
+IIR/spectral instruction misses and spectral data misses increase. Unchanged
+page storage does not establish unchanged instruction working-set behavior.
+No complete-cache-locality or energy claim follows from fewer data loads.
+Full numerical/ISA, IRQ/pipeline/timing, adaptive register placement, broader
+application domains, SIMD/multicore, consumer integration and sustained realtime
+remain open parts of the unchanged objective. All 118 ISA rows remain partial.
+
+
+Verified increment
+
+Both 134-test suites pass with zero skips: release 120.93 s (two workers),
+strict ASan/UBSan 243.71 s (three). All 154 C++ translation units retain strict
+nonrecovering instrumentation and all 195 source/header files pass formatting.
+The proof matrix passes 838284 independent RX checks per build; complete-state
+native accounting passes 7135929. Existing product/word-planner/input/width/SM
+matrices pass 50452992/1857255/202020/8909837/5120088 checks. All 52 archives
+regenerate exactly through their 50 registrations; fixtures/producers/objective
+remain unchanged. No fuzzing or publication is performed.
+
+All 24 release backend/stream and four strict full states agree. Their concurrent
+timings qualify correctness only: strict retains FIR/IIR/spectral package
+failures and 447/142/100/33 late blocks. The separate controlled/default captures
+above remain the performance evidence. The full-build release runner is
+byte-identical to the immutable measured candidate; no repeat-until-pass capture
+replaces earlier misses. Structural ISA audit passes; require-complete fails
+with all 118 rows partial. The full objective remains active and incomplete.

@@ -140,6 +140,7 @@ struct Shape {
   detail::LoopResidency residency = detail::LoopResidency::automatic;
   detail::RangeMode ranges = detail::RangeMode::automatic;
   detail::WordReuseMode word_reuse = detail::WordReuseMode::automatic;
+  detail::LoopWindowMode window = detail::LoopWindowMode::automatic;
 };
 
 std::vector<Step> steps(const Shape shape) {
@@ -415,7 +416,8 @@ void direct_shape(const Shape shape) {
                              detail::RegionMode::guarded,
                              shape.residency,
                              shape.ranges,
-                             shape.word_reuse);
+                             shape.word_reuse,
+                             shape.window);
   const native::Direct code(emitter.generate(ops));
   require(emitter.coalesced_accounting() == (ops.size() <= 256) && emitter.guarded_region() &&
               emitter.packed_retirement() && emitter.cached_status(),
@@ -426,6 +428,9 @@ void direct_shape(const Shape shape) {
   require(emitter.loop_bank_cache() ==
               (shape.loop && shape.residency == detail::LoopResidency::vectors),
           "Only helper-free resident loops hold X/Y separately from old parallel snapshots");
+  require(emitter.loop_window() ==
+              (shape.loop && ops.size() <= 256 && shape.window != detail::LoopWindowMode::disabled),
+          "Only bounded closed RAM loops emit whole-call window preflights");
   if (shape.pattern == Pattern::reused) {
     require(emitter.word_reuse() == (shape.word_reuse != detail::WordReuseMode::disabled),
             "Only cost-admitted repeated words populate extra native slots");
@@ -498,6 +503,13 @@ void residency_patterns(const Word mode) {
                       .pattern = pattern,
                       .residency = residency,
                       .word_reuse = detail::WordReuseMode::vectors});
+        direct_shape({.mode = mode,
+                      .first = word_mask - 5,
+                      .loop = true,
+                      .alias = alias,
+                      .pattern = pattern,
+                      .residency = residency,
+                      .window = detail::LoopWindowMode::disabled});
       }
     }
   }

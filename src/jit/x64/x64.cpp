@@ -317,6 +317,14 @@ void Code::multiply(const RegisterPair registers) {
   byte(mod_register | ((dst & 7) << 3) | (src & 7));
 }
 
+void Code::divide(const Reg divisor) {
+  constexpr unsigned divide_group = 6;
+  const auto src = static_cast<unsigned>(divisor);
+  rex(Width::dword, divide_group, src);
+  byte(unary_opcode);
+  byte(mod_register | (divide_group << 3) | (src & 7));
+}
+
 void Code::unary(const unsigned group, const Reg destination) {
   const auto dst = static_cast<unsigned>(destination);
   rex(Width::qword, group, dst);

@@ -228,3 +228,20 @@ encoding is independently qualified. See word-reuse.txt for proofs, finite
 symbolic/RX controls, numerical witnesses and retained cache/timing tradeoffs.
 These limited cost-selected formats do not complete the general allocator or
 all-program ISA/cache-locality/realtime/energy objectives.
+
+
+Private scratch for whole-call RAM proofs
+
+The existing eight bytes of SysV stack padding now hold a dword iteration count
+and a byte success flag for admitted helper-free loops. No Cpu/NativeContext
+field or architectural cache is added. Entry derives the count from immutable
+instruction budget and current LC; success proves every accessed cursor over
+that complete window. M/N cannot change in an admitted body. Failure preserves
+original per-header R/M/N checks, and every header still checks LC>1.
+
+No helper can clobber this private scratch after admission. Existing A/B/SR/X/Y
+formats, parallel snapshots, first-word populations, canonical exits, saved
+targets and exact retirement prefixes stay intact. See loop-window.txt for the
+state/address proof and independent whole-object read-only and RX witnesses.
+Lower data-load counts alone do not establish complete cache locality or energy
+savings; retained PMU miss increases and timing scope limits are recorded there.

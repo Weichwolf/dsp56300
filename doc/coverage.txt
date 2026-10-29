@@ -97,12 +97,12 @@ and old parallel operands without memory/I/O observation barriers. All 6758417
 directed ASR/register assertions pass; no ISA catalogue row becomes complete.
 See doc/native-shifts.txt for guards, witnesses, measurements and remaining work.
 
-The current configuration passes all 133 correctness tests in release (133.32 s,
-two CTest processes) and strict ASan/UBSan (282.01 s, three), zero skips. All 150
+The current configuration passes all 134 correctness tests in release (120.93 s,
+two CTest processes) and strict ASan/UBSan (243.71 s, three), zero skips. All 154
 C++ translation units retain strict nonrecovering address/undefined/integer
-instrumentation; all 191 project C++ source/header files pass clang-format/tidy/
+instrumentation; all 195 project C++ source/header files pass clang-format/tidy/
 Werror. All 52 binary archives and their producers remain unchanged in the
-current cost-selected word-reuse increment; all exact regeneration checks pass. No
+current RAM loop-window increment; all exact regeneration checks pass. No
 fuzzing was run. Structural ISA audit passes; require-complete remains a failing
 gate with 118 partial/zero complete entries.
 
@@ -116,18 +116,21 @@ stream/backend states and four strict report-only states. Concurrent reports
 retain timing failures and qualify correctness, not optimized speed.
 
 The latest optimized default bench passes all four one-second packages: FIR
-0.269736 s, IIR 0.523179 s, spectral 0.792007 s, nonlinear 0.609135 s. Every
-complete state matches. FIR/nonlinear retain 1/9 late blocks; IIR/spectral have
-zero in this capture. Actual rates are 1008.98/524.52/324.12/434.58 MIPS. The
-matched one-GPR candidate reduces spectral CPU demand 2.77%, with a retained
-2.30% FIR increase and small/noncausal IIR/nonlinear differences. All sixteen
-states/packages pass; matched candidate block misses remain FIR1/0, spectral3/4.
-Guest work and page storage are equal. Earlier 264-MIPS/default block failures,
-273.07/263.29-MIPS candidates and the 1.037437-second baseline package failure
+0.235463 s, IIR 0.470453 s, spectral 0.689131 s, nonlinear 0.514553 s. Every
+complete state and block budget passes in this capture. Actual rates are
+1155.85/583.30/372.50/514.47 MIPS. The matched loop-window candidate reduces
+IIR/spectral/nonlinear CPU demand 1.30%/2.39%/3.16%; FIR's small difference has
+unproved attribution because its batch bypasses this path. All sixteen states,
+packages and block deadlines pass, with identical guest work and page storage.
+The previous word-reuse comparison's FIR +2.30% and candidate FIR1/0/spectral3/4
+late blocks remain recorded, as do its default FIR1/nonlinear9 misses.
+Earlier 264-MIPS/default block failures, 273.07/263.29-MIPS candidates and the
+1.037437-second baseline package failure
 remain recorded. Passing packages do not replace failed block budgets. External
 scheduling/frequency effects and causal FIR attribution are unproved. See
-continuous-bench.txt, loop-residency.txt and word-reuse.txt. Sustained latency/
-reserve and broader qualification remain open; no all-program realtime claim.
+continuous-bench.txt, loop-residency.txt, word-reuse.txt and loop-window.txt.
+Sustained latency/reserve and broader qualification remain open; no all-program
+realtime claim.
 
 The expanded native-move boundary test passes all 78446 assertions in both builds.
 It includes exact same-code reuse after modifier changes and paired aliased X/Y
@@ -726,3 +729,45 @@ partial rejection and invalidation with old current/new suffix inputs. Both
 builds pass the expanded input target (202020 assertions); production code and
 the measured runner stay unchanged. See word-reuse.txt for exact matrix and
 post-suite scope. All other previously green tests remain unchanged.
+
+
+Read-only whole-call RAM windows
+
+Existing helper-free RAM loops now optionally prove all cursor accesses for
+min(budget/body_instructions,LC-1) iterations at entry. Success uses eight existing
+private stack bytes to amortize R/M/N guards; failure keeps the old per-header
+checks and partial progress. LC>1, saved-target, budget, retirement and canonical
+exit checks remain. Linear/N proofs use widened unsigned arithmetic; pre-use
+constants, held addresses and invariant modulo rings retain one-body proofs.
+Public layouts, ISA/mode admission, arithmetic and guest work stay unchanged.
+
+The new RX proof witness passes 838284 independent checks per build across all
+eight cursors, unequal-bank shared/paired X/Y traces, constants, post-N tails,
+modulo rings, matching/mismatching modifiers, huge LC/budgets and word/dword
+bounds. Forty profiles reach the proof; one oversized paired ring explicitly
+retains planner fallback. Every case compares every guest/context byte for
+read-only admission/rejection. A forward AGU oracle checks every admitted window.
+The expanded complete-state native accounting matrix passes 7135929 checks with
+window enabled/disabled, existing three residency formats, word/range controls,
+all CCR/six scaling-RM/SM choices, aliases, exact progress and observer boundaries.
+All 52 archives/producers and the full objective remain byte-identical.
+
+Both 134-test suites, all 24 complete backend/stream states and four strict
+report-only states pass correctness. Concurrent backend package/block failures
+remain correctness-only evidence. Strict captures retain FIR/IIR/spectral
+package failures and late-block counts 447/142/100/33. Those timings include
+concurrent correctness work and do not establish optimized throughput. Earlier
+263/273-MIPS FFT captures, the failed baseline seconds package and every older
+block/cache regression remain recorded; no capture is repeated until passing.
+
+Separate controlled seconds measurements reduce IIR/spectral/nonlinear CPU
+1.30%/2.39%/3.16%; exact work and executable page storage remain equal. Every
+measured/default state/package/block passes in these captures. Whole-process
+requested user PMU counters show 2.40%/2.44%/6.22% fewer instructions and
+0.79%/0.65%/2.90% fewer cycles. IIR/spectral instruction misses increase
+12.30%/0.49%; spectral data misses increase 1.72%. Setup/cold/warm/state checking
+is included; no isolated JIT, complete locality or energy claim follows.
+See loop-window.txt for mathematics, state tables and precise measurement scope.
+All 118 ISA rows remain partial. Full numerical/ISA, IRQ/pipeline/timing, general
+adaptive allocation, broader application domains, SIMD/multicore, integration,
+sustained realtime and cache/energy remain open under the unchanged objective.

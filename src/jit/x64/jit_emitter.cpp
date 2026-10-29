@@ -71,7 +71,8 @@ JitEmitter::JitEmitter(const JitRuntime runtime,
                        const RegionMode region,
                        const LoopResidency residency,
                        const RangeMode ranges,
-                       const WordReuseMode words)
+                       const WordReuseMode words,
+                       const LoopWindowMode window)
     : runtime_(runtime),
       modifiers_(modifiers),
       optimize_(optimize),
@@ -79,7 +80,8 @@ JitEmitter::JitEmitter(const JitRuntime runtime,
       region_mode_(region),
       residency_mode_(residency),
       range_mode_(ranges),
-      word_mode_(words) {}
+      word_mode_(words),
+      window_mode_(window) {}
 
 bool JitEmitter::has_moves(const NativeOp &operation) {
   return operation.instruction.operation == Operation::parallel &&
@@ -373,6 +375,7 @@ std::vector<std::uint8_t> JitEmitter::generate_body(const std::span<const Native
                                          std::numeric_limits<std::uint8_t>::max()));
   coalesced_accounting_ = region_mode_ == RegionMode::guarded && packed_retirement_ &&
                           operations.size() <= maximum_coalesced_operations;
+  loop_window_ = coalesced_accounting_ && region_.loop && window_mode_ == LoopWindowMode::automatic;
   retirement_helpers_ =
       packed_retirement_ &&
       std::ranges::any_of(operations, [this](const auto &op) { return observable_moves(op); });
@@ -400,11 +403,10 @@ std::vector<std::uint8_t> JitEmitter::generate_body(const std::span<const Native
     code_.binary(op_cmp, {.destination = Reg::r15, .source = Reg::ax}, Width::dword);
     exit_if(Branch::equal);
   }
+  initialize_loop_window();
   initialize_loop_residency();
   code_.bind(loop_header_);
-  if (region_mode_ == RegionMode::guarded) {
-    region_guard(code_, Reg::r12, exits_.at(dirty_accumulators()));
-  }
+  if (region_mode_ == RegionMode::guarded) { guard_region_header(); }
   const auto flags = plan_flags(operations);
   const auto effects = word_effects(operations);
   const auto populations = word_mode_ == WordReuseMode::vectors

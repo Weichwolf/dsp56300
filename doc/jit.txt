@@ -547,3 +547,20 @@ The SSE experiment saves loads but gives no robust matched CPU benefit and is
 not automatic. See word-reuse.txt for proof, independent compiler/RX/numerical
 witnesses and complete measurement scopes including regressions and late blocks.
 No ISA row, full adaptive allocator or sustained realtime requirement is completed.
+
+
+Whole-call RAM loop windows
+
+An admitted helper-free guarded loop can prove all addresses for
+min(budget/body_instructions, LC-1) iterations at entry. A successful read-only
+proof uses an existing private stack byte to skip subsequent R/M/N guards.
+Failure keeps the original per-header checks and exact partial execution.
+Widened unsigned arithmetic covers monotone linear unit/N traces; constants,
+held cursors and invariant unit-modulo rings use their existing one-body proof.
+LC>1 remains checked at every header, including after successful window proof.
+Every budget, saved-target, retirement and canonical exit remains unchanged.
+Public CPU/context/API layouts and ISA/numerical admission stay unchanged.
+See loop-window.txt for the proof, eight-cursor independent RX witnesses,
+enabled/disabled complete-state controls and measured cache/timing tradeoffs.
+This amortizes guards in selected RAM loops; it does not establish complete
+translation, full numerical/ISA coverage or arbitrary-program realtime.

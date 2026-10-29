@@ -82,6 +82,7 @@ public:
   void immediate(unsigned group, Reg destination, std::uint32_t value, Width width = Width::qword);
   void shift(unsigned group, Reg destination, unsigned count, Width width = Width::qword);
   void multiply(RegisterPair registers);
+  void divide(Reg divisor);
   void unary(unsigned group, Reg destination);
   void set(unsigned condition, Reg destination);
   void packed(Packed operation, Xmm destination, Xmm source);
