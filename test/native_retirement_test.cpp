@@ -303,6 +303,64 @@ void low32_packing() {
   }
 }
 
+void packed_copies() {
+  using detail::x64::Code;
+  using detail::x64::Packed;
+  using detail::x64::Reg;
+  using detail::x64::Xmm;
+  constexpr std::array registers{Xmm::x0, Xmm::x1, Xmm::x2, Xmm::x3, Xmm::x4, Xmm::x5, Xmm::x6};
+  constexpr std::uint32_t arithmetic_mask = 0x8d5;
+  constexpr std::uint64_t high = 0x89abcdef01234567;
+  constexpr std::array<std::uint8_t, 4> landing{0xf3, 0x0f, 0x1e, 0xfa};
+  constexpr std::array<std::uint8_t, 1> push_flags{0x68};
+  constexpr std::array<std::uint8_t, 1> pop_flags{0x9d};
+  constexpr std::array<std::uint8_t, 2> capture{0x9c, 0x58};
+  constexpr std::array<std::uint8_t, 1> returned{0xc3};
+  for (const auto source : registers) {
+    for (const auto destination : registers) {
+      Code encoded;
+      encoded.packed(Packed::copy, destination, source);
+      const auto modrm =
+          0xc0U | (static_cast<unsigned>(destination) << 3) | static_cast<unsigned>(source);
+      const std::vector<std::uint8_t> expected_encoding{
+          0x66, 0x0f, 0x6f, static_cast<std::uint8_t>(modrm)};
+      require(encoded.bytes() == expected_encoding,
+              "SSE2 register copies match independent MOVDQA literal encodings");
+      for (const auto incoming : {0U, arithmetic_mask}) {
+        Code code;
+        code.raw(landing);
+        code.packed_load(source, Reg::di, offsetof(detail::Cpu, instructions));
+        if (source != destination) { code.packed(Packed::bit_xor, destination, destination); }
+        code.raw(push_flags); // PUSH imm32, POPFQ: defined user arithmetic flags only.
+        code.u32(incoming | 2U);
+        code.raw(pop_flags);
+        code.packed(Packed::copy, destination, source);
+        code.raw(capture); // PUSHFQ, POP RAX, before any flag-changing instruction.
+        code.immediate(4, Reg::ax, arithmetic_mask);
+        code.store(Reg::di, offsetof(detail::Cpu, reg) + offsetof(Registers, x), Reg::ax);
+        code.packed_store(Reg::di, offsetof(detail::Cpu, instructions), destination);
+        code.packed_to(Reg::ax, source);
+        code.store(Reg::di, offsetof(detail::Cpu, reg) + offsetof(Registers, y), Reg::ax);
+        code.constant(Reg::ax, 0);
+        code.raw(returned);
+        const native::Direct executable(code.bytes());
+        detail::Cpu cpu;
+        auto expected = register_model::seed(0);
+        cpu.reg = expected;
+        cpu.instructions = maximum;
+        cpu.cycles = high;
+        expected.x = incoming;
+        expected.y = maximum;
+        detail::NativeContext context;
+        require(executable.enter(cpu, context) == 0 && cpu.instructions == maximum &&
+                    cpu.cycles == high && cpu.reg == expected,
+                "Every snapshot/cache permutation preserves both qword lanes, source and "
+                "arithmetic flags");
+      }
+    }
+  }
+}
+
 struct Snapshot {
   Registers state;
   Progress progress;
@@ -451,6 +509,7 @@ int main() {
   try {
     dsp56300::test::encodings();
     dsp56300::test::low32_packing();
+    dsp56300::test::packed_copies();
     dsp56300::test::counter_lanes();
     dsp56300::test::admission_guards();
     for (const auto mode : dsp56300::test::modes) {

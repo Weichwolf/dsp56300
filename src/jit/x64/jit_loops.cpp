@@ -120,9 +120,30 @@ void JitEmitter::loop_backedge() {
   code_.binary(op_sub, {.destination = Reg::ax, .source = Reg::r15}, Width::dword);
   code_.immediate(group_cmp, Reg::ax, loop_size_ - 1, Width::dword);
   exit_if(Branch::below_equal);
-  // The header was compiled with empty accumulator caches. Re-establish its
-  // memory inputs on every backedge rather than assuming unproven loop phis.
-  flush_accumulators(dirty_accumulators());
+  // Ordinary headers still require canonical inputs. Closed resident loops
+  // initialized both slots before admission and preserve them across this edge.
+  if (!loop_residency_) { flush_accumulators(dirty_accumulators()); }
   code_.jump(loop_header_);
+}
+
+void JitEmitter::initialize_loop_residency() {
+  if (!loop_residency_) { return; }
+  // Initial rejection retains the original zero-dirty exit. Subsequent guards
+  // can fail after complete iterations and must publish both initialized slots.
+  region_guard(code_, Reg::r12, exits_[0]);
+  code_.load(Reg::bp, Reg::r12, offsetof(Cpu, reg) + offsetof(Registers, a));
+  code_.load(Reg::bx, Reg::r12, offsetof(Cpu, reg) + offsetof(Registers, b));
+  if (loop_bank_cache_) {
+    code_.packed_load_lane<64>(x64::Xmm::x5, Reg::r12, offsetof(Cpu, reg) + offsetof(Registers, x));
+    code_.packed_load_lane<64>(x64::Xmm::x6, Reg::r12, offsetof(Cpu, reg) + offsetof(Registers, y));
+  }
+  accumulator_dirty_.fill(true);
+}
+
+void JitEmitter::materialize_loop_banks() {
+  code_.packed_to(Reg::ax, x64::Xmm::x5);
+  code_.store(Reg::r12, offsetof(Cpu, reg) + offsetof(Registers, x), Reg::ax);
+  code_.packed_to(Reg::ax, x64::Xmm::x6);
+  code_.store(Reg::r12, offsetof(Cpu, reg) + offsetof(Registers, y), Reg::ax);
 }
 } // namespace dsp56300::detail

@@ -10,6 +10,7 @@
 
 namespace dsp56300::detail {
 enum class RegionMode : unsigned char { automatic, ordinary, guarded };
+enum class LoopResidency : unsigned char { automatic, vectors, disabled };
 
 struct RegionAddress {
   Word bound = io_begin, linear_limit = io_begin, advances = 0, modifier = 0;

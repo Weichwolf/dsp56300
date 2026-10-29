@@ -34,7 +34,7 @@ void JitEmitter::move_read_register(const Reg value, const NativeMove &move, con
   if (reg >= a_register) {
     current_value(value, reg == a_register ? 0U : 1U);
   } else {
-    code_.load(value, Reg::r12, bank_offset(reg));
+    current_value(value, reg <= x1_register ? 2U : 3U);
   }
   if (reg < a_register) {
     if ((reg & 1U) != 0) { code_.shift(shift_right, value, word_bits); }
@@ -72,17 +72,29 @@ void JitEmitter::move_write_register(const Reg value, const unsigned reg) {
     code_.mov({.destination = Reg::ax, .source = value});
     code_.shift(shift_left, Reg::ax, low_word_shift);
     code_.shift(shift_arithmetic, Reg::ax, padding_bits);
+    if (loop_residency_) {
+      store_accumulator(reg == b_register, Reg::ax);
+      return;
+    }
   } else if ((reg & 1U) != 0) {
-    code_.load(Reg::ax, Reg::r12, bank_offset(reg), Width::dword);
+    if (loop_bank_cache_) {
+      current_value(Reg::ax, reg <= x1_register ? 2U : 3U);
+    } else {
+      code_.load(Reg::ax, Reg::r12, bank_offset(reg), Width::dword);
+    }
     code_.immediate(group_and, Reg::ax, word_mask, Width::dword);
     code_.mov({.destination = Reg::r9, .source = value});
     code_.shift(shift_left, Reg::r9, word_bits);
     code_.binary(op_or, {.destination = Reg::ax, .source = Reg::r9});
   } else {
-    code_.load(Reg::ax, Reg::r12, bank_offset(reg));
+    current_value(Reg::ax, reg <= x1_register ? 2U : 3U);
     code_.immediate(group_and, Reg::ax, ~word_mask);
     code_.binary(op_or, {.destination = Reg::ax, .source = value});
   }
-  code_.store(Reg::r12, bank_offset(reg), Reg::ax);
+  if (loop_bank_cache_) {
+    code_.packed_from<64>(reg <= x1_register ? x64::Xmm::x5 : x64::Xmm::x6, Reg::ax);
+  } else {
+    code_.store(Reg::r12, bank_offset(reg), Reg::ax);
+  }
 }
 } // namespace dsp56300::detail

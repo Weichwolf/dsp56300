@@ -66,12 +66,14 @@ JitEmitter::JitEmitter(const JitRuntime runtime,
                        const bool optimize,
                        const BatchBackend batch,
                        const std::array<Word, agu_registers> modifiers,
-                       const RegionMode region)
+                       const RegionMode region,
+                       const LoopResidency residency)
     : runtime_(runtime),
       modifiers_(modifiers),
       optimize_(optimize),
       batch_backend_(batch),
-      region_mode_(region) {}
+      region_mode_(region),
+      residency_mode_(residency) {}
 
 bool JitEmitter::has_moves(const NativeOp &operation) {
   return operation.instruction.operation == Operation::parallel &&
@@ -119,7 +121,9 @@ bool JitEmitter::lowerable(const NativeOp &operation) const {
 }
 
 void JitEmitter::current_value(const Reg destination, const unsigned index) {
-  if (index < accumulator_dirty_.size() && accumulator_dirty_.at(index)) {
+  if (loop_bank_cache_ && index >= accumulator_dirty_.size()) {
+    code_.packed_to(destination, index == 2 ? x64::Xmm::x5 : x64::Xmm::x6);
+  } else if (index < accumulator_dirty_.size() && accumulator_dirty_.at(index)) {
     code_.mov({.destination = destination, .source = index == 0 ? Reg::bp : Reg::bx});
   } else {
     code_.load(destination, Reg::r12, offsetof(Cpu, reg) + register_offsets.at(index));
@@ -130,6 +134,13 @@ void JitEmitter::store_accumulator(const bool destination_b, const Reg source) {
   const auto index = destination_b ? 1U : 0U;
   code_.mov({.destination = destination_b ? Reg::bx : Reg::bp, .source = source});
   accumulator_dirty_.at(index) = true;
+}
+
+void JitEmitter::invalidate_moved_accumulators() {
+  if (loop_residency_) { return; }
+  for (unsigned index = 0; index < accumulator_dirty_.size(); ++index) {
+    if ((dataflow_.move_writes & (Word{1} << index)) != 0) { accumulator_dirty_.at(index) = false; }
+  }
 }
 
 Word JitEmitter::dirty_accumulators() const {
@@ -144,6 +155,7 @@ void JitEmitter::flush_accumulators(const Word mask) {
                   index == 0 ? Reg::bp : Reg::bx);
     }
   }
+  if (loop_bank_cache_ && mask != 0) { materialize_loop_banks(); }
 }
 
 void JitEmitter::exit_if(const Branch condition) {
@@ -352,6 +364,10 @@ std::vector<std::uint8_t> JitEmitter::generate_body(const std::span<const Native
       std::ranges::any_of(operations, [this](const auto &op) { return observable_moves(op); });
   cached_status_ = admit_cached_status();
   cached_inputs_ = admit_cached_inputs(operations);
+  loop_residency_ = region_mode_ == RegionMode::guarded && loop_size_ != 0 && packed_retirement_ &&
+                    residency_mode_ != LoopResidency::disabled;
+  loop_bank_cache_ =
+      loop_residency_ && !retirement_helpers_ && residency_mode_ == LoopResidency::vectors;
   code_.raw(entry_landing); // ENDBR64.
   code_.raw(save_nonvolatile);
   code_.mov({.destination = Reg::r12, .source = Reg::di});
@@ -370,8 +386,11 @@ std::vector<std::uint8_t> JitEmitter::generate_body(const std::span<const Native
     code_.binary(op_cmp, {.destination = Reg::r15, .source = Reg::ax}, Width::dword);
     exit_if(Branch::equal);
   }
+  initialize_loop_residency();
   code_.bind(loop_header_);
-  if (region_mode_ == RegionMode::guarded) { region_guard(code_, Reg::r12, exits_[0]); }
+  if (region_mode_ == RegionMode::guarded) {
+    region_guard(code_, Reg::r12, exits_.at(dirty_accumulators()));
+  }
   const auto flags = plan_flags(operations);
   for (std::size_t operation_index = 0; operation_index < operations.size(); ++operation_index) {
     const auto &operation = operations[operation_index];
@@ -384,11 +403,7 @@ std::vector<std::uint8_t> JitEmitter::generate_body(const std::span<const Native
       }
       loop_guard(operation);
       if (has_moves(operation)) { moves(operation); }
-      for (unsigned index = 0; index < accumulator_dirty_.size(); ++index) {
-        if ((dataflow_.move_writes & (Word{1} << index)) != 0) {
-          accumulator_dirty_.at(index) = false;
-        }
-      }
+      invalidate_moved_accumulators();
       native(operation);
       retire(operation, publish_pc(operations, operation_index));
     } else {

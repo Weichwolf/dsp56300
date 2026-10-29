@@ -1,0 +1,176 @@
+Closed-loop DSP data-register residency
+
+Admission and representation
+
+Proved helper-free RAM loops retain A/B in host GPRs across backedges by default.
+A private experiment additionally retains X/Y in SSE2 registers. The full-bank
+format regressed CPU demand, so automatic mode keeps canonical X/Y. The existing finite RAM/M/N/ring/linear/loop/saved-target/budget
+and no-program-store-alias guards remain. Every operation must lower natively,
+packed retirement must be admitted and the trace must end on a continuing DO
+boundary. Ordinary, helper/I/O and unsupported contexts retain their existing
+execution and canonical checkpoints. Public APIs, CPU/runtime layouts, guest
+work, numerical semantics and instruction costs are unchanged.
+
+Experimental full-bank mapping (automatic mode retains canonical X/Y):
+
+State                  Host representation                 Publication
+A/B                    existing RBP/RBX, aligned raw56     every post-admission exit
+X/Y                    XMM5/XMM6 low qword, raw48           every post-admission exit
+old A/B                XMM3/XMM4                          before parallel move commits
+old X/Y                XMM0/XMM1                          before parallel move commits
+SR                     existing R14D                      existing exact publication
+progress/move counts    existing R15D/prefix bookkeeping   every original exit boundary
+R/N/M/LC/PC/frames      existing canonical CPU             all original guard/checkpoints
+
+The entry performs a read-only preflight before seeding A/B/X/Y.
+Initial rejection takes the original zero-dirty exit. After admission, both
+accumulator slots are valid/potentially dirty; every later header failure and
+return publishes them, including an untouched accumulator's exact original bits.
+The first repeated header is checked too; no bounds or LC check is removed.
+A/B full-word loads update their authoritative GPRs. Native data-register writes
+preserve the unmodified X/Y half in the resident bank. No admitted operation
+reads stale canonical data banks. Guards read canonical AGU/control state only.
+
+X/Y snapshots use XMM0/XMM1 only when retirement has no helpers: those temporaries
+are free until final counter publication. This is an explicit additional guard.
+Cache values occupy different registers from the old operands. Snapshot copies
+use ordinary SSE2 MOVDQA; no AVX feature is required. Before retirement reuses
+these temporaries, all resident banks have been materialized. There are no
+helper calls while this format is live, and no new persistent allocation.
+
+A private same-build control selects automatic A/B residency, experimental full
+residency or the previous empty-header behavior. It propagates through the ordinary/guarded code
+selector. This is a generic closed-loop mapping choice, not firmware recognition,
+SIMD voice parallelism or the completed adaptive register allocator. Wider
+cross-region mappings, AGU allocation and cost-based representation selection
+remain open parts of the original objective.
+
+Independent validation
+
+The expanded helper-forbidden RX/public-Core matrix passes 1464387 assertions
+per build. Existing accounting/region witnesses remain; new patterns include
+full RAM loads into A/B, clipped A-to-B/self moves, simultaneous B-to-A plus old-B
+MACR, crossed X-memory/Y-register transfers, X1/Y1/X0 register-half preservation,
+and arithmetic updating only A or only B while the other remains a canary.
+All three residency controls run the same independently modeled traces.
+
+The matrix includes all CCR bytes, six scaling/RM choices with/without qualified
+SM, aliases, wrapped P, initial/later RAM/M/header failures, saved-target and LC
+changes, short/whole budgets, 32/63/64-bit counters/canaries and two-word endings.
+Private maximal-cost/padded IR cases remain compiler tests, not DSP throughput.
+Public checks cover every multi-iteration prefix, exact native/helper/move
+counts, fast-vector admission and foreground reentry with a live loop frame.
+Warmed loop admission then changes to I/O: canonical callbacks, rejected-load
+partial state, fail-stop no replay and callback P-extension edits stay exact.
+
+The existing host-retirement test adds 147 independent checks: all 49 source/
+destination XMM permutations match literal MOVDQA bytes, and 98 RX executions
+retain both distinct qword lanes, the source and all six arithmetic flags.
+Representative bytes are also checked with LLVM MC. The host-retirement target
+now passes 104942 assertions. No guest fixture or producer changes; all 52
+archives retain exact bytes. These finite matrices do not establish complete ISA
+or physical hardware/pipeline qualification.
+
+
+Full-bank experiment verification
+
+Before changing the automatic policy, all 130 tests pass in release (85.53 s, two CTest processes) and strict ASan/UBSan
+(214.91 s, three), zero skips. Both builds pass 1464387 accounting/state assertions,
+104942 retirement/encoding assertions and all existing 1269134 RAM-region checks.
+All 52 archives and producers remain byte-identical; every exact regeneration
+check passes. All 143 strict C++ translation units retain required nonrecovering
+address/undefined/unsigned/conversion instrumentation, and all 183 C++ files pass
+format/tidy/Werror. All 24 full backend/stream states and four strict report-only
+states agree. Structural ISA audit passes; require-complete remains red with
+118 partial/zero complete rows. No fuzzing or publication is performed.
+
+Concurrent instrumented timings retain spectral's package failure and late-block
+counts 110/2/100/34 for FIR/IIR/spectral/nonlinear. The other three packages pass.
+Those captures establish correctness, not optimized speed or realtime. The full
+objective remains active: complete ISA/numerical/IRQ/pipeline/timing behavior,
+broader application domains, general adaptive allocation, multicore, integration,
+sustained latency/realtime, cache locality and energy remain open.
+
+
+Rejected automatic SSE2-bank candidate
+
+The A/B-only pilot produced CPU decreases of 0.43%/0.09%/0.19%/0.10% across
+FIR/IIR/spectral/nonlinear, below a reliable causal gain claim. It motivated the
+full-bank experiment. Both pilots use unchanged fixtures and meaningful work.
+The full-bank comparison is CPU2, baseline/candidate/candidate/baseline per
+scenario, one natural warm input second followed by one measured input second
+in the same DSP. No project build/test/format task overlaps that comparison;
+external host scheduling/frequency/activity remain uncontrolled. No restoration,
+replay, padding or overhead subtraction is used.
+
+Scenario   Baseline CPU s       Full-bank CPU s       Mean CPU increase
+FIR        0.237088..0.237506    0.241563..0.242147       1.92%
+IIR        0.567862..0.568103    0.581837..0.582312       2.48%
+spectral   0.767611..0.767680    0.780563..0.782707       1.82%
+nonlinear  0.609205..0.609372    0.633882..0.633965       4.04%
+
+All sixteen states, packages and block budgets pass. A separate full-bank default
+gate also passes all four states/packages/blocks, with spectral 328.67 MIPS.
+Passing a package does not justify selecting a consistently slower mapping.
+
+Separate whole-process requested user PMU events, sixteen states, all five
+counters 100% running. Scope includes setup/cold/warm/state checks, not isolated
+timed JIT or energy. No build/suite overlaps; light source editing and a brief
+format invocation overlap this PMU capture, external conditions uncontrolled.
+Mean decreases below; negative values denote increases.
+
+Scenario  Host instructions  Host cycles  L1 data loads  L1 data misses  L1 I misses
+FIR            ~0%              0.39%          ~0%          -0.70%        -3.83%
+IIR             0.08%          -2.58%        49.81%          -1.22%       -33.98%
+spectral       -0.34%          -2.36%         8.16%          -1.18%         5.23%
+nonlinear       0.10%          -3.99%        40.17%          -0.24%       -18.47%
+
+Fewer data loads do not establish faster execution: the experiment changes
+register-domain transfers, dependencies and code/cache behavior too. The specific
+limiter is unproved. Instruction-cache regressions remain recorded; no energy or
+complete-cache-locality claim is made. Full-bank mode remains an explicitly
+selected, independently tested research path rather than the automatic default.
+
+
+Final automatic A/B policy
+
+After rejecting automatic SSE2 banks, final suites again pass 130/130 tests in
+release (130.29 s, two CTest processes) and strict (260.47 s, three), zero skips.
+The same 1464387 state/accounting and 104942 retirement/encoding assertions pass
+in each build, including all three private controls. All 24 full backend/stream
+states and four strict report-only states agree. Final concurrent strict captures
+retain FIR/spectral package failures and late blocks 317/39/100/123; IIR/nonlinear
+packages pass. They qualify correctness only. Files/fixtures/instrumentation are
+unchanged from the verified scopes above.
+
+The final automatic comparison uses the same pinned four-phase protocol with
+no concurrent project build/test/format job and unchanged guest work. External
+scheduling/frequency remain uncontrolled; wall/CPU variation is substantial.
+
+Scenario   Baseline CPU s       Automatic CPU s        Mean CPU observation
+FIR        0.243148..0.256854    0.256714..0.259797       3.30% increase, retained
+IIR        0.605260..0.606186    0.605366..0.605891       0.02% decrease
+spectral   0.829686..0.842470    0.833163..0.840024       0.06% increase
+nonlinear  0.650398..0.651770    0.649825..0.654771       0.19% increase
+
+All sixteen full states agree. Fifteen packages pass; one spectral baseline
+fails at 1.037437 wall s. Both spectral candidates pass the input-second deadline
+but retain 273.07/263.29 MIPS, below the 275-MIPS reference. Block misses are
+baseline FIR0/17, IIR7/31, spectral10/48, nonlinear2/20; automatic FIR0/0, IIR19/25,
+spectral26/33, nonlinear22/6. All failures remain recorded. None of these noisy
+small differences is claimed as a causal A/B speed gain; FIR's increase remains
+visible. No repeat-until-pass capture replaces any result.
+
+Separate final default release gate, every full state/package passes:
+Scenario   Wall s      Process CPU s   MIPS       Max block / budget ms   Late
+FIR        0.388605    0.268574         700.35      8.493 / 1.333           46
+IIR        0.675903    0.623075         406.00      4.889 / 1.333           18
+spectral   0.852032    0.827583         301.28     17.692 /10.000            4
+nonlinear  0.695760    0.642182         380.48      7.283 / 1.333           14
+
+The package gate enforces input-second wall time, not every reported block
+budget or an additional MIPS floor. Every short-block miss remains an open
+latency failure. Earlier 264-MIPS/default misses also remain, rather than being
+superseded by a new passing sample. This increment establishes exact register
+formats and comparative evidence; it does not establish a general speed gain,
+complete ISA, sustained realtime, complete cache locality or energy improvement.

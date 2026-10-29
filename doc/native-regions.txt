@@ -144,3 +144,15 @@ qualification remain active work; the current package gate is not completion.
 The subsequent linear post-N extension is specified in native-strides.txt. Its
 additional range proof and canonical final-R wrap preserve this original unit-
 step/ring qualification; its measurements are a separate controlled increment.
+
+
+Closed-loop register checkpoint follow-up
+
+The original RAM/alias/M/N/LC/saved-target/budget guards remain. Closed loops
+now seed A/B after an initial preflight, retain them across
+backedges and materialize all post-admission exits. Initial rejection retains
+its zero-dirty exit; ordinary/helper paths retain their previous checkpoints.
+A private full-bank X/Y SSE2 experiment and disabled original-header controls
+compare the same independently modeled traces in one build. The SSE2 experiment
+regressed CPU demand and is not selected automatically. See loop-residency.txt for complete state/snapshot mapping
+and measured costs; this changes no guest semantics or ISA qualification.

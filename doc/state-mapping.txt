@@ -1,13 +1,20 @@
 DSP state mapped to host resources
 
-This is the state inventory and next compiler design, not a claim that adaptive
-allocation or SIMD register-bank caching is already implemented. Current native
+This is the state inventory, selected implemented mappings and next compiler
+design. A general adaptive register allocator is not implemented. Current native
 code holds dirty A/B in RBP/RBX and, in admitted regions, SR in R14D; SSE2
 combines retirement counters. Live instruction-local parallel-input snapshots
 use XMM3..6; they expire after that ALU and reload after successful helpers.
 Ordinary native regions still use canonical X/Y and AGU memory across guest
 instructions; the guarded MAC region below has a separate working format.
-See native-inputs.txt; persistent bank caching and adaptive allocation remain open.
+Closed helper-free RAM loops now seed A/B in their existing GPRs and retain them
+across backedges. A separately selected private experiment also caches raw48 X/Y
+in XMM5/XMM6; old X/Y then use XMM0/XMM1 and old A/B use XMM3/XMM4. That SSE2
+format is correct but measured slower, so automatic mode keeps canonical X/Y.
+Entry preflight and every return preserve complete canonical checkpoints. These
+are selected closed-loop formats, not the final general adaptive allocator.
+See loop-residency.txt and native-inputs.txt; broader bank caching, cost-based
+selection and adaptive allocation remain open.
 
 Architectural aliases, unshifted DSP bit coordinates
 

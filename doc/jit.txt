@@ -121,9 +121,10 @@ mode, LA/LF, REP and invalidation checks before generated execution continues;
 faults or changed context exit immediately. The ending instruction's transfer
 also checks invalidation before any native backedge. Bodies ending in a general
 instruction still return through the existing helper path.
-Each backedge materializes dirty A/B before reentering a header compiled with
-empty caches. This avoids assuming loop-carried register allocation that has
-not been proven. Flags, PC, progress, dynamic LC/SP/frame reads, callback ordering
+Ordinary backedges materialize dirty A/B before reentering an empty-cache
+header. Proved helper-free RAM loops instead seed A/B once and retain them across
+headers, with exact post-admission exit publication. A private full-bank SSE2
+experiment is correct but measured slower and is not automatic; see loop-residency.txt. Flags, PC, progress, dynamic LC/SP/frame reads, callback ordering
 and fault observations keep their per-instruction semantics. The optimization
 reduces dispatcher/entry/exit work, not guest retirement or elapsed DSP time.
 REP bodies use their original latched general execution path.
@@ -165,9 +166,12 @@ exception or callback: only values proven unobservable before replacement are
 omitted. Liveness does not yet cross RAM/AGU guards or general helpers.
 
 Native entry preserves the extra nonvolatile register and SysV stack alignment.
-R14 keeps the old-input pointer; R8 is the Y address during transfers and becomes
-available to ALU flag code after transfers finish. X/Y and old overwritten inputs
-remain memory-backed. This is bounded accumulator allocation/materialization,
+R14 holds cached SR in admitted regions and otherwise the old-input pointer;
+R8 is the Y address during transfers and becomes available to ALU flag code
+after transfers finish. Ordinary X/Y stay canonical; instruction-local old inputs
+use the qualified snapshot format. A private closed-loop experiment also retains X/Y in SSE2 registers; automatic
+mode retains canonical X/Y because that experiment regressed CPU demand. See
+loop-residency.txt. These are bounded mappings,
 not a general SSA register allocator. The bounded flag pass does not establish
 independent iterations or vectorize the guest.
 MOVEC/MOVEM/MOVEP use the general helpers. Guest SR writes exit on changed

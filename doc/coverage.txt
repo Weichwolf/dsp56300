@@ -97,15 +97,14 @@ and old parallel operands without memory/I/O observation barriers. All 6758417
 directed ASR/register assertions pass; no ISA catalogue row becomes complete.
 See doc/native-shifts.txt for guards, witnesses, measurements and remaining work.
 
-The current configuration passes all 130 correctness tests in release (108.71 s,
-two CTest processes) and strict ASan/UBSan (251.55 s, three processes), zero skips.
-All 143 C++ translation units retain required strict nonrecovering address/
-undefined/integer instrumentation; all 183 project C++ source/header files pass
-clang-format/tidy/Werror. Fifty previous archives stay unchanged; two obsolete SM
-shift rejections are promoted with identical stimuli in one old archive. The
-new independently modeled saturated-shift archive brings the total to 52. All
-registered exact regeneration checks pass. No fuzzing was run. Structural ISA
-audit passes; require-complete remains a failing gate with 118 partial/zero complete.
+The current configuration passes all 130 correctness tests in release (130.29 s,
+two CTest processes) and strict ASan/UBSan (260.47 s, three), zero skips. All 143
+C++ translation units retain strict nonrecovering address/undefined/integer
+instrumentation; all 183 project C++ source/header files pass clang-format/tidy/
+Werror. All 52 binary archives and their producers remain unchanged in the
+current register-residency increment; all exact regeneration checks pass. No
+fuzzing was run. Structural ISA audit passes; require-complete remains a failing
+gate with 118 partial/zero complete entries.
 
 The new meaningful nonlinear stream uses 204 channels/four driven feedback stages
 at 48 kHz, persistent histories and input/output rings, with exact SM/rounding.
@@ -117,14 +116,15 @@ stream/backend states and four strict report-only states. Concurrent reports
 retain timing failures and qualify correctness, not optimized speed.
 
 The latest optimized default bench passes all four one-second packages: FIR
-0.285208 s, IIR 0.740048 s, spectral 0.972681 s, nonlinear 0.655202 s. Every
-complete state matches. All four retain block misses (4/34/20/1); spectral's
-263.91 MIPS falls below the 275-MIPS reference. These failures stay visible.
-All sixteen matched states/packages pass, with block misses retained for both
-baseline and candidate. The saved identical baseline also runs slower than its
-earlier capture; the external cause is unproved. See continuous-bench.txt.
-Sustained latency/reserve and wider scenario qualification remain open. Package
-gates are separate from correctness tests and do not prove all-program realtime.
+0.388605 s, IIR 0.675903 s, spectral 0.852032 s, nonlinear 0.695760 s. Every
+complete state matches. All four retain block misses (46/18/4/14); spectral's
+latest default is 301.28 MIPS. Matched spectral candidates retain 273.07/263.29
+MIPS below the reference, and one baseline package fails at 1.037437 wall s.
+Fifteen matched packages and all sixteen states pass. These and earlier default
+264-MIPS/block failures remain recorded; no passing sample replaces them.
+External scheduling/frequency causes are unproved. See continuous-bench.txt and
+loop-residency.txt. Sustained latency/reserve and wider qualification remain
+open; correctness/package gates do not prove all-program realtime.
 The expanded native-move boundary test passes all 78446 assertions in both builds.
 It includes exact same-code reuse after modifier changes and paired aliased X/Y
 wraps/I/O fallback. Profiled modulo checks compile ring constants but guard every
@@ -198,11 +198,12 @@ Dynamic CPU, loop, budget, frame and memory guards remain. No persistent layout
 or allocation is added; prepared entries retain independent state/reuse tests.
 See doc/mac-plan-compilation.txt for lifetime, code-size and measured tradeoffs.
 
-Adaptive pattern-dependent register allocation, new SIMD bank formats and
-both-branch evaluation remain design/experiment work, not implemented features;
+General adaptive register allocation and both-branch evaluation remain design/
+experiment work. Selected closed-loop SIMD bank residency is now implemented;
 see doc/state-mapping.txt for inventory, layouts, guards and transition witnesses.
-The new instruction-local input snapshots use only live old-value banks in
-XMM3..6, reloading after successful general transfer helpers. This removes fast
+Ordinary instruction-local input snapshots use live old-value banks in XMM3..6,
+reloading after successful general transfer helpers. The private full-bank experiment instead keeps current X/Y in XMM5/XMM6 and
+old X/Y in XMM0/XMM1; it measured slower, so automatic X/Y remain canonical. This removes fast
 RAM snapshot round trips, not canonical X/Y storage across guest instructions.
 CoreImplementation and typed reference/cached/JIT adapters now share a checked
 integration contract in the correctness/benchmark runner. Lane/vector geometry
@@ -580,3 +581,40 @@ performance summaries while historical captures remain. The latest default FFT
 rate and every late block remain explicit qualification gaps; no repeated capture
 is used to replace them with a passing sample. No full ISA or goal completion
 claim is made, and no publication is authorized/performed.
+
+
+Closed-loop data-register residency
+
+Proved helper-free RAM loops now seed existing A/B GPRs after a read-only initial
+preflight. A private experiment additionally caches raw48 X/Y in SSE2 slots. Every repeated header/ending/budget/
+saved-target guard remains, and every post-admission exit publishes all valid
+banks. Full A/B moves update authoritative slots; partial X/Y writes preserve
+the other half, and old parallel operands occupy different registers. Initial
+rejection uses the original zero-dirty exit. Other paths remain canonical.
+Private experimental-full-bank/automatic-A-B/disabled controls compare independently modeled traces
+in one build. This is a selected closed-loop format, not the full adaptive allocator.
+
+The expanded matrix passes 1464387 assertions per build, including all CCR/six
+scaling-RM/SM choices, aliases/P wrap, full A/B loads/moves, crossed X/Y memory/
+register transfers, unused-bank canaries, header/budget/LC/target failures, exact
+progress and canonical I/O/P-edit/fault/IRQ/reentry boundaries. The host encoding
+test adds 147 literal/RX copy checks, for 104942 total. All 52 binary archives and
+producers remain unchanged. See loop-residency.txt for the proof, complete scopes
+and measurements. No ISA entry or full-objective requirement is declared complete.
+
+The full-bank SSE2 candidate increases matched CPU demand by 1.92%/2.48%/1.82%/
+4.04% across FIR/IIR/spectral/nonlinear. It remains private/explicit and is not
+selected automatically. Whole-process user PMU counters show IIR/nonlinear L1
+data loads falling 49.81%/40.17% while cycles rise 2.58%/3.99%; instruction misses
+rise 33.98%/18.47%. All increases and scope limits remain recorded. Fewer CPU-state
+loads alone do not establish speed, locality or energy gains. The A/B-only pilot
+shows no robust causal gain; final automatic policy is qualified separately.
+
+Final automatic A/B policy is requalified: 130/130 tests in both builds, all
+24 full stream/backend and four strict states agree. Matched CPU changes are
+small/noisy for IIR/spectral/nonlinear; FIR retains a 3.30% increase. No causal
+speed gain is claimed. All sixteen matched states agree; one spectral baseline
+package fails and candidate spectral MIPS/block shortfalls stay visible. The
+latest default package gate passes but all four block budgets have misses.
+General adaptive allocation, broader domains, numerical/IRQ/pipeline/timing,
+SIMD/multicore, integration and cache/energy remain active with the full objective.

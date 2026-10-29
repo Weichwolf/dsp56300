@@ -89,3 +89,14 @@ reduced the largest parallel-MOVE outlier from 12% to about 0.5%; mixed-MOVE and
 bit-access differences remained around 1-2%. This is host/harness variability
 evidence, not proof that every other workload has zero regression. Keep raw
 results and investigate meaningful changes on longer representative programs.
+
+
+Closed-loop residency follow-up
+
+The snapshot format above remains the ordinary/helper-path format. Proved
+helper-free RAM loops can experimentally retain current X/Y in XMM5/XMM6 and take old X/Y
+snapshots in XMM0/XMM1; old A/B retain XMM3/XMM4. Those temporaries are free
+during helper-free retirement, with explicit admission and canonical exit
+publication. See loop-residency.txt for the proof and independent witnesses.
+The measured SSE2 format is slower and remains a private experiment; automatic
+mode retains canonical X/Y. The full adaptive allocator remains open.

@@ -20,7 +20,8 @@ public:
              bool optimize,
              BatchBackend batch = BatchBackend::automatic,
              std::array<Word, agu_registers> modifiers = {},
-             RegionMode region = RegionMode::automatic);
+             RegionMode region = RegionMode::automatic,
+             LoopResidency residency = LoopResidency::automatic);
   [[nodiscard]] std::vector<std::uint8_t> generate(std::span<const NativeOp> operations);
 
   [[nodiscard]] bool packed_retirement() const noexcept { return packed_retirement_; }
@@ -34,6 +35,10 @@ public:
   [[nodiscard]] bool guarded_region() const noexcept { return region_.valid; }
 
   [[nodiscard]] bool coalesced_accounting() const noexcept { return coalesced_accounting_; }
+
+  [[nodiscard]] bool loop_residency() const noexcept { return loop_residency_; }
+
+  [[nodiscard]] bool loop_bank_cache() const noexcept { return loop_bank_cache_; }
 
 private:
   [[nodiscard]] bool lowerable(const NativeOp &operation) const;
@@ -52,6 +57,8 @@ private:
   void general_moves(const NativeOp &operation);
   void capture_inputs();
   void restore_inputs();
+  [[nodiscard]] x64::Xmm input_snapshot(unsigned index) const;
+  void materialize_loop_banks();
   [[nodiscard]] bool admit_cached_inputs(std::span<const NativeOp> operations) const;
   void register_move(const NativeRegisterMove &move, Word mode);
   void move_guard(const NativeMove &move, x64::Label &slow);
@@ -85,6 +92,7 @@ private:
   void value(x64::Reg destination, unsigned index, bool latched);
   void current_value(x64::Reg destination, unsigned index);
   void store_accumulator(bool destination_b, x64::Reg source);
+  void invalidate_moved_accumulators();
   [[nodiscard]] Word dirty_accumulators() const;
   void flush_accumulators(Word mask);
   void exit_if(x64::Branch condition);
@@ -102,6 +110,7 @@ private:
   void loop_push(x64::Reg frame);
   void loop_continue();
   void loop_backedge();
+  void initialize_loop_residency();
   void batch_entry(std::span<const NativeOp> operations);
   void retire(const NativeOp &operation, bool publish);
   x64::Code code_;
@@ -118,6 +127,7 @@ private:
   bool optimize_;
   BatchBackend batch_backend_;
   RegionMode region_mode_;
+  LoopResidency residency_mode_;
   NativeRegion region_;
   bool mac_batches_ = false;
   bool packed_retirement_ = false;
@@ -125,9 +135,11 @@ private:
   bool cached_status_ = false;
   bool cached_inputs_ = false;
   bool coalesced_accounting_ = false;
+  bool loop_residency_ = false;
+  bool loop_bank_cache_ = false;
   Word pending_instructions_ = 0, pending_moves_ = 0, pending_extra_cycles_ = 0;
   NativeDataflow dataflow_;
-  // Only native writes establish a live host value; dirty also implies valid.
+  // Dirty implies valid. Closed resident loops seed both slots before all effects.
   std::array<bool, 2> accumulator_dirty_{};
   std::array<x64::Label, 4> exits_;
   x64::Label loop_header_;

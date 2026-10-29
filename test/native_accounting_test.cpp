@@ -128,14 +128,50 @@ bool moved(const Step step) {
          step.action == Action::reg;
 }
 
+enum class Pattern : std::uint8_t { mixed, loads, crossed, only_a, only_b };
+
 struct Shape {
   Word mode = 0, first = start;
   bool loop = false, alias = false, maximum_cost = false, two_word_end = false;
   std::size_t padding = 0;
+  Pattern pattern = Pattern::mixed;
+  detail::LoopResidency residency = detail::LoopResidency::automatic;
 };
 
 std::vector<Step> steps(const Shape shape) {
   auto result = body();
+  if (shape.pattern == Pattern::loads) {
+    result[4] = single({.reg = 14}, mac_round_b);
+    result[5] = single({.reg = 15, .cursor = 1, .y = true}, adc_x_a);
+    constexpr Word move_a_b = 0x21cf00;
+    constexpr Word move_b_a_mac_b = 0x21eefb;
+    constexpr Word move_a_a = 0x21ce00;
+    result.insert(
+        result.begin() + 6,
+        {{.word = move_a_b, .action = Action::reg, .ports = {}, .source = 14, .destination = 15},
+         {.word = move_b_a_mac_b,
+          .action = Action::reg,
+          .ports = {},
+          .source = 15,
+          .destination = 14},
+         {.word = move_a_a, .action = Action::reg, .ports = {}, .source = 14, .destination = 14}});
+  }
+  if (shape.pattern == Pattern::crossed) {
+    result[4] = single({.reg = 6}, mac_round_a);
+    result[5] = single({.reg = 4, .cursor = 1, .y = true}, mac_round_b);
+    constexpr Word x1_y1 = 0x20a700;
+    constexpr Word y1_x0 = 0x20e400;
+    result.insert(
+        result.begin() + 6,
+        {{.word = x1_y1, .action = Action::reg, .ports = {}, .source = 5, .destination = 7},
+         {.word = y1_x0, .action = Action::reg, .ports = {}, .source = 7, .destination = 4}});
+  }
+  if (shape.pattern == Pattern::only_a || shape.pattern == Pattern::only_b) {
+    for (auto &step : result) {
+      if ((step.word & status_byte) == 0 || step.action == Action::constant) { continue; }
+      step.word = (step.word & ~Word{8}) | (shape.pattern == Pattern::only_b ? 8U : 0U);
+    }
+  }
   const Step nop{.action = Action::nop, .ports = {}};
   result.insert(result.begin() + 4, shape.padding, nop);
   if (shape.two_word_end) {
@@ -224,7 +260,8 @@ void execute(Registers &state, Memory &memory, const Step step) {
   } else if (step.action == Action::immediate) {
     auto immediate_old = old;
     immediate_old.x = step.extension;
-    arithmetic(state, immediate_old, 0x40);
+    constexpr Word add_x0 = 0x40;
+    arithmetic(state, immediate_old, add_x0 | (step.word & 8U));
   } else if (step.action != Action::nop) {
     arithmetic(state, old, step.word);
   }
@@ -364,11 +401,18 @@ void direct_shape(const Shape shape) {
                              true,
                              BatchBackend::disabled,
                              register_model::seed(0).m,
-                             detail::RegionMode::guarded);
+                             detail::RegionMode::guarded,
+                             shape.residency);
   const native::Direct code(emitter.generate(ops));
   require(emitter.coalesced_accounting() == (ops.size() <= 256) && emitter.guarded_region() &&
               emitter.packed_retirement() && emitter.cached_status(),
           "Only bounded proved helper-free regions use the tested coalesced counter path");
+  require(emitter.loop_residency() ==
+              (shape.loop && shape.residency != detail::LoopResidency::disabled),
+          "Only admitted closed loops seed authoritative accumulator slots across backedges");
+  require(emitter.loop_bank_cache() ==
+              (shape.loop && shape.residency == detail::LoopResidency::vectors),
+          "Only helper-free resident loops hold X/Y separately from old parallel snapshots");
   for (Word flags = 0; flags <= status_byte; ++flags) {
     direct_case(code,
                 memory,
@@ -394,6 +438,24 @@ void direct_matrix() {
                           .alias = alias});
           }
         }
+      }
+    }
+  }
+}
+
+void residency_patterns(const Word mode) {
+  for (const auto pattern :
+       {Pattern::mixed, Pattern::loads, Pattern::crossed, Pattern::only_a, Pattern::only_b}) {
+    for (const auto residency : {detail::LoopResidency::automatic,
+                                 detail::LoopResidency::vectors,
+                                 detail::LoopResidency::disabled}) {
+      for (const bool alias : {false, true}) {
+        direct_shape({.mode = mode,
+                      .first = word_mask - 5,
+                      .loop = true,
+                      .alias = alias,
+                      .pattern = pattern,
+                      .residency = residency});
       }
     }
   }
@@ -461,6 +523,80 @@ void api_prefixes(const Options options, const bool alias) {
   }
 }
 
+void api_loop_case(
+    Core &core, Memory &memory, const Shape shape, const Word budget, const bool native_expected) {
+  memory.initialize();
+  auto expected_memory = memory;
+  auto expected = initial(shape, {.progress = {}, .flags = status_byte, .target = start});
+  core.set_registers(expected);
+  const auto progress = core.progress();
+  const auto counts = core.jit_statistics();
+  const auto trace = steps(shape);
+  Word cycles = 0;
+  Word moves = 0;
+  for (Word index = 0; index < budget; ++index) {
+    const auto position = index % trace.size();
+    const auto step = trace[position];
+    execute(expected, expected_memory, step);
+    cycles += words(step);
+    moves += moved(step) ? 1U : 0U;
+    if (position + 1 == trace.size()) {
+      --expected.lc;
+      expected.pc = start;
+    }
+  }
+  const auto run = core.run(budget);
+  require(run.dispatches == budget && run.fault.kind == FaultKind::none &&
+              core.registers() == expected && memory.data == expected_memory.data &&
+              run.progress == Progress{.instructions = progress.instructions + budget,
+                                       .estimated_cycles = progress.estimated_cycles + cycles},
+          "Every resident multi-iteration API prefix exposes exact registers, memory and costs");
+  if (budget != 3 * trace.size()) { return; }
+  if (native_expected) {
+    const auto after = core.jit_statistics();
+    const auto native = after.native_alu_instructions - counts.native_alu_instructions;
+    require(native == budget && after.helper_instructions == counts.helper_instructions &&
+                after.native_move_instructions == counts.native_move_instructions + moves,
+            "Warmed closed loops retire every complete body and move through actual native code");
+  }
+  require(core.interruptible(), "A returned resident loop exposes an admitted IRQ boundary");
+  constexpr Word vector = 32;
+  core.interrupt(vector, 1);
+  require(core.registers() == expected && memory.data == expected_memory.data &&
+              !core.interruptible() &&
+              core.progress() == Progress{.instructions = run.progress.instructions + 2,
+                                          .estimated_cycles = run.progress.estimated_cycles + 2},
+          "Fast service preserves the complete resident-loop checkpoint and live loop frame");
+  execute(expected, expected_memory, trace.front());
+  const auto resumed = core.run(1);
+  require(resumed.dispatches == 1 && resumed.fault.kind == FaultKind::none &&
+              core.registers() == expected && memory.data == expected_memory.data &&
+              resumed.progress == Progress{.instructions = run.progress.instructions + 3,
+                                           .estimated_cycles = run.progress.estimated_cycles + 4} &&
+              core.interruptible(),
+          "Foreground reentry with final LC retains canonical accumulators and releases exclusion");
+}
+
+void api_loops(const Options options, const Word mode) {
+  for (const auto pattern :
+       {Pattern::mixed, Pattern::loads, Pattern::crossed, Pattern::only_a, Pattern::only_b}) {
+    Memory memory{.alias = true};
+    std::array<Word, memory_words> p{};
+    Core core({.program = p, .x = memory.bank(false), .y = memory.bank(true)}, nullptr, options);
+    const Shape shape{.mode = mode, .loop = true, .alias = true, .pattern = pattern};
+    const auto trace = steps(shape);
+    constexpr Word vector = 32;
+    core.load(Space::program, vector, std::array{0U, 0U});
+    core.load(Space::program, start, program(trace));
+    const auto maximum_budget = 3 * static_cast<Word>(trace.size());
+    const bool native_expected = options.backend == Backend::jit && options.optimize;
+    api_loop_case(core, memory, shape, maximum_budget, native_expected);
+    for (Word budget = 0; budget <= maximum_budget; ++budget) {
+      api_loop_case(core, memory, shape, budget, native_expected);
+    }
+  }
+}
+
 class Observer final : public Io {
 public:
   Core *core = nullptr;
@@ -496,7 +632,7 @@ public:
 struct CallbackInput {
   Backend backend = Backend::jit;
   Word mode = 0;
-  bool accept = true, patch = false;
+  bool accept = true, patch = false, loop = false;
 };
 
 void callback(const CallbackInput input) {
@@ -511,7 +647,7 @@ void callback(const CallbackInput input) {
             &observer,
             {.backend = input.backend});
   observer.core = &core;
-  const Shape shape{.mode = input.mode};
+  const Shape shape{.mode = input.mode, .loop = input.loop};
   auto trace = steps(shape);
   core.load(Space::program, start, program(trace));
   memory.initialize();
@@ -561,6 +697,10 @@ void callback(const CallbackInput input) {
   for (const auto step : std::span(trace).subspan(io_index + 1)) {
     execute(state, expected_memory, step);
   }
+  if (input.loop) {
+    --state.lc;
+    state.pc = start;
+  }
   require(run.dispatches == trace.size() && run.fault.kind == FaultKind::none &&
               run.progress == Progress{.instructions = before.instructions + trace.size(),
                                        .estimated_cycles = before.estimated_cycles + 15} &&
@@ -574,6 +714,10 @@ void callback(const CallbackInput input) {
 int main() {
   try {
     dsp56300::test::direct_matrix();
+    for (const auto mode : dsp56300::test::modes) {
+      dsp56300::test::residency_patterns(mode);
+      dsp56300::test::residency_patterns(mode | dsp56300::test::saturation_model::mode);
+    }
     for (const bool alias : {false, true}) {
       for (const bool loop : {false, true}) {
         dsp56300::test::direct_shape({.mode = dsp56300::test::saturation_model::mode |
@@ -591,6 +735,11 @@ int main() {
     }
     for (const auto backend :
          {dsp56300::Backend::reference, dsp56300::Backend::cached, dsp56300::Backend::jit}) {
+      for (const auto mode : dsp56300::test::modes) {
+        dsp56300::test::api_loops({.backend = backend}, mode);
+        dsp56300::test::api_loops({.backend = backend},
+                                  mode | dsp56300::test::saturation_model::mode);
+      }
       for (const auto limit : {1U, 4U, 64U}) {
         for (const bool alias : {false, true}) {
           dsp56300::test::api_prefixes({.backend = backend, .instructions_per_block = limit},
@@ -602,6 +751,8 @@ int main() {
           for (const bool patch : {false, true}) {
             dsp56300::test::callback(
                 {.backend = backend, .mode = mode, .accept = accept, .patch = patch});
+            dsp56300::test::callback(
+                {.backend = backend, .mode = mode, .accept = accept, .patch = patch, .loop = true});
           }
         }
       }
