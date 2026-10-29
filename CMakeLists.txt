@@ -237,6 +237,11 @@ if(BUILD_TESTING)
   add_test(NAME saturation-boundaries COMMAND dsp56300_saturation_test)
   add_executable(dsp56300_generate_saturation test/generate_saturation.cpp)
   target_link_libraries(dsp56300_generate_saturation PRIVATE dsp56300_fixture_format)
+  add_executable(dsp56300_generate_saturated_shifts test/generate_saturated_shifts.cpp)
+  target_link_libraries(dsp56300_generate_saturated_shifts PRIVATE dsp56300_fixture_format)
+  add_executable(dsp56300_saturated_shift_test test/saturated_shift_test.cpp)
+  target_link_libraries(dsp56300_saturated_shift_test PRIVATE dsp56300::core)
+  add_test(NAME saturated-shift-boundaries COMMAND dsp56300_saturated_shift_test)
   add_executable(dsp56300_generate_integer test/generate_integer.cpp)
   target_link_libraries(dsp56300_generate_integer PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_address_calc test/generate_address_calc.cpp)
@@ -435,6 +440,13 @@ if(BUILD_TESTING)
     "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_saturation>"
     "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/saturation-regenerated.d56"
     "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/saturation.d56"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
+  add_test(NAME saturated-shift-fixtures COMMAND dsp56300_fixture_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/saturated-shifts.d56")
+  add_test(NAME saturated-shift-reproducibility COMMAND "${CMAKE_COMMAND}"
+    "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_saturated_shifts>"
+    "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/saturated-shifts-regenerated.d56"
+    "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/saturated-shifts.d56"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
   add_test(NAME loop-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/loops.d56")

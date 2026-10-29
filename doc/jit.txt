@@ -488,3 +488,14 @@ their existing representations. This reduces counter traffic without a new
 architectural register allocator. See region-accounting.txt for exact bounds,
 independent RX/Core witnesses and measured tradeoffs; continuous-bench.txt records
 the package and block deadlines. Full ISA and the full objective remain open.
+
+
+SM arithmetic shifts retain general execution
+
+Parallel ASL/ASR and immediate/register-controlled arithmetic shifts now have
+qualified general SM semantics. Existing SM native admission intentionally
+rejects them, so the JIT helper publishes exact old operands, shifted Carry,
+saturation/flags and progress. Ordinary eligible single-bit ASR remains native.
+Independent same-PC mode changes and real dispatch counters verify this split;
+callbacks/P edits and rejected transfers retain their canonical boundaries.
+See saturated-shifts.txt for scope and independent binary/host witnesses.

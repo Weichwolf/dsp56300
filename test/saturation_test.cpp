@@ -269,13 +269,15 @@ void reject(const Backend backend, const Unsupported input) {
 }
 
 void rejected_modes(const Backend backend) {
-  constexpr std::array<Word, 8> instructions{
-      0x200022, 0x200032, 0x200017, 0x200003, 0x200045, 0x014085, 0x200012, 0x200002};
+  constexpr std::array<Word, 6> instructions{
+      0x200017, 0x200003, 0x200045, 0x014085, 0x200012, 0x200002};
   for (const auto instruction : instructions) {
     reject(backend, {.instruction = instruction, .status = saturation_model::mode});
   }
+  constexpr Word asl_a = 0x200032;
   for (const Word other : {0x2000U, 0x4000U, 0x20000U, mode_up | mode_down}) {
     reject(backend, {.instruction = mac, .status = saturation_model::mode | other});
+    reject(backend, {.instruction = asl_a, .status = saturation_model::mode | other});
   }
 }
 

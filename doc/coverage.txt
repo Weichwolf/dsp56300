@@ -97,14 +97,15 @@ and old parallel operands without memory/I/O observation barriers. All 6758417
 directed ASR/register assertions pass; no ISA catalogue row becomes complete.
 See doc/native-shifts.txt for guards, witnesses, measurements and remaining work.
 
-The current configuration passes all 127 correctness tests in release (90.31 s,
-two CTest processes) and strict ASan/UBSan (212.46 s, three processes), with no
-skips. All 141 C++ translation units retain required strict nonrecovering address/
-undefined/integer instrumentation; all 180 project C++ source/header files pass
-clang-format/tidy/Werror. All 51 archives and producer sources remain unchanged
-in the current accounting increment. All registered regeneration checks pass.
-No fuzzing was run. Structural ISA audit passes; require-complete remains a
-failing gate with 118 partial/zero complete entries.
+The current configuration passes all 130 correctness tests in release (108.71 s,
+two CTest processes) and strict ASan/UBSan (251.55 s, three processes), zero skips.
+All 143 C++ translation units retain required strict nonrecovering address/
+undefined/integer instrumentation; all 183 project C++ source/header files pass
+clang-format/tidy/Werror. Fifty previous archives stay unchanged; two obsolete SM
+shift rejections are promoted with identical stimuli in one old archive. The
+new independently modeled saturated-shift archive brings the total to 52. All
+registered exact regeneration checks pass. No fuzzing was run. Structural ISA
+audit passes; require-complete remains a failing gate with 118 partial/zero complete.
 
 The new meaningful nonlinear stream uses 204 channels/four driven feedback stages
 at 48 kHz, persistent histories and input/output rings, with exact SM/rounding.
@@ -115,14 +116,15 @@ state agrees in all six variants. Across all four scenarios this gives 24 full
 stream/backend states and four strict report-only states. Concurrent reports
 retain timing failures and qualify correctness, not optimized speed.
 
-The optimized default bench passes all four one-second packages: FIR 0.234576 s,
-IIR 0.557283 s, spectral 0.751003 s, nonlinear 0.600266 s. Every complete state
-matches and all measured block budgets pass in that capture. The slowest current
-default throughput is spectral 341.82 MIPS. All sixteen states, packages and
-block budgets pass in the matched accounting comparison. Earlier late captures
-remain recorded; sustained latency/reserve and wider scenario qualification
-remain open. See continuous-bench.txt. These gates are separate from correctness
-tests and do not prove indefinite/all-program realtime.
+The latest optimized default bench passes all four one-second packages: FIR
+0.285208 s, IIR 0.740048 s, spectral 0.972681 s, nonlinear 0.655202 s. Every
+complete state matches. All four retain block misses (4/34/20/1); spectral's
+263.91 MIPS falls below the 275-MIPS reference. These failures stay visible.
+All sixteen matched states/packages pass, with block misses retained for both
+baseline and candidate. The saved identical baseline also runs slower than its
+earlier capture; the external cause is unproved. See continuous-bench.txt.
+Sustained latency/reserve and wider scenario qualification remain open. Package
+gates are separate from correctness tests and do not prove all-program realtime.
 The expanded native-move boundary test passes all 78446 assertions in both builds.
 It includes exact same-code reuse after modifier changes and paired aliased X/Y
 wraps/I/O fallback. Profiled modulo checks compile ring constants but guard every
@@ -549,3 +551,32 @@ Counters include setup/warm/checks; they do not establish complete cache localit
 or energy savings. Complete ISA, numerical/IRQ/pipeline/timing behavior, adaptive
 register placement, additional domains, SIMD/multicore, integration and sustained
 realtime remain open parts of the unchanged objective.
+
+
+General arithmetic shifts with SM
+
+ASL/ASR now admit arithmetic saturation in parallel single-bit, immediate and
+register-controlled 56-bit forms. Counts 0..55 shift old operands, preserve
+shifted Carry and limit the final raw result. Stored flags and raw left-shift
+overflow remain exact, including sticky L. Native SM shift admission is unchanged;
+JIT falls back to the qualified general implementation. Other numerical modes,
+logical shifts and normalization/division retain their existing diagnostics.
+
+The standalone bit-serial producer adds 52632 original binary cases and 1473697
+complete-state assertions across reference/cached/JIT. All defined counts,
+source/destination pairs, six control selectors with aliases/high bits, initial
+extension/MSP patterns, CCR bytes, six scaling/RM choices, raw bits and REP
+reevaluation/saturation are covered by explicit matrices. Another 2016 host
+checks qualify exact mixed prefixes, same-PC mode changes, real dispatch counts,
+undefined-count diagnostics and old-input/I/O/P-edit/failure publication. All
+130 tests pass in both builds, with all 52 exact regeneration checks. ASL/ASR
+remain partial catalogue rows. See saturated-shifts.txt for scope and evidence.
+
+The semantic extension's matched comparison shows only small CPU differences:
+FIR increases 0.21%, IIR/spectral/nonlinear decrease 0.02%/0.33%/0.44%. None is
+claimed as a causal speed change. All guest/native/helper/move/batch/AVX2 counts
+and page storage stay equal. New package/block results above supersede current
+performance summaries while historical captures remain. The latest default FFT
+rate and every late block remain explicit qualification gaps; no repeated capture
+is used to replace them with a passing sample. No full ISA or goal completion
+claim is made, and no publication is authorized/performed.

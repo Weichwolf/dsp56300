@@ -650,3 +650,51 @@ capture retains package failures and 227/148/100/164 late blocks: correctness
 only, not optimized speed evidence. Full ISA remains 118 partial rows. Broader
 domains, adaptive allocation, SIMD/multicore, integration, cache/energy and
 sustained/indefinite realtime remain active work.
+
+
+General SM arithmetic-shift increment
+
+All four continuous programs and their fixtures remain byte-identical. New
+original arithmetic-shift fixtures qualify semantics, not throughput. Both
+correctness configurations pass 130 tests, all 52 archives regenerate, all
+24 full backend/stream states and four strict report-only states agree. The
+strict concurrent run retains three package failures, one pass and late-block
+counts 234/91/100/150; it is correctness evidence, not optimized speed evidence.
+
+
+Continuous-workload regression comparison
+
+The saved baseline is byte-identical to the verified 8c7f1e3 runner. Candidate
+changes no continuous fixture, guest instruction/base-cycle work or expected
+state. CPU2, baseline/candidate/candidate/baseline per scenario, one natural warm
+input second then one measured input second in the same DSP. No project build/
+test/format task runs concurrently. External host scheduling/frequency/activity
+are uncontrolled. No restoration, replay, padding or overhead subtraction.
+
+Scenario   Baseline CPU s       Candidate CPU s       Mean observation
+FIR        0.269956..0.270130    0.270104..0.271118     0.21% increase, retained
+IIR        0.631015..0.637078    0.632200..0.635651     0.02% decrease
+spectral   0.859157..0.868052    0.857380..0.864145     0.33% decrease
+nonlinear  0.664538..0.666132    0.662300..0.662465     0.44% decrease
+
+All sixteen full states and package deadlines pass. The small differences do
+not establish a causal speed gain or regression. Native/helper/move/batch/AVX2
+counts and page storage remain equal; pages stay 32768/49152/344064/40960 bytes.
+Measured block misses remain: baseline FIR4/6, IIR16/11, spectral8/0, nonlinear
+13/22; candidate FIR0/2, IIR1/8, spectral2/2, nonlinear10/24. These are failures
+of the respective sampled block budgets, even where whole packages pass.
+
+Separate default release gate, every full state and package deadline passes:
+Scenario   Wall s      Process CPU s   MIPS       Max block / budget ms   Late
+FIR        0.285208    0.274320         954.25      2.702 / 1.333            4
+IIR        0.740048    0.624004         370.81      8.070 / 1.333           34
+spectral   0.972681    0.886006         263.91     16.725 /10.000           20
+nonlinear  0.655202    0.653209         404.03      1.666 / 1.333            1
+
+The package gate enforces the input-second wall deadline; it reports but does
+not enforce each short block deadline or a separate MIPS floor. The new spectral
+capture falls below the 275-MIPS reference and its hop deadline. Do not replace
+these failures with earlier passing captures. The identical saved baseline is
+also slower than in its earlier capture; the specific external cause is not
+established. No repeat-until-pass capture or PMU/energy claim is made. Broader
+and sustained latency qualification remains open with the full objective.

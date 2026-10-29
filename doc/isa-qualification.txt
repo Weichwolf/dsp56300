@@ -360,3 +360,29 @@ variants. All 49 previous archives/producers remain unchanged. All 126 tests pas
 in both builds and all 118 catalogue rows remain partial. See native-constants.txt
 and nonlinear-stream.txt. Full numerical modes, encoding/operand/sequence coverage,
 interrupt/pipeline/timing and broader application qualification remain open.
+
+
+ASL/ASR arithmetic-saturation qualification increment
+
+Parallel single-bit and immediate/register-controlled arithmetic shifts now admit
+SM in ordinary 56-bit operation. Counts 0..55 shift the original operand, retain
+the shifted-out Carry and apply the three-bit post-result saturation decision.
+Flags describe the stored value; shift overflow and limiting retain sticky L.
+Native SM shift admission is intentionally unchanged, so JIT uses the qualified
+general implementation. Other modes and logical shifts retain diagnostics.
+
+The new original binary archive contains 52632 bit-serial cases: every defined
+count, both sources/destinations and all six control selectors (including control/
+source/destination aliases), ignored high control bits, all initial extension
+bytes/MSP signs with representative counts, every CCR byte, six scaling/RM
+choices, individual/complemented raw bits and per-iteration REP effects. An
+additional 2016 host checks qualify same-PC mode changes, exact prefixes, real
+native/general dispatch, undefined-count diagnostics and callback/P-edit/partial
+load/fail-stop boundaries. The producer links only the fixture codec.
+
+Exactly two earlier unsupported-SM bit-operation records become independently
+predicted successes with byte-identical initial registers/input blocks. All
+other old records and the other fifty old archives remain byte-identical.
+No catalogue row becomes complete; full SC/SA/DM/numerical, transfer/sequence,
+IRQ/pipeline/timing and physical hardware qualification remain mandatory.
+See saturated-shifts.txt for scope, verification and workload regression evidence.

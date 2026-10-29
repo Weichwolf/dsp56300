@@ -2,6 +2,8 @@
 // Standalone finite-width bit/integer model; never links or executes the DSP core.
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
+#include "saturated_shift_model.hpp"
+#include "saturation_model.hpp"
 #include "support.hpp"
 
 #include <array>
@@ -415,9 +417,22 @@ void rejected_modes(Cases &cases) {
                                                   Word{1} << 20,
                                                   mode_down | mode_up,
                                                   (Word{1} << 21) | mode_down | mode_up};
-  constexpr std::array<Word, 4> instructions{0x0c1d02, 0x0c1e80, 0x0c1e48, 0x0c1e38};
+  constexpr Word immediate_asl = 0x0c1d02;
+  constexpr Word x0_asl = 0x0c1e48;
+  constexpr std::array<Word, 4> instructions{immediate_asl, 0x0c1e80, x0_asl, 0x0c1e38};
   for (const auto mode : unsupported_modes) {
     for (const auto opcode : instructions) {
+      if (mode == saturation_model::mode && (opcode == immediate_asl || opcode == x0_asl)) {
+        BinaryCase item;
+        item.initial = seed();
+        item.initial.sr = mode;
+        item.expected = item.initial;
+        const unsigned count =
+            opcode == immediate_asl ? 1U : static_cast<unsigned>(item.initial.x % 64);
+        shift_model::apply(item.expected, item.initial, {.count = count, .left = true});
+        append(cases, std::move(item), opcode);
+        continue;
+      }
       rejected_case(
           cases,
           {.opcode = opcode, .status = mode, .value = mode, .kind = FaultKind::unsupported_mode});

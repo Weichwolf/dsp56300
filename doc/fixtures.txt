@@ -869,3 +869,22 @@ bench includes nonlinear-stream; filter it through DSP56300_BENCH_FILTER or use
 the existing case/backend selection. Short fixtures remain correctness evidence,
 not throughput runs. See nonlinear-stream.txt and native-constants.txt for the
 meaningful work, exact guest costs, state proof and performance limitations.
+
+
+Saturated arithmetic shifts
+
+saturated-shifts.d56 contains 52632 independently modeled ASL/ASR cases. The
+standalone dsp56300_generate_saturated_shifts producer uses an explicit 56-bit
+array, shifts one bit at a time and tests the original saturation action table;
+it never executes or links the emulator. Complete state, memory and costs are
+checked in all three backends. Immediate/register counts 0..55, six control
+selectors/old aliases/high bits, initial extension/MSP patterns, all CCR bytes,
+six scaling/RM choices, raw bit positions and repeated saturation/control alias
+reevaluation are covered. Matrices are declared in the producer, not a claim
+that every legal cross-product or ISA sequence is complete. See saturated-shifts.txt.
+
+Only records 4160/4162 in bit-operations.d56 are promoted from obsolete SM
+rejection to exact success. Their initial registers and program/data inputs are
+unchanged; all other records and all fifty other old archives are byte-identical.
+The new archive brings the total to 52. Regeneration uses the normal exact-byte
+CTest check. Single-instruction qualification cases are not throughput benchmarks.

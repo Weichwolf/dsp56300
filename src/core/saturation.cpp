@@ -20,6 +20,8 @@ bool Core::Impl::numeric_alu_supported(const Word opcode) {
   constexpr Word rounded = 0x11;
   constexpr Word absolute = 0x26;
   constexpr Word negate = 0x36;
+  constexpr Word shift_right = 0x22;
+  constexpr Word shift_left = 0x32;
   const auto operation = opcode & alu_mask;
   const auto selector = (opcode >> 4) & 7;
   const auto kind = opcode & 7;
@@ -28,7 +30,8 @@ bool Core::Impl::numeric_alu_supported(const Word opcode) {
   const bool supported = opcode == 0 || (opcode & 0x80U) != 0 || sum || carry_sum ||
                          operation == tfr || operation == tfr_x0 || operation == tfr_y0 ||
                          operation == tfr_x1 || operation == tfr_y1 || operation == clear ||
-                         operation == rounded || operation == absolute || operation == negate;
+                         operation == rounded || operation == absolute || operation == negate ||
+                         operation == shift_right || operation == shift_left;
   return numeric_mode_supported(supported ? arithmetic_saturation : 0);
 }
 

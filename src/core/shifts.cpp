@@ -43,8 +43,9 @@ void Core::Impl::arithmetic_shift(const std::uint64_t value, const ShiftControl 
       carried = ((value >> (padding_bits + count - 1)) & 1) != 0;
     }
   }
-  (control.destination_b ? cpu.reg.b : cpu.reg.a) = result;
   arithmetic_flags(result, overflowed);
+  if ((cpu.reg.sr & arithmetic_saturation) != 0) { saturate_arithmetic(result); }
+  (control.destination_b ? cpu.reg.b : cpu.reg.a) = result;
   cpu.reg.sr = (cpu.reg.sr & ~carry) | (carried ? carry : 0);
 }
 
@@ -85,11 +86,11 @@ bool Core::Impl::word_shift(const Word opcode) {
 }
 
 void Core::Impl::execute_shift(const Instruction &decoded) {
-  if (!numeric_mode_supported()) { return; }
   const auto opcode = decoded.opcode;
   const auto operation = decoded.operation;
   const bool arithmetic = operation == Operation::arithmetic_shift_immediate ||
                           operation == Operation::arithmetic_shift_register;
+  if (!numeric_mode_supported(arithmetic ? arithmetic_saturation : 0)) { return; }
   const bool immediate = operation == Operation::arithmetic_shift_immediate ||
                          operation == Operation::logical_shift_immediate;
   unsigned count = opcode >> 1;
