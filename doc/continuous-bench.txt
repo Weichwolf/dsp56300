@@ -783,3 +783,42 @@ miss remain recorded above and in loop-residency.txt. New passing samples do not
 replace them or establish indefinite/all-program realtime. No repeat-until-pass
 capture is used. Full numerical/ISA/IRQ/pipeline/timing, adaptive allocation,
 broader domains, SIMD/multicore, integration and cache/energy remain open.
+
+
+Native product coordinates and zero addends
+
+All guest archives/producers and work totals remain unchanged. Both 132-test
+suites pass; all 24 complete stream/backend and four strict report-only states
+agree. Concurrent all-backend timings retain package/block failures and qualify
+correctness only. Concurrent strict timing retains FIR/spectral package failures
+and 254/19/100/2 late blocks. It qualifies correctness, not optimized throughput.
+
+CPU2 matched baseline/candidate/candidate/baseline captures use one natural
+warmup input second then the next measured second. No concurrent project build,
+test execution or formatting; external conditions remain uncontrolled. No
+restoration/replay/padding or overhead subtraction. All sixteen complete states,
+packages and sampled block deadlines pass. Mean CPU reductions relative to the
+preceding width-proof compiler: FIR 1.02%, IIR 2.24%, spectral 0.13%, nonlinear
+2.75%. The small spectral change is not a robust speed claim; the FIR attribution
+is unproved because its batch path is largely unchanged. Exact native/helper/
+move/batch/AVX2 counts and page allocations remain equal for every matched case.
+
+Separate final default gate, all states and packages pass:
+Scenario   Wall s      Process CPU s   MIPS       Max block / budget ms   Late
+FIR        0.233063    0.233080         1167.75      0.333 / 1.333            0
+IIR        0.473391    0.473420          579.68      0.663 / 1.333            0
+spectral   0.715774    0.715800          358.64      7.224 /10.000            0
+nonlinear  0.531100    0.531105          498.44      0.746 / 1.333            0
+
+A separate sixteen-process user-PMU capture, all five counters at 100%, confirms
+IIR instruction/cycle reductions 1.88%/2.34%, nonlinear 0.58%/2.68%. The scope
+includes setup/compilation/cold/warm/state checks, not isolated timed JIT or energy.
+FIR/nonlinear instruction misses rise 13.11%/6.00%; spectral data misses rise 0.30%.
+All increases are retained. Spectral's separate 2.12% cycle reduction does not
+establish a causal timed gain from its 0.13% CPU observation. No full cache
+locality/energy claim. See product-coordinates.txt for all metrics and witnesses.
+
+Previous failed packages, 263/273-MIPS spectral captures and every old block miss
+remain evidence above and in loop-residency.txt. Current passing samples do not
+replace them or qualify indefinite/all-program realtime. The full objective,
+including complete ISA, remains active; this is another compiler increment.

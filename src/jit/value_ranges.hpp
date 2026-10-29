@@ -13,6 +13,7 @@ enum class SaturationProof : std::uint8_t { none, canonical, general };
 struct NativeValueProof {
   unsigned width = accumulator_bits;
   bool raw_overflow = true, rounding_overflow = true;
+  bool zero_addend = false;
   SaturationProof saturation = SaturationProof::general;
 
   [[nodiscard]] bool overflow_value() const noexcept {

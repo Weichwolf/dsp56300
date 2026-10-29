@@ -24,6 +24,7 @@ constexpr unsigned product_width = 49, canonical_width = 50;
 struct Result {
   unsigned width = accumulator_bits;
   bool raw_overflow = false, rounding = false, compare = false, transfer = false;
+  bool zero_addend = false;
 };
 
 unsigned
@@ -52,8 +53,10 @@ std::optional<Result> parallel_result(const NativeOp &operation,
   if ((code & product_bit) != 0) {
     const auto width =
         (code & 2U) != 0 ? std::max(product_width, old[destination] + 1) : product_width;
-    return Result{
-        .width = width, .raw_overflow = width > accumulator_bits, .rounding = (code & 1U) != 0};
+    return Result{.width = width,
+                  .raw_overflow = width > accumulator_bits,
+                  .rounding = (code & 1U) != 0,
+                  .zero_addend = (code & 2U) != 0 && old[destination] == 0};
   }
   if (form == clear) { return Result{.width = 0}; }
   if (form == rounded) { return Result{.width = old[destination], .rounding = true}; }
@@ -98,6 +101,7 @@ NativeValueProof finish(const NativeOp &operation, const Result result) {
   NativeValueProof proof{.width = std::min(result.width, accumulator_bits),
                          .raw_overflow = result.raw_overflow,
                          .rounding_overflow = false,
+                         .zero_addend = result.zero_addend,
                          .saturation = SaturationProof::none};
   if (result.rounding && proof.width != 0) {
     proof.rounding_overflow = proof.width == accumulator_bits;

@@ -20,6 +20,7 @@
 #include <limits>
 #include <span>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace dsp56300::detail {
@@ -228,18 +229,22 @@ void JitEmitter::multiply(const NativeOp &operation) {
   const auto opcode = operation.instruction.opcode;
   constexpr std::array<std::array<unsigned, 2>, 8> pairs{
       {{0, 0}, {2, 2}, {1, 0}, {3, 2}, {0, 3}, {2, 0}, {1, 2}, {3, 1}}};
-  const auto pair = pairs.at((opcode >> 4) & 7);
-  const auto operand = [this, &operation](const Reg reg, const unsigned selector) {
+  auto pair = pairs.at((opcode >> 4) & 7);
+  if ((pair[0] & 1U) != 0 && (pair[1] & 1U) == 0) { std::swap(pair[0], pair[1]); }
+  const bool square = pair[0] == pair[1];
+  const bool scaled = !square && (pair[0] & 1U) == 0;
+  const auto operand = [this,
+                        &operation](const Reg reg, const unsigned selector, const bool aligned) {
     value(reg, selector < 2 ? 2U : 3U, has_moves(operation));
     code_.shift(shift_left, reg, (selector & 1U) == 0 ? low_word_shift : high_word_shift);
-    code_.shift(shift_arithmetic, reg, low_word_shift);
+    code_.shift(shift_arithmetic, reg, low_word_shift - (aligned ? product_shift : 0U));
   };
-  operand(Reg::ax, pair[0]);
-  operand(Reg::dx, pair[1]);
-  code_.multiply({.destination = Reg::ax, .source = Reg::dx});
-  code_.shift(shift_left, Reg::ax, product_shift);
+  operand(Reg::ax, pair[0], scaled);
+  if (!square) { operand(Reg::dx, pair[1], false); }
+  code_.multiply({.destination = Reg::ax, .source = square ? Reg::ax : Reg::dx});
+  if (!scaled) { code_.shift(shift_left, Reg::ax, product_shift); }
   if ((opcode & 4U) != 0) { code_.unary(3, Reg::ax); }
-  if ((opcode & 2U) != 0) {
+  if ((opcode & 2U) != 0 && !value_proof_.zero_addend) {
     value(Reg::dx, (opcode & 8U) != 0 ? 1U : 0U, has_moves(operation));
     code_.binary(op_add, {.destination = Reg::ax, .source = Reg::dx});
     if (value_proof_.raw_overflow) { code_.set(condition_overflow, Reg::r10); }

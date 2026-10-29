@@ -386,3 +386,13 @@ other old records and the other fifty old archives remain byte-identical.
 No catalogue row becomes complete; full SC/SA/DM/numerical, transfer/sequence,
 IRQ/pipeline/timing and physical hardware qualification remain mandatory.
 See saturated-shifts.txt for scope, verification and workload regression evidence.
+
+
+Native product-coordinate witnesses add a finite 11217408-check helper-free RX
+matrix and expand independent width metadata checks to 8909837 per build. Scope
+is the 128 ordinary signed parallel MPY/MPYR/MAC/MACR forms, six scaling/RM modes
+with SM clear/set, declared unequal-word/edge inputs and old-zero/parallel writes.
+See product-coordinates.txt. This is exact compiler representation qualification,
+not exhaustive operand pairs, complete physical DSP timing or new immediate/
+power-of-two/mixed-signed support. The four catalogue rows remain partial, as do
+all 118 catalogue entries. Structural audit must pass; require-complete must fail.

@@ -19,6 +19,7 @@ namespace dsp56300::test {
 namespace {
 constexpr Word clear_a = 0x200013, clear_b = 0x20001b, asr_a = 0x200022;
 constexpr Word add_zero = 0x0140c0;
+constexpr Word accumulate_mask = 0x82;
 constexpr std::array modes{0U, mode_down, mode_up, mode_rm, mode_rm | mode_down, mode_rm | mode_up};
 constexpr std::array<std::uint64_t, 10> inputs{0,
                                                1,
@@ -71,6 +72,10 @@ void witness(detail::NativeValueRanges ranges, const Registers &old, const Word 
   const auto proof =
       ranges.advance(operation({.opcode = parallel_none | code, .mode = old.sr}), true, false);
   const auto raw = (code & 8U) != 0 ? expected.b : expected.a;
+  if (proof.zero_addend) {
+    require((code & accumulate_mask) == accumulate_mask && ((code & 8U) != 0 ? old.b : old.a) == 0,
+            "A product zero-addend certificate describes the old accumulator before moves");
+  }
   require(proof.width <= accumulator_bits && contained({.width = proof.width, .raw = raw}),
           "Every width certificate contains the independent actual stored raw56 value");
   const auto form = code & sequence_model::alu_mask;

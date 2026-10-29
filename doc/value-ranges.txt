@@ -164,3 +164,14 @@ partial; no row becomes complete through compiler facts. Full numerical/mode,
 IRQ/exception/pipeline/timing, adaptive allocation, additional application domains,
 SIMD/multicore, integration, cache/energy and sustained reserve qualification
 remain open under the unchanged full objective.
+
+
+A subsequent product-coordinate increment consumes an exact-zero addend fact
+from the old destination width before parallel writes. It applies only to a
+supported accumulating product; roots/helpers/observers remain conservative.
+The private range-disabled control retains the original addition. The expanded
+independent metadata matrix passes 8909837 checks per build, including the
+implication that every zero-addend certificate names an actual old zero. Native
+product execution has a separate 11217408-check raw56 witness matrix. See
+product-coordinates.txt for exact scope and measurements; all broader objective
+gaps and historical timing observations above remain active evidence.
