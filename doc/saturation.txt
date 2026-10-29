@@ -44,8 +44,12 @@ Current implemented SM domains
   can limit; NORMF uses BFU bypass. Old control/flag inputs, Carry and complete
   NORM NOP behavior remain explicit. All these qualified SM forms retain general
   execution; see saturated-shifts.txt and saturated-normalization.txt.
-- SC/SA/DM combinations, reserved scaling, logical shifts/division, other
-  SM ALU forms and unqualified nonparallel/count transfers are still rejected
+- AND/OR/EOR/NOT, logical shifts and rotates now admit their BFU SM bypass in
+  the qualified ordinary 56-bit domain, including immediate and old-control forms.
+  Outer accumulator bits and E/U/S/L remain preserved, with separate shifted C
+  and conditional flag publication. See bfu-logic.txt for exact matrices.
+- SC/SA/DM combinations, reserved scaling, division, other SM ALU forms and
+  unqualified nonparallel/count transfers are still rejected
   explicitly. The full SM numerical mode is not claimed complete.
 
 The first increment qualified general SM execution. Selected parallel arithmetic,

@@ -37,9 +37,9 @@ The private ShiftControl carries an explicit saturation choice. Defaults keep
 single-bit/NORM behavior; immediate/register ASL/ASR and NORMF disable it. Path
 selection depends on instruction form, not runtime count. No transient clearing
 of architectural SM, public state field or mode-key relaxation is introduced.
-Other numerical domains still diagnose; DIV SM remains unsupported. Other BFU
-classes retain their established qualified bypass or explicit admission gaps.
-This change does not silently admit untested logical operations.
+Other numerical domains still diagnose; DIV SM remains unsupported. The later logical-BFU increment independently qualifies AND/OR/EOR/NOT and
+logical shifts/rotates with SM; see bfu-logic.txt. Other numerical and instruction
+admission gaps remain explicit. No blanket admission of untested modes occurs.
 
 Counts outside NORMF's specified -55..+56 and ASL/ASR's 0..55 domain retain
 explicit software diagnostics, not claimed hardware traps. SB/SC/DM, reserved

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Independent SM execution, native-mode transitions and exact callback boundaries.
+#include "bfu_logic_model.hpp"
 #include "dsp56300/core.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
@@ -268,11 +269,38 @@ void reject(const Backend backend, const Unsupported input) {
           "An unqualified mode remains fail-stop without invented execution");
 }
 
+void qualified_complement(const Backend backend, const Unsupported input) {
+  Machine machine(backend);
+  machine.core.write(Space::program, start, input.instruction);
+  auto expected = seed(0);
+  expected.sr = input.status;
+  machine.core.set_registers(expected);
+  bfu_model::apply(expected, expected, {.function = bfu_model::Function::complement});
+  ++expected.pc;
+  const auto run = machine.core.run(1);
+  require(run.dispatches == 1 &&
+              run.progress == Progress{.instructions = 1, .estimated_cycles = 1} &&
+              run.fault.kind == FaultKind::none && machine.core.registers() == expected,
+          "The original SM NOT stimulus now preserves outer bits and bypasses arithmetic limiting");
+  ++expected.pc;
+  const auto next = machine.core.run(1);
+  require(next.dispatches == 1 &&
+              next.progress == Progress{.instructions = 2, .estimated_cycles = 2} &&
+              next.fault.kind == FaultKind::none && machine.core.registers() == expected,
+          "The following NOP retires without replaying the qualified BFU result");
+}
+
 void rejected_modes(const Backend backend) {
+  constexpr Word complement = 0x200017;
   constexpr std::array<Word, 6> instructions{
       0x200017, 0x200003, 0x200045, 0x014085, 0x200012, 0x200002};
   for (const auto instruction : instructions) {
-    reject(backend, {.instruction = instruction, .status = saturation_model::mode});
+    const Unsupported input{.instruction = instruction, .status = saturation_model::mode};
+    if (instruction == complement) {
+      qualified_complement(backend, input);
+    } else {
+      reject(backend, input);
+    }
   }
   constexpr Word asl_a = 0x200032;
   for (const Word other : {0x2000U, 0x4000U, 0x20000U, mode_up | mode_down}) {

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Standalone finite-width bit/integer model; never links or executes the DSP core.
+#include "bfu_logic_model.hpp"
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
 #include "saturated_shift_model.hpp"
@@ -410,6 +411,32 @@ void rejected_counts(Cases &cases) {
   }
 }
 
+void logical_sm_case(Cases &cases, const Word opcode) {
+  constexpr Word immediate_left = 0x0c1e80;
+  const bool immediate = opcode == immediate_left;
+  const auto count = immediate ? 0U : static_cast<Word>(seed().x % 32);
+  if (count > word_bits) {
+    rejected_case(cases,
+                  {.opcode = opcode,
+                   .status = saturation_model::mode,
+                   .value = count,
+                   .kind = FaultKind::invalid_instruction});
+    return;
+  }
+  BinaryCase item;
+  item.initial = seed();
+  item.initial.sr = saturation_model::mode;
+  item.expected = item.initial;
+  bfu_model::apply(
+      item.expected,
+      item.initial,
+      {.function = immediate ? bfu_model::Function::left : bfu_model::Function::right,
+       .form = immediate ? bfu_model::Form::shift_immediate : bfu_model::Form::shift_register,
+       .source = 2,
+       .count = count});
+  append(cases, std::move(item), opcode);
+}
+
 void rejected_modes(Cases &cases) {
   constexpr std::array<Word, 6> unsupported_modes{Word{1} << 13,
                                                   Word{1} << 14,
@@ -432,6 +459,10 @@ void rejected_modes(Cases &cases) {
         shift_model::apply(
             item.expected, item.initial, {.count = count, .left = true, .saturate = false});
         append(cases, std::move(item), opcode);
+        continue;
+      }
+      if (mode == saturation_model::mode) {
+        logical_sm_case(cases, opcode);
         continue;
       }
       rejected_case(

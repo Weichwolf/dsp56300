@@ -22,16 +22,25 @@ bool Core::Impl::numeric_alu_supported(const Word opcode) {
   constexpr Word negate = 0x36;
   constexpr Word shift_right = 0x22;
   constexpr Word shift_left = 0x32;
+  constexpr Word complement = 0x17;
+  constexpr Word logical_right = 0x23;
+  constexpr Word logical_left = 0x33;
+  constexpr Word rotate_right = 0x27;
+  constexpr Word rotate_left = 0x37;
   const auto operation = opcode & alu_mask;
   const auto selector = (opcode >> 4) & 7;
   const auto kind = opcode & 7;
   const bool sum = selector >= 1 && (kind == 0 || kind == 4);
   const bool carry_sum = (selector == 2 || selector == 3) && (kind == 1 || kind == 5);
+  const bool binary_logic = selector >= 4 && (kind == 2 || kind == 3 || kind == 6);
+  const bool bfu = binary_logic || operation == complement || operation == logical_right ||
+                   operation == logical_left || operation == rotate_right ||
+                   operation == rotate_left;
   const bool supported = opcode == 0 || (opcode & 0x80U) != 0 || sum || carry_sum ||
                          operation == tfr || operation == tfr_x0 || operation == tfr_y0 ||
                          operation == tfr_x1 || operation == tfr_y1 || operation == clear ||
                          operation == rounded || operation == absolute || operation == negate ||
-                         operation == shift_right || operation == shift_left;
+                         operation == shift_right || operation == shift_left || bfu;
   return numeric_mode_supported(supported ? arithmetic_saturation : 0);
 }
 

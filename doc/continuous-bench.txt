@@ -967,3 +967,48 @@ as private diagnostics, not final qualification. Earlier passing packages and
 older failed budgets remain recorded; none replaces the current failed gate.
 Complete ISA/modes/IRQ/pipeline/timing, general allocation, broader applications,
 SIMD/multicore, integration, sustained realtime/reserve and cache/energy stay open.
+
+
+Logical BFU mode admission: ordinary regression qualification
+
+The logical-BFU increment adds SM bypass for raw logical operations/shifts/
+rotates; it does not add native lowering. See bfu-logic.txt for its independent
+truth/serial expectations, original inputs and partial-ISA scope. Existing
+continuous programs/input/counts/layouts remain identical. These four streams
+qualify regression behavior, not sustained capacity of the new BFU domains.
+
+Against local 0d37f94, CPU2 baseline/candidate/candidate/baseline captures use one
+natural warmup input second then the next measured second. No project build/
+test/format job overlaps; external scheduling/frequency remain uncontrolled.
+No state restoration, replay, overhead subtraction or repeat-until-pass capture.
+All 16 full states/packages/block budgets pass, with exact equal guest/native/
+helper/move/batch/AVX2/base-cycle counts and page storage. Mean CPU increases
+1.05% for FIR and 0.33% for spectral; IIR/nonlinear decrease 0.14%/0.01%. All
+increases remain; none establishes a causal speed change. Both baseline and
+candidate are faster than the previous host capture, whose failures remain.
+
+Final default capture, all full states/packages/block deadlines PASS:
+
+scene      wall s    process CPU s  actual MIPS  max/budget block ms  late
+FIR         0.232148  0.232161       1172.35       0.447 / 1.333        0
+IIR         0.466937  0.466963        587.69       0.805 / 1.333        0
+spectral    0.680423  0.680458        377.27       7.153 /10.000        0
+nonlinear   0.517324  0.517340        511.71       0.883 / 1.333        0
+
+The previous default FFT 1.222611 s / 209.96 MIPS, 71/39/52/31 late blocks and seven
+matched package failures are not replaced or waived. The original off-CPU delay
+remains unexplained; a later passing capture does not isolate its cause. These
+four passing packages do not qualify indefinite realtime, arbitrary programs,
+all application domains, physical pipeline/bus timing or the full 275-MIPS goal.
+
+Separate whole-process requested user PMU captures retain 16 matching states and
+five counters 100% running/no multiplexing. Host instruction/data-load counts are
+essentially unchanged, except nonlinear instructions increase 0.008%. Cycles
+change +1.14%/+0.43%/+0.54%/-0.06% for FIR/IIR/spectral/nonlinear. FIR/IIR/
+nonlinear data misses increase 15.11%/0.33%/1.20%; IIR/spectral instruction misses
+increase 20.28%/8.01%. All increases remain recorded. Setup/compilation/cold/warm/
+state checks are included, not isolated timed JIT or energy; no complete cache-locality
+claim follows. Concurrent backend/strict runs retain timing failures and qualify
+complete-state correctness only. Full ISA/numerical/IRQ/pipeline/timing, adaptive
+allocation, more continuous applications, SIMD/multicore, integration, sustained
+latency/reserve and cache/energy stay open under the unchanged objective.

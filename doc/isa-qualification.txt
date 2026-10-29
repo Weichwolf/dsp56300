@@ -431,3 +431,28 @@ See saturated-normalization.txt. The original erroneous mode interpretation and
 pre-review artifacts are retained explicitly rather than treated as evidence of
 final correctness. Complete modes/ISA/IRQ/pipeline/timing and hardware ambiguities
 remain open; all 118 rows stay partial and require-complete must still fail.
+
+
+Logical BFU arithmetic-saturation bypass
+
+AND/OR/EOR/NOT and logical shifts/rotates now admit SM in the established
+ordinary 56-bit domain. Raw middle 24-bit operations bypass the limiter, preserve
+outer words and E/U/S/L, and separately publish NZV/shifted Carry. Both immediate
+logic widths, all six logical-count controls and IFcc/IFcc.U publication are
+included. Other modes, reserved scaling and unqualified CMP/TST/shifted arithmetic
+remain explicit gaps. Native SM admission is unchanged; helpers retain canonical
+state. No architectural-layout or consumer contract change is introduced.
+
+The independent truth-table/serial-bit producer adds76664original cases in two
+archives. Complete CCR/scaling-RM shape matrices, every admitted count/control,
+raw bit/extension patterns, exact old parallel inputs, condition truth/publication,
+REP partial feedback and DO cleanup are qualified. Public-Core controls add 2472
+checks across native/general boundaries, same-PC modes, failed loads/P edits and
+invalid domains. Three old fault records become successes; one retains its old
+count 27 and now diagnoses that count after SM admission. All initial stimuli and
+unrelated old records remain identical. An older host NOT-rejection expectation
+is similarly replaced by exact success/following-NOP expectations without
+changing its input. See bfu-logic.txt for scope and final validation evidence.
+These finite witnesses do not complete SB/SC/DM, all transfers/modes, physical
+flags/errata, full IRQ/pipeline/timing or any ISA catalogue row. All 118rows remain
+partial, and require-complete must still fail independently of current tests.

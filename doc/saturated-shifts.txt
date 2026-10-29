@@ -30,8 +30,9 @@ PC/progress/loop state    existing canonical core       every budget/callback/re
 
 Defined counts 0..55 are admitted. Existing diagnostics for undefined larger
 counts remain explicit software contracts, not claims that hardware traps.
-SA/SC/DM, reserved scaling and logical-shift/other unqualified SM forms retain
-unsupported-mode diagnostics. NORM/NORMF now admit their distinct SM paths; DIV SM remains unsupported. SM native
+SA/SC/DM, reserved scaling and other unqualified SM forms retain diagnostics.
+Logical shifts/rotates now admit their independently qualified BFU bypass; see
+bfu-logic.txt. NORM/NORMF now admit their distinct SM paths; DIV SM remains unsupported. SM native
 shift admission is also unchanged: the JIT uses exact general execution while
 ordinary eligible single-bit ASR retains emitted x64. Public state/API/layouts
 and instruction costs are unchanged. No new speed claim for SM shifts is made.

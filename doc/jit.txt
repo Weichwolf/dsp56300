@@ -569,3 +569,15 @@ See loop-window.txt for the proof, eight-cursor independent RX witnesses,
 enabled/disabled complete-state controls and measured cache/timing tradeoffs.
 This amortizes guards in selected RAM loops; it does not establish complete
 translation, full numerical/ISA coverage or arbitrary-program realtime.
+
+
+Logical BFU modes retain general execution
+
+SM admission now includes AND/OR/EOR/NOT and logical shifts/rotates in their
+qualified ordinary domain, with raw outer-word preservation, old parallel inputs,
+conditional CCR publication and BFU saturation bypass. The native whitelist stays
+unchanged; exact general helpers handle these new forms between existing native
+arithmetic, including P edits/failures and mode changes. No public state/layout,
+host ISA or checkpoint contract changes. See bfu-logic.txt for independent
+truth/serial models, old-stimulus preservation and finite coverage. This does not
+qualify sustained BFU throughput, full modes or arbitrary-program native lowering.

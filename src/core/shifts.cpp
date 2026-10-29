@@ -92,7 +92,7 @@ void Core::Impl::execute_shift(const Instruction &decoded) {
   const auto operation = decoded.operation;
   const bool arithmetic = operation == Operation::arithmetic_shift_immediate ||
                           operation == Operation::arithmetic_shift_register;
-  if (!numeric_mode_supported(arithmetic ? arithmetic_saturation : 0)) { return; }
+  if (!numeric_mode_supported(arithmetic_saturation)) { return; }
   const bool immediate = operation == Operation::arithmetic_shift_immediate ||
                          operation == Operation::logical_shift_immediate;
   unsigned count = opcode >> 1;

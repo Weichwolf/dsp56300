@@ -97,17 +97,21 @@ and old parallel operands without memory/I/O observation barriers. All 6758417
 directed ASR/register assertions pass; no ISA catalogue row becomes complete.
 See doc/native-shifts.txt for guards, witnesses, measurements and remaining work.
 
-The current configuration passes all 139 correctness tests in release (150.28 s,
-two CTest processes) and strict ASan/UBSan (315.66 s, three), zero skips. All 156
-C++ translation units retain strict nonrecovering address/undefined/integer
-instrumentation; all 198 project C++ source/header files pass clang-format/tidy/
-Werror. All 54 binary archives regenerate exactly. The normalization/BFU increment
-adds 79552 cases; four old archives have explicitly audited semantic corrections
-with every input and unrelated record unchanged. The other 48 old archives are
-byte-identical. See saturated-normalization.txt for the initial incorrect BFU
-interpretation, corrected producer expectations and exact record counts. No
-fuzzing was run. Structural ISA audit passes; require-complete remains a failing
-gate with 118 partial/zero complete entries.
+The current configuration qualifies all 144 registered tests in release and
+strict ASan/UBSan, with zero skips. Full sweeps take 114.11 s/two workers and
+265.60 s/three and pass 143/144 each, failing only the obsolete host NOT rejection.
+That test-only expectation is replaced with identical-input exact success and
+following-NOP checks; targeted reruns pass 9786 assertions in 0.28/1.17 s. Other 143
+targets and production stay unchanged and are not repeated. This is composite
+current-state qualification, not a claim of two newly green full sweeps.
+All 158 C++ translation units retain strict nonrecovering address/undefined/
+integer instrumentation; all 201 C++ source/header files pass format/tidy/Werror.
+All 56 archives reproduce exactly through 54 registrations. Two original BFU
+archives add 76664 cases. Only four old records in two archives change, with
+identical initial programs/registers/data; one preserves count 27 as a diagnostic.
+Other 52 old archives and every unrelated serialized record remain byte-identical.
+No fuzzing. Structural ISA audit passes; require-complete fails with 118 partial/
+zero complete rows. See bfu-logic.txt for qualification scope and exact evidence.
 
 The new meaningful nonlinear stream uses 204 channels/four driven feedback stages
 at 48 kHz, persistent histories and input/output rings, with exact SM/rounding.
@@ -118,21 +122,20 @@ state agrees in all six variants. Across all four scenarios this gives 24 full
 stream/backend states and four strict report-only states. Concurrent reports
 retain timing failures and qualify correctness, not optimized speed.
 
-The latest optimized default gate FAILS: FIR/IIR/nonlinear packages take
-0.536524/0.645986/0.594866 s, but spectral takes 1.222611 s (209.96 actual MIPS).
-All four full states agree; all four retain late blocks, 71/39/52/31 respectively.
-Process CPU demand is 0.261458/0.517318/0.758929/0.558503 s per input second.
-CPU time below one second does not waive a failed wall-time deadline or the
-275-MIPS reference. The matched capture retains seven package failures, three
-in candidate runs, including spectral 168.95/236.44MIPS and IIR 229.77MIPS. Large
-wall/CPU gaps suggest off-CPU time but its cause is not isolated; no causal speed
-change is claimed for the numerical-mode correction. Every native/helper/move/
-batch/AVX2/guest/base-cycle count and page size stays equal. Prior passing
-loop-window captures, older263/273-MIPS FFT rates, the1.037437-second baseline
-failure and every old block/cache regression remain historical evidence.
-See continuous-bench.txt and saturated-normalization.txt. Complete ISA, sustained
-latency/reserve and broader qualification remain open; no all-program realtime
-claim. Passing state/correctness checks do not turn the failed bench gate green.
+The latest optimized default gate passes all four seconds packages and block
+budgets: FIR 0.232148 s / IIR 0.466937 s / spectral 0.680423 s / nonlinear 0.517324 s, with actual
+1172.35/587.69/377.27/511.71 MIPS and zero late blocks. All states agree. The
+matched comparison also passes all 16 states/packages/block budgets with identical
+guest/native/helper/move/batch/AVX2/base-cycle counts and page storage. These
+streams do not qualify sustained throughput of newly admitted SM logical forms.
+Small CPU differences include retained FIR/spectral increases 1.05%/0.33%; no
+causal speed change is claimed. The baseline also improves versus the previous
+host capture, whose default spectral 1.222611 s / 209.96 MIPS, 71/39/52/31 late blocks
+and seven matched package failures remain historical evidence. Passing current
+captures do not erase them or diagnose their off-CPU delay. Full sustained/all-
+program 275-MIPS realtime and all other objectives remain open. See
+continuous-bench.txt and bfu-logic.txt for scope, counter/cache regressions and
+unchanged whole-device/pipeline/energy limitations.
 
 The expanded native-move boundary test passes all 78446 assertions in both builds.
 It includes exact same-code reuse after modifier changes and paired aliased X/Y
@@ -815,3 +818,39 @@ not isolated JIT or energy; off-CPU wall delays are not diagnosed. These failure
 remain under the full performance objective. Complete modes/ISA/IRQ/pipeline/
 timing, adaptive allocation, broader domains, SIMD/multicore, integration,
 sustained realtime and cache/energy remain active; all 118 ISA rows are partial.
+
+
+Logical BFU SM admission
+
+AND/OR/EOR/NOT and logical shifts/rotates now admit the defined BFU bypass in
+ordinary 56-bit operation, including immediate widths, old controls and conditional
+publication. Middle24 results preserve outer bits and E/U/S/L; logic preserves
+Carry, shifts/rotates publish only the specified shifted bit. Native SM admission
+stays unchanged/general. Other modes, reserved scaling and unqualified CMP/TST/
+shifted arithmetic remain explicit gaps. No public layout or contract change.
+
+Two original truth-table/serial archives add 76664 cases: all 34 parallel shapes,
+CCR/scaling-RM matrices, exact middle/outer bits, explicit zero/sign truth pairs,
+all defined counts/six controls, IFcc/IFcc.U, parallel old-source loads, REP
+feedback/partial prefixes and DO cleanup. Dedicated public-Core checks pass 2472
+assertions with real native/general dispatch, same-PC modes, callbacks/P edits,
+partial failure/no replay and invalid domains. Three old fault records become
+success, while a fourth keeps its original count 27 and now diagnoses that count.
+Every old input/unrelated byte and the other 52 old archives stay identical.
+
+Both 144-test qualifications include 143 green full-sweep targets plus the corrected
+old NOT host expectation, independently rerun with 9786 checks in both builds.
+Only test code changes after those sweeps; production and the other 143 targets
+stay identical. This composite scope and initial failures remain explicit.
+All 56 exact regenerations,24backend states and four strict full states agree.
+Concurrent timing failures stay recorded; strict late blocks 682/122/100/34.
+See bfu-logic.txt for exact evidence and source-mode boundaries.
+
+The current four default seconds packages and their blocks pass, but the prior
+FFT 1.222611 s / 209.96 MIPS and every old failed budget remain. Mean FIR/spectral CPU
+increases 1.05%/0.33% are retained with no causal speed claim. PMU data misses rise
+15.11%/0.33%/1.20% for FIR/IIR/nonlinear; IIR/spectral instruction misses rise
+20.28%/8.01%. Whole-process setup/cold/warm/checks are included, not isolated JIT
+or energy. Full ISA/modes/IRQ/pipeline/timing, dynamic allocation, broader
+applications, SIMD/multicore, integration, sustained realtime and cache/energy
+remain active. All 118ISA rows remain partial; the full objective is unchanged.

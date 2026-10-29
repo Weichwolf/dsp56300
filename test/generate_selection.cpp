@@ -451,6 +451,16 @@ void interactions(Cases &cases, const std::span<const Alu> inputs) {
       item.fault = {
           .kind = FaultKind::unsupported_mode, .address = start, .value = mode, .pc = start};
       item.name = "Selection/status remaining numerical modes are explicit unsupported boundaries";
+      if (mode == 0x100000U && alu.kind == Kind::complement) {
+        item.expected = item.initial;
+        selection_model::apply(item.expected, item.initial, alu);
+        ++item.expected.pc;
+        item.dispatches = 1;
+        item.progress = {.instructions = 1, .estimated_cycles = 1};
+        item.interruptible = true;
+        item.fault = {};
+        item.name = "NOT uses the qualified BFU arithmetic-saturation bypass";
+      }
       cases.push_back(std::move(item));
     }
   }
