@@ -594,3 +594,59 @@ partial rows. Separate whole-process user PMU captures show nonlinear host
 instructions/cycles/L1 data loads falling33.77%/30.17%/24.25%, while L1 data and
 instruction misses rise 11.83%/68.63%. No isolated-JIT/cache-locality/energy claim.
 See native-constants.txt for exact guard, counter scopes and remaining goals.
+
+
+Coalesced accounting in guarded RAM regions
+
+This increment changes only exact host accounting emission; all four fixtures,
+input rates, coefficients, DSP instructions/base cycles and expected states are
+unchanged from feae63b. The guarded emitter charges completed instruction/move/
+extra-cycle prefixes at every possible exit. General paths retain per-instruction
+accounting. No API, CPU/context layout or true register allocator is added.
+See region-accounting.txt for admission and the exit proof.
+
+CPU2, baseline/candidate/candidate/baseline per scenario; one natural warm input
+second then one measured second in the same DSP. No project build/test/format
+job runs concurrently; external scheduling/frequency remain uncontrolled. No
+state restoration, replay, padding or overhead subtraction is used.
+
+Scenario   Baseline CPU s       Candidate CPU s       Mean observation
+FIR        0.229836..0.229905    0.230927..0.231679     0.62% increase, retained
+IIR        0.598966..0.601783    0.559342..0.562464     6.57% decrease
+spectral   0.768678..0.777014    0.749209..0.754027     2.75% decrease
+nonlinear  0.620337..0.620984    0.598791..0.598866     3.52% decrease
+
+All sixteen complete states, packages and block budgets pass. Candidate actual
+MIPS range 1174.81..1178.60 /487.89..490.63 /340.46..342.64 /442.04..442.05.
+Guest/native/helper/move/batch/AVX2 counts stay equal, with page storage unchanged
+at 32768/49152/344064/40960 bytes. The small FIR increase has no proven causal
+attribution. It remains part of the comparison.
+
+Separate default release gate, all full states/packages pass with zero late blocks:
+Scenario   Wall s      Process CPU s   MIPS       Maximum block / input budget ms
+FIR        0.234576    0.234588        1160.22      0.482 / 1.333
+IIR        0.557283    0.557313         492.42      0.970 / 1.333
+spectral   0.751003    0.751045         341.82      7.822 /10.000
+nonlinear  0.600266    0.600299         441.00      1.004 / 1.333
+
+Separate whole-process user PMU captures use the same four-phase order for each
+scenario. All sixteen states pass; all five requested events run at 100.00%,
+without multiplex loss. Scope includes setup/cold/warm/state checks, not only
+timed JIT execution. Mean decreases follow; negative values denote increases.
+
+Scenario  Instructions  Host cycles  L1 data loads  L1 data misses  L1 I misses
+FIR            ~0%          -0.72%          ~0%           11.91%       -2.22%
+IIR           7.85%          6.90%        32.54%            0.65%        8.54%
+spectral      2.24%          2.34%         3.60%            2.46%       -5.20%
+nonlinear     8.27%          3.57%        30.78%            0.01%       10.06%
+
+Counter scope and the large load-versus-cycle difference prevent treating all
+memory traffic as the performance bottleneck or claiming energy improvement.
+Instruction-cache regressions remain visible despite unchanged page storage.
+All 127 correctness tests pass in release/strict with 321951 new accounting
+assertions per build and all 51 fixtures/producers unchanged. All 24 backend/
+stream states and four strict report-only states agree. The concurrent strict
+capture retains package failures and 227/148/100/164 late blocks: correctness
+only, not optimized speed evidence. Full ISA remains 118 partial rows. Broader
+domains, adaptive allocation, SIMD/multicore, integration, cache/energy and
+sustained/indefinite realtime remain active work.

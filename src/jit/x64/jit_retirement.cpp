@@ -43,6 +43,11 @@ void JitEmitter::materialize_retirement() {
 }
 
 void JitEmitter::retire_progress(const NativeOp &operation) {
+  if (coalesced_accounting_) {
+    ++pending_instructions_;
+    pending_extra_cycles_ += static_cast<Word>(operation.instruction.cycles) - 1;
+    return;
+  }
   if (packed_retirement_) {
     if (retirement_helpers_) { code_.packed(Packed::add_qword, Xmm::x0, Xmm::x1); }
     if (operation.instruction.cycles > 1) {
@@ -57,6 +62,32 @@ void JitEmitter::retire_progress(const NativeOp &operation) {
   code_.memory_immediate(group_add, Reg::r12, offsetof(Cpu, instructions), Width::qword, 1);
   code_.memory_immediate(
       group_add, Reg::r12, offsetof(Cpu, cycles), Width::qword, operation.instruction.cycles);
+}
+
+void JitEmitter::count_move() {
+  if (coalesced_accounting_) {
+    ++pending_moves_;
+    return;
+  }
+  code_.load(Reg::ax, Reg::r13, offsetof(NativeContext, native_moves));
+  code_.memory_immediate(group_add, Reg::ax, 0, Width::qword, 1);
+}
+
+void JitEmitter::materialize_pending_accounting() {
+  if (pending_instructions_ != 0) {
+    code_.immediate(group_add, Reg::r15, pending_instructions_, Width::dword);
+    pending_instructions_ = 0;
+  }
+  if (pending_extra_cycles_ != 0) {
+    code_.memory_immediate(
+        group_add, Reg::r12, offsetof(Cpu, cycles), Width::qword, pending_extra_cycles_);
+    pending_extra_cycles_ = 0;
+  }
+  if (pending_moves_ != 0) {
+    code_.load(Reg::ax, Reg::r13, offsetof(NativeContext, native_moves));
+    code_.memory_immediate(group_add, Reg::ax, 0, Width::qword, pending_moves_);
+    pending_moves_ = 0;
+  }
 }
 
 bool JitEmitter::publish_pc(const std::span<const NativeOp> operations,

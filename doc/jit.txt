@@ -474,3 +474,17 @@ ordinary execution. This is generic compilation metadata, not program-specific
 recognition or a public CPU-layout change. Independent RX/Core checks and the
 new nonlinear stream qualify the change; see native-constants.txt for exact
 proof/coverage and cache/performance tradeoffs. The full objective remains open.
+
+
+Coalesced counter publication in closed RAM regions
+
+Helper-free guarded regions with packed retirement and at most 256 operations
+record instruction/move/extra-cycle prefixes at compile time. Emitted additions
+charge completed work before the last-instruction LC guard, before end/backedge
+branches and before ordinary fallthrough returns. Initial/header rejection skips
+all fallthrough-only charges. General/helper paths retain per-instruction work.
+R15D, packed qword progress, canonical state and observation boundaries retain
+their existing representations. This reduces counter traffic without a new
+architectural register allocator. See region-accounting.txt for exact bounds,
+independent RX/Core witnesses and measured tradeoffs; continuous-bench.txt records
+the package and block deadlines. Full ISA and the full objective remain open.

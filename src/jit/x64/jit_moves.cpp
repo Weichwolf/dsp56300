@@ -7,8 +7,6 @@
 #include "native_region.hpp"
 #include "x64.hpp"
 
-#include <array>
-#include <cstddef>
 #include <cstdint>
 #include <span>
 
@@ -17,7 +15,7 @@ namespace {
 using x64::Branch;
 using x64::Reg;
 using x64::Width;
-constexpr unsigned op_test = 0x85, group_add = 0, group_and = 4;
+constexpr unsigned op_test = 0x85, group_and = 4;
 }
 
 void JitEmitter::general_moves(const NativeOp &operation) {
@@ -60,8 +58,7 @@ void JitEmitter::register_move(const NativeRegisterMove &move, const Word mode) 
   capture_inputs();
   move_read_register(Reg::si, {.address = {}, .reg = move.source}, mode);
   move_write_register(Reg::si, move.destination);
-  code_.load(Reg::ax, Reg::r13, offsetof(NativeContext, native_moves));
-  code_.memory_immediate(group_add, Reg::ax, 0, Width::qword, 1);
+  count_move();
 }
 
 void JitEmitter::moves(const NativeOp &operation) {
@@ -97,8 +94,7 @@ void JitEmitter::moves(const NativeOp &operation) {
     for (const auto &move : transfers) { move_update(move); }
     for (const auto &move : transfers) { move_capture(move, operation.mode); }
     for (const auto &move : transfers) { move_commit(move); }
-    code_.load(Reg::ax, Reg::r13, offsetof(NativeContext, native_moves));
-    code_.memory_immediate(group_add, Reg::ax, 0, Width::qword, 1);
+    count_move();
     return;
   }
   x64::Label slow;
@@ -110,8 +106,7 @@ void JitEmitter::moves(const NativeOp &operation) {
   // Capture both ports before either destination changes, including host aliases.
   for (const auto &move : transfers) { move_capture(move, operation.mode); }
   for (const auto &move : transfers) { move_commit(move); }
-  code_.load(Reg::ax, Reg::r13, offsetof(NativeContext, native_moves));
-  code_.memory_immediate(group_add, Reg::ax, 0, Width::qword, 1);
+  count_move();
   code_.jump(done);
   code_.bind(slow);
   // Late ring checks retain this instruction's target after its local label dies.

@@ -33,6 +33,8 @@ public:
 
   [[nodiscard]] bool guarded_region() const noexcept { return region_.valid; }
 
+  [[nodiscard]] bool coalesced_accounting() const noexcept { return coalesced_accounting_; }
+
 private:
   [[nodiscard]] bool lowerable(const NativeOp &operation) const;
   [[nodiscard]] static bool saturation_supported(const NativeOp &operation);
@@ -90,6 +92,8 @@ private:
   [[nodiscard]] bool admit_packed_retirement(std::span<const NativeOp> operations) const;
   void initialize_retirement();
   void materialize_retirement();
+  void count_move();
+  void materialize_pending_accounting();
   void retire_progress(const NativeOp &operation);
   [[nodiscard]] bool publish_pc(std::span<const NativeOp> operations, std::size_t index) const;
   void loop_guard(const NativeOp &operation);
@@ -120,6 +124,8 @@ private:
   bool retirement_helpers_ = false;
   bool cached_status_ = false;
   bool cached_inputs_ = false;
+  bool coalesced_accounting_ = false;
+  Word pending_instructions_ = 0, pending_moves_ = 0, pending_extra_cycles_ = 0;
   NativeDataflow dataflow_;
   // Only native writes establish a live host value; dirty also implies valid.
   std::array<bool, 2> accumulator_dirty_{};

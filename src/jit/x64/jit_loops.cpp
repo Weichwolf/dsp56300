@@ -92,6 +92,7 @@ void JitEmitter::loop_setup(const NativeOp &operation) {
 
 void JitEmitter::loop_guard(const NativeOp &operation) {
   if (!at_loop_end(operation)) { return; }
+  materialize_pending_accounting();
   // Final iteration and malformed cleanup remain authoritative general execution.
   code_.load(Reg::ax, Reg::r12, lc_offset, Width::dword);
   code_.immediate(group_cmp, Reg::ax, 1, Width::dword);

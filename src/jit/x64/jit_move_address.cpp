@@ -34,8 +34,7 @@ void JitEmitter::address_immediate(const NativeAddressImmediate &move) {
   const auto bank = offset_register ? offsetof(Registers, n) : offsetof(Registers, r);
   code_.store_constant(
       Reg::r12, offsetof(Cpu, reg) + bank + (index * sizeof(Word)), Width::dword, move.value);
-  code_.load(Reg::ax, Reg::r13, offsetof(NativeContext, native_moves));
-  code_.memory_immediate(group_add, Reg::ax, 0, Width::qword, 1);
+  count_move();
 }
 
 // Address generation touches CPU registers only; no RAM/I/O address is dereferenced.

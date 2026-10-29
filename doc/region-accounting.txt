@@ -1,0 +1,79 @@
+Counter publication in proved RAM regions
+
+Scope and representation
+
+Helper-free guarded regions now coalesce already-defined retirement, native-move
+and extra-cycle accounting. The compiler records the exact instruction prefix
+while emitting code, then charges it at existing observation/exit boundaries.
+Ordinary paths retain their original per-instruction accounting. Canonical DSP
+state, instruction costs, public options and all RAM/I/O/event contracts remain
+unchanged. The optimization uses the existing R15D and packed progress holders.
+
+State                    Holder                         Publication
+retired instructions     R15D plus emitted prefix       before end guard / backedge / return
+base cycles              existing packed return lanes   exact final R15D contribution
+extra cycles             compile-time prefix -> CPU     before every possible exit
+native move instructions compile-time prefix -> counter before every possible exit
+A/B, flags, old inputs   existing GPR/XMM checkpoints   existing state/observer rules
+PC/LC/frames/exclusion   existing control code          original retirement/guard positions
+
+Admission is a proved guarded region with packed accounting and at most 256
+operations. The public Core already limits blocks to 256. Instruction costs are
+bytes; even the maximal extra-cycle sum 256*254 fits a positive signed 32-bit immediate.
+A static bound prevents truncation/sign extension mistakes. A larger private IR
+region retains per-instruction accounting; it does not lose its RAM proof.
+
+Every existing native move-counter site calls one shared emitter helper. The
+counter describes transfer instructions, so a paired transfer contributes one;
+NOP/pure arithmetic contribute zero, and register/address immediates retain
+their original transfer charge. Count collection follows actual emission sites,
+not an approximate ALU/opcode count. Transfer ordering and all ALU bytes are intact.
+
+Exit proof
+
+Before the last-instruction LC guard, charge the completed prefix. Keep that
+guard even though the region header already excludes LC<=1. After the last
+instruction, charge its retirement before saved-target/budget branches. A
+nonloop fallthrough charges its full body before binding return labels. Thus
+initial/header rejection jumps over every fallthrough-only charge and cannot
+dereference the move counter. Earlier completed iterations remain charged.
+
+AX/EFLAGS may be clobbered only at completed-instruction boundaries. In
+particular, DX from loop_continue survives the counter write for the following
+saved-PC check. Existing dirty A/B, cached SR and old parallel snapshots retain
+their exact checkpoint rules. Both packed qword progress lanes retain 64-bit
+wrap; additional cycles and native-move counters wrap independently.
+
+Independent validation
+
+The new helper-forbidden RX and public-Core test passes 321951 checks in both
+builds. Its declared mixed body has 12 instructions, 15 base cycles and nine
+native move instructions, including paired transfers, NOP, pure multiplication,
+long immediate arithmetic, register moves and pre-use R constants. Independent
+raw-width arithmetic/transfer/AGU models derive full registers, memory and exact
+costs; the emulator does not supply expectations.
+
+The directed matrix includes all old CCR bytes, six scaling/RM choices, ordinary
+and SM arithmetic, X/Y aliases, wrapped P positions, different saved targets,
+whole/short budgets, LC zero/one/continuing values, initial/later header failures,
+wrong modifiers, and independent 32/63/64-bit counter boundaries/canaries. A
+rejected region also runs with a null counter pointer to require read-only exits.
+Separate cases end on a two-word instruction, and exercise 256/257-operation
+admission with maximal byte-sized IR costs. Those artificial NOP/cost cases are
+compiler accounting tests, not DSP timing claims or qualifying throughput runs.
+
+Public-Core checks cover every warm mixed prefix in all three backends, block
+limits 1/4/64 and a disabled optimizer. Warmed closed regions then change to I/O:
+callbacks must observe the exact prefix registers/costs, rejection retains its
+partial load without ALU/retirement, accepted callbacks may replace a following
+P extension, and fail-stop calls cannot replay a charged prefix. Existing
+retirement, region, constant, saturation, cache/debug/event and fault witnesses
+remain in the full suite. All 51 binary archives and all producers are unchanged.
+
+Full suites pass 127/127 in release (90.31 s, two CTest processes) and strict
+ASan/UBSan (212.46 s, three), zero skips. All 24 full stream/backend states agree;
+four strict report-only streams retain concurrent timing misses. All 141 C++
+translation units retain required nonrecovering address/undefined/integer
+instrumentation; all 180 C++ files pass format/tidy/Werror. Structural ISA audit
+passes; require-complete remains red with 118 partial/zero complete entries.
+No fuzzing or publication is performed. The full objective remains active.

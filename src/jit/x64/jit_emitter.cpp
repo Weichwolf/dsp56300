@@ -16,6 +16,7 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <type_traits>
 #include <vector>
@@ -316,13 +317,14 @@ void JitEmitter::retire(const NativeOp &operation, const bool publish) {
     code_.store_constant(Reg::r12, offsetof(Cpu, repeat_completed), Width::word, 0);
   }
   retire_progress(operation);
-  code_.raw(increment_retired); // INC R15D (retired instructions).
+  if (!coalesced_accounting_) { code_.raw(increment_retired); } // INC R15D.
   if (observable_moves(operation) && (!at_loop_end(operation) || loop_size_ != 0)) {
     code_.load(Reg::ax, Reg::r13, offsetof(NativeContext, dirty));
     code_.memory_immediate(group_cmp, Reg::ax, 0, Width::byte, 0);
     exit_if(Branch::not_equal);
   }
   if (at_loop_end(operation)) {
+    materialize_pending_accounting();
     if (loop_size_ != 0) {
       loop_backedge();
     } else {
@@ -339,6 +341,12 @@ std::vector<std::uint8_t> JitEmitter::generate_body(const std::span<const Native
     loop_pc_ = operations.front().pc;
   }
   packed_retirement_ = admit_packed_retirement(operations);
+  constexpr std::size_t maximum_coalesced_operations = 256;
+  static_assert(maximum_coalesced_operations <=
+                static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max() /
+                                         std::numeric_limits<std::uint8_t>::max()));
+  coalesced_accounting_ = region_mode_ == RegionMode::guarded && packed_retirement_ &&
+                          operations.size() <= maximum_coalesced_operations;
   retirement_helpers_ =
       packed_retirement_ &&
       std::ranges::any_of(operations, [this](const auto &op) { return observable_moves(op); });
@@ -393,6 +401,7 @@ std::vector<std::uint8_t> JitEmitter::generate_body(const std::span<const Native
       exit_if(Branch::not_equal);
     }
   }
+  materialize_pending_accounting();
   finish();
   // Keep non-linear checks beyond every return, outside the linear hot path.
   emit_ring_guards();
