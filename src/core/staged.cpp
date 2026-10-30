@@ -35,6 +35,7 @@ FaultKind rejected_effect(const InstructionEffect effect) {
     case EffectKind::write: return FaultKind::memory_write;
     case EffectKind::bit: return FaultKind::io_bit;
     case EffectKind::reset: return FaultKind::host_event;
+    case EffectKind::address_update:
     case EffectKind::retire:
     default: throw std::logic_error("No rejection class for retirement");
   }
@@ -85,13 +86,18 @@ std::optional<PendingInstruction> Core::pending_instruction() const {
       .computed = impl_->staged->computed};
 }
 
-InstructionProgress Core::begin_instruction(const InstructionWords words) {
+InstructionProgress Core::begin_instruction(const InstructionWords words,
+                                            const InstructionPublication publication) {
   impl_->validate_staged_mutation();
   if (impl_->executing || impl_->fault.kind != FaultKind::none ||
       impl_->cpu.processing != ProcessingState::running) {
     throw std::logic_error("Instruction computation requires healthy stopped running state");
   }
   const auto decoded = decoded_words(words);
+  if (publication != InstructionPublication::retirement &&
+      publication != InstructionPublication::address_updates) {
+    throw std::invalid_argument("Unknown instruction publication mode");
+  }
   const auto fetch = instruction_fetch();
   if (words.address != fetch.address ||
       (fetch.latched_opcode && *fetch.latched_opcode != words.opcode)) {
@@ -111,6 +117,7 @@ InstructionProgress Core::begin_instruction(const InstructionWords words) {
   work.base = base;
   work.input = words;
   work.decoded = decoded;
+  work.publication = publication;
   work.active = true;
   const detail::ExecutionGuard guard(impl_->executing);
   impl_->compute_instruction();
@@ -139,7 +146,11 @@ InstructionProgress Core::advance_instruction(const EffectTicket &ticket) {
     throw std::overflow_error("Instruction effect capacity exhausted");
   }
   Word response = 0;
-  if (!impl_->perform_instruction(effect, response)) {
+  if (effect.kind == EffectKind::address_update) {
+    if (!effect.address_update) { throw std::logic_error("Native address writeback is missing"); }
+    const auto update = *effect.address_update;
+    work.published_addresses.at(update.index) = update.value;
+  } else if (!impl_->perform_instruction(effect, response)) {
     impl_->current_pc = effect.pc;
     impl_->fail(rejected_effect(effect),
                 effect.space,

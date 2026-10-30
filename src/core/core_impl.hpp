@@ -61,6 +61,8 @@ struct Core::Impl {
   [[nodiscard]] bool staged_computing() const noexcept { return staged && staged->computing; }
 
   void compute_instruction();
+  void publish_address_update(AddressWriteback update, Word address) const;
+  void restore_published_addresses();
   [[nodiscard]] detail::Instruction captured_instruction(Word address) const;
   [[nodiscard]] Word sample_instruction(InstructionEffect effect) const;
   [[nodiscard]] bool perform_instruction(InstructionEffect effect, Word &response) const;

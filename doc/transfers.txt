@@ -41,9 +41,14 @@ the native executor still owns their actual pop/push, scaling/limiting and flags
 Non-data-MOVE families and unsupported encodings return nullopt, never a fake
 empty dependency set. NOP/known no-MOVE fields are explicit supported empty sets.
 
+X:R/R:Y arrays use canonical memory-transfer-first ordering even when assembly
+syntax places the companion register transfer first. This is not a sequence of
+visible register assignments: the native executor must retain the original
+sources of the parallel transfers before publishing destinations.
+
 The count/order describes encoded transfers, not physical/granted bus operations.
 X:Y effects can have runtime qualification (including simultaneous I/O addresses),
-and L: uses two physical spaces. Conditional ALU and all native early AGU/MOVE
+and L: uses two physical spaces. Conditional ALU, complete native AGU/MOVE phase
 publication, overlapping instructions, cache, RMW/IRQ/resources and clock timing
 remain to be integrated. Metadata cannot authorize a host register patch.
 

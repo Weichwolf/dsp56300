@@ -25,6 +25,8 @@ struct StagedState {
   InstructionWords input;
   Instruction decoded;
   std::array<AcceptedEffect, capacity> records{};
+  std::array<std::optional<Word>, 8> published_addresses{};
+  InstructionPublication publication = InstructionPublication::retirement;
   std::size_t used = 0, cursor = 0;
   std::optional<InstructionEffect> pending;
   bool active = false, computing = false, complete = false;

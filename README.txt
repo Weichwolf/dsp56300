@@ -86,6 +86,9 @@ See doc/instruction-metadata.txt for exact scope.
 <dsp56300/transfers.hpp> adds pure encoded data-MOVE descriptions: scalar/control/
 program/peripheral, paired/composite transfers and address-update roles. This is
 not a complete instruction dependency or hardware timing model; see doc/transfers.txt.
+Captured instructions can optionally expose native automatic R writebacks before
+data access through owned CPU tickets. All other results retain retirement
+publication; physical stage timing and overlap remain open. See doc/staged-execution.txt.
 Ordinary run returns an explicit waiting/stopped state for WAIT/STOP. Guest RESET needs
 Io::reset_peripherals acknowledgement; the default is an explicit event fault.
 See doc/processing.txt for wake, callback, clock and qualification contracts.

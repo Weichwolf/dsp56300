@@ -392,7 +392,7 @@ query qualification, not a repeated staged/whole-suite or pipeline gate. Exact
 operand/dependency descriptions remain required; conservative JIT bank masks are
 not physical hazard metadata. See doc/instruction-metadata.txt.
 
-Pure inspect_transfers now describes encoded data MOVE source/destination roles,
+At e4e5336, pure inspect_transfers describes encoded data MOVE source/destination roles,
 all scalar/control/program/peripheral forms, immediate/extension operands,
 parallel X/Y and composite L: views, displacement addressing and pure AGU updates.
 address_inputs describes architectural EA inputs/writeback only; it is not a
@@ -404,6 +404,19 @@ ASan/UBSan and separate TSan, with no fuzz or manufacturer/application programs.
 Eight new CPP contexts/profile compile; 60 prior CPU object/source/recipe
 identities remain exact. All 64 archive members and the protected executable
 are audited. No unrelated staged/whole-suite replay is claimed. See doc/transfers.txt.
+
+Optional native automatic R publication now captures the actual AGU result and
+publishes it only through its owner-bound CPU ticket, with no Io callback or
+retirement. The remaining registers/hidden state retain their normal ownership.
+Published R values, pending updates and accepted bus responses survive opaque
+checkpoint/restore; abandoned tickets cannot alter the restored continuation.
+26528 independent new assertions per profile and thirteen affected regression
+groups qualify under ASan/UBSan and separate TSan. The strict test-only expected
+cycle correction reuses thirteen passing groups by exact identity; no duplicate
+regression is claimed. Both profiles audit 81 C++ contexts, 64 CPU archive members,
+one instrumented fixture-format member and seven protected executables. This
+does not establish physical AG2 timing, general MOVE/ALU visibility, overlapping
+instructions or complete device operation. See doc/staged-execution.txt.
 
 The CPU-only library does not supply DSP56371 board clocks, DMA/serial/host-port
 peripherals, pin timing or a synthesizer. Installed package consumption,

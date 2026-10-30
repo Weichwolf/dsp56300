@@ -119,7 +119,14 @@ Word Core::Impl::effective(const AddressForm form) {
   const auto result = modifier == modifier_mask
                           ? address_add(original, offset)
                           : update_address({.index = index, .offset = offset});
-  if (mode != 5) { cpu.reg.r[index] = result; }
+  if (mode != 5) {
+    cpu.reg.r[index] = result;
+    if (staged_computing()) {
+      publish_address_update(
+          {.index = static_cast<std::uint8_t>(index), .previous = original, .value = result},
+          mode == 7 ? result : original);
+    }
+  }
   return mode == 5 || mode == 7 ? result : original;
 }
 

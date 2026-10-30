@@ -138,13 +138,24 @@ struct InstructionFetch {
   std::optional<Word> latched_opcode;
 };
 
-enum class EffectKind : std::uint8_t { read, write, bit, reset, retire };
+enum class InstructionPublication : std::uint8_t { retirement, address_updates };
+
+enum class EffectKind : std::uint8_t { read, write, bit, reset, retire, address_update };
+
+struct AddressWriteback {
+  std::uint8_t index = 0;
+  Word previous = 0, value = 0;
+  bool operator==(const AddressWriteback &) const = default;
+};
 
 struct InstructionEffect {
   EffectKind kind = EffectKind::retire;
   Space space = Space::program;
   Word address = 0, value = 0, pc = 0, omr = 0, bit = 0;
   BitAction action = BitAction::test;
+  // Native automatic R writeback. address is the computed EA; space is unused.
+  // This is an owned CPU publication boundary, never a host bus transaction.
+  std::optional<AddressWriteback> address_update = std::nullopt;
   bool operator==(const InstructionEffect &) const = default;
 };
 
@@ -232,7 +243,9 @@ public:
   [[nodiscard]] Checkpoint checkpoint() const;
   void restore(const Checkpoint &checkpoint);
   [[nodiscard]] InstructionFetch instruction_fetch() const;
-  [[nodiscard]] InstructionProgress begin_instruction(InstructionWords words);
+  [[nodiscard]] InstructionProgress
+  begin_instruction(InstructionWords words,
+                    InstructionPublication publication = InstructionPublication::retirement);
   [[nodiscard]] std::optional<PendingInstruction> pending_instruction() const;
   [[nodiscard]] InstructionProgress advance_instruction(const EffectTicket &ticket);
   [[nodiscard]] bool interruptible(InstructionWords words) const;

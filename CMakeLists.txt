@@ -158,6 +158,10 @@ if(BUILD_TESTING)
     test/staged_effects.cpp test/staged_events.cpp)
   target_link_libraries(dsp56300_staged_test PRIVATE dsp56300::core)
   add_test(NAME staged-instruction-boundaries COMMAND dsp56300_staged_test)
+  add_executable(dsp56300_address_publication_test test/address_publication_test.cpp
+    test/address_publication_restore.cpp)
+  target_link_libraries(dsp56300_address_publication_test PRIVATE dsp56300::core)
+  add_test(NAME native-address-publication COMMAND dsp56300_address_publication_test)
   add_executable(dsp56300_transfer_info_test test/transfer_info_test.cpp
     test/transfer_info_parallel.cpp test/transfer_info_special.cpp test/transfer_info_literals.cpp)
   target_link_libraries(dsp56300_transfer_info_test PRIVATE dsp56300::core)

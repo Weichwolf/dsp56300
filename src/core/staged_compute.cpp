@@ -6,6 +6,7 @@
 #include "instruction.hpp"
 #include "staged.hpp"
 
+#include <cstddef>
 #include <stdexcept>
 
 namespace dsp56300::detail {
@@ -23,6 +24,21 @@ Word StagedState::sample(const InstructionEffect effect) {
 } // namespace dsp56300::detail
 
 namespace dsp56300 {
+void Core::Impl::publish_address_update(const AddressWriteback update, const Word address) const {
+  if (!staged_computing() || staged->publication != InstructionPublication::address_updates ||
+      fault.kind != FaultKind::none) {
+    return;
+  }
+  static_cast<void>(sample_instruction(
+      {.kind = EffectKind::address_update, .address = address, .address_update = update}));
+}
+
+void Core::Impl::restore_published_addresses() {
+  for (std::size_t index = 0; index < staged->published_addresses.size(); ++index) {
+    if (const auto value = staged->published_addresses[index]) { cpu.reg.r[index] = *value; }
+  }
+}
+
 Word Core::Impl::sample_instruction(InstructionEffect effect) const {
   effect.pc = current_pc;
   effect.omr = staged->base.cpu.reg.omr;
@@ -63,6 +79,7 @@ void Core::Impl::compute_instruction() {
   } catch (...) {
     work.computing = false;
     restore_execution(work.base);
+    restore_published_addresses();
     work.pending.reset();
     fail(FaultKind::host_event, Space::program, work.input.address, work.input.opcode);
     throw;
@@ -73,6 +90,7 @@ void Core::Impl::compute_instruction() {
   work.computed.b >>= detail::padding_bits;
   const auto failure = fault;
   restore_execution(work.base);
+  restore_published_addresses();
   if (failure.kind != FaultKind::none) {
     fault = failure;
     work.pending.reset();
@@ -96,8 +114,9 @@ bool Core::Impl::perform_instruction(const InstructionEffect effect, Word &respo
       return accepted;
     }
     case EffectKind::reset: return io->reset_peripherals(effect.pc);
+    case EffectKind::address_update:
     case EffectKind::retire:
-    default: throw std::logic_error("Retirement is not an external bus operation");
+    default: throw std::logic_error("CPU publication is not an external bus operation");
   }
 }
 } // namespace dsp56300

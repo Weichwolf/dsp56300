@@ -7,7 +7,7 @@ REP opcode latch when present. begin_instruction verifies the supplied address,
 word widths, extension count and repeat latch before computing one instruction.
 No physical opcode/extension read or interrupt acknowledgement is made here.
 
-Boundary                Observable state / action
+Default boundary        Observable state / action
 begin_instruction       Computes until a real memory/reset effect or retirement
 pending_instruction     Owner-bound ticket, effect/context, observed native prefix/result
 advance_instruction     Performs exactly the stored bus effect, or publishes retirement
@@ -24,6 +24,45 @@ recomputation verifies and consumes that log without repeating external effects.
 A copied PendingInstruction is an observation; changing it cannot alter the
 stored operation or computed result used by its ticket.
 
+Optional native address publication
+
+begin_instruction(words, InstructionPublication::address_updates) additionally
+suspends when it computes an automatic native R writeback. For memory operands,
+this is before the following data access.
+The default retirement policy retains the preceding interface behavior.
+An EffectKind::address_update contains AddressWriteback {index, previous, value}
+and the actual computed EA in address. space is unused; this is a CPU boundary,
+not an Io transaction. Its owner-bound ticket publishes only that native R value.
+PC, data/ALU results, status/stack state and retirement counters remain held.
+The observed computed registers cannot substitute for the stored native update.
+
+Accepted publication values join the bounded effect continuation. Recomputation
+uses the original instruction inputs, verifies accepted update descriptions and
+never repeats publication as an external operation. Checkpoints retain which R
+updates are visible as well as pending updates; restore invalidates old tickets.
+An ensuing bus rejection preserves an already accepted R update. Reset cancels
+the continuation and resets CPU state. Pure U and post/pre-update addressing
+produce these boundaries. Indirect, indexed, absolute/extension addressing and
+explicit MOVEs to R do not invent an automatic writeback.
+
+This is value-level automatic R publication, not calibrated AG2 timing, general
+early MOVE/ALU publication or overlapping instructions. Paired address updates
+have separate native tickets; their physical cycle/grant relationship remains
+the timing integration's responsibility. No automatic processor clock advance,
+physical bus operation or acknowledgement is implied by accepting a CPU ticket.
+
+Directed automatic-address qualification covers 26528 assertions per profile
+under ASan/UBSan and separate TSan: sixteen independent linear/modulo/reverse
+arithmetic cases over all R indices, X/Y and load/store directions; pure U,
+non-updating/explicit destinations, old parallel ALU operands, rejected data
+access/reset and paired restore at five boundaries across nine backend pairs.
+The pre-decrement base-cost expectation includes the FM Appendix A +pru cycle.
+All fourteen affected groups qualify. After the test-only cost correction,
+thirteen strict results retain exact source/object/recipe/ELF identity; TSan
+runs all fourteen groups once. Each profile audits 81 C++ contexts, the complete
+64-member CPU archive, the instrumented fixture-format dependency and seven
+protected executables. There is no whole-suite, calibrated-stage or device claim.
+
 Core::run, register initialization and conflicting debug/interrupt controls cannot
 replace a pending staged owner. Reset cancels CPU continuation, not earlier
 external writes. A healthy checkpoint must be paired with external memory/I/O
@@ -36,18 +75,19 @@ uses the general ISA executor for every backend option; native JIT compilation
 of these boundaries is not yet implemented. Capture/restore, cold setup and the
 internal suspension mechanism belong outside a real-time audio callback.
 
-Directed ASan/UBSan and separate TSan qualification covers 690 staged assertions
+The existing staged qualification covers 690 assertions
 per profile: literal arithmetic/full state, P data vs opcode capture, X/Y address
 updates, four paired transfer directions across all backend restore pairs,
 foreign/stale/tampered views, native fast/long vectors and RTI, REP latches,
 rejected second effects with persistent external prefixes, atomic bit carry,
-and accepted/rejected RESET with post-acknowledgement restoration. Thirteen
-unchanged caller results retain exact ELF/source/recipe identity after the
-final test-only controls. No fuzzing or manufacturer programs are involved.
+and accepted/rejected RESET with post-acknowledgement restoration. At 669e223,
+thirteen unchanged caller results retained exact ELF/source/recipe identity
+after test-only controls. No fuzzing or manufacturer programs are involved.
 
-Staged CE/cache execution rejects explicitly. Actual early AGU/MOVE publication,
-physical RMW phases, calibrated pipeline/cache/IRQ timing and realtime throughput
-remain required integration work. computed is an observation, not permission to patch visible registers.
+Staged CE/cache execution rejects explicitly. Complete phase-separated AGU/MOVE
+publication, overlapping instructions, physical RMW phases, calibrated
+pipeline/cache/IRQ timing and realtime throughput remain required integration
+work. computed is an observation, not permission to patch visible registers.
 The consumer owns physical F1/F2 receipts, derivative arbitration, selected-source
 ACK, memory resources, clock edges and devices. Faster host execution cannot
 advance those emulated clocks. This interface is not complete device acceptance.
