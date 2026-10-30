@@ -80,9 +80,10 @@ bool Core::Impl::word_shift(const Word opcode) {
       operation != rol_operation) {
     return false;
   }
-  // Parallel moves may already have written this accumulator: shift the latched input.
+  // Shift the original main word while retaining concurrent native EXT/LSP writes.
   const bool destination_b = (opcode & 8U) != 0;
-  (destination_b ? cpu.reg.b : cpu.reg.a) = latched[destination_b ? 1 : 0];
+  auto &destination = destination_b ? cpu.reg.b : cpu.reg.a;
+  destination = (destination & ~main_word_mask) | (latched[destination_b ? 1 : 0] & main_word_mask);
   logical_shift({.destination_b = destination_b, .left = (opcode & 16U) != 0}, (opcode & 4U) != 0);
   return true;
 }

@@ -171,7 +171,7 @@ bool Core::Impl::logic(const Word opcode) {
   } else {
     word &= input;
   }
-  destination = (before & ~main_word_mask) | (std::uint64_t{word} << main_word_shift);
+  destination = (destination & ~main_word_mask) | (std::uint64_t{word} << main_word_shift);
   logical_flags(word);
   return true;
 }

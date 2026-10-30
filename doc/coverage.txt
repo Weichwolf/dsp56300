@@ -405,8 +405,8 @@ Eight new CPP contexts/profile compile; 60 prior CPU object/source/recipe
 identities remain exact. All 64 archive members and the protected executable
 are audited. No unrelated staged/whole-suite replay is claimed. See doc/transfers.txt.
 
-Optional native automatic R publication now captures the actual AGU result and
-publishes it only through its owner-bound CPU ticket, with no Io callback or
+At 1abd8b4, optional native automatic R publication captures the actual AGU result
+and publishes it only through its owner-bound CPU ticket, with no Io callback or
 retirement. The remaining registers/hidden state retain their normal ownership.
 Published R values, pending updates and accepted bus responses survive opaque
 checkpoint/restore; abandoned tickets cannot alter the restored continuation.
@@ -417,6 +417,16 @@ regression is claimed. Both profiles audit 81 C++ contexts, 64 CPU archive membe
 one instrumented fixture-format member and seven protected executables. This
 does not establish physical AG2 timing, general MOVE/ALU visibility, overlapping
 instructions or complete device operation. See doc/staged-execution.txt.
+
+Parallel 24-bit logic/word-shift results now preserve actual concurrent EXT/LSP
+MOVE writes. Old source/main operands remain latched; only the ALU main word is
+merged into the live destination. Five scoped groups/profile pass ASan/UBSan and
+separate TSan, including 58757 new assertions over 19584 independently described
+cases. Both profiles audit 74 C++ contexts (68 exact-retained, 6 fresh), the
+64-member CPU archive and five protected executables. The original 24 failing
+own inputs pass unchanged against the repaired library. No calibrated interlock,
+whole-instruction legality or complete ISA/device claim follows. See
+doc/partial-accumulator-moves.txt.
 
 The CPU-only library does not supply DSP56371 board clocks, DMA/serial/host-port
 peripherals, pin timing or a synthesizer. Installed package consumption,

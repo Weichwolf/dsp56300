@@ -51,8 +51,8 @@ have separate native tickets; their physical cycle/grant relationship remains
 the timing integration's responsibility. No automatic processor clock advance,
 physical bus operation or acknowledgement is implied by accepting a CPU ticket.
 
-Directed automatic-address qualification covers 26528 assertions per profile
-under ASan/UBSan and separate TSan: sixteen independent linear/modulo/reverse
+At 1abd8b4, directed automatic-address qualification covers 26528 assertions
+per profile under ASan/UBSan and separate TSan: sixteen independent linear/modulo/reverse
 arithmetic cases over all R indices, X/Y and load/store directions; pure U,
 non-updating/explicit destinations, old parallel ALU operands, rejected data
 access/reset and paired restore at five boundaries across nine backend pairs.
