@@ -153,7 +153,7 @@ if(BUILD_TESTING)
   target_link_libraries(dsp56300_checkpoint_test PRIVATE dsp56300::core Threads::Threads)
   add_test(NAME checkpoint-boundaries COMMAND dsp56300_checkpoint_test)
   add_executable(dsp56300_staged_test test/staged_test.cpp test/staged_control.cpp
-    test/staged_effects.cpp)
+    test/staged_effects.cpp test/staged_events.cpp)
   target_link_libraries(dsp56300_staged_test PRIVATE dsp56300::core)
   add_test(NAME staged-instruction-boundaries COMMAND dsp56300_staged_test)
   add_executable(dsp56300_core_test test/core_test.cpp)

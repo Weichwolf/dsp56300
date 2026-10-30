@@ -60,6 +60,11 @@ Current user requirements
 - Consumers use ordinary headers, owned/shared memory, events and synchronous
   I/O. Keep ownership, bounds, aliases, host mutation and invalidation explicit.
   Derivative clocks, peripherals and board/device behavior belong to consumers.
+  Provide complete opaque CPU continuations, controlled instruction capture and
+  externally owned bus effects. Separate native computation from publication,
+  preserving original operands, early AGU/MOVE visibility and retirement order.
+  A functional single-instruction interface does not replace the required
+  overlapping instruction/event/timing model.
 - Use C++23, LLVM 19, CMake/Ninja, strict warnings, hardening, clang-format/tidy,
   and nonrecovering ASan/UBSan with native dependencies instrumented in strict
   builds. Keep functions at most 120 lines and do not suppress/weaken checks.

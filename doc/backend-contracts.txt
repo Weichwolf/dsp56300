@@ -3,8 +3,9 @@ Core and SIMD contracts
 include/dsp56300/backend.hpp defines CoreImplementation: a structural C++23
 contract for construction, registers, progress/faults, P/X/Y access, bounded
 execution, complete stopped checkpoints, processing/debug state, interrupts and
-cache invalidation. Methods
-retain the ordinary Core ownership/event contracts and precise return types.
+cache invalidation, captured instruction metadata, owned bus/retirement effects
+and captured interrupt requests. Methods retain the ordinary Core ownership/event
+contracts and precise return types.
 Concept satisfaction alone proves no numerical, timing or ownership semantics.
 
 BackendCore<Backend::reference>, BackendCore<Backend::cached> and
@@ -13,6 +14,9 @@ They own the same Core facade, add no virtual dispatch and choose their backend
 at construction. The type's backend wins over Options.backend; other options
 are preserved. These adapters do not introduce three independent ISA models:
 reference and cached execution still share their instruction executor.
+The adapters also forward external-Io construction and staged continuation.
+All staged backend choices currently use the same general executor; selecting
+the JIT type does not qualify staged native compilation or throughput.
 
 The optional second BackendCore parameter selects a compiled batch policy:
 

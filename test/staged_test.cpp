@@ -129,6 +129,7 @@ int main() {
     interrupt();
     repetition();
     faults();
+    events();
     std::cout << dsp56300::test::checks << " staged instruction assertions passed\n";
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';

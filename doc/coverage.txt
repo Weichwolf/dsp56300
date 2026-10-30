@@ -363,13 +363,23 @@ stopped CPU continuation, including REP/opcode latches, pending software/debug
 vectors, exclusion, progress, faults, processing/debug state and the complete
 architectural instruction cache. The host separately pairs memory and I/O.
 Geometry/layout validation precedes restore; decoded/native caches invalidate.
-Scoped validation qualifies eight unique ASan/UBSan groups and eight separate
-TSan groups, including 2839 checkpoint assertions per profile. Seven unchanged
-ASan caller results retain exact ELF/input/recipe identity when only the alias
-witnesses change. All 68 affected C++ contexts and 56 CPU archive members per
-profile are instrumented; format/tidy are clean and no tests skip. This does not
-establish an external serialized format or calibrated pipeline/event timing.
-See doc/checkpoints.txt for the exact ownership and allocation contract.
+Captured-instruction execution now supplies an explicit external-Io owner,
+address/width/REP-latch validation, bounded accepted-effect recording and native
+retirement tickets. Every staged P/X/Y, atomic-bit and RESET action requires a
+real accepting callback. Computation reuses accepted responses without replay;
+restored tickets rebind to the new owner/generation. Copied computed views never
+supply replacement results. See doc/staged-execution.txt for the exact contract.
+
+Scoped qualification covers 14 unique groups per sanitizer profile, including
+690 staged assertions and 2839 checkpoint assertions. The initial production
+integration freshly ran all 14 under ASan/UBSan and separate TSan; the final
+controls change tests only and rerun the staged group, retaining 13 exact
+ELF/source/recipe-identical caller results. All 81 affected C++ contexts and 59
+CPU archive members per profile are instrumented; format/tidy are clean with
+zero skips or sanitizer findings. This does not establish a serialized format,
+early AGU/MOVE publication, physical RMW/parallel bus phases, calibrated pipeline,
+staged CE/cache, native staged JIT or real-time throughput. Staged backend choices
+use the general executor. See doc/checkpoints.txt for allocation/ownership.
 
 The CPU-only library does not supply DSP56371 board clocks, DMA/serial/host-port
 peripherals, pin timing or a synthesizer. Installed package consumption,
@@ -384,8 +394,8 @@ nonrecovering ASan/UBSan/integer instrumentation remain required. No checks are
 weakened or suppressed. No fuzz testing is authorized or run. Binary fixtures
 encode explicit portable fields; independent producers do not use emulator
 snapshots or another DSP emulator as expectations. Manufacturer assets remain
-local. Verified increments are committed locally. No publication destination is
-currently authorized, so these increments are not pushed. Local account names
+local. Verified reviewed increments are committed and pushed to the configured
+origin/main (Weichwolf/dsp56300), as explicitly authorized. Local account names
 stay out of tracked instructions/code/docs.
 The full active objective remains incomplete and must be audited against every
 requirement above, including those that current tests do not yet establish.

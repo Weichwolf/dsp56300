@@ -1,5 +1,11 @@
 Host I/O contract
 
+This document describes ordinary buffer-backed run/interrupt execution. The
+alternative captured-instruction route also uses Io for all staged low-RAM and
+P data accesses, retains visible CPU/progress until retirement, and records
+accepted responses without repeating external effects. Its callbacks observe
+that held CPU state; computed is observation only. See doc/staged-execution.txt.
+
 The embedder supplies derivative peripherals through Io. Guest X/Y accesses in
 0xffff80..0xffffff are dispatched to that interface; P accesses use the supplied
 program RAM. The CPU library supplies no peripheral register values or board

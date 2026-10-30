@@ -73,7 +73,13 @@ checkpoint restore paired with matching caller-owned memory/I/O. Register views
 are initialization only. Core::checkpoint/restore preserve complete CPU
 continuation, architectural cache and sleep/fault/debug state; see doc/checkpoints.txt.
 See doc/io.txt for synchronous word/atomic-bit callbacks and mutation boundaries.
-run returns an explicit waiting/stopped state for WAIT/STOP. Guest RESET needs
+For an externally clocked instruction owner, Core(Io&) accepts explicitly
+captured instruction words and returns owned bus/retirement tickets. It has no
+implicit program-fetch/RAM route. Checkpoints preserve the pending computation
+and accepted external responses. This route currently uses the general executor
+for every backend; early AGU/MOVE publication, CE/cache and staged native JIT
+remain unqualified. See doc/staged-execution.txt for ownership and exact scope.
+Ordinary run returns an explicit waiting/stopped state for WAIT/STOP. Guest RESET needs
 Io::reset_peripherals acknowledgement; the default is an explicit event fault.
 See doc/processing.txt for wake, callback, clock and qualification contracts.
 DEBUG/DEBUGcc support a functional halt or IME-selected debug interrupt. Host

@@ -36,10 +36,18 @@ uses the general ISA executor for every backend option; native JIT compilation
 of these boundaries is not yet implemented. Capture/restore, cold setup and the
 internal suspension mechanism belong outside a real-time audio callback.
 
-Current implementation is under qualification. Staged CE/cache execution rejects
-explicitly. Actual early AGU/MOVE publication, physical RMW phases, calibrated
-pipeline/cache/IRQ timing and realtime throughput remain required integration
-work. computed is an observation, not permission to patch visible registers.
+Directed ASan/UBSan and separate TSan qualification covers 690 staged assertions
+per profile: literal arithmetic/full state, P data vs opcode capture, X/Y address
+updates, four paired transfer directions across all backend restore pairs,
+foreign/stale/tampered views, native fast/long vectors and RTI, REP latches,
+rejected second effects with persistent external prefixes, atomic bit carry,
+and accepted/rejected RESET with post-acknowledgement restoration. Thirteen
+unchanged caller results retain exact ELF/source/recipe identity after the
+final test-only controls. No fuzzing or manufacturer programs are involved.
+
+Staged CE/cache execution rejects explicitly. Actual early AGU/MOVE publication,
+physical RMW phases, calibrated pipeline/cache/IRQ timing and realtime throughput
+remain required integration work. computed is an observation, not permission to patch visible registers.
 The consumer owns physical F1/F2 receipts, derivative arbitration, selected-source
 ACK, memory resources, clock edges and devices. Faster host execution cannot
 advance those emulated clocks. This interface is not complete device acceptance.

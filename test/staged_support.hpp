@@ -29,6 +29,7 @@ public:
   std::vector<Event> events;
   std::size_t calls = 0, accepted = 0;
   Word pc = boot;
+  Word x_written = 0, y_written = 0;
   bool exact = true;
 
   bool read(const Space space,
@@ -57,7 +58,10 @@ public:
               event)) {
       return false;
     }
-    return event.accept && exact;
+    const bool committed = event.accept && exact;
+    if (committed && space == Space::x) { x_written = value; }
+    if (committed && space == Space::y) { y_written = value; }
+    return committed;
   }
 
   bool bit(const Space space,
@@ -147,4 +151,5 @@ void restore();
 void interrupt();
 void repetition();
 void faults();
+void events();
 } // namespace dsp56300::test::staged_test

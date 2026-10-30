@@ -13,6 +13,7 @@ Progress and faults            Instruction/base-cost counters and full fault con
 WAIT/STOP/debug                 Processing state and hidden debug controls/request
 Architectural instruction cache Contents, valid bits, tags, locks and replacement order
 Host execution metadata        Current instruction, latched operands and repeat decode
+Staged instruction             Native base/candidate, accepted responses and pending effect
 P/X/Y memory and external I/O   Caller-owned; save/restore separately as one device state
 Decoded/native host caches     Invalidated on restore; not architectural state
 JIT statistics                 Host diagnostics; not rewound
@@ -20,8 +21,10 @@ JIT statistics                 Host diagnostics; not rewound
 Restore validates layout/configuration and allocates a cache copy before changing
 the destination. An incompatible/empty handle or an active callback rejects
 without modifying its CPU state. Memory sizes and all pairwise overlap offsets
-must match; a fresh owner's buffer addresses may differ. Backend, optimization
-and translation-block settings may differ. Checkpoints retain no memory or I/O
+must match; a fresh owner's buffer addresses may differ. Buffer-backed/external
+construction modes must match. Restored staged effects rebind to the destination
+owner and a new generation, rejecting abandoned and foreign tickets before I/O.
+Backend, optimization and translation-block settings may differ. Checkpoints retain no memory or I/O
 pointers and survive reset/destruction of their original Core. Default and
 moved-from Checkpoint handles are empty; copies retain the immutable snapshot.
 BackendCore adapters and CoreImplementation expose the same checkpoint methods.
