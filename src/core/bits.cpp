@@ -80,6 +80,13 @@ bool Core::Impl::access_bit(const Instruction &decoded, const BitAction action) 
   }
   const auto address = bit_address(operand, decoded);
   if (fault.kind != FaultKind::none) { return false; }
+  if (staged_computing()) {
+    return sample_instruction({.kind = EffectKind::bit,
+                               .space = operand.space,
+                               .address = address,
+                               .bit = bit,
+                               .action = action}) != 0;
+  }
   if (address >= io_begin) {
     bool previous = false;
     if (io == nullptr || !io->bit(operand.space, address, current_pc, bit, action, previous)) {

@@ -147,6 +147,10 @@ void Core::Impl::execute(const Instruction &decoded) {
 }
 
 void Core::interrupt(const Word vector, const unsigned level) {
+  impl_->validate_staged_mutation();
+  if (impl_->external) {
+    throw std::logic_error("External interrupt entry requires captured vectors");
+  }
   const ExecutionGuard guard(impl_->executing);
   auto &state = impl_->cpu.reg;
   const auto mask = (state.sr >> interrupt_level_shift) & interrupt_level_mask;

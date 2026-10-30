@@ -17,10 +17,10 @@
 namespace dsp56300 {
 namespace {
 
-Buffers validate(const Buffers buffers, const Options options) {
-  if (buffers.program.empty() || buffers.x.empty() || buffers.y.empty() ||
-      buffers.program.size() > address_words || buffers.x.size() > address_words ||
-      buffers.y.size() > address_words) {
+Buffers validate(const Buffers buffers, const Options options, const bool external) {
+  if (!external && (buffers.program.empty() || buffers.x.empty() || buffers.y.empty() ||
+                    buffers.program.size() > address_words || buffers.x.size() > address_words ||
+                    buffers.y.size() > address_words)) {
     throw std::invalid_argument("DSP requires nonempty memory spans of at most 2^24 words");
   }
   constexpr Word maximum_block = 256;
@@ -38,11 +38,17 @@ Buffers validate(const Buffers buffers, const Options options) {
 }
 }
 
-Core::Impl::Impl(const Buffers supplied, Io *const host_io, const Options settings)
-    : io(host_io), buffers(validate(supplied, settings)), options(settings) {
+Core::Impl::Impl(const Buffers supplied,
+                 Io *const host_io,
+                 const Options settings,
+                 const bool external_memory)
+    : io(host_io),
+      buffers(validate(supplied, settings, external_memory)),
+      options(settings),
+      external(external_memory) {
   aliases_program[1] = overlaps_program(buffers.x);
   aliases_program[2] = overlaps_program(buffers.y);
-  if (options.backend == Backend::jit) {
+  if (options.backend == Backend::jit && !external) {
     jit = std::make_unique<detail::Jit>(
         cpu,
         buffers.program,
@@ -96,6 +102,9 @@ void Core::Impl::fail(const FaultKind kind,
 }
 
 Word Core::Impl::read_memory(const Space space, const Word address) {
+  if (staged_computing()) {
+    return sample_instruction({.kind = EffectKind::read, .space = space, .address = address});
+  }
   if (space != Space::program && address >= detail::io_begin) {
     Word value = 0;
     if (io == nullptr || !io->read(space, address, current_pc, value)) {
@@ -115,6 +124,13 @@ Word Core::Impl::read_memory(const Space space, const Word address) {
 }
 
 void Core::Impl::write_memory(const Space space, const Word address, const Word value) {
+  if (staged_computing()) {
+    static_cast<void>(sample_instruction({.kind = EffectKind::write,
+                                          .space = space,
+                                          .address = address,
+                                          .value = value & word_mask}));
+    return;
+  }
   if (space != Space::program && address >= detail::io_begin) {
     if (io == nullptr || !io->write(space, address, current_pc, value & word_mask)) {
       fail(FaultKind::io_write, space, address, value);
@@ -136,6 +152,7 @@ void Core::Impl::write_memory(const Space space, const Word address, const Word 
 }
 
 detail::Instruction Core::Impl::instruction(const Word pc) {
+  if (staged_computing()) { return captured_instruction(pc); }
   const auto opcode = fetch_program(pc);
   if (options.backend != Backend::reference && pages[pc / page_words]) {
     const auto &cached = (*pages[pc / page_words])[pc % page_words];
@@ -210,10 +227,17 @@ Core::Core(const Buffers buffers, Io *const io, const Options options)
   reset();
 }
 
+Core::Core(Io &bus, const Options options)
+    : impl_(std::make_unique<Impl>(Buffers{}, &bus, options, true)) {
+  reset();
+}
+
 Core::~Core() = default;
 
 void Core::reset() {
   if (impl_->executing) { throw std::logic_error("Reset requires stopped DSP execution"); }
+  impl_->invalidate_effect_tickets();
+  impl_->staged.reset();
   impl_->cpu = {};
   impl_->vector = {};
   impl_->debug_vector = 0;
@@ -278,6 +302,10 @@ std::uint32_t Core::Impl::run_general(const std::uint32_t budget) {
 }
 
 RunResult Core::run(const std::uint32_t instruction_budget) {
+  impl_->validate_staged_mutation();
+  if (impl_->external) {
+    throw std::logic_error("External instruction owner requires captured words");
+  }
   const detail::ExecutionGuard guard(impl_->executing);
   RunResult result;
   if (!impl_->jit) {
@@ -309,6 +337,7 @@ RunResult Core::run(const std::uint32_t instruction_budget) {
 }
 
 bool Core::interruptible() const {
+  if (impl_->staged_active()) { return false; }
   if ((impl_->cpu.processing != ProcessingState::running &&
        impl_->cpu.processing != ProcessingState::waiting) ||
       (impl_->cpu.debug_flags & detail::debug_interrupt_pending) != 0 ||
@@ -317,6 +346,9 @@ bool Core::interruptible() const {
     return false;
   }
   if (!impl_->cpu.repeat_completed) { return true; }
+  if (impl_->external) {
+    throw std::logic_error("Interrupt eligibility requires captured next-instruction metadata");
+  }
   const auto pc = impl_->cpu.reg.pc;
   if (pc >= impl_->buffers.program.size()) { return false; }
   auto opcode = impl_->buffers.program[pc] & word_mask;

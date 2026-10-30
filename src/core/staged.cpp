@@ -1,0 +1,191 @@
+// SPDX-License-Identifier: GPL-3.0-only
+#include "staged.hpp"
+
+#include "architecture.hpp"
+#include "core_impl.hpp"
+#include "dsp56300/core.hpp"
+#include "execution_guard.hpp"
+#include "instruction.hpp"
+
+#include <cstdint>
+#include <limits>
+#include <memory>
+#include <optional>
+#include <stdexcept>
+#include <utility>
+
+namespace dsp56300 {
+namespace {
+detail::Instruction decoded_words(const InstructionWords words) {
+  if (words.address > word_mask || words.opcode > word_mask ||
+      (words.extension && *words.extension > word_mask)) {
+    throw std::invalid_argument("Captured instruction word exceeds 24 bits");
+  }
+  auto decoded = detail::decode(words.opcode);
+  if (words.extension.has_value() != (decoded.words == 2)) {
+    throw std::invalid_argument("Captured instruction has missing or unexpected extension");
+  }
+  decoded.extension = words.extension.value_or(0);
+  return decoded;
+}
+
+FaultKind rejected_effect(const InstructionEffect effect) {
+  switch (effect.kind) {
+    case EffectKind::read: return FaultKind::memory_read;
+    case EffectKind::write: return FaultKind::memory_write;
+    case EffectKind::bit: return FaultKind::io_bit;
+    case EffectKind::reset: return FaultKind::host_event;
+    case EffectKind::retire:
+    default: throw std::logic_error("No rejection class for retirement");
+  }
+}
+}
+
+EffectTicket::EffectTicket(std::shared_ptr<const bool> owner, const Position position)
+    : owner_(std::move(owner)), epoch_(position.epoch), position_(position.ordinal) {}
+
+void Core::Impl::invalidate_effect_tickets() {
+  if (effect_epoch == std::numeric_limits<std::uint64_t>::max()) {
+    throw std::overflow_error("Instruction effect generations exhausted");
+  }
+  ++effect_epoch;
+}
+
+void Core::Impl::validate_staged_mutation() const {
+  if (staged_active()) { throw std::logic_error("Pending instruction owns CPU mutation"); }
+}
+
+InstructionFetch Core::instruction_fetch() const {
+  if (impl_->executing || impl_->staged_active()) {
+    throw std::logic_error("Instruction fetch metadata requires stopped unowned execution");
+  }
+  if (impl_->debug_ready()) {
+    return {.address = impl_->debug_vector, .latched_opcode = std::nullopt};
+  }
+  if (impl_->exception_ready()) {
+    return {.address = (impl_->vector.address +
+                        (impl_->vector.phase == Impl::VectorPhase::second ? 1U : 0U)) &
+                       word_mask,
+            .latched_opcode = std::nullopt};
+  }
+  return {.address = impl_->cpu.reg.pc,
+          .latched_opcode = impl_->cpu.repeat_remaining != 0 && impl_->cpu.repeat_loaded
+                                ? std::optional(impl_->repeated.opcode)
+                                : std::nullopt};
+}
+
+std::optional<PendingInstruction> Core::pending_instruction() const {
+  if (!impl_->staged_active() || impl_->fault.kind != FaultKind::none) { return std::nullopt; }
+  const auto selected = impl_->staged->pending;
+  if (!selected) { return std::nullopt; }
+  return PendingInstruction{
+      .ticket = EffectTicket(impl_->effect_owner,
+                             {.epoch = impl_->effect_epoch, .ordinal = impl_->staged->used}),
+      .effect = *selected,
+      .computed = impl_->staged->computed};
+}
+
+InstructionProgress Core::begin_instruction(const InstructionWords words) {
+  impl_->validate_staged_mutation();
+  if (impl_->executing || impl_->fault.kind != FaultKind::none ||
+      impl_->cpu.processing != ProcessingState::running) {
+    throw std::logic_error("Instruction computation requires healthy stopped running state");
+  }
+  const auto decoded = decoded_words(words);
+  const auto fetch = instruction_fetch();
+  if (words.address != fetch.address ||
+      (fetch.latched_opcode && *fetch.latched_opcode != words.opcode)) {
+    throw std::invalid_argument("Captured instruction differs from the actual CPU fetch/latch");
+  }
+  if ((impl_->cpu.reg.sr & detail::cache_enable) != 0) {
+    impl_->current_pc = words.address;
+    impl_->fail(FaultKind::unsupported_mode, Space::program, words.address, impl_->cpu.reg.sr);
+    return {.progress = progress(), .fault = fault()};
+  }
+  if (!impl_->effect_owner) { impl_->effect_owner = std::make_shared<const bool>(false); }
+  if (!impl_->staged) { impl_->staged = std::make_unique<detail::StagedState>(); }
+  const auto base = impl_->execution_state();
+  impl_->invalidate_effect_tickets();
+  auto &work = *impl_->staged;
+  work = {};
+  work.base = base;
+  work.input = words;
+  work.decoded = decoded;
+  work.active = true;
+  const detail::ExecutionGuard guard(impl_->executing);
+  impl_->compute_instruction();
+  return {.pending = pending_instruction(), .progress = progress(), .fault = fault()};
+}
+
+InstructionProgress Core::advance_instruction(const EffectTicket &ticket) {
+  if (impl_->executing || !impl_->staged_active() || !impl_->staged->pending ||
+      impl_->fault.kind != FaultKind::none || ticket.owner_ != impl_->effect_owner ||
+      ticket.epoch_ != impl_->effect_epoch || ticket.position_ != impl_->staged->used) {
+    throw std::invalid_argument("Stale, foreign or unavailable instruction effect ticket");
+  }
+  const detail::ExecutionGuard guard(impl_->executing);
+  auto &work = *impl_->staged;
+  const auto selected = work.pending;
+  if (!selected) { throw std::logic_error("Instruction lost its selected effect"); }
+  const auto effect = *selected;
+  if (effect.kind == EffectKind::retire) {
+    if (!work.complete) { throw std::logic_error("Retirement lost its native computation"); }
+    impl_->restore_execution(work.candidate);
+    work.active = false;
+    work.pending.reset();
+    return {.progress = progress(), .fault = fault(), .retired = true};
+  }
+  if (work.used == work.records.size()) {
+    throw std::overflow_error("Instruction effect capacity exhausted");
+  }
+  Word response = 0;
+  if (!impl_->perform_instruction(effect, response)) {
+    impl_->current_pc = effect.pc;
+    impl_->fail(rejected_effect(effect),
+                effect.space,
+                effect.address,
+                effect.kind == EffectKind::bit ? effect.bit : effect.value);
+    work.pending.reset();
+    return {.progress = progress(), .fault = fault()};
+  }
+  work.records.at(work.used++) = {.effect = effect, .response = response};
+  impl_->compute_instruction();
+  return {.pending = pending_instruction(), .progress = progress(), .fault = fault()};
+}
+
+bool Core::interruptible(const InstructionWords words) const {
+  const auto decoded = decoded_words(words);
+  if (impl_->staged_active()) { return false; }
+  if (words.address != impl_->cpu.reg.pc) {
+    throw std::invalid_argument("Interrupt metadata differs from the current normal PC");
+  }
+  if (!impl_->cpu.repeat_completed) { return interruptible(); }
+  if (detail::is_repeat(decoded.operation)) { return false; }
+  // Only the old RAM-peek tail depends on the completed-REP marker.
+  return (impl_->cpu.processing == ProcessingState::running ||
+          impl_->cpu.processing == ProcessingState::waiting) &&
+         (impl_->cpu.debug_flags & detail::debug_interrupt_pending) == 0 &&
+         fault().kind == FaultKind::none && impl_->vector.phase == Impl::VectorPhase::none &&
+         impl_->cpu.repeat_remaining == 0 && !impl_->cpu.interrupt_inhibited;
+}
+
+void Core::request_interrupt(const Word vector,
+                             const unsigned level,
+                             const InstructionWords foreground) {
+  impl_->validate_staged_mutation();
+  if (impl_->executing) { throw std::logic_error("Interrupt requests require stopped execution"); }
+  constexpr unsigned maximum_level = 3;
+  constexpr unsigned level_shift = 8;
+  const auto mask = (impl_->cpu.reg.sr >> level_shift) & maximum_level;
+  if (vector > word_mask || (vector & 1U) != 0 || level > maximum_level || level < mask ||
+      !interruptible(foreground)) {
+    throw std::invalid_argument("Captured interrupt request is not admissible");
+  }
+  impl_->cpu.processing = ProcessingState::running;
+  impl_->vector = {.resume = impl_->cpu.reg.pc,
+                   .address = vector,
+                   .level = level,
+                   .phase = Impl::VectorPhase::first};
+  impl_->cpu.repeat_completed = false;
+}
+} // namespace dsp56300

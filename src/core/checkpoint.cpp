@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "dsp56300/checkpoint.hpp"
 
-#include "architecture.hpp"
 #include "core_impl.hpp"
 #include "dsp56300/core.hpp"
-#include "instruction.hpp"
-#include "program_cache.hpp"
+#include "execution_state.hpp"
+#include "staged.hpp"
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -45,15 +45,9 @@ MemoryLayout layout(const Buffers buffers) {
 }
 
 struct Checkpoint::State {
-  detail::Cpu cpu;
-  std::array<std::uint64_t, 4> latched;
-  Word current_pc;
-  unsigned current_words;
-  detail::Instruction repeated;
-  Fault fault;
-  Core::Impl::Vector vector;
-  Word debug_vector;
-  std::optional<detail::ProgramCache> cache;
+  detail::ExecutionState execution;
+  std::optional<detail::StagedState> staged;
+  bool external = false;
   MemoryLayout memory;
   Word cacheable_begin;
   Word cacheable_end;
@@ -66,44 +60,36 @@ Checkpoint::~Checkpoint() = default;
 
 Checkpoint Core::checkpoint() const {
   if (impl_->executing) { throw std::logic_error("Checkpoint capture requires stopped execution"); }
-  const auto cache = impl_->icache ? std::optional(*impl_->icache) : std::nullopt;
-  return Checkpoint(std::make_shared<const Checkpoint::State>(
-      Checkpoint::State{.cpu = impl_->cpu,
-                        .latched = impl_->latched,
-                        .current_pc = impl_->current_pc,
-                        .current_words = impl_->current_words,
-                        .repeated = impl_->repeated,
-                        .fault = impl_->fault,
-                        .vector = impl_->vector,
-                        .debug_vector = impl_->debug_vector,
-                        .cache = cache,
-                        .memory = layout(impl_->buffers),
-                        .cacheable_begin = impl_->options.cacheable_begin,
-                        .cacheable_end = impl_->options.cacheable_end,
-                        .cache_sector_words = impl_->options.cache_sector_words}));
+  return Checkpoint(std::make_shared<const Checkpoint::State>(Checkpoint::State{
+      .execution = impl_->execution_state(),
+      .staged = impl_->staged_active() ? std::optional(*impl_->staged) : std::nullopt,
+      .external = impl_->external,
+      .memory = layout(impl_->buffers),
+      .cacheable_begin = impl_->options.cacheable_begin,
+      .cacheable_end = impl_->options.cacheable_end,
+      .cache_sector_words = impl_->options.cache_sector_words}));
 }
 
 void Core::restore(const Checkpoint &checkpoint) {
   if (impl_->executing) { throw std::logic_error("Checkpoint restore requires stopped execution"); }
   if (!checkpoint.state_) { throw std::invalid_argument("Cannot restore an empty checkpoint"); }
   const auto &state = *checkpoint.state_;
-  if (state.memory != layout(impl_->buffers) ||
+  if (state.external != impl_->external || state.memory != layout(impl_->buffers) ||
       state.cacheable_begin != impl_->options.cacheable_begin ||
       state.cacheable_end != impl_->options.cacheable_end ||
       state.cache_sector_words != impl_->options.cache_sector_words) {
     throw std::invalid_argument("Checkpoint memory aliases, sizes or cache geometry differ");
   }
-  // Allocate before mutating the destination. Remaining state transfers cannot fail.
-  auto cache = state.cache ? std::make_unique<detail::ProgramCache>(*state.cache) : nullptr;
+  auto staged = state.staged ? std::make_unique<detail::StagedState>(*state.staged) : nullptr;
+  auto owner = impl_->effect_owner;
+  if (staged && !owner) { owner = std::make_shared<const bool>(false); }
+  if (impl_->effect_epoch == std::numeric_limits<std::uint64_t>::max()) {
+    throw std::overflow_error("Instruction effect generations exhausted");
+  }
+  impl_->restore_execution(state.execution);
   clear_code_cache();
-  impl_->cpu = state.cpu;
-  impl_->latched = state.latched;
-  impl_->current_pc = state.current_pc;
-  impl_->current_words = state.current_words;
-  impl_->repeated = state.repeated;
-  impl_->fault = state.fault;
-  impl_->vector = state.vector;
-  impl_->debug_vector = state.debug_vector;
-  impl_->icache = std::move(cache);
+  ++impl_->effect_epoch;
+  impl_->effect_owner = std::move(owner);
+  impl_->staged = std::move(staged);
 }
 } // namespace dsp56300

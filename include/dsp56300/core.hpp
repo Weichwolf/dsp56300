@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 
 namespace dsp56300 {
@@ -127,6 +128,62 @@ public:
   bit(Space space, Word address, Word pc, Word bit, BitAction action, bool &previous) noexcept = 0;
 };
 
+struct InstructionWords {
+  Word address = 0, opcode = 0;
+  std::optional<Word> extension = std::nullopt;
+};
+
+struct InstructionFetch {
+  Word address = 0;
+  std::optional<Word> latched_opcode;
+};
+
+enum class EffectKind : std::uint8_t { read, write, bit, reset, retire };
+
+struct InstructionEffect {
+  EffectKind kind = EffectKind::retire;
+  Space space = Space::program;
+  Word address = 0, value = 0, pc = 0, omr = 0, bit = 0;
+  BitAction action = BitAction::test;
+  bool operator==(const InstructionEffect &) const = default;
+};
+
+class EffectTicket {
+public:
+  EffectTicket(const EffectTicket &) = default;
+  EffectTicket &operator=(const EffectTicket &) = default;
+  EffectTicket(EffectTicket &&) noexcept = default;
+  EffectTicket &operator=(EffectTicket &&) noexcept = default;
+  ~EffectTicket() = default;
+
+private:
+  friend class Core;
+
+  struct Position {
+    std::uint64_t epoch;
+    std::size_t ordinal;
+  };
+
+  EffectTicket(std::shared_ptr<const bool> owner, Position position);
+  std::shared_ptr<const bool> owner_;
+  std::uint64_t epoch_ = 0;
+  std::size_t position_ = 0;
+};
+
+struct PendingInstruction {
+  EffectTicket ticket;
+  InstructionEffect effect;
+  // Native computation before this effect; observation is not publication.
+  Registers computed;
+};
+
+struct InstructionProgress {
+  std::optional<PendingInstruction> pending = std::nullopt;
+  Progress progress;
+  Fault fault;
+  bool retired = false;
+};
+
 // Three RAM address spaces, each word stored in uint32_t; sizes may differ.
 // Memory beyond the supplied spans faults, except I/O routed to the host.
 // Spans may overlap. The embedder owns contents/lifetime; mutate words aliasing
@@ -157,6 +214,9 @@ private:
 class Core {
 public:
   explicit Core(Buffers buffers, Io *io = nullptr, Options options = {});
+  // External instruction owner supplies captured words and advances real effects.
+  // All staged P/X/Y access uses this bus; ordinary run requires RAM buffers.
+  explicit Core(Io &bus, Options options = {});
   ~Core();
   Core(const Core &) = delete;
   Core &operator=(const Core &) = delete;
@@ -171,6 +231,13 @@ public:
   // The caller restores matching RAM and I/O separately. Host code caches clear.
   [[nodiscard]] Checkpoint checkpoint() const;
   void restore(const Checkpoint &checkpoint);
+  [[nodiscard]] InstructionFetch instruction_fetch() const;
+  [[nodiscard]] InstructionProgress begin_instruction(InstructionWords words);
+  [[nodiscard]] std::optional<PendingInstruction> pending_instruction() const;
+  [[nodiscard]] InstructionProgress advance_instruction(const EffectTicket &ticket);
+  [[nodiscard]] bool interruptible(InstructionWords words) const;
+  // Capture an admitted request without fetching a vector or acknowledging a device.
+  void request_interrupt(Word vector, unsigned level, InstructionWords foreground);
   [[nodiscard]] Progress progress() const noexcept;
   [[nodiscard]] Fault fault() const noexcept;
   // Native ALU instructions may still use an instrumented parallel-move helper.

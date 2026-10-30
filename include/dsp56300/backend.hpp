@@ -6,6 +6,7 @@
 
 #include <concepts>
 #include <cstdint>
+#include <optional>
 #include <span>
 
 namespace dsp56300 {
@@ -17,6 +18,8 @@ concept CoreImplementation = std::constructible_from<Implementation, Buffers, Io
                                       const Implementation &view,
                                       const Registers &state,
                                       const Checkpoint &checkpoint,
+                                      const InstructionWords instruction,
+                                      const EffectTicket &ticket,
                                       const Space space,
                                       const Word address,
                                       const Word value,
@@ -29,6 +32,20 @@ concept CoreImplementation = std::constructible_from<Implementation, Buffers, Io
                                { core.set_registers(state) } -> std::same_as<void>;
                                { view.checkpoint() } -> std::same_as<Checkpoint>;
                                { core.restore(checkpoint) } -> std::same_as<void>;
+                               { view.instruction_fetch() } -> std::same_as<InstructionFetch>;
+                               {
+                                 core.begin_instruction(instruction)
+                               } -> std::same_as<InstructionProgress>;
+                               {
+                                 view.pending_instruction()
+                               } -> std::same_as<std::optional<PendingInstruction>>;
+                               {
+                                 core.advance_instruction(ticket)
+                               } -> std::same_as<InstructionProgress>;
+                               { view.interruptible(instruction) } -> std::same_as<bool>;
+                               {
+                                 core.request_interrupt(address, level, instruction)
+                               } -> std::same_as<void>;
                                { view.progress() } noexcept -> std::same_as<Progress>;
                                { view.fault() } noexcept -> std::same_as<Fault>;
                                { view.jit_statistics() } noexcept -> std::same_as<JitStatistics>;
@@ -60,6 +77,8 @@ public:
   explicit BackendCore(const Buffers buffers, Io *const io = nullptr, const Options options = {})
       : core_(buffers, io, select(options)) {}
 
+  explicit BackendCore(Io &bus, const Options options = {}) : core_(bus, select(options)) {}
+
   void reset() { core_.reset(); }
 
   [[nodiscard]] Registers registers() const { return core_.registers(); }
@@ -69,6 +88,28 @@ public:
   [[nodiscard]] Checkpoint checkpoint() const { return core_.checkpoint(); }
 
   void restore(const Checkpoint &checkpoint) { core_.restore(checkpoint); }
+
+  [[nodiscard]] InstructionFetch instruction_fetch() const { return core_.instruction_fetch(); }
+
+  [[nodiscard]] InstructionProgress begin_instruction(const InstructionWords words) {
+    return core_.begin_instruction(words);
+  }
+
+  [[nodiscard]] std::optional<PendingInstruction> pending_instruction() const {
+    return core_.pending_instruction();
+  }
+
+  [[nodiscard]] InstructionProgress advance_instruction(const EffectTicket &ticket) {
+    return core_.advance_instruction(ticket);
+  }
+
+  [[nodiscard]] bool interruptible(const InstructionWords words) const {
+    return core_.interruptible(words);
+  }
+
+  void request_interrupt(const Word vector, const unsigned level, const InstructionWords words) {
+    core_.request_interrupt(vector, level, words);
+  }
 
   [[nodiscard]] Progress progress() const noexcept { return core_.progress(); }
 

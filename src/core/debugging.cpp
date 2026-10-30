@@ -17,12 +17,14 @@ DebugStatus Core::debug_status() const noexcept {
 }
 
 void Core::set_debug_interrupt_mode(const bool enabled) {
+  impl_->validate_staged_mutation();
   if (impl_->executing) { throw std::logic_error("Debug control requires stopped host execution"); }
   const auto flags = impl_->cpu.debug_flags & ~debug_interrupt_mode;
   impl_->cpu.debug_flags = static_cast<std::uint8_t>(flags | (enabled ? debug_interrupt_mode : 0));
 }
 
 void Core::request_debug() {
+  impl_->validate_staged_mutation();
   if (impl_->executing) { throw std::logic_error("Debug requests require stopped host execution"); }
   if (impl_->fault.kind != FaultKind::none || impl_->cpu.processing == ProcessingState::debugging) {
     throw std::invalid_argument("Debug request requires a nonfaulted, nondebugging CPU");
@@ -31,6 +33,7 @@ void Core::request_debug() {
 }
 
 void Core::resume_from_debug() {
+  impl_->validate_staged_mutation();
   if (impl_->executing) { throw std::logic_error("Debug resume requires stopped host execution"); }
   if (impl_->fault.kind != FaultKind::none || impl_->cpu.processing != ProcessingState::debugging) {
     throw std::invalid_argument("Only a nonfaulted debugging CPU can resume");

@@ -4,9 +4,11 @@
 #include "architecture.hpp"
 #include "bit_instruction.hpp"
 #include "dsp56300/core.hpp"
+#include "execution_state.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
 #include "program_cache.hpp"
+#include "staged.hpp"
 
 #include <array>
 #include <cstddef>
@@ -16,13 +18,8 @@
 
 namespace dsp56300 {
 struct Core::Impl {
-  enum class VectorPhase : std::uint8_t { none, pending, first, second };
-
-  struct Vector {
-    Word resume = 0, address = 0;
-    unsigned level = 0;
-    VectorPhase phase = VectorPhase::none;
-  };
+  using VectorPhase = detail::VectorPhase;
+  using Vector = detail::VectorState;
 
   [[nodiscard]] bool exception_ready() const noexcept {
     return vector.phase != VectorPhase::none && cpu.repeat_remaining == 0;
@@ -55,7 +52,20 @@ struct Core::Impl {
   void step_vector();
   void call_vector(const detail::Instruction &decoded);
 
-  explicit Impl(Buffers supplied, Io *io, Options settings);
+  explicit Impl(Buffers supplied, Io *io, Options settings, bool external_memory = false);
+  [[nodiscard]] detail::ExecutionState execution_state() const;
+  void restore_execution(const detail::ExecutionState &state);
+
+  [[nodiscard]] bool staged_active() const noexcept { return staged && staged->active; }
+
+  [[nodiscard]] bool staged_computing() const noexcept { return staged && staged->computing; }
+
+  void compute_instruction();
+  [[nodiscard]] detail::Instruction captured_instruction(Word address) const;
+  [[nodiscard]] Word sample_instruction(InstructionEffect effect) const;
+  [[nodiscard]] bool perform_instruction(InstructionEffect effect, Word &response) const;
+  void validate_staged_mutation() const;
+  void invalidate_effect_tickets();
   [[nodiscard]] std::span<Word> area(Space space) const;
   void fail(FaultKind kind, Space space, Word address, Word value = 0);
   [[nodiscard]] Word read_memory(Space space, Word address);
@@ -159,5 +169,9 @@ struct Core::Impl {
   bool executing = false;
   std::array<bool, 3> aliases_program{true, false, false};
   Word debug_vector = 0;
+  bool external = false;
+  std::unique_ptr<detail::StagedState> staged;
+  std::shared_ptr<const bool> effect_owner;
+  std::uint64_t effect_epoch = 0;
 };
 } // namespace dsp56300

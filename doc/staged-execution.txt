@@ -1,0 +1,45 @@
+Captured instructions and externally owned effects
+
+Core(Io&, Options) constructs a CPU whose instruction owner supplies known
+InstructionWords. It has no implicit RAM or automatic program-fetch route.
+instruction_fetch reports the actual next normal/vector address and an existing
+REP opcode latch when present. begin_instruction verifies the supplied address,
+word widths, extension count and repeat latch before computing one instruction.
+No physical opcode/extension read or interrupt acknowledgement is made here.
+
+Boundary                Observable state / action
+begin_instruction       Computes until a real memory/reset effect or retirement
+pending_instruction     Owner-bound ticket, effect/context, observed native prefix/result
+advance_instruction     Performs exactly the stored bus effect, or publishes retirement
+registers/progress       Retain their pre-instruction values until retirement
+checkpoint/restore      Include accepted responses and the pending computation
+request_interrupt       Retains admitted vector/priority and genuine normal resume PC
+
+All staged P/X/Y word accesses use the supplied Io, including ordinary low RAM
+and program-data operations. Bit actions use one atomic Io::bit transaction.
+RESET requires an actual reset_peripherals acknowledgement. Rejection is a
+visible fault with operation class, address and PC; no successful value is
+invented. Accepted responses are recorded in a bounded instruction log. Native
+recomputation verifies and consumes that log without repeating external effects.
+A copied PendingInstruction is an observation; changing it cannot alter the
+stored operation or computed result used by its ticket.
+
+Core::run, register initialization and conflicting debug/interrupt controls cannot
+replace a pending staged owner. Reset cancels CPU continuation, not earlier
+external writes. A healthy checkpoint must be paired with external memory/I/O
+state by the consumer. Restored pending effects receive new owner/generation
+tickets; abandoned or foreign tickets do not authorize another access.
+
+The external constructor requires this explicit execution route. Ordinary buffer
+construction/run retain their existing ownership contract. Staged computation
+uses the general ISA executor for every backend option; native JIT compilation
+of these boundaries is not yet implemented. Capture/restore, cold setup and the
+internal suspension mechanism belong outside a real-time audio callback.
+
+Current implementation is under qualification. Staged CE/cache execution rejects
+explicitly. Actual early AGU/MOVE publication, physical RMW phases, calibrated
+pipeline/cache/IRQ timing and realtime throughput remain required integration
+work. computed is an observation, not permission to patch visible registers.
+The consumer owns physical F1/F2 receipts, derivative arbitration, selected-source
+ACK, memory resources, clock edges and devices. Faster host execution cannot
+advance those emulated clocks. This interface is not complete device acceptance.

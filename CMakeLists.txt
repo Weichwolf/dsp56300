@@ -22,7 +22,8 @@ find_program(DSP56300_CLANG_FORMAT NAMES clang-format-19 REQUIRED)
 set(CMAKE_CXX_CLANG_TIDY "${DSP56300_CLANG_TIDY};--warnings-as-errors=*")
 
 add_library(dsp56300_core STATIC
-  src/core.cpp src/core/core_state.cpp src/core/checkpoint.cpp src/core/arithmetic.cpp src/core/saturation.cpp src/core/shifts.cpp
+  src/core.cpp src/core/core_state.cpp src/core/checkpoint.cpp src/core/execution_state.cpp
+  src/core/staged.cpp src/core/staged_compute.cpp src/core/arithmetic.cpp src/core/saturation.cpp src/core/shifts.cpp
   src/core/conditional.cpp src/core/immediate.cpp src/core/integer.cpp src/core/decode.cpp src/core/moves.cpp
   src/core/transfers.cpp src/core/registers.cpp src/core/agu.cpp src/core/control.cpp src/core/exceptions.cpp
   src/core/bits.cpp src/core/bit_fields.cpp src/core/loops.cpp src/core/products.cpp src/core/iteration.cpp
@@ -151,6 +152,10 @@ if(BUILD_TESTING)
   find_package(Threads REQUIRED)
   target_link_libraries(dsp56300_checkpoint_test PRIVATE dsp56300::core Threads::Threads)
   add_test(NAME checkpoint-boundaries COMMAND dsp56300_checkpoint_test)
+  add_executable(dsp56300_staged_test test/staged_test.cpp test/staged_control.cpp
+    test/staged_effects.cpp)
+  target_link_libraries(dsp56300_staged_test PRIVATE dsp56300::core)
+  add_test(NAME staged-instruction-boundaries COMMAND dsp56300_staged_test)
   add_executable(dsp56300_core_test test/core_test.cpp)
   target_link_libraries(dsp56300_core_test PRIVATE dsp56300::core)
   add_test(NAME core-instructions COMMAND dsp56300_core_test)

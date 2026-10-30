@@ -43,6 +43,7 @@ Registers Core::registers() const {
 }
 
 void Core::set_registers(const Registers &state) {
+  impl_->validate_staged_mutation();
   if (impl_->executing) {
     throw std::logic_error("Register initialization requires stopped DSP execution");
   }

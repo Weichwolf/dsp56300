@@ -11,6 +11,7 @@ ProcessingState Core::processing_state() const noexcept {
 }
 
 void Core::resume_from_stop() {
+  impl_->validate_staged_mutation();
   if (impl_->executing) { throw std::logic_error("STOP wake requires stopped host execution"); }
   if (impl_->cpu.processing != ProcessingState::stopped || impl_->fault.kind != FaultKind::none) {
     throw std::invalid_argument("Only a nonfaulted STOP state admits IRQA wake completion");
@@ -25,6 +26,10 @@ void Core::Impl::execute_processing(const detail::Instruction &decoded) {
   }
   if (decoded.operation == detail::Operation::stop) {
     cpu.processing = ProcessingState::stopped;
+    return;
+  }
+  if (staged_computing()) {
+    static_cast<void>(sample_instruction({.kind = EffectKind::reset, .address = current_pc}));
     return;
   }
   if (io == nullptr || !io->reset_peripherals(current_pc)) {
