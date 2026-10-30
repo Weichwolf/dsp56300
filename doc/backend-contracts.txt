@@ -2,7 +2,8 @@ Core and SIMD contracts
 
 include/dsp56300/backend.hpp defines CoreImplementation: a structural C++23
 contract for construction, registers, progress/faults, P/X/Y access, bounded
-execution, processing/debug state, interrupts and cache invalidation. Methods
+execution, complete stopped checkpoints, processing/debug state, interrupts and
+cache invalidation. Methods
 retain the ordinary Core ownership/event contracts and precise return types.
 Concept satisfaction alone proves no numerical, timing or ownership semantics.
 

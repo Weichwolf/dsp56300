@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 
+#include "dsp56300/checkpoint.hpp"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -165,6 +167,10 @@ public:
   // Changes visible registers, not hidden execution continuation. Use after reset
   // for initialization; this is not checkpoint restore.
   void set_registers(const Registers &state);
+  // Capture/restore complete stopped CPU continuation and architectural cache.
+  // The caller restores matching RAM and I/O separately. Host code caches clear.
+  [[nodiscard]] Checkpoint checkpoint() const;
+  void restore(const Checkpoint &checkpoint);
   [[nodiscard]] Progress progress() const noexcept;
   [[nodiscard]] Fault fault() const noexcept;
   // Native ALU instructions may still use an instrumented parallel-move helper.
@@ -194,6 +200,7 @@ public:
   void clear_code_cache();
 
 private:
+  friend class Checkpoint;
   struct Impl;
   std::unique_ptr<Impl> impl_;
 };

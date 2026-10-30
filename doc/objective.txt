@@ -74,7 +74,8 @@ Current user requirements
   GPL-3.0-only licensing and source/dependency attribution. Keep manufacturer
   reference copies and private analysis outside the tracked source tree.
 - Do not run fuzz tests without an explicit user request. Commit verified
-  increments locally. The latest user-provided repository instructions do not
-  authorize a publication destination; do not publish these increments.
+  increments and push reviewed source commits to the configured origin/main
+  (Weichwolf/dsp56300), as explicitly authorized by the user. Do not publish
+  reference assets or backup branches.
 - Speak German with the user; write code, comments, documentation and commits
   in English. Keep local account names out of tracked source and instructions.

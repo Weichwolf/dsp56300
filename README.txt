@@ -68,8 +68,10 @@ elements; architectural A/B values in Registers are raw 56-bit quantities.
 The host retains buffer ownership and must use Core::load/write for program
 mutation. Core is owned by one execution thread; callbacks run synchronously.
 Unimplemented instructions/modes, unmapped accesses and rejected I/O stop the
-core with explicit context. Faulted execution requires reset. Register views
-are not complete checkpoints of REP/interrupt continuation, DSP cache or sleep state.
+core with explicit context. Faulted execution requires reset or a valid stopped
+checkpoint restore paired with matching caller-owned memory/I/O. Register views
+are initialization only. Core::checkpoint/restore preserve complete CPU
+continuation, architectural cache and sleep/fault/debug state; see doc/checkpoints.txt.
 See doc/io.txt for synchronous word/atomic-bit callbacks and mutation boundaries.
 run returns an explicit waiting/stopped state for WAIT/STOP. Guest RESET needs
 Io::reset_peripherals acknowledgement; the default is an explicit event fault.

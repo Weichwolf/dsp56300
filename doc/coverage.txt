@@ -97,15 +97,16 @@ and old parallel operands without memory/I/O observation barriers. All 6758417
 directed ASR/register assertions pass; no ISA catalogue row becomes complete.
 See doc/native-shifts.txt for guards, witnesses, measurements and remaining work.
 
-The current configuration qualifies all 144 registered tests in release and
-strict ASan/UBSan, with zero skips. Full sweeps take 114.11 s/two workers and
+The pre-checkpoint configuration qualified its 144 registered tests in release
+and strict ASan/UBSan, with zero skips. Full sweeps take 114.11 s/two workers and
 265.60 s/three and pass 143/144 each, failing only the obsolete host NOT rejection.
 That test-only expectation is replaced with identical-input exact success and
 following-NOP checks; targeted reruns pass 9786 assertions in 0.28/1.17 s. Other 143
 targets and production stay unchanged and are not repeated. This is composite
 current-state qualification, not a claim of two newly green full sweeps.
-All 158 C++ translation units retain strict nonrecovering address/undefined/
-integer instrumentation; all 201 C++ source/header files pass format/tidy/Werror.
+At that checkpoint all 158 C++ translation units retained strict nonrecovering
+address/undefined/integer instrumentation; all 201 C++ source/header files passed
+format/tidy/Werror.
 All 56 archives reproduce exactly through 54 registrations. Two original BFU
 archives add 76664 cases. Only four old records in two archives change, with
 identical initial programs/registers/data; one preserves count 27 as a diagnostic.
@@ -356,6 +357,19 @@ invalidation are explicit. Peripheral replies/reset acceptance are not invented.
 Single-thread ownership/stopped mutation remains required; a register view alone
 is not a cache/REP/vector checkpoint. See doc/io.txt for callback/fault state,
 reentry, mutation, ordering and ownership contracts.
+
+Core::checkpoint/restore and the typed BackendCore adapters now provide an opaque
+stopped CPU continuation, including REP/opcode latches, pending software/debug
+vectors, exclusion, progress, faults, processing/debug state and the complete
+architectural instruction cache. The host separately pairs memory and I/O.
+Geometry/layout validation precedes restore; decoded/native caches invalidate.
+Scoped validation qualifies eight unique ASan/UBSan groups and eight separate
+TSan groups, including 2839 checkpoint assertions per profile. Seven unchanged
+ASan caller results retain exact ELF/input/recipe identity when only the alias
+witnesses change. All 68 affected C++ contexts and 56 CPU archive members per
+profile are instrumented; format/tidy are clean and no tests skip. This does not
+establish an external serialized format or calibrated pipeline/event timing.
+See doc/checkpoints.txt for the exact ownership and allocation contract.
 
 The CPU-only library does not supply DSP56371 board clocks, DMA/serial/host-port
 peripherals, pin timing or a synthesizer. Installed package consumption,

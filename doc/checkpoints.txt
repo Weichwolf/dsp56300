@@ -1,0 +1,44 @@
+Stopped CPU checkpoints
+
+Core::checkpoint returns an opaque, copyable immutable Checkpoint. Core::restore
+accepts it after execution stops, including in a different Core/backend with the
+same memory sizes/overlap offsets and architectural instruction-cache geometry.
+This is an in-process continuation, not an external serialized input format.
+
+State                          Captured/restored
+Architectural registers        All, with internal A/B precision unchanged
+REP                            Remaining count, body latch, saved LC and exclusion
+Software/debug vectors         Pending phase, vector, priority and normal resume PC
+Progress and faults            Instruction/base-cost counters and full fault context
+WAIT/STOP/debug                 Processing state and hidden debug controls/request
+Architectural instruction cache Contents, valid bits, tags, locks and replacement order
+Host execution metadata        Current instruction, latched operands and repeat decode
+P/X/Y memory and external I/O   Caller-owned; save/restore separately as one device state
+Decoded/native host caches     Invalidated on restore; not architectural state
+JIT statistics                 Host diagnostics; not rewound
+
+Restore validates layout/configuration and allocates a cache copy before changing
+the destination. An incompatible/empty handle or an active callback rejects
+without modifying its CPU state. Memory sizes and all pairwise overlap offsets
+must match; a fresh owner's buffer addresses may differ. Backend, optimization
+and translation-block settings may differ. Checkpoints retain no memory or I/O
+pointers and survive reset/destruction of their original Core. Default and
+moved-from Checkpoint handles are empty; copies retain the immutable snapshot.
+BackendCore adapters and CoreImplementation expose the same checkpoint methods.
+One immutable Checkpoint may be shared across independently owned CPUs; each
+restore takes a separate copy of mutable architectural cache state. A single
+Core still requires one execution owner and stopped capture/restore.
+
+Coordinate memory and peripheral restoration in the consumer. A CPU checkpoint
+does not roll back an accepted device write or validate supplied memory contents.
+A faulted snapshot restores its diagnostic stopped state; an earlier healthy
+snapshot can recover only with the appropriate externally restored device state.
+Capture/restore may allocate and require stopped execution outside a real-time
+audio callback. Copying visible Registers remains initialization, not restoration.
+
+Directed tests use independent literal arithmetic, PC, LC, stack and progress
+expectations across reference/cached/JIT and fresh owners. They cover loaded REP
+opcodes after P mutation, fast/long split software vectors, RTI and service
+exclusion, pending debug, sleep/fault states, locked architectural cache data
+different from backing RAM, incompatible geometry and callback reentry. These
+tests do not establish complete ISA, clocked pipeline execution or a device boot.

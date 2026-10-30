@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 
+#include "dsp56300/checkpoint.hpp"
 #include "dsp56300/core.hpp"
 
 #include <concepts>
@@ -15,6 +16,7 @@ concept CoreImplementation = std::constructible_from<Implementation, Buffers, Io
                              requires(Implementation &core,
                                       const Implementation &view,
                                       const Registers &state,
+                                      const Checkpoint &checkpoint,
                                       const Space space,
                                       const Word address,
                                       const Word value,
@@ -25,6 +27,8 @@ concept CoreImplementation = std::constructible_from<Implementation, Buffers, Io
                                { core.reset() } -> std::same_as<void>;
                                { view.registers() } -> std::same_as<Registers>;
                                { core.set_registers(state) } -> std::same_as<void>;
+                               { view.checkpoint() } -> std::same_as<Checkpoint>;
+                               { core.restore(checkpoint) } -> std::same_as<void>;
                                { view.progress() } noexcept -> std::same_as<Progress>;
                                { view.fault() } noexcept -> std::same_as<Fault>;
                                { view.jit_statistics() } noexcept -> std::same_as<JitStatistics>;
@@ -61,6 +65,10 @@ public:
   [[nodiscard]] Registers registers() const { return core_.registers(); }
 
   void set_registers(const Registers &state) { core_.set_registers(state); }
+
+  [[nodiscard]] Checkpoint checkpoint() const { return core_.checkpoint(); }
+
+  void restore(const Checkpoint &checkpoint) { core_.restore(checkpoint); }
 
   [[nodiscard]] Progress progress() const noexcept { return core_.progress(); }
 

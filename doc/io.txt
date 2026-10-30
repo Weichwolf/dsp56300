@@ -89,8 +89,11 @@ Instruction budgets count retired guest instructions on every backend. Progress
 reports retired instructions and documented base costs, excluding calibrated
 pipeline, IRQ-entry and external wait timing. The host admits interrupts at
 stopped instruction boundaries; derivative arbitration and timed peripheral
-events remain host responsibilities. Exact pipeline/event timing and a complete
-checkpoint format remain open parts of the core objective.
+events remain host responsibilities. Exact pipeline/event timing remains open.
+Complete stopped CPU continuation uses Core::checkpoint/restore; the caller
+separately restores matching memory/I/O. This opaque in-process handle is not an
+external serialized state format. See doc/checkpoints.txt for layout checks,
+fault recovery and allocation boundaries.
 
 Stack returns and interrupt entry
 

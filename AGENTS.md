@@ -38,4 +38,5 @@
   native JIT execution; do not add a KVM/VMX backend, tests or permissions setup.
 - Keep local account names out of tracked instructions, code and documentation.
 - Do not run fuzz tests unless the user explicitly requests them.
-- Commit verified increments locally. No publication destination is authorized.
+- Commit verified increments and push reviewed source commits to the configured
+  origin/main (Weichwolf/dsp56300). Do not publish reference assets or backup branches.
