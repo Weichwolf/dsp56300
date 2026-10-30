@@ -1,0 +1,43 @@
+Pure instruction shape inspection
+
+Include <dsp56300/instruction.hpp> and link dsp56300::core. The free noexcept
+inspect_instruction(Word) returns optional<InstructionShape>. It constructs no
+Core, reads no emulated memory, performs no I/O/fetch/acknowledgement and advances
+no clock or CPU state. It uses the independent opcode decoder directly.
+
+Field        Meaning
+kind         Recognized encoded family; not every operand/mode is qualified
+words        One or two captured words required by that recognized shape
+repeatable   One-word family structurally eligible as a REP body, if otherwise legal
+nullopt      An over-24-bit input or an opcode with no recognized shape
+
+Inputs are never silently masked into a different 24-bit opcode. Structural
+recognition does not validate all register selectors, addressing combinations,
+ALU forms or numerical modes. It must not manufacture a successful execution.
+The native executor remains responsible for actual operands, effects and faults.
+A caller with an unknown shape must report context rather than guess its width
+or perform speculative extension reads. The query supplies no extension value,
+physical bus receipt, calibrated cost or dependency/forwarding mask.
+
+For example, independently encoded MOVE X:(R0)+,X0 (44d800) is one word;
+MOVE #extension,X0 (44f400) and MOVEM P:extension,X0 (07f084) are two words.
+The latter cannot become a REP body merely because their families allow REP.
+Tests also specify immediate/register loops, short/effective branches/calls,
+returns, RESET/WAIT/STOP, ILLEGAL/TRAP and relative cache controls independently.
+
+Directed qualification: 19 literal forms plus three unknown/width rejection
+cases, 41 assertions under ASan/UBSan and separate TSan. Only the two new query/
+test C++ contexts compile; the 59 prior CPU contexts retain exact source/object/
+recipe identities. The current 60-member CPU archive remains instrumented and
+the query executable retains strict hardening. No fuzzing, manufacturer programs
+or application programs are used.
+
+  cmake --preset strict
+  cmake --build build/strict --target dsp56300_instruction_shape_test -j2
+  ctest --test-dir build/strict -R '^instruction-shapes$' --output-on-failure
+
+Use the thread preset/build directory for the separate TSan scope. These tests
+do not establish complete ISA, exact operand dependencies, early AGU/MOVE
+publication, overlapped execution, calibrated pipeline/IRQ/bus timing, staged
+native JIT throughput or complete device operation. Those requirements remain
+open. Compiler-conservative all-bank masks are not exact physical dependencies.

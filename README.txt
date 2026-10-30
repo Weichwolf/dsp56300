@@ -79,6 +79,10 @@ implicit program-fetch/RAM route. Checkpoints preserve the pending computation
 and accepted external responses. This route currently uses the general executor
 for every backend; early AGU/MOVE publication, CE/cache and staged native JIT
 remain unqualified. See doc/staged-execution.txt for ownership and exact scope.
+The separate <dsp56300/instruction.hpp> query inspect_instruction reports recognized
+family, word count and structural REP eligibility without emulated memory/I/O.
+This is shape inspection, not operand/mode validation or physical timing.
+See doc/instruction-metadata.txt for exact scope.
 Ordinary run returns an explicit waiting/stopped state for WAIT/STOP. Guest RESET needs
 Io::reset_peripherals acknowledgement; the default is an explicit event fault.
 See doc/processing.txt for wake, callback, clock and qualification contracts.
