@@ -1,0 +1,66 @@
+Encoded data MOVE descriptions
+
+Include <dsp56300/transfers.hpp> and link dsp56300::core. The pure noexcept
+inspect_transfers(Word) returns optional<InstructionTransfers>. It constructs
+no Core, samples no extension/CPU register/emulated memory, invokes no I/O or
+acknowledgement and advances no emulated clock. It never publishes CPU state.
+
+Field                Described encoding, not an executed result
+instruction          Existing recognized family/width/structural REP shape
+moves[0..count)       Source/destination operands for up to two encoded data MOVEs
+register_value       Scalar register identifier or composite L: register view
+memory               X/Y/P or logical L: space and an encoded address
+immediate            Encoded short literal plus its specified placement shift
+extension            Required immediate extension, without an invented value
+address_update       Pure U parallel address-update component, distinct from MOVE
+parallel_alu         Retained encoded ALU byte, not decoded dependencies/legality
+
+RegisterId keeps full A/B distinct from raw A0/A1/A2 and B0/B1/B2. The L: views
+A10/B10, X/Y, full A/B and AB/BA preserve their distinct packing/extension roles.
+Composite identifiers beyond 63 are not six-bit selectors. Logical L: means the
+architectural X:Y pair, not a new physical memory bank or one physical bus access.
+
+EncodedAddress distinguishes direct/post/pre/indexed/offset register modes,
+absolute short/extension addresses and short/extension displacement. Short
+relative displacement is sign-extended to a raw 24-bit literal. Extension kinds
+contain no sampled extension value; unused default fields are not memory replies.
+address_inputs returns R/N/M expression inputs and automatic R writeback masks.
+Those masks describe semantic EA calculation, not physical ports, pipeline stalls
+or forwarding. Unknown kinds and out-of-range register-relative indices reject
+before shifting. Literal absolute/extension addresses require no AGU registers.
+An explicit MOVE destination R register remains an operand even when the same
+instruction also updates an address register. Do not collapse those write roles.
+
+Supported data-field families: parallel no-MOVE, immediate short, register,
+pure update, scalar X/Y, X:R/R:Y classes, L: and paired X:Y; standalone MOVEC,
+MOVEM, all high/low MOVEP forms and short/long displacement. Validated extraction
+of these fields does not validate every combined ALU/destination conflict,
+register-class restriction, numerical mode, implicit flag/stack/PCU effect or
+whole instruction. SSH and full accumulator operands retain their identities;
+the native executor still owns their actual pop/push, scaling/limiting and flags.
+Non-data-MOVE families and unsupported encodings return nullopt, never a fake
+empty dependency set. NOP/known no-MOVE fields are explicit supported empty sets.
+
+The count/order describes encoded transfers, not physical/granted bus operations.
+X:Y effects can have runtime qualification (including simultaneous I/O addresses),
+and L: uses two physical spaces. Conditional ALU and all native early AGU/MOVE
+publication, overlapping instructions, cache, RMW/IRQ/resources and clock timing
+remain to be integrated. Metadata cannot authorize a host register patch.
+
+Directed qualification uses independent FM chapter 12 tables and chapter 13 MOVE bit fields,
+fixed literal anchors, all selector/EA/direction/space combinations in the declared
+finite matrices, plus explicit reserved/unsupported controls. It checks 531527
+assertions over 291552 cases under ASan/UBSan and separate TSan. Cases are specified
+field products with full expected descriptions, not random/mutational fuzzing.
+Eight new CPP contexts/profile are checked; the 60 preceding CPU contexts retain
+exact object/source/recipe identity. The 64-member archive and native executable
+retain instrumentation/hardening. No manufacturer or application program is used.
+These are decoding/EA-description tests, not executed DSP throughput or a device boot.
+
+  cmake --preset strict
+  cmake --build build/strict --target dsp56300_transfer_info_test -j2
+  ctest --test-dir build/strict -R '^data-transfer-encodings$' --output-on-failure
+
+Use the thread preset/directory for separate TSan. Complete operand/implicit
+state dependencies, native pipeline publication and whole original instrument
+operation remain outstanding acceptance requirements.

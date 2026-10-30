@@ -83,6 +83,9 @@ The separate <dsp56300/instruction.hpp> query inspect_instruction reports recogn
 family, word count and structural REP eligibility without emulated memory/I/O.
 This is shape inspection, not operand/mode validation or physical timing.
 See doc/instruction-metadata.txt for exact scope.
+<dsp56300/transfers.hpp> adds pure encoded data-MOVE descriptions: scalar/control/
+program/peripheral, paired/composite transfers and address-update roles. This is
+not a complete instruction dependency or hardware timing model; see doc/transfers.txt.
 Ordinary run returns an explicit waiting/stopped state for WAIT/STOP. Guest RESET needs
 Io::reset_peripherals acknowledgement; the default is an explicit event fault.
 See doc/processing.txt for wake, callback, clock and qualification contracts.

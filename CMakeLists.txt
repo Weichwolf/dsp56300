@@ -23,7 +23,9 @@ set(CMAKE_CXX_CLANG_TIDY "${DSP56300_CLANG_TIDY};--warnings-as-errors=*")
 
 add_library(dsp56300_core STATIC
   src/core.cpp src/core/core_state.cpp src/core/checkpoint.cpp src/core/execution_state.cpp
-  src/core/staged.cpp src/core/staged_compute.cpp src/core/instruction_shape.cpp src/core/arithmetic.cpp src/core/saturation.cpp src/core/shifts.cpp
+  src/core/staged.cpp src/core/staged_compute.cpp src/core/instruction_shape.cpp
+  src/core/transfer_info.cpp src/core/transfer_parallel.cpp src/core/transfer_special.cpp
+  src/core/transfer_description.cpp src/core/arithmetic.cpp src/core/saturation.cpp src/core/shifts.cpp
   src/core/conditional.cpp src/core/immediate.cpp src/core/integer.cpp src/core/decode.cpp src/core/moves.cpp
   src/core/transfers.cpp src/core/registers.cpp src/core/agu.cpp src/core/control.cpp src/core/exceptions.cpp
   src/core/bits.cpp src/core/bit_fields.cpp src/core/loops.cpp src/core/products.cpp src/core/iteration.cpp
@@ -156,6 +158,10 @@ if(BUILD_TESTING)
     test/staged_effects.cpp test/staged_events.cpp)
   target_link_libraries(dsp56300_staged_test PRIVATE dsp56300::core)
   add_test(NAME staged-instruction-boundaries COMMAND dsp56300_staged_test)
+  add_executable(dsp56300_transfer_info_test test/transfer_info_test.cpp
+    test/transfer_info_parallel.cpp test/transfer_info_special.cpp test/transfer_info_literals.cpp)
+  target_link_libraries(dsp56300_transfer_info_test PRIVATE dsp56300::core)
+  add_test(NAME data-transfer-encodings COMMAND dsp56300_transfer_info_test)
   add_executable(dsp56300_instruction_shape_test test/instruction_shape_test.cpp)
   target_link_libraries(dsp56300_instruction_shape_test PRIVATE dsp56300::core)
   add_test(NAME instruction-shapes COMMAND dsp56300_instruction_shape_test)

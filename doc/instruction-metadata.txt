@@ -28,8 +28,8 @@ returns, RESET/WAIT/STOP, ILLEGAL/TRAP and relative cache controls independently
 Directed qualification: 19 literal forms plus three unknown/width rejection
 cases, 41 assertions under ASan/UBSan and separate TSan. Only the two new query/
 test C++ contexts compile; the 59 prior CPU contexts retain exact source/object/
-recipe identities. The current 60-member CPU archive remains instrumented and
-the query executable retains strict hardening. No fuzzing, manufacturer programs
+recipe identities. At d7429d3, the qualified archive has 60 instrumented members
+and the query executable retains strict hardening. No fuzzing, manufacturer programs
 or application programs are used.
 
   cmake --preset strict
