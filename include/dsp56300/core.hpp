@@ -276,6 +276,9 @@ private:
 struct PendingInstruction {
   EffectTicket ticket;
   InstructionEffect effect;
+  // Actual captured opcode, absent until the native fetch has completed.
+  // It identifies the owning instruction, not a pipeline or atomicity guarantee.
+  std::optional<Word> opcode = std::nullopt;
   // Native computation before this effect; observation is not publication.
   Registers computed;
 };

@@ -32,6 +32,11 @@ invented. Accepted responses are recorded in a bounded instruction log. Native
 recomputation verifies and consumes that log without repeating external effects.
 A copied PendingInstruction is an observation; changing it cannot alter the
 stored operation or computed result used by its ticket.
+Its optional opcode identifies the actual captured instruction. It is absent
+while an owned opcode fetch or its cache fill is pending, then known at later
+extension, operand and publication effects; explicitly supplied words are known
+immediately. This is provenance only, not a physical pipeline or atomicity claim.
+Checkpoint restoration preserves the same observation and rebinds the ticket.
 
 Core-owned logical program reads
 

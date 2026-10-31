@@ -91,6 +91,11 @@ std::optional<PendingInstruction> Core::pending_instruction() const {
       .ticket = EffectTicket(impl_->effect_owner,
                              {.epoch = impl_->effect_epoch, .ordinal = impl_->staged->used}),
       .effect = *selected,
+      // A native opcode-fetch effect may still be filling an instruction cache
+      // line. Its requested word is not owned until capture_program_words returns.
+      .opcode = !impl_->staged->fetch_words || selected->kind != EffectKind::fetch_opcode
+                    ? std::optional(impl_->staged->input.opcode)
+                    : std::nullopt,
       .computed = impl_->staged->computed};
 }
 
