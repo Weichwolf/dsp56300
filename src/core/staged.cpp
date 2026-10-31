@@ -74,7 +74,8 @@ InstructionFetch Core::instruction_fetch() const {
     return {.address = (impl_->vector.address +
                         (impl_->vector.phase == Impl::VectorPhase::second ? 1U : 0U)) &
                        word_mask,
-            .latched_opcode = std::nullopt};
+            .latched_opcode = std::nullopt,
+            .exception_vector = true};
   }
   return {.address = impl_->cpu.reg.pc,
           .latched_opcode = impl_->cpu.repeat_remaining != 0 && impl_->cpu.repeat_loaded

@@ -149,6 +149,7 @@ void memory();
 void multiple_effects();
 void restore();
 void interrupt();
+void vector_provenance();
 void repetition();
 void faults();
 void events();

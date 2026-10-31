@@ -4,7 +4,9 @@ Core(Io&, Options) constructs a CPU with externally owned instruction effects.
 The owner supplies known InstructionWords to begin_instruction or explicitly
 starts Core-owned logical program reads with begin_fetch. There is no implicit
 RAM or automatic instruction execution. instruction_fetch reports the actual
-next normal/vector address and existing REP opcode latch. begin_instruction
+next normal/vector address, native exception-vector ownership and existing REP
+opcode latch. A handler coinciding with a vector address is still a normal
+fetch once native vector ownership ends. begin_instruction
 verifies supplied address, widths, extension count and latch before computing
 one instruction; that captured-word route performs no program read. Neither
 route establishes physical fetch clocks or interrupt acknowledgement.

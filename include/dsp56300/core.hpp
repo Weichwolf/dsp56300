@@ -136,6 +136,8 @@ struct InstructionWords {
 struct InstructionFetch {
   Word address = 0;
   std::optional<Word> latched_opcode;
+  // True only while native exception/interrupt entry owns this fetch.
+  bool exception_vector = false;
 };
 
 enum class InstructionPublication : std::uint8_t {

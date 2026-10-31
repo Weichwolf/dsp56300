@@ -127,6 +127,7 @@ int main() {
     multiple_effects();
     restore();
     interrupt();
+    vector_provenance();
     repetition();
     faults();
     events();
