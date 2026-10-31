@@ -124,8 +124,12 @@ void Core::Impl::execute_operation(const Instruction &decoded) {
       const unsigned shift = field == 0 || field == 3 ? control_byte_shift : 0;
       const auto value = ((opcode >> control_byte_shift) & 0xff) << shift;
       const Word byte_mask = Word{0xff} << shift;
+      begin_unit(RegisterUnit::control_byte);
+      mark_unit_field(
+          {.storage = field >= 2 ? RegisterStorage::omr : RegisterStorage::sr, .mask = byte_mask});
       target = decoded.operation == Operation::and_control ? target & (value | ~byte_mask)
                                                            : target | value;
+      publish_unit();
       return;
     }
     case Operation::repeat_immediate:

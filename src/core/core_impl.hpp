@@ -63,6 +63,13 @@ struct Core::Impl {
 
   void compute_instruction();
   void capture_program_words();
+  [[nodiscard]] bool unit_publication() const noexcept;
+  void begin_unit(RegisterUnit unit) const;
+  void mark_unit_field(RegisterUpdate update) const;
+  [[nodiscard]] Word read_unit_register(unsigned number);
+  void write_unit_register(unsigned number, Word value);
+  void publish_unit() const;
+  void apply_unit(const UnitWriteback &update);
   [[nodiscard]] bool alu_publication() const noexcept;
   void mark_alu(RegisterStorage storage, std::uint64_t mask) const;
   void mark_alu_field(RegisterUpdate update) const;

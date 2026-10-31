@@ -3,6 +3,7 @@
 #include "dsp56300/core.hpp"
 #include "fixture_memory.hpp"
 #include "support.hpp"
+#include "unit_fixture_support.hpp"
 
 #include <cstddef>
 #include <exception>
@@ -10,6 +11,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace dsp56300::test::alu_fixture_test {
@@ -97,6 +99,21 @@ bool advance(Core &core) {
   const auto before = core.registers();
   const auto progress = core.progress();
   auto after = before;
+  if (pending->effect.kind == EffectKind::unit_update) {
+    const auto result = pending->effect.unit_update;
+    if (!result) { throw std::runtime_error("Native scalar-unit effect lost its owned result"); }
+    require(result->count > 0 && result->count <= result->updates.size(),
+            "A scalar-unit publication has its bounded actual writer set");
+    for (unsigned index = 0; index < result->count; ++index) {
+      unit_fixture_test::apply(after, result->updates.at(index));
+    }
+    pending->effect.unit_update = UnitWriteback{};
+    pending->computed = {};
+    const auto result_progress = core.advance_instruction(pending->ticket);
+    require(!result_progress.retired && core.registers() == after && core.progress() == progress,
+            "The accepted native scalar unit publishes only its owned CPU prefix");
+    return false;
+  }
   const bool alu = pending->effect.kind == EffectKind::alu_update;
   if (alu) {
     const auto result = pending->effect.alu_update;
@@ -121,8 +138,8 @@ bool advance(Core &core) {
   return result.retired;
 }
 
-void instruction(Core &core) {
-  static_cast<void>(core.begin_fetch(InstructionPublication::alu_updates));
+void instruction(Core &core, const InstructionPublication policy) {
+  static_cast<void>(core.begin_fetch(policy));
   constexpr unsigned effect_limit = 65;
   for (unsigned count = 0; core.fault().kind == FaultKind::none; ++count) {
     if (count == effect_limit) {
@@ -132,7 +149,7 @@ void instruction(Core &core) {
   }
 }
 
-void check(const BinaryCase &item, const Backend backend) {
+void check(const BinaryCase &item, const Backend backend, const InstructionPublication policy) {
   require(item.reset_actions.empty(),
           "Selected ALU archives require no fabricated peripheral RESET acknowledgement");
   Ram ram(initial_memory(item));
@@ -144,7 +161,7 @@ void check(const BinaryCase &item, const Backend backend) {
   for (Word retired = 0; retired < item.budget && core.fault().kind == FaultKind::none &&
                          core.processing_state() == ProcessingState::running;
        ++retired) {
-    instruction(core);
+    instruction(core, policy);
   }
   require(core.progress() == item.progress && core.progress().instructions == item.dispatches,
           "Independent fixture retirement and documented base costs through real unit publication");
@@ -162,13 +179,13 @@ void check(const BinaryCase &item, const Backend backend) {
   }
 }
 
-void run(const std::filesystem::path &path) {
+void run(const std::filesystem::path &path, const InstructionPublication policy) {
   const auto cases = read_fixture(path);
   require(!cases.empty(), "Owned independent unit archive contains actual cases");
   for (const auto backend : {Backend::reference, Backend::cached, Backend::jit}) {
     for (std::size_t index = 0; index < cases.size(); ++index) {
       try {
-        check(cases[index], backend);
+        check(cases[index], backend, policy);
       } catch (const std::exception &error) {
         throw std::runtime_error(path.string() + ": case " + std::to_string(index) + " (" +
                                  cases[index].name + ", " + std::string(backend_name(backend)) +
@@ -185,8 +202,13 @@ void run(const std::filesystem::path &path) {
 int main(const int argc, const char *const *const argv) {
   try {
     if (argc < 2) { throw std::runtime_error("Usage: dsp56300_alu_fixture_test FILE.d56 [...]"); }
-    for (int index = 1; index < argc; ++index) {
-      dsp56300::test::alu_fixture_test::run(argv[index]);
+    const bool units = std::string_view(argv[1]) == "--units";
+    const int first = units ? 2 : 1;
+    if (first == argc) { throw std::runtime_error("No owned fixture archive supplied"); }
+    for (int index = first; index < argc; ++index) {
+      dsp56300::test::alu_fixture_test::run(argv[index],
+                                            units ? dsp56300::InstructionPublication::unit_updates
+                                                  : dsp56300::InstructionPublication::alu_updates);
     }
     std::cout << dsp56300::test::checks << " independently expected ALU fixture checks passed\n";
   } catch (const std::exception &error) {

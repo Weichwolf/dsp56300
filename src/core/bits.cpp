@@ -53,16 +53,19 @@ bool Core::Impl::register_bit(const BitAccess &access) {
   if ((number == a_register || number == b_register) && !numeric_mode_supported()) { return false; }
   const auto original =
       stack_high ? static_cast<Word>(cpu.reg.stack[cpu.reg.sp & (stack_entries - 1)] >> word_bits)
-                 : read_register(number);
+                 : read_unit_register(number);
   if (fault.kind != FaultKind::none) { return false; }
   const Word mask = Word{1} << access.bit;
   if (modify) {
     const auto value = modified_bit(original, mask, access.action);
     if (stack_high) {
+      mark_unit_field({.storage = RegisterStorage::stack,
+                       .index = static_cast<std::uint8_t>(cpu.reg.sp & (stack_entries - 1)),
+                       .mask = std::uint64_t{word_mask} << word_bits});
       auto &frame = cpu.reg.stack[cpu.reg.sp & (stack_entries - 1)];
       frame = (std::uint64_t{value} << word_bits) | (frame & word_mask);
     } else {
-      write_register(number, value);
+      write_unit_register(number, value);
     }
   }
   return (original & mask) != 0;
@@ -80,14 +83,14 @@ bool Core::Impl::access_bit(const Instruction &decoded, const BitAction action) 
   }
   const auto address = bit_address(operand, decoded);
   if (fault.kind != FaultKind::none) { return false; }
-  if (staged_computing()) {
-    return sample_instruction({.kind = EffectKind::bit,
-                               .space = operand.space,
-                               .address = address,
-                               .bit = bit,
-                               .action = action}) != 0;
-  }
   if (address >= io_begin) {
+    if (staged_computing()) {
+      return sample_instruction({.kind = EffectKind::bit,
+                                 .space = operand.space,
+                                 .address = address,
+                                 .bit = bit,
+                                 .action = action}) != 0;
+    }
     bool previous = false;
     if (io == nullptr || !io->bit(operand.space, address, current_pc, bit, action, previous)) {
       fail(FaultKind::io_bit, operand.space, address, bit);
@@ -104,12 +107,15 @@ bool Core::Impl::access_bit(const Instruction &decoded, const BitAction action) 
 }
 
 void Core::Impl::execute_bit(const Instruction &decoded) {
+  begin_unit(RegisterUnit::bit);
   const bool branching =
       decoded.operation == Operation::bit_jump || decoded.operation == Operation::bit_branch;
   const auto action = branching ? BitAction::test : bit_action(decoded.opcode);
   const bool previous = access_bit(decoded, action);
   if (fault.kind != FaultKind::none) { return; }
   if (branching) {
+    // Native source pop/limiting precedes the PCU call/branch, including its faults.
+    publish_unit();
     if (previous != ((decoded.opcode & (1U << 5)) != 0)) { return; }
     if (bit_call(decoded)) {
       push(cpu.reg.pc, cpu.reg.sr);
@@ -123,7 +129,9 @@ void Core::Impl::execute_bit(const Instruction &decoded) {
   const auto operand = bit_operand(decoded);
   if (operand.location != BitLocation::reg || operand.selector != sr_register ||
       action == BitAction::test) {
+    mark_unit_field({.storage = RegisterStorage::sr, .mask = carry});
     cpu.reg.sr = (cpu.reg.sr & ~carry) | (previous ? carry : 0);
   }
+  publish_unit();
 }
 } // namespace dsp56300

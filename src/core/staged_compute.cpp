@@ -42,6 +42,7 @@ void Core::Impl::restore_published_results() {
     }
     if (effect.move_update) { apply_move(*effect.move_update); }
     if (effect.alu_update) { apply_alu(*effect.alu_update); }
+    if (effect.unit_update) { apply_unit(*effect.unit_update); }
   }
 }
 
@@ -63,6 +64,8 @@ void Core::Impl::compute_instruction() {
   restore_execution(work.base);
   work.cursor = 0;
   work.alu_result = {};
+  work.unit_result = {};
+  work.unit_active = false;
   work.pending.reset();
   work.complete = false;
   work.computing = true;
@@ -127,6 +130,7 @@ bool Core::Impl::perform_instruction(const InstructionEffect effect, Word &respo
     case EffectKind::address_update:
     case EffectKind::move_update:
     case EffectKind::alu_update:
+    case EffectKind::unit_update:
     case EffectKind::retire:
     default: throw std::logic_error("CPU publication is not an external bus operation");
   }

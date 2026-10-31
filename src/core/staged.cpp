@@ -41,6 +41,7 @@ FaultKind rejected_effect(const InstructionEffect effect) {
     case EffectKind::address_update:
     case EffectKind::move_update:
     case EffectKind::alu_update:
+    case EffectKind::unit_update:
     case EffectKind::retire:
     default: throw std::logic_error("No rejection class for retirement");
   }
@@ -113,7 +114,8 @@ InstructionProgress Core::begin_owned(const std::optional<InstructionWords> capt
   if (publication != InstructionPublication::retirement &&
       publication != InstructionPublication::address_updates &&
       publication != InstructionPublication::move_updates &&
-      publication != InstructionPublication::alu_updates) {
+      publication != InstructionPublication::alu_updates &&
+      publication != InstructionPublication::unit_updates) {
     throw std::invalid_argument("Unknown instruction publication mode");
   }
   if (captured && (words.address != fetch.address ||
@@ -171,6 +173,8 @@ InstructionProgress Core::advance_instruction(const EffectTicket &ticket) {
     if (!effect.move_update) { throw std::logic_error("Native MOVE writeback is missing"); }
   } else if (effect.kind == EffectKind::alu_update) {
     if (!effect.alu_update) { throw std::logic_error("Native ALU writeback is missing"); }
+  } else if (effect.kind == EffectKind::unit_update) {
+    if (!effect.unit_update) { throw std::logic_error("Native scalar-unit writeback is missing"); }
   } else if (!impl_->perform_instruction(effect, response)) {
     impl_->current_pc = effect.pc;
     impl_->fail(rejected_effect(effect),

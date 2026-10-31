@@ -142,7 +142,8 @@ enum class InstructionPublication : std::uint8_t {
   retirement,
   address_updates,
   move_updates,
-  alu_updates
+  alu_updates,
+  unit_updates
 };
 
 enum class EffectKind : std::uint8_t {
@@ -155,7 +156,8 @@ enum class EffectKind : std::uint8_t {
   move_update,
   alu_update,
   fetch_opcode,
-  fetch_extension
+  fetch_extension,
+  unit_update
 };
 
 struct AddressWriteback {
@@ -210,6 +212,17 @@ struct AluWriteback {
   bool operator==(const AluWriteback &) const = default;
 };
 
+enum class RegisterUnit : std::uint8_t { bit, control_byte, address_calculation };
+
+// Actual remaining scalar-unit writes, separate from ALU/MOVE and PCU retirement.
+struct UnitWriteback {
+  RegisterUnit unit = RegisterUnit::bit;
+  Word opcode = 0;
+  std::uint8_t count = 0;
+  std::array<RegisterUpdate, 3> updates{};
+  bool operator==(const UnitWriteback &) const = default;
+};
+
 struct InstructionEffect {
   EffectKind kind = EffectKind::retire;
   Space space = Space::program;
@@ -220,6 +233,7 @@ struct InstructionEffect {
   std::optional<AddressWriteback> address_update = std::nullopt;
   std::optional<MoveWriteback> move_update = std::nullopt;
   std::optional<AluWriteback> alu_update = std::nullopt;
+  std::optional<UnitWriteback> unit_update = std::nullopt;
   bool operator==(const InstructionEffect &) const = default;
 };
 

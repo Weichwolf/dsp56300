@@ -148,7 +148,11 @@ void Core::Impl::execute_address_calculation(const Instruction &decoded) {
   } else {
     result = update_address({.index = index, .offset = calculation_offset(cpu.reg, opcode)});
   }
-  if (fault.kind == FaultKind::none) { write_register(destination, result); }
+  if (fault.kind == FaultKind::none) {
+    begin_unit(RegisterUnit::address_calculation);
+    write_unit_register(destination, result);
+    publish_unit();
+  }
 }
 
 } // namespace dsp56300

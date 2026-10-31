@@ -25,6 +25,8 @@ struct StagedState {
   std::optional<InstructionEffect> pending;
   Registers computed;
   AluWriteback alu_result;
+  UnitWriteback unit_result;
+  bool unit_active = false;
   std::array<AcceptedEffect, capacity> records{};
   Instruction decoded;
   InstructionWords input;

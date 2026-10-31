@@ -18,7 +18,10 @@ checkpoint/restore      Include accepted responses and the pending computation
 request_interrupt       Retains admitted vector/priority and genuine normal resume PC
 
 All staged P/X/Y word accesses use the supplied Io, including ordinary low RAM
-and program-data operations. Bit actions use one atomic Io::bit transaction.
+and program-data operations. RAM bit instructions use a genuine read followed
+by a native modified-word write, or just a read for TEST. Only addresses in the
+upper peripheral window (0xffff80..0xffffff) use atomic Io::bit transactions.
+This transport correction applies to every CPU publication policy.
 RESET requires an actual reset_peripherals acknowledgement. Rejection is a
 visible fault with operation class, address and PC; no successful value is
 invented. Accepted responses are recorded in a bounded instruction log. Native
@@ -75,6 +78,14 @@ explicit MOVEs to R do not invent an automatic writeback.
 The additional move_updates policy also exposes native MOVE storage effects;
 see move-publication.txt for its producer, mask and checkpoint contract. This
 extension does not calibrate physical pipeline clocks or implement overlap.
+
+The unit_updates policy includes native automatic-R/MOVE/ALU results and adds
+bit, control-byte and explicit LRA/LUA results. Its source-side SSH pop/limiting
+boundary precedes a later PCU branch/call; ordinary bit results follow the real
+Io operation. This scope passes 257730 directed assertions per sanitizer profile
+and all twelve selected regressions, including four complete unchanged archives.
+See unit-publication.txt for the qualified scope and actual storage/flag-mask
+contract. PCU and hidden retirement are not unit_update effects.
 
 This is value-level automatic R publication, not calibrated AG2 timing, general
 early MOVE/ALU publication or overlapping instructions. Paired address updates

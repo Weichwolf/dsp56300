@@ -973,3 +973,24 @@ refusals, wrapping, REP-latch reuse and all selected cross-backend restore cuts.
 The complete unchanged ALU archives now reach their native expected faults and
 wrap results. Physical F1/F2/cache/IRQ and complete overlapped execution remain
 open. See staged-execution.txt.
+
+
+Native scalar-unit publication
+
+The opt-in unit_updates policy adds actual native bit, control-byte and explicit
+LRA/LUA destination results to automatic-R/MOVE/ALU publication. Native source
+pop/limiting precedes PCU call effects; bit carry, existing SSH frame modification
+and byte/storage-view masks retain actual writer provenance. Prior policies hold
+these CPU results until their original boundaries. All policies use native
+read/modify/write for RAM bits and atomic callbacks only for peripheral bits.
+Directed qualification passes 257730 assertions per ASan/UBSan and separate TSan
+profile, including 342 RAM/36 peripheral checkpoint cuts. All twelve selected
+regressions pass, including four complete unchanged archives with 180600 cases
+through three staged backend options. Fault records retain their original oracle;
+full final fault register/memory equality is not newly asserted. Each profile
+binds 92 C++ contexts, 69 CPU members, the instrumented fixture dependency and
+ten protected ELFs, with zero own findings/skips/fuzz. See unit-publication.txt.
+PCU/hidden retirement, per-stage input/product latches, calibrated forwarding,
+overlap/cache/IRQ/RMW, native staged JIT, realtime and complete consumer migration
+remain unqualified.
+All prior gaps, the complete objective and all 118 partial ISA rows remain open.
