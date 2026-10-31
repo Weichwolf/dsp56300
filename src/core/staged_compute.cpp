@@ -25,7 +25,7 @@ Word StagedState::sample(const InstructionEffect effect) {
 
 namespace dsp56300 {
 void Core::Impl::publish_address_update(const AddressWriteback update, const Word address) const {
-  if (!staged_computing() || staged->publication != InstructionPublication::address_updates ||
+  if (!staged_computing() || staged->publication == InstructionPublication::retirement ||
       fault.kind != FaultKind::none) {
     return;
   }
@@ -33,9 +33,14 @@ void Core::Impl::publish_address_update(const AddressWriteback update, const Wor
       {.kind = EffectKind::address_update, .address = address, .address_update = update}));
 }
 
-void Core::Impl::restore_published_addresses() {
-  for (std::size_t index = 0; index < staged->published_addresses.size(); ++index) {
-    if (const auto value = staged->published_addresses[index]) { cpu.reg.r[index] = *value; }
+void Core::Impl::restore_published_results() {
+  for (std::size_t index = 0; index < staged->used; ++index) {
+    const auto &effect = staged->records[index].effect;
+    if (effect.address_update) {
+      const auto update = *effect.address_update;
+      cpu.reg.r.at(update.index) = update.value;
+    }
+    if (effect.move_update) { apply_move(*effect.move_update); }
   }
 }
 
@@ -79,7 +84,7 @@ void Core::Impl::compute_instruction() {
   } catch (...) {
     work.computing = false;
     restore_execution(work.base);
-    restore_published_addresses();
+    restore_published_results();
     work.pending.reset();
     fail(FaultKind::host_event, Space::program, work.input.address, work.input.opcode);
     throw;
@@ -90,7 +95,7 @@ void Core::Impl::compute_instruction() {
   work.computed.b >>= detail::padding_bits;
   const auto failure = fault;
   restore_execution(work.base);
-  restore_published_addresses();
+  restore_published_results();
   if (failure.kind != FaultKind::none) {
     fault = failure;
     work.pending.reset();
@@ -115,6 +120,7 @@ bool Core::Impl::perform_instruction(const InstructionEffect effect, Word &respo
     }
     case EffectKind::reset: return io->reset_peripherals(effect.pc);
     case EffectKind::address_update:
+    case EffectKind::move_update:
     case EffectKind::retire:
     default: throw std::logic_error("CPU publication is not an external bus operation");
   }

@@ -6,6 +6,7 @@
 #include <array>
 #include <bit>
 #include <cstdint>
+#include <optional>
 
 namespace dsp56300 {
 using namespace detail;
@@ -69,24 +70,25 @@ void Core::Impl::logical_flags(const Word value) {
   cpu.reg.sr = (cpu.reg.sr & ~(negative | zero | overflow)) | flags;
 }
 
-Word Core::Impl::transfer_word(const std::uint64_t value) {
+Word Core::Impl::transfer_word(const std::uint64_t value,
+                               const std::optional<unsigned> source_register) {
   const unsigned shift = main_word_shift + ((cpu.reg.sr & scale_down) != 0 ? 1U : 0U) -
                          ((cpu.reg.sr & scale_up) != 0 ? 1U : 0U);
   const auto result = std::bit_cast<std::int64_t>(value) >> shift;
   const auto growth_shift = normal_growth_shift + ((cpu.reg.sr & scale_down) != 0 ? 1U : 0U) -
                             ((cpu.reg.sr & scale_up) != 0 ? 1U : 0U);
-  if ((((value >> growth_shift) ^ (value >> (growth_shift + 1))) & 1) != 0) {
-    cpu.reg.sr |= growth;
-  }
+  Word flags = 0;
+  if ((((value >> growth_shift) ^ (value >> (growth_shift + 1))) & 1) != 0) { flags |= growth; }
+  Word word = static_cast<Word>(result) & word_mask;
   if (result > maximum_word) {
-    cpu.reg.sr |= limit;
-    return static_cast<Word>(maximum_word);
+    flags |= limit;
+    word = static_cast<Word>(maximum_word);
+  } else if (result < minimum_word) {
+    flags |= limit;
+    word = sign24_bit;
   }
-  if (result < minimum_word) {
-    cpu.reg.sr |= limit;
-    return sign24_bit;
-  }
-  return static_cast<Word>(result) & word_mask;
+  transfer_status(flags, source_register);
+  return word;
 }
 
 void Core::Impl::round(std::uint64_t &value) {

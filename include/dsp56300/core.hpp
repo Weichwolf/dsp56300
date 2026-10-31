@@ -138,14 +138,60 @@ struct InstructionFetch {
   std::optional<Word> latched_opcode;
 };
 
-enum class InstructionPublication : std::uint8_t { retirement, address_updates };
+enum class InstructionPublication : std::uint8_t { retirement, address_updates, move_updates };
 
-enum class EffectKind : std::uint8_t { read, write, bit, reset, retire, address_update };
+enum class EffectKind : std::uint8_t {
+  read,
+  write,
+  bit,
+  reset,
+  retire,
+  address_update,
+  move_update
+};
 
 struct AddressWriteback {
   std::uint8_t index = 0;
   Word previous = 0, value = 0;
   bool operator==(const AddressWriteback &) const = default;
+};
+
+// Physical storage, in the same unshifted coordinates as Registers. The mask
+// records a native write even when its value equals the previous value.
+enum class RegisterStorage : std::uint8_t {
+  x,
+  y,
+  a,
+  b,
+  r,
+  n,
+  m,
+  sr,
+  omr,
+  la,
+  lc,
+  sp,
+  sc,
+  sz,
+  ep,
+  vba,
+  stack
+};
+enum class MoveProducer : std::uint8_t { register_write, accumulator_read, stack_read, long_load };
+
+struct RegisterUpdate {
+  RegisterStorage storage = RegisterStorage::x;
+  std::uint8_t index = 0;
+  std::uint64_t mask = 0, previous = 0, value = 0;
+  bool operator==(const RegisterUpdate &) const = default;
+};
+
+struct MoveWriteback {
+  MoveProducer producer = MoveProducer::register_write;
+  // Native register encoding, or the L: selector for long_load.
+  std::uint8_t selector = 0, count = 0;
+  std::array<RegisterUpdate, 3> updates{};
+  bool operator==(const MoveWriteback &) const = default;
 };
 
 struct InstructionEffect {
@@ -156,6 +202,7 @@ struct InstructionEffect {
   // Native automatic R writeback. address is the computed EA; space is unused.
   // This is an owned CPU publication boundary, never a host bus transaction.
   std::optional<AddressWriteback> address_update = std::nullopt;
+  std::optional<MoveWriteback> move_update = std::nullopt;
   bool operator==(const InstructionEffect &) const = default;
 };
 

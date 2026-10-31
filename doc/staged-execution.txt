@@ -45,6 +45,10 @@ the continuation and resets CPU state. Pure U and post/pre-update addressing
 produce these boundaries. Indirect, indexed, absolute/extension addressing and
 explicit MOVEs to R do not invent an automatic writeback.
 
+The additional move_updates policy also exposes native MOVE storage effects;
+see move-publication.txt for its producer, mask and checkpoint contract. This
+extension does not calibrate physical pipeline clocks or implement overlap.
+
 This is value-level automatic R publication, not calibrated AG2 timing, general
 early MOVE/ALU publication or overlapping instructions. Paired address updates
 have separate native tickets; their physical cycle/grant relationship remains
@@ -84,8 +88,8 @@ and accepted/rejected RESET with post-acknowledgement restoration. At 669e223,
 thirteen unchanged caller results retained exact ELF/source/recipe identity
 after test-only controls. No fuzzing or manufacturer programs are involved.
 
-Staged CE/cache execution rejects explicitly. Complete phase-separated AGU/MOVE
-publication, overlapping instructions, physical RMW phases, calibrated
+Staged CE/cache execution rejects explicitly. Native ALU publication, calibrated
+AGU/MOVE phase clocks, overlapping instructions, physical RMW phases, complete
 pipeline/cache/IRQ timing and realtime throughput remain required integration
 work. computed is an observation, not permission to patch visible registers.
 The consumer owns physical F1/F2 receipts, derivative arbitration, selected-source

@@ -36,6 +36,7 @@ FaultKind rejected_effect(const InstructionEffect effect) {
     case EffectKind::bit: return FaultKind::io_bit;
     case EffectKind::reset: return FaultKind::host_event;
     case EffectKind::address_update:
+    case EffectKind::move_update:
     case EffectKind::retire:
     default: throw std::logic_error("No rejection class for retirement");
   }
@@ -95,7 +96,8 @@ InstructionProgress Core::begin_instruction(const InstructionWords words,
   }
   const auto decoded = decoded_words(words);
   if (publication != InstructionPublication::retirement &&
-      publication != InstructionPublication::address_updates) {
+      publication != InstructionPublication::address_updates &&
+      publication != InstructionPublication::move_updates) {
     throw std::invalid_argument("Unknown instruction publication mode");
   }
   const auto fetch = instruction_fetch();
@@ -148,8 +150,8 @@ InstructionProgress Core::advance_instruction(const EffectTicket &ticket) {
   Word response = 0;
   if (effect.kind == EffectKind::address_update) {
     if (!effect.address_update) { throw std::logic_error("Native address writeback is missing"); }
-    const auto update = *effect.address_update;
-    work.published_addresses.at(update.index) = update.value;
+  } else if (effect.kind == EffectKind::move_update) {
+    if (!effect.move_update) { throw std::logic_error("Native MOVE writeback is missing"); }
   } else if (!impl_->perform_instruction(effect, response)) {
     impl_->current_pc = effect.pc;
     impl_->fail(rejected_effect(effect),

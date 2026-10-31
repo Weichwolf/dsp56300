@@ -14,6 +14,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 
 namespace dsp56300 {
@@ -62,7 +63,16 @@ struct Core::Impl {
 
   void compute_instruction();
   void publish_address_update(AddressWriteback update, Word address) const;
-  void restore_published_addresses();
+  void restore_published_results();
+  [[nodiscard]] bool move_publication() const noexcept;
+  [[nodiscard]] MoveWriteback move_destination(unsigned number) const;
+  [[nodiscard]] static MoveWriteback long_destination(unsigned selector);
+  void capture_move(MoveWriteback &update) const;
+  void publish_move(MoveWriteback update) const;
+  void apply_move(const MoveWriteback &update);
+  [[nodiscard]] Word read_move_register(unsigned number);
+  void write_move_register(unsigned number, Word value);
+  void transfer_status(Word flags, std::optional<unsigned> source_register);
   [[nodiscard]] detail::Instruction captured_instruction(Word address) const;
   [[nodiscard]] Word sample_instruction(InstructionEffect effect) const;
   [[nodiscard]] bool perform_instruction(InstructionEffect effect, Word &response) const;
@@ -140,8 +150,10 @@ struct Core::Impl {
   void write_register(unsigned number, Word value);
   [[nodiscard]] Word effective(detail::AddressForm form);
   [[nodiscard]] Word update_address(detail::AddressUpdate update);
-  [[nodiscard]] Word transfer_word(std::uint64_t value);
-  [[nodiscard]] std::uint64_t transfer_long(std::uint64_t value);
+  [[nodiscard]] Word transfer_word(std::uint64_t value,
+                                   std::optional<unsigned> source_register = std::nullopt);
+  [[nodiscard]] std::uint64_t transfer_long(std::uint64_t value,
+                                            std::optional<unsigned> source_register = std::nullopt);
   [[nodiscard]] std::uint64_t source(unsigned selector, bool destination_b) const;
   void arithmetic_flags(std::uint64_t value, bool overflowed);
   void logical_flags(Word value);

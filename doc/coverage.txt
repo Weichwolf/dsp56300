@@ -925,3 +925,22 @@ increases 1.05%/0.33% are retained with no causal speed claim. PMU data misses r
 or energy. Full ISA/modes/IRQ/pipeline/timing, dynamic allocation, broader
 applications, SIMD/multicore, integration, sustained realtime and cache/energy
 remain active. All 118ISA rows remain partial; the full objective is unchanged.
+
+
+Native MOVE publication
+
+Opt-in move_updates extends native automatic-R tickets with actual scalar/raw/
+composite MOVE results, source S/L and SSH stack effects. Native producers retain
+physical masks and unchanged writes; the accepted ordered journal preserves
+explicit R writes that cancel automatic updates. Original parallel ALU operands,
+PC/progress ownership and complete stopped checkpoints remain separate. Directed
+controls pass 18960 assertions per profile under ASan/UBSan and separate TSan;
+nine affected regression groups also pass. Each profile binds 82 C++ contexts,
+66 CPU members, the instrumented fixture dependency and eight protected ELFs,
+with zero own compiler/tidy/format/sanitizer findings and no skips/fuzz. See
+move-publication.txt for the actual producer, source and checkpoint scope.
+The directed stack operations have SEN clear; automatic stack extension and
+hardware exception/SE/UF behavior remain separate unqualified requirements.
+Native ALU publication, calibrated timing, forwarding, multiple-inflight execution,
+native staged JIT, sustained realtime and complete application replacement remain
+unqualified. The full objective and all prior open domains remain unchanged.

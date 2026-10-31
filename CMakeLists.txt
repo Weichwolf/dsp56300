@@ -23,7 +23,7 @@ set(CMAKE_CXX_CLANG_TIDY "${DSP56300_CLANG_TIDY};--warnings-as-errors=*")
 
 add_library(dsp56300_core STATIC
   src/core.cpp src/core/core_state.cpp src/core/checkpoint.cpp src/core/execution_state.cpp
-  src/core/staged.cpp src/core/staged_compute.cpp src/core/instruction_shape.cpp
+  src/core/staged.cpp src/core/staged_compute.cpp src/core/move_publication.cpp src/core/move_storage.cpp src/core/instruction_shape.cpp
   src/core/transfer_info.cpp src/core/transfer_parallel.cpp src/core/transfer_special.cpp
   src/core/transfer_description.cpp src/core/arithmetic.cpp src/core/saturation.cpp src/core/shifts.cpp
   src/core/conditional.cpp src/core/immediate.cpp src/core/integer.cpp src/core/decode.cpp src/core/moves.cpp
@@ -162,6 +162,10 @@ if(BUILD_TESTING)
     test/address_publication_restore.cpp)
   target_link_libraries(dsp56300_address_publication_test PRIVATE dsp56300::core)
   add_test(NAME native-address-publication COMMAND dsp56300_address_publication_test)
+  add_executable(dsp56300_move_publication_test test/move_publication_test.cpp
+    test/move_publication_effects.cpp test/move_publication_restore.cpp)
+  target_link_libraries(dsp56300_move_publication_test PRIVATE dsp56300::core)
+  add_test(NAME native-move-publication COMMAND dsp56300_move_publication_test)
   add_executable(dsp56300_partial_accumulator_test test/partial_accumulator_test.cpp)
   target_link_libraries(dsp56300_partial_accumulator_test PRIVATE dsp56300::core)
   add_test(NAME partial-accumulator-moves COMMAND dsp56300_partial_accumulator_test)

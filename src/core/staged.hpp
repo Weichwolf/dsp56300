@@ -21,14 +21,13 @@ struct StagedState {
   static constexpr std::size_t capacity = 64;
   ExecutionState base;
   ExecutionState candidate;
-  Registers computed;
-  InstructionWords input;
-  Instruction decoded;
-  std::array<AcceptedEffect, capacity> records{};
-  std::array<std::optional<Word>, 8> published_addresses{};
-  InstructionPublication publication = InstructionPublication::retirement;
   std::size_t used = 0, cursor = 0;
   std::optional<InstructionEffect> pending;
+  Registers computed;
+  std::array<AcceptedEffect, capacity> records{};
+  Instruction decoded;
+  InstructionWords input;
+  InstructionPublication publication = InstructionPublication::retirement;
   bool active = false, computing = false, complete = false;
 
   [[nodiscard]] Word sample(InstructionEffect effect);

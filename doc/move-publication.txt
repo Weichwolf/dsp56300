@@ -1,0 +1,75 @@
+Native MOVE publication
+
+The opt-in InstructionPublication::move_updates policy includes the existing
+native automatic-R tickets and exposes MOVE effects before ALU retirement.
+The default and address_updates policies retain their existing behavior.
+EffectKind::move_update carries a MoveWriteback with native producer, encoded
+register (or L: selector) and at most three masked physical RegisterUpdates.
+The memory space/address/value fields are unused for MOVE publication.
+Masks and values use public unshifted Registers coordinates. previous/value
+contain only masked bits. An explicit same-value destination still emits a write.
+
+Producer                  Native computation observed
+register_write            Actual register write, including SSH/SSL and R/N/M
+accumulator_read          Actual S/L set operations during limited A/B reads
+stack_read                Actual SSH pop's SP/SC effects
+long_load                 Direct raw/signed A/B or X/Y L: destination load
+
+The hooks surround native computation, without recomputing register arithmetic
+from decoded descriptors. Raw accumulator parts, full signed accumulator writes,
+composite packing, sticky flags and stack effects retain distinct storage masks.
+AB/BA use their two real native register writes. S/L records include only bits
+actually set by the source calculation, including already sticky unchanged bits.
+Invalid registers, rejected data accesses and stack faults remain visible faults.
+
+Accepting a stored owner-bound MOVE ticket publishes only its genuine masks.
+It performs no external Io transaction, retires nothing and advances no clock.
+Unrelated PC, ALU/status/stack and hidden continuation remain held. The accepted
+effect journal restores native R and MOVE results in order, so an explicit R
+write can cancel an earlier automatic update. Native recomputation always starts
+from original inputs and consumes the verified accepted effects; parallel ALU
+operands remain original latches even after a source register load is visible.
+Observation copies cannot inject values. Checkpoints retain accepted writes,
+pending native effects and full hidden continuation; old tickets are invalidated.
+A later bus or stack failure preserves genuine earlier accepted CPU/Io effects.
+Reset cancels CPU continuation; matching external state is consumer-owned.
+
+This is a value-level native boundary, not a calibrated EX1 clock or overlapping
+pipeline. Separate records do not imply distinct physical clocks or serialized
+X/Y grants. Captured words and opaque checkpoints require a matching header and
+library ABI. Suspended execution still uses the general executor, including JIT
+options; its replay/suspension mechanism is outside a realtime audio callback.
+
+Directed controls independently model all 47 supported scalar destinations,
+full register state and storage provenance, including explicit unchanged writes.
+They also cover raw/signed/composite L: loads, original ALU sources, concurrent
+logic/LSP, limiting flags, SSH push/pop,
+stack failures and ordered automatic/explicit same-R writes. Paired bus and
+status/stack checkpoints cover every live boundary and all nine backend pairs.
+These controls do not establish arbitrary combined destination legality, all
+numerical modes, timing interlocks, physical vector/cache behavior or throughput.
+
+Build the selected target:
+  cmake --build build/strict --target dsp56300_move_publication_test format-check -j2
+Run:
+  ctest --test-dir build/strict --output-on-failure -j1 -R '^native-move-publication$'
+Repeat under the separate thread preset. Fuzzing is not part of this target.
+Qualification: 18960 native MOVE assertions per profile under ASan/UBSan and
+separate TSan. All nine selected affected regression groups also pass: native
+input snapshots, staged boundaries, native automatic-R publication, partial
+accumulator merging, transfer/displacement boundaries and their three transfer,
+parallel-MOVE and displacement fixture groups. Both profiles bind 82 C++ contexts
+(81 rebuilt/different, one exact retained), all 66 CPU archive members, the
+instrumented fixture-format dependency and eight protected executables. Zero
+own compiler/tidy/format or sanitizer findings, no skips or fuzz. Earlier compiler
+findings were fixed; they remain recorded failures, not retroactive passes.
+
+The directed stack cases use OMR=5 with SEN clear. Automatic stack-extension
+memory transfers, SE/UF state and hardware stack-error exception admission remain
+unqualified; ordinary explicit fail-stop stack faults are not that hardware proof.
+
+Remaining integration: per-stage operand/address/product latches, native ALU
+publication, bounded multiple-inflight queue, forwarding and physical hazards,
+actual stall clocks, branch/vector/REP cancellation, complete pipeline snapshots,
+native staged JIT and sustained realtime. The complete standalone application
+and foreign-Core replacement remain separate, unqualified acceptance requirements.
