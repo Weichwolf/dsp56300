@@ -101,9 +101,11 @@ void Core::Impl::conditional_transfer(const Word opcode) {
     }
     const bool destination_b = (opcode & 8U) != 0;
     latched = {cpu.reg.a, cpu.reg.b, cpu.reg.x, cpu.reg.y};
+    mark_alu_accumulator(destination_b);
     (destination_b ? cpu.reg.b : cpu.reg.a) = source(selector, destination_b);
   }
   if ((opcode & (address_only_bit | dual_bit)) != 0) {
+    mark_alu_address(opcode & 7);
     cpu.reg.r[opcode & 7] = cpu.reg.r[(opcode >> 8) & 7];
   }
 }
@@ -117,6 +119,9 @@ void Core::Impl::conditional_alu(const Word opcode) {
   if (!condition({.status = status, .selector = (opcode >> 8) & 15})) { return; }
   latched = {cpu.reg.a, cpu.reg.b, cpu.reg.x, cpu.reg.y};
   alu(opcode & byte_mask);
-  if ((opcode & condition_update_bit) == 0) { cpu.reg.sr = status; }
+  if ((opcode & condition_update_bit) == 0) {
+    cpu.reg.sr = status;
+    omit_alu_status(word_mask);
+  }
 }
 } // namespace dsp56300

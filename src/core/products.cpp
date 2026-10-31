@@ -105,12 +105,16 @@ void Core::Impl::execute_product(const Instruction &decoded) {
   }
   const auto value = 2 * product.left * product.right * (product.subtract ? -1 : 1);
   const auto term = (static_cast<std::uint64_t>(value) & accumulator_mask) << padding_bits;
+  mark_alu_accumulator(product.destination_b);
   destination = wrapped_add(initial, term);
   const bool overflowed = ((initial ^ destination) & (term ^ destination)) >> host_sign_bit != 0;
   arithmetic_flags(destination, overflowed);
   if (product.rounded) {
     round(destination);
-    if (overflowed) { cpu.reg.sr |= overflow | limit; }
+    if (overflowed) {
+      mark_alu(RegisterStorage::sr, overflow | limit);
+      cpu.reg.sr |= overflow | limit;
+    }
   } else if ((cpu.reg.sr & arithmetic_saturation) != 0 &&
              (ordinary || (decoded.operation == Operation::product_double && sign_mode == 0))) {
     saturate_arithmetic(destination);

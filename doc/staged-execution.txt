@@ -1,11 +1,13 @@
 Captured instructions and externally owned effects
 
-Core(Io&, Options) constructs a CPU whose instruction owner supplies known
-InstructionWords. It has no implicit RAM or automatic program-fetch route.
-instruction_fetch reports the actual next normal/vector address and an existing
-REP opcode latch when present. begin_instruction verifies the supplied address,
-word widths, extension count and repeat latch before computing one instruction.
-No physical opcode/extension read or interrupt acknowledgement is made here.
+Core(Io&, Options) constructs a CPU with externally owned instruction effects.
+The owner supplies known InstructionWords to begin_instruction or explicitly
+starts Core-owned logical program reads with begin_fetch. There is no implicit
+RAM or automatic instruction execution. instruction_fetch reports the actual
+next normal/vector address and existing REP opcode latch. begin_instruction
+verifies supplied address, widths, extension count and latch before computing
+one instruction; that captured-word route performs no program read. Neither
+route establishes physical fetch clocks or interrupt acknowledgement.
 
 Default boundary        Observable state / action
 begin_instruction       Computes until a real memory/reset effect or retirement
@@ -23,6 +25,31 @@ invented. Accepted responses are recorded in a bounded instruction log. Native
 recomputation verifies and consumes that log without repeating external effects.
 A copied PendingInstruction is an observation; changing it cannot alter the
 stored operation or computed result used by its ticket.
+
+Core-owned logical program reads
+
+begin_fetch(publication) starts the actual next instruction using owned
+fetch_opcode/fetch_extension tickets through the supplied Io. Accepting a ticket
+performs the genuine P read; native decoding determines whether an extension is
+needed. Extension addresses wrap modulo24, and a real read refusal reports its
+actual address, operation and instruction PC. No dummy word or host-created CPU
+fault replaces the missing read. Accepted words remain in the owned continuation
+and checkpoint; replay never rereads them. REP uses its genuine native opcode
+latch after the first body execution. Fully supplied begin_instruction words
+retain their strict original width/latch checks and perform no implicit fetch.
+
+interruptible_opcode accepts only the known opcode for REP-tail eligibility;
+this read-only metadata query needs no invented/speculative extension. The full
+interruptible(words) interface retains complete-word validation. Neither query
+acknowledges a device or advances a guest clock. Logical read tickets do not
+calibrate physical F1/F2, architectural cache prefetch or vector/IRQ bus timing.
+
+Directed logical-read qualification passes 1503 assertions per profile under
+ASan/UBSan and separate TSan: real opcode/extension refusal, modulo24 wrapping,
+REP-latch reuse and 72 cross-backend/boundary restore cases. The unchanged eleven
+selected complete ALU archives also pass through genuine reads. Native ALU
+result publication has its own bounded qualification in alu-publication.txt;
+neither qualification establishes physical fetch clocks or overlapping execution.
 
 Optional native address publication
 
@@ -88,10 +115,11 @@ and accepted/rejected RESET with post-acknowledgement restoration. At 669e223,
 thirteen unchanged caller results retained exact ELF/source/recipe identity
 after test-only controls. No fuzzing or manufacturer programs are involved.
 
-Staged CE/cache execution rejects explicitly. Native ALU publication, calibrated
-AGU/MOVE phase clocks, overlapping instructions, physical RMW phases, complete
-pipeline/cache/IRQ timing and realtime throughput remain required integration
-work. computed is an observation, not permission to patch visible registers.
+Staged CE/cache execution rejects explicitly. Other native unit phases,
+calibrated AGU/MOVE/ALU phase clocks, overlapping instructions, physical RMW
+phases, complete pipeline/cache/IRQ timing and realtime throughput remain
+required integration work. computed is an observation, not permission to patch
+visible registers.
 The consumer owns physical F1/F2 receipts, derivative arbitration, selected-source
 ACK, memory resources, clock edges and devices. Faster host execution cannot
 advance those emulated clocks. This interface is not complete device acceptance.

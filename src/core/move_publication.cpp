@@ -12,7 +12,9 @@ namespace dsp56300 {
 using namespace detail;
 
 bool Core::Impl::move_publication() const noexcept {
-  return staged_computing() && staged->publication == InstructionPublication::move_updates &&
+  return staged_computing() &&
+         (staged->publication == InstructionPublication::move_updates ||
+          staged->publication == InstructionPublication::alu_updates) &&
          fault.kind == FaultKind::none;
 }
 

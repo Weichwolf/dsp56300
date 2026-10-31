@@ -61,12 +61,14 @@ void Core::Impl::arithmetic_flags(const std::uint64_t value, const bool overflow
   if (((value >> shift) & 1) == ((value >> (shift - 1)) & 1)) { flags |= unnormalized; }
   if (overflowed) { flags |= overflow | limit; }
   constexpr Word changed = negative | zero | extension | unnormalized | overflow;
+  mark_alu(RegisterStorage::sr, changed | (overflowed ? limit : 0));
   cpu.reg.sr = (cpu.reg.sr & ~changed) | flags;
 }
 
 void Core::Impl::logical_flags(const Word value) {
   Word flags = value == 0 ? zero : 0;
   if ((value & sign24_bit) != 0) { flags |= negative; }
+  mark_alu(RegisterStorage::sr, negative | zero | overflow);
   cpu.reg.sr = (cpu.reg.sr & ~(negative | zero | overflow)) | flags;
 }
 
@@ -142,12 +144,16 @@ void Core::Impl::multiply(const Word opcode) {
   auto term = static_cast<std::uint64_t>(product) << multiply_shift;
   if ((opcode & 4U) != 0) { term = wrapped_sub(0, term); }
   const auto initial = (opcode & 2U) != 0 ? before : 0;
+  mark_alu_accumulator(destination_b);
   destination = wrapped_add(initial, term);
   const bool overflowed = signed_overflow(initial, term, destination);
   arithmetic_flags(destination, overflowed);
   if ((opcode & 1U) != 0) {
     round(destination);
-    if (overflowed) { cpu.reg.sr |= overflow | limit; }
+    if (overflowed) {
+      mark_alu(RegisterStorage::sr, overflow | limit);
+      cpu.reg.sr |= overflow | limit;
+    }
   } else {
     if ((cpu.reg.sr & arithmetic_saturation) != 0) { saturate_arithmetic(destination); }
   }
@@ -173,6 +179,7 @@ bool Core::Impl::logic(const Word opcode) {
   } else {
     word &= input;
   }
+  mark_alu_accumulator(destination_b, main_word_mask >> detail::padding_bits);
   destination = (destination & ~main_word_mask) | (std::uint64_t{word} << main_word_shift);
   logical_flags(word);
   return true;
@@ -189,22 +196,29 @@ bool Core::Impl::unary(const Word opcode) {
     case op_tfr_x0:
     case op_tfr_y0:
     case op_tfr_x1:
-    case op_tfr_y1: destination = source((opcode >> 4) & 7, destination_b); return true;
+    case op_tfr_y1:
+      mark_alu_accumulator(destination_b);
+      destination = source((opcode >> 4) & 7, destination_b);
+      return true;
     case op_clear:
+      mark_alu_accumulator(destination_b);
       destination = 0;
       arithmetic_flags(0, false);
       return true;
     case 3: arithmetic_flags(before, false); return true;
     case op_round:
+      mark_alu_accumulator(destination_b);
       destination = before;
       round(destination);
       return true;
     case op_abs:
+      mark_alu_accumulator(destination_b);
       destination = magnitude(before);
       arithmetic_flags(destination, before == (std::uint64_t{1} << host_sign_bit));
       if ((cpu.reg.sr & arithmetic_saturation) != 0) { saturate_arithmetic(destination); }
       return true;
     case op_negate:
+      mark_alu_accumulator(destination_b);
       destination = wrapped_sub(0, before);
       arithmetic_flags(destination, before == (std::uint64_t{1} << host_sign_bit));
       if ((cpu.reg.sr & arithmetic_saturation) != 0) { saturate_arithmetic(destination); }
@@ -253,8 +267,12 @@ void Core::Impl::add_operands(const AddOperands input) {
                                       : (intermediate < before || result < intermediate);
   arithmetic_flags(result, input.shift_overflow || overflowed);
   if ((cpu.reg.sr & arithmetic_saturation) != 0) { saturate_arithmetic(result); }
+  mark_alu(RegisterStorage::sr, carry);
   cpu.reg.sr = (cpu.reg.sr & ~carry) | (carried ? carry : 0);
-  if (!input.compare) { (input.destination_b ? cpu.reg.b : cpu.reg.a) = result; }
+  if (!input.compare) {
+    mark_alu_accumulator(input.destination_b);
+    (input.destination_b ? cpu.reg.b : cpu.reg.a) = result;
+  }
 }
 
 bool Core::Impl::shifted_addition(const Word opcode) {
@@ -294,7 +312,11 @@ void Core::Impl::alu(const Word opcode) {
     const bool transfer = opcode == op_max ? std::bit_cast<std::int64_t>(latched[0]) >=
                                                  std::bit_cast<std::int64_t>(latched[1])
                                            : magnitude(latched[0]) >= magnitude(latched[1]);
-    if (transfer) { cpu.reg.b = latched[0]; }
+    if (transfer) {
+      mark_alu_accumulator(true);
+      cpu.reg.b = latched[0];
+    }
+    mark_alu(RegisterStorage::sr, carry);
     cpu.reg.sr = (cpu.reg.sr & ~carry) | (transfer ? 0 : carry);
     return;
   }

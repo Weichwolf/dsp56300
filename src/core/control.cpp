@@ -40,7 +40,7 @@ std::uint64_t Core::Impl::pop() {
   return value;
 }
 
-void Core::Impl::execute(const Instruction &decoded) {
+void Core::Impl::execute_operation(const Instruction &decoded) {
   auto &reg = cpu.reg;
   const auto opcode = decoded.opcode;
   switch (decoded.operation) {

@@ -41,6 +41,7 @@ void Core::Impl::restore_published_results() {
       cpu.reg.r.at(update.index) = update.value;
     }
     if (effect.move_update) { apply_move(*effect.move_update); }
+    if (effect.alu_update) { apply_alu(*effect.alu_update); }
   }
 }
 
@@ -61,10 +62,12 @@ void Core::Impl::compute_instruction() {
   auto &work = *staged;
   restore_execution(work.base);
   work.cursor = 0;
+  work.alu_result = {};
   work.pending.reset();
   work.complete = false;
   work.computing = true;
   try {
+    if (work.fetch_words) { capture_program_words(); }
     step();
     if (fault.kind == FaultKind::none && work.cursor != work.used) {
       throw std::logic_error("Instruction did not consume every accepted effect");
@@ -105,7 +108,9 @@ void Core::Impl::compute_instruction() {
 bool Core::Impl::perform_instruction(const InstructionEffect effect, Word &response) const {
   if (io == nullptr) { return false; }
   switch (effect.kind) {
-    case EffectKind::read: {
+    case EffectKind::read:
+    case EffectKind::fetch_opcode:
+    case EffectKind::fetch_extension: {
       const bool accepted = io->read(effect.space, effect.address, effect.pc, response);
       response &= word_mask;
       return accepted;
@@ -121,6 +126,7 @@ bool Core::Impl::perform_instruction(const InstructionEffect effect, Word &respo
     case EffectKind::reset: return io->reset_peripherals(effect.pc);
     case EffectKind::address_update:
     case EffectKind::move_update:
+    case EffectKind::alu_update:
     case EffectKind::retire:
     default: throw std::logic_error("CPU publication is not an external bus operation");
   }

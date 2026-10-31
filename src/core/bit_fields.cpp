@@ -50,8 +50,10 @@ void Core::Impl::extract_field(const Instruction &decoded, const Word control) {
   auto result = (source >> offset) & mask;
   if (!unsigned_result && (result & (std::uint64_t{1} << (width - 1))) != 0) { result |= ~mask; }
   result = (result & accumulator_mask) << padding_bits;
+  mark_alu_accumulator((decoded.opcode & 1U) != 0);
   ((decoded.opcode & 1U) != 0 ? cpu.reg.b : cpu.reg.a) = result;
   arithmetic_flags(result, false);
+  mark_alu(RegisterStorage::sr, carry);
   cpu.reg.sr &= ~carry;
 }
 
@@ -69,8 +71,10 @@ void Core::Impl::insert_field(const Instruction &decoded, const Word control) {
   auto &destination = (decoded.opcode & 1U) != 0 ? cpu.reg.b : cpu.reg.a;
   const auto raw =
       ((destination >> padding_bits) & ~mask) | ((std::uint64_t{source} & field_mask) << offset);
+  mark_alu_accumulator((decoded.opcode & 1U) != 0);
   destination = raw << padding_bits;
   arithmetic_flags(destination, false);
+  mark_alu(RegisterStorage::sr, carry);
   cpu.reg.sr &= ~carry;
 }
 
@@ -79,6 +83,7 @@ void Core::Impl::merge_field(const Instruction &decoded, const Word source) {
   const Word result = ((source & half_word_mask) << half_word_bits) |
                       (static_cast<Word>(destination >> main_shift) & half_word_mask);
   constexpr auto mask = std::uint64_t{word_mask} << main_shift;
+  mark_alu_accumulator((decoded.opcode & 1U) != 0, mask >> padding_bits);
   destination = (destination & ~mask) | (std::uint64_t{result} << main_shift);
   logical_flags(result);
 }
@@ -88,6 +93,7 @@ void Core::Impl::count_leading_bits(const Word opcode) {
   constexpr int exponent_bias = 9;
   const auto leading = std::countl_zero((source >> host_sign_bit) == 0 ? source : ~source);
   const auto count = source == 0 ? 0 : exponent_bias - leading;
+  mark_alu_accumulator((opcode & 1U) != 0);
   ((opcode & 1U) != 0 ? cpu.reg.b : cpu.reg.a) = static_cast<std::uint64_t>(count) << main_shift;
   logical_flags(static_cast<Word>(count) & word_mask);
 }

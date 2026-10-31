@@ -941,6 +941,35 @@ with zero own compiler/tidy/format/sanitizer findings and no skips/fuzz. See
 move-publication.txt for the actual producer, source and checkpoint scope.
 The directed stack operations have SEN clear; automatic stack extension and
 hardware exception/SE/UF behavior remain separate unqualified requirements.
-Native ALU publication, calibrated timing, forwarding, multiple-inflight execution,
+Other native unit phases, calibrated timing, forwarding, multiple-inflight execution,
 native staged JIT, sustained realtime and complete application replacement remain
 unqualified. The full objective and all prior open domains remain unchanged.
+
+
+Native ALU result publication
+
+Opt-in alu_updates extends owned automatic-R/MOVE results with native data-ALU,
+BFU and conditional-register-transfer results before hidden PCU retirement.
+Actual write sites retain masked first-written inputs, final values and unchanged
+writers. Compare-only, false conditional and restored IFcc/NORM status bits
+remain distinct. Directed native ALU qualification passes 437568 assertions per
+profile under ASan/UBSan and separate TSan, together with all eleven complete
+466152-case archives across three staged backend options and six affected legacy
+groups. Both profiles bind 87 C++ contexts, 68 CPU members, the instrumented
+fixture dependency and nine protected ELFs, with zero own findings/skips/fuzz.
+See alu-publication.txt. Full calibrated pipeline/forwarding/overlap, other unit
+phases, cache/IRQ/RMW timing, native staged JIT, realtime and complete application
+replacement remain open. The complete objective and previous ISA gaps persist.
+
+
+Native logical program reads
+
+begin_fetch adds genuine owned opcode/extension Io reads, modulo24 address wrap,
+real fetch refusals and REP-latch reuse. Missing extensions are not fabricated
+nor turned into a host-injected CPU fault. The fully captured-word API remains
+strict, with opcode-only eligibility separately queryable. Directed read/prefix/
+cut controls pass 1503 assertions per sanitizer profile, including real read
+refusals, wrapping, REP-latch reuse and all selected cross-backend restore cuts.
+The complete unchanged ALU archives now reach their native expected faults and
+wrap results. Physical F1/F2/cache/IRQ and complete overlapped execution remain
+open. See staged-execution.txt.

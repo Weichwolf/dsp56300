@@ -138,7 +138,12 @@ struct InstructionFetch {
   std::optional<Word> latched_opcode;
 };
 
-enum class InstructionPublication : std::uint8_t { retirement, address_updates, move_updates };
+enum class InstructionPublication : std::uint8_t {
+  retirement,
+  address_updates,
+  move_updates,
+  alu_updates
+};
 
 enum class EffectKind : std::uint8_t {
   read,
@@ -147,7 +152,10 @@ enum class EffectKind : std::uint8_t {
   reset,
   retire,
   address_update,
-  move_update
+  move_update,
+  alu_update,
+  fetch_opcode,
+  fetch_extension
 };
 
 struct AddressWriteback {
@@ -194,6 +202,14 @@ struct MoveWriteback {
   bool operator==(const MoveWriteback &) const = default;
 };
 
+// Native data-ALU/BFU and conditional-transfer results, held before PCU retirement.
+struct AluWriteback {
+  Word opcode = 0;
+  std::uint8_t count = 0;
+  std::array<RegisterUpdate, 3> updates{};
+  bool operator==(const AluWriteback &) const = default;
+};
+
 struct InstructionEffect {
   EffectKind kind = EffectKind::retire;
   Space space = Space::program;
@@ -203,6 +219,7 @@ struct InstructionEffect {
   // This is an owned CPU publication boundary, never a host bus transaction.
   std::optional<AddressWriteback> address_update = std::nullopt;
   std::optional<MoveWriteback> move_update = std::nullopt;
+  std::optional<AluWriteback> alu_update = std::nullopt;
   bool operator==(const InstructionEffect &) const = default;
 };
 
@@ -293,9 +310,14 @@ public:
   [[nodiscard]] InstructionProgress
   begin_instruction(InstructionWords words,
                     InstructionPublication publication = InstructionPublication::retirement);
+  // Own logical opcode/extension bus reads, preserving REP's genuine opcode latch.
+  [[nodiscard]] InstructionProgress
+  begin_fetch(InstructionPublication publication = InstructionPublication::retirement);
   [[nodiscard]] std::optional<PendingInstruction> pending_instruction() const;
   [[nodiscard]] InstructionProgress advance_instruction(const EffectTicket &ticket);
   [[nodiscard]] bool interruptible(InstructionWords words) const;
+  // Eligibility needs only the captured opcode; this query performs no fetch.
+  [[nodiscard]] bool interruptible_opcode(InstructionWords words) const;
   // Capture an admitted request without fetching a vector or acknowledging a device.
   void request_interrupt(Word vector, unsigned level, InstructionWords foreground);
   [[nodiscard]] Progress progress() const noexcept;
@@ -327,6 +349,9 @@ public:
   void clear_code_cache();
 
 private:
+  [[nodiscard]] InstructionProgress begin_owned(std::optional<InstructionWords> captured,
+                                                InstructionPublication publication);
+  [[nodiscard]] bool interruptible_captured(InstructionWords words, bool complete) const;
   friend class Checkpoint;
   struct Impl;
   std::unique_ptr<Impl> impl_;

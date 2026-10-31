@@ -62,6 +62,15 @@ struct Core::Impl {
   [[nodiscard]] bool staged_computing() const noexcept { return staged && staged->computing; }
 
   void compute_instruction();
+  void capture_program_words();
+  [[nodiscard]] bool alu_publication() const noexcept;
+  void mark_alu(RegisterStorage storage, std::uint64_t mask) const;
+  void mark_alu_field(RegisterUpdate update) const;
+  void mark_alu_address(unsigned index) const;
+  void mark_alu_accumulator(bool destination_b, std::uint64_t mask = accumulator_mask) const;
+  void omit_alu_status(Word mask) const;
+  void publish_alu() const;
+  void apply_alu(const AluWriteback &update);
   void publish_address_update(AddressWriteback update, Word address) const;
   void restore_published_results();
   [[nodiscard]] bool move_publication() const noexcept;
@@ -93,6 +102,7 @@ struct Core::Impl {
   [[nodiscard]] static std::uint32_t jit_moves(void *owner,
                                                const detail::NativeOp *operation) noexcept;
   void execute(const detail::Instruction &decoded);
+  void execute_operation(const detail::Instruction &decoded);
   void execute_immediate(const detail::Instruction &decoded);
   void execute_iteration(const detail::Instruction &decoded);
   void normalize_fast(Word opcode);

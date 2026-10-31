@@ -16,13 +16,14 @@
 
 namespace dsp56300 {
 namespace {
-detail::Instruction decoded_words(const InstructionWords words) {
+detail::Instruction decoded_words(const InstructionWords words, const bool complete = true) {
   if (words.address > word_mask || words.opcode > word_mask ||
       (words.extension && *words.extension > word_mask)) {
     throw std::invalid_argument("Captured instruction word exceeds 24 bits");
   }
   auto decoded = detail::decode(words.opcode);
-  if (words.extension.has_value() != (decoded.words == 2)) {
+  if ((complete && words.extension.has_value() != (decoded.words == 2)) ||
+      (words.extension && decoded.words != 2)) {
     throw std::invalid_argument("Captured instruction has missing or unexpected extension");
   }
   decoded.extension = words.extension.value_or(0);
@@ -31,12 +32,15 @@ detail::Instruction decoded_words(const InstructionWords words) {
 
 FaultKind rejected_effect(const InstructionEffect effect) {
   switch (effect.kind) {
-    case EffectKind::read: return FaultKind::memory_read;
+    case EffectKind::read:
+    case EffectKind::fetch_opcode:
+    case EffectKind::fetch_extension: return FaultKind::memory_read;
     case EffectKind::write: return FaultKind::memory_write;
     case EffectKind::bit: return FaultKind::io_bit;
     case EffectKind::reset: return FaultKind::host_event;
     case EffectKind::address_update:
     case EffectKind::move_update:
+    case EffectKind::alu_update:
     case EffectKind::retire:
     default: throw std::logic_error("No rejection class for retirement");
   }
@@ -89,20 +93,31 @@ std::optional<PendingInstruction> Core::pending_instruction() const {
 
 InstructionProgress Core::begin_instruction(const InstructionWords words,
                                             const InstructionPublication publication) {
+  return begin_owned(words, publication);
+}
+
+InstructionProgress Core::begin_fetch(const InstructionPublication publication) {
+  return begin_owned(std::nullopt, publication);
+}
+
+InstructionProgress Core::begin_owned(const std::optional<InstructionWords> captured,
+                                      const InstructionPublication publication) {
   impl_->validate_staged_mutation();
   if (impl_->executing || impl_->fault.kind != FaultKind::none ||
       impl_->cpu.processing != ProcessingState::running) {
     throw std::logic_error("Instruction computation requires healthy stopped running state");
   }
-  const auto decoded = decoded_words(words);
+  const auto fetch = instruction_fetch();
+  const auto words = captured.value_or(InstructionWords{.address = fetch.address});
+  const auto decoded = captured ? decoded_words(words) : detail::Instruction{};
   if (publication != InstructionPublication::retirement &&
       publication != InstructionPublication::address_updates &&
-      publication != InstructionPublication::move_updates) {
+      publication != InstructionPublication::move_updates &&
+      publication != InstructionPublication::alu_updates) {
     throw std::invalid_argument("Unknown instruction publication mode");
   }
-  const auto fetch = instruction_fetch();
-  if (words.address != fetch.address ||
-      (fetch.latched_opcode && *fetch.latched_opcode != words.opcode)) {
+  if (captured && (words.address != fetch.address ||
+                   (fetch.latched_opcode && *fetch.latched_opcode != words.opcode))) {
     throw std::invalid_argument("Captured instruction differs from the actual CPU fetch/latch");
   }
   if ((impl_->cpu.reg.sr & detail::cache_enable) != 0) {
@@ -119,6 +134,8 @@ InstructionProgress Core::begin_instruction(const InstructionWords words,
   work.base = base;
   work.input = words;
   work.decoded = decoded;
+  work.fetch_words = !captured;
+  work.latched_opcode = fetch.latched_opcode;
   work.publication = publication;
   work.active = true;
   const detail::ExecutionGuard guard(impl_->executing);
@@ -152,6 +169,8 @@ InstructionProgress Core::advance_instruction(const EffectTicket &ticket) {
     if (!effect.address_update) { throw std::logic_error("Native address writeback is missing"); }
   } else if (effect.kind == EffectKind::move_update) {
     if (!effect.move_update) { throw std::logic_error("Native MOVE writeback is missing"); }
+  } else if (effect.kind == EffectKind::alu_update) {
+    if (!effect.alu_update) { throw std::logic_error("Native ALU writeback is missing"); }
   } else if (!impl_->perform_instruction(effect, response)) {
     impl_->current_pc = effect.pc;
     impl_->fail(rejected_effect(effect),
@@ -167,7 +186,18 @@ InstructionProgress Core::advance_instruction(const EffectTicket &ticket) {
 }
 
 bool Core::interruptible(const InstructionWords words) const {
-  const auto decoded = decoded_words(words);
+  return interruptible_captured(words, true);
+}
+
+bool Core::interruptible_opcode(const InstructionWords words) const {
+  if (words.extension) {
+    throw std::invalid_argument("Opcode eligibility query has unexpected extension");
+  }
+  return interruptible_captured(words, false);
+}
+
+bool Core::interruptible_captured(const InstructionWords words, const bool complete) const {
+  const auto decoded = decoded_words(words, complete);
   if (impl_->staged_active()) { return false; }
   if (words.address != impl_->cpu.reg.pc) {
     throw std::invalid_argument("Interrupt metadata differs from the current normal PC");
