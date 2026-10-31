@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <exception>
 #include <iostream>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -161,6 +162,90 @@ void memory_port(const Backend backend, const MemoryCase input) {
   }
 }
 
+void fast_memory_port(const Backend backend, const MemoryCase input, const Word slot) {
+  constexpr Word vector = 0x54;
+  Script io({{.space = input.peripheral_space,
+              .address = low_port + 5,
+              .pc = vector + slot,
+              .value = payload,
+              .write = input.write}});
+  Machine machine(backend, &io);
+  std::array<Word, 3> program{};
+  program[slot] = input.opcode;
+  if (input.immediate) { program[slot + 1] = payload; }
+  machine.core.load(Space::program, vector, program);
+  if (input.write && !input.immediate) {
+    machine.core.write(input.memory_space, ram_address, payload);
+  }
+  auto state = initial_state();
+  state.r[0] = ram_address;
+  state.sr = status_byte;
+  machine.core.set_registers(state);
+  machine.core.request_interrupt(vector, 0, {.address = start, .opcode = 0});
+  const bool rejected = input.immediate && slot != 0;
+  const auto count = input.immediate && slot == 0 ? 1U : 2U;
+  const auto result = machine.core.run(count);
+  if (rejected) {
+    require(result.fault == Fault{.kind = FaultKind::unsupported_instruction,
+                                  .space = Space::program,
+                                  .address = vector + slot,
+                                  .value = input.opcode,
+                                  .pc = vector + slot} &&
+                result.progress == Progress{.instructions = 1, .estimated_cycles = 1} &&
+                machine.core.registers() == state && !io.complete(),
+            "A two-word MOVEP cannot begin in the second fast slot or perform its I/O");
+    return;
+  }
+  if (!input.immediate) { ++state.r[0]; }
+  const auto cycles = input.cycles + (input.immediate ? 0U : 1U);
+  require(result.dispatches == count && result.fault.kind == FaultKind::none && io.complete() &&
+              result.progress == Progress{.instructions = count, .estimated_cycles = cycles} &&
+              machine.core.registers() == state && !machine.core.interruptible(),
+          "Fast MOVEP retains foreground PC, stack, flags, real I/O and manual base costs");
+  if (!input.immediate) {
+    require(machine.core.read(input.memory_space, ram_address) == payload,
+            "Fast MOVEP transfers the actual word and retains its native address update");
+  }
+  ++state.pc;
+  const auto resumed = machine.core.run(1);
+  require(resumed.dispatches == 1 && resumed.fault.kind == FaultKind::none &&
+              machine.core.registers() == state && machine.core.interruptible() && io.complete(),
+          "Fast MOVEP resumes the foreground without an RTI or repeated peripheral effect");
+}
+
+void staged_fast_immediate(const Backend backend) {
+  constexpr Word vector = 0x54;
+  constexpr Word opcode = 0x07f405;
+  Script io({{.address = low_port + 5, .pc = vector, .value = payload, .write = true}});
+  Machine machine(backend, &io);
+  const auto state = initial_state();
+  machine.core.request_interrupt(vector, 0, {.address = start, .opcode = 0});
+  const auto first =
+      machine.core.begin_instruction({.address = vector, .opcode = opcode, .extension = payload});
+  if (!first.pending) { throw std::runtime_error("Fast MOVEP has no staged peripheral write"); }
+  require(first.pending->effect.kind == EffectKind::write && first.pending->effect.pc == vector &&
+              !io.complete() && machine.core.registers() == state &&
+              machine.core.progress() == Progress{},
+          "Captured fast MOVEP waits for its actual vector-addressed peripheral effect");
+  static_cast<void>(machine.core.advance_instruction(first.pending.value().ticket));
+  const auto after_write = machine.core.checkpoint();
+  const auto finish = [&] {
+    unsigned effects = 0;
+    while (const auto pending = machine.core.pending_instruction()) {
+      require(++effects <= 16, "Fast MOVEP has a bounded native retirement suffix");
+      const auto result = machine.core.advance_instruction(pending->ticket);
+      require(result.fault.kind == FaultKind::none, "Fast MOVEP retirement must remain successful");
+    }
+    require(io.complete() && machine.core.registers() == state &&
+                machine.core.progress() == Progress{.instructions = 1, .estimated_cycles = 2} &&
+                !machine.core.interruptible(),
+            "Fast MOVEP retires one instruction without changing foreground PC or stack");
+  };
+  finish();
+  machine.core.restore(after_write);
+  finish();
+}
+
 void memory_ports(const Backend backend) {
   constexpr std::array<MemoryCase, 10> cases{
       {{.opcode = 0x075805},
@@ -173,7 +258,11 @@ void memory_ports(const Backend backend) {
        {.opcode = 0x00d805, .cycles = 6, .memory_space = Space::program, .write = true},
        {.opcode = 0x07f405, .write = true, .immediate = true},
        {.opcode = 0x07b485, .peripheral_space = Space::y, .write = true, .immediate = true}}};
-  for (const auto item : cases) { memory_port(backend, item); }
+  for (const auto item : cases) {
+    memory_port(backend, item);
+    fast_memory_port(backend, item, 0);
+    fast_memory_port(backend, item, 1);
+  }
 }
 
 void self_modify(const Backend backend, const bool peripheral) {
@@ -247,6 +336,7 @@ int main() {
          {dsp56300::Backend::reference, dsp56300::Backend::cached, dsp56300::Backend::jit}) {
       dsp56300::test::register_ports(backend);
       dsp56300::test::memory_ports(backend);
+      dsp56300::test::staged_fast_immediate(backend);
       dsp56300::test::self_modify(backend, false);
       dsp56300::test::self_modify(backend, true);
       dsp56300::test::mode_change(backend);

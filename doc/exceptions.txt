@@ -32,7 +32,9 @@ boundary policy; a long service saturates the mask at three. This is not a
 complete nonmaskable-source arbiter or hardware pipeline model.
 
 The implemented vector subset comprises unconditional short/effective JSR,
-parallel ALU/data moves and NOP. One two-word fast instruction is admitted at
+parallel ALU/data moves, NOP and MOVEP memory/program forms. Register MOVEP
+remains unsupported in fast vectors, including the restricted stack/loop
+register destinations listed in FM Appendix A.3.7. One two-word fast instruction is admitted at
 the first vector word. Existing long-call entry can use either vector slot.
 Conditional/bit-call vector forms and other legal fast instruction classes are
 still explicit unsupported cases. Decoder, EA, stack and I/O failures do not
@@ -45,6 +47,17 @@ repeat finishes, including the encoded-zero count of 65536. TRAP and TRAPcc are
 prohibited repeat bodies, including untaken conditions. Unsupported decoded
 instructions and stack errors still use explicit library faults; this increment
 does not automatically turn every such fault into an illegal/stack exception.
+
+Directed MOVEP qualification checks ten authored X/Y/P/immediate forms in both
+fast slots on reference/cached/JIT backends. Expected registers, address updates,
+I/O callback PC/value and listed base costs are independent literals. A two-word
+instruction in slot two refuses before I/O; a completed vector resumes its real
+foreground without RTI. Captured immediate execution also restores after an
+accepted peripheral write without replaying that effect. These component checks
+do not calibrate interrupt-entry latency or establish derivative/device behavior.
+
+  cmake --build build/strict --target dsp56300_transfer_test -j4
+  ctest --test-dir build/strict -R '^transfer-boundaries$' --output-on-failure
 
 Sources and unresolved details
 

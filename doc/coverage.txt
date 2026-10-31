@@ -49,6 +49,11 @@ Functional coverage includes ordinary arithmetic, integer/bit-field families,
 register/memory/parallel/MOVE forms, AGU modes, REP/DO/DOR/FOREVER/BRK/ENDDO,
 branches/subroutines/RTI, internal exceptions, RESET/WAIT/STOP, DEBUG/DEBUGcc and
 architectural cache controls. None is complete merely because code/tests exist.
+Fast vectors additionally execute memory/program MOVEP forms, with real I/O,
+manual base costs and native EA updates in either legal slot. Two-word slot-two
+refusal and captured immediate post-I/O restore retain the accepted prefix.
+Register MOVEP fast forms, other legal classes and physical entry/pipeline
+latency remain open; see doc/exceptions.txt and transfer-boundaries.
 Exact qualified domains and assumptions remain in the ISA table and in
 doc/exceptions.txt, doc/processing.txt, doc/debugging.txt and doc/program-cache.txt.
 

@@ -66,6 +66,8 @@ void Core::Impl::step_vector() {
     call_vector(decoded);
   } else {
     if ((decoded.operation != Operation::parallel && decoded.operation != Operation::nop &&
+         decoded.operation != Operation::move_peripheral_memory &&
+         decoded.operation != Operation::move_peripheral_program &&
          decoded.operation != Operation::reset_peripherals &&
          decoded.operation != Operation::debug &&
          decoded.operation != Operation::conditional_debug) ||
