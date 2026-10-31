@@ -31,6 +31,7 @@ concept CoreImplementation = std::constructible_from<Implementation, Buffers, Io
                                { view.registers() } -> std::same_as<Registers>;
                                { core.set_registers(state) } -> std::same_as<void>;
                                { view.checkpoint() } -> std::same_as<Checkpoint>;
+                               { view.candidate_checkpoint(ticket) } -> std::same_as<Checkpoint>;
                                { core.restore(checkpoint) } -> std::same_as<void>;
                                { view.instruction_fetch() } -> std::same_as<InstructionFetch>;
                                {
@@ -86,6 +87,10 @@ public:
   void set_registers(const Registers &state) { core_.set_registers(state); }
 
   [[nodiscard]] Checkpoint checkpoint() const { return core_.checkpoint(); }
+
+  [[nodiscard]] Checkpoint candidate_checkpoint(const EffectTicket &ticket) const {
+    return core_.candidate_checkpoint(ticket);
+  }
 
   void restore(const Checkpoint &checkpoint) { core_.restore(checkpoint); }
 

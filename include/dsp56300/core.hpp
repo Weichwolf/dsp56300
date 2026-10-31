@@ -332,6 +332,11 @@ public:
   // Capture/restore complete stopped CPU continuation and architectural cache.
   // The caller restores matching RAM and I/O separately. Host code caches clear.
   [[nodiscard]] Checkpoint checkpoint() const;
+  // Capture the complete computed successor state at an owned retirement
+  // boundary without publishing it on this CPU. This is speculative: the
+  // caller must preserve instruction ordering and pair external memory/I/O
+  // with the already accepted effects. Tickets remain owned by this CPU.
+  [[nodiscard]] Checkpoint candidate_checkpoint(const EffectTicket &ticket) const;
   void restore(const Checkpoint &checkpoint);
   [[nodiscard]] InstructionFetch instruction_fetch() const;
   [[nodiscard]] InstructionProgress

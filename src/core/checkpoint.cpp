@@ -4,6 +4,7 @@
 #include "core_impl.hpp"
 #include "dsp56300/core.hpp"
 #include "execution_state.hpp"
+#include "hidden_retirement.hpp"
 #include "staged.hpp"
 
 #include <array>
@@ -68,6 +69,33 @@ Checkpoint Core::checkpoint() const {
       .cacheable_begin = impl_->options.cacheable_begin,
       .cacheable_end = impl_->options.cacheable_end,
       .cache_sector_words = impl_->options.cache_sector_words}));
+}
+
+Checkpoint Core::candidate_checkpoint(const EffectTicket &ticket) const {
+  if (impl_->executing || !impl_->staged_active() || !impl_->staged->complete ||
+      impl_->fault.kind != FaultKind::none || ticket.owner_ != impl_->effect_owner ||
+      ticket.epoch_ != impl_->effect_epoch || ticket.position_ != impl_->staged->used) {
+    throw std::invalid_argument("Candidate checkpoint requires the current retirement ticket");
+  }
+  const auto pending = impl_->staged->pending;
+  if (!pending || pending->kind != EffectKind::retire) {
+    throw std::invalid_argument("Candidate checkpoint requires the current retirement ticket");
+  }
+  auto candidate = *checkpoint().state_;
+  if (impl_->staged->publication == InstructionPublication::pcu_updates) {
+    auto &execution = candidate.execution;
+    detail::merge_hidden_retirement(execution.cpu,
+                                    execution.vector,
+                                    execution.debug_vector,
+                                    execution.repeated,
+                                    impl_->staged->hidden_result);
+  } else {
+    auto cache = std::move(candidate.execution.cache);
+    candidate.execution = impl_->staged->candidate;
+    candidate.execution.cache = std::move(cache);
+  }
+  candidate.staged.reset();
+  return Checkpoint(std::make_shared<const Checkpoint::State>(std::move(candidate)));
 }
 
 void Core::restore(const Checkpoint &checkpoint) {

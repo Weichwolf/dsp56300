@@ -369,6 +369,10 @@ retirement tickets. Every staged P/X/Y, atomic-bit and RESET action requires a
 real accepting callback. Computation reuses accepted responses without replay;
 restored tickets rebind to the new owner/generation. Copied computed views never
 supply replacement results. See doc/staged-execution.txt for the exact contract.
+Candidate checkpoints expose a completed but unpublished native continuation
+to a separately owned CPU. Directed tests cover all six publication modes,
+accepted I/O without replay, ticket isolation and REP continuation; they do
+not establish instruction overlap, device clocks or bus arbitration.
 
 Staged-execution qualification at 669e223 covers 14 unique groups per profile, including
 690 staged assertions and 2839 checkpoint assertions. The initial production
