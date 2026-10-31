@@ -39,6 +39,10 @@ Build and check (LLVM 19, CMake >=3.25, Ninja, clang-format-19, clang-tidy-19):
 
 Use the release preset for performance work. No fuzzing runs automatically.
 Project setup and strict policies retain their source attribution in THIRD_PARTY.txt.
+Embedding via add_subdirectory exports dsp56300::core and propagates C++23.
+Set DSP56300_SANITIZER to match the parent. In a parent project, DSP-specific
+tests are opt-in with DSP56300_BUILD_TESTING=ON and its formatting target is
+dsp56300-format-check. Standalone test and format targets retain their names.
 
 Benchmarks run continuous one-second DSP workloads with independent binary fixtures:
 

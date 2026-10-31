@@ -18,6 +18,7 @@ endforeach()
 include(cmake/Quality.cmake)
 find_program(DSP56300_CLANG_TIDY NAMES clang-tidy-19 REQUIRED)
 find_program(DSP56300_CLANG_FORMAT NAMES clang-format-19 REQUIRED)
+option(DSP56300_BUILD_TESTING "Build DSP library tests" ${PROJECT_IS_TOP_LEVEL})
 
 set(CMAKE_CXX_CLANG_TIDY "${DSP56300_CLANG_TIDY};--warnings-as-errors=*")
 
@@ -45,6 +46,7 @@ add_library(dsp56300_core STATIC
   src/jit/mac_batch.cpp src/jit/mac_batch_scalar.cpp src/jit/x64/mac_batch_avx2.cpp src/jit/x64/jit_batch.cpp)
 add_library(dsp56300::core ALIAS dsp56300_core)
 target_include_directories(dsp56300_core PUBLIC include)
+target_compile_features(dsp56300_core PUBLIC cxx_std_23)
 target_link_libraries(dsp56300_core PUBLIC dsp56300_quality)
 target_include_directories(dsp56300_core PRIVATE src/core src/jit src/jit/x64)
 
@@ -52,11 +54,16 @@ file(GLOB_RECURSE DSP56300_OWN_FILES CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/test/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/test/*.hpp")
-add_custom_target(format-check
+if(PROJECT_IS_TOP_LEVEL)
+  set(DSP56300_FORMAT_TARGET format-check)
+else()
+  set(DSP56300_FORMAT_TARGET dsp56300-format-check)
+endif()
+add_custom_target(${DSP56300_FORMAT_TARGET}
   COMMAND "${DSP56300_CLANG_FORMAT}" --dry-run --Werror ${DSP56300_OWN_FILES}
   VERBATIM)
 
-if(BUILD_TESTING)
+if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64)$")
     add_executable(dsp56300_native_retirement_test test/native_retirement_test.cpp
       test/native/direct.cpp)
