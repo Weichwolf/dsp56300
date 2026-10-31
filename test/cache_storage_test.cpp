@@ -146,6 +146,75 @@ void program_data(const unsigned width) {
   pair.compare();
   pair.flush(false);
 }
+
+void reader_transfers(const unsigned width) {
+  struct Source {
+    std::vector<Word> requests;
+    std::optional<Word> reject;
+  } source;
+
+  const auto read = [](void *context, const Word address) -> std::optional<Word> {
+    auto &input = *static_cast<Source *>(context);
+    input.requests.push_back(address);
+    if (input.reject == address) { return std::nullopt; }
+    return 0x1000000U | address;
+  };
+  detail::ProgramCache cache(width);
+  require(cache.fetch(5, 32, true, 32, read, &source) == 5,
+          "Reader burst returns masked first word");
+  require(source.requests == std::vector<Word>{5, 6, 7}, "Reader observes exact burst order");
+  source.requests.clear();
+  require(cache.fetch(6, 32, true, 32, read, &source) == 6 && source.requests.empty(),
+          "Reader cache hit issues no transfer");
+  source.reject = 10;
+  require(!cache.fetch(9, 32, true, 32, read, &source), "Reader refusal is observable");
+  require(source.requests == std::vector<Word>{9, 10}, "Burst stops at refused word");
+  require(cache.peek(9) == 9 && !cache.peek(10), "Only accepted burst words become valid");
+  source.requests.clear();
+  require(!cache.fetch(32, 32, false, 32, read, &source) && source.requests.empty(),
+          "Out-of-range fetch performs no transfer");
+}
+
+void replay_burst(const unsigned width) {
+  struct Pause : std::exception {};
+
+  struct Source {
+    std::vector<Word> accepted;
+    std::vector<Word> requested;
+    std::size_t cursor = 0;
+  } source;
+
+  const auto read = [](void *context, const Word address) -> std::optional<Word> {
+    auto &input = *static_cast<Source *>(context);
+    if (input.cursor < input.accepted.size()) {
+      require(input.accepted[input.cursor++] == address, "Replay consumes accepted reads in order");
+      return address + 0x100;
+    }
+    input.requested.push_back(address);
+    throw Pause{};
+  };
+  const detail::ProgramCache base(width);
+  for (const Word expected : {4U, 5U, 6U, 7U}) {
+    auto candidate = base;
+    source.cursor = 0;
+    try {
+      static_cast<void>(candidate.fetch(4, 32, true, 32, read, &source));
+      require(false, "Incomplete burst must pause");
+    } catch (const Pause &) {
+      require(source.requested.back() == expected, "Next request advances through burst");
+      source.accepted.push_back(expected);
+    }
+  }
+  auto candidate = base;
+  source.cursor = 0;
+  constexpr Word first_word = 0x104;
+  constexpr Word last_word = 0x107;
+  require(candidate.fetch(4, 32, true, 32, read, &source) == first_word,
+          "Completed replay returns the first fetched word");
+  require(source.requested == std::vector<Word>{4, 5, 6, 7},
+          "Replay never repeats an external request");
+  require(candidate.peek(7) == last_word, "Completed replay contains the last burst word");
+}
 } // namespace
 } // namespace dsp56300::test
 
@@ -156,6 +225,8 @@ int main() {
       dsp56300::test::lock_masks(width);
       dsp56300::test::all_locked(width);
       dsp56300::test::program_data(width);
+      dsp56300::test::reader_transfers(width);
+      dsp56300::test::replay_burst(width);
     }
     std::cout << dsp56300::test::checks << " independent cache storage checks passed\n";
   } catch (const std::exception &error) {

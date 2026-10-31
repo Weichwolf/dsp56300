@@ -1,0 +1,38 @@
+Native program-control results and sparse hidden retirement
+
+InstructionPublication::pcu_updates includes automatic-R, MOVE, ALU and scalar
+unit results, and adds genuine native PCU register writers. A pcu_update carries
+PcuWriteback {opcode, count, updates[8]}; RegisterStorage::pc is appended to the
+existing storage coordinates. Fields are sorted by storage/index with actual
+first-written prior bits and final masked native values, including same writes.
+The API layout requires a matching library/caller rebuild.
+
+Native sequential/target PC, real stack pushes/pops, source limiting, loop LC/LA
+and LF/FV writes reach owned CPU boundaries. A control source is sampled after
+the genuine preceding operations: DO SP/SC/SSL see the first native push. MOVE
+and scalar stack ownership remain separate. Real earlier accepted CPU and bus
+prefixes survive a later fault; no fallback word or success response is created.
+The default and previous CPU publication policies retain their boundaries.
+
+Actual native repeat/vector/debug/processing assignments mark typed hidden
+writers. Native instruction/cycle deltas commit once with only marked hidden
+fields, preserving unrelated fields. PCU mode does not restore the whole computed
+CPU/register file, current_pc/current_words or transient operand context at
+retirement. Checkpoints include the native producer/result journal and reject
+abandoned tickets. RAM/Io state remains caller-owned and must match on restore.
+
+Qualification is pending. Directed controls include literal NOP/call/RTI/REP
+results, source flags before a real stack refusal and cross-backend call cuts.
+Pure sparse-merge controls are supporting tests only. Ten complete unchanged
+owned control archives are selected through real owned fetches and their original
+register/memory or fault/progress/processing/debug oracles. Explicit RESET scripts
+must match actual callback PC/order/count and acceptance, never a default ACK.
+
+This is still single-instruction value ownership. Functional staged cache paths
+have bounded direct coverage; cache state is not restored as CPU retirement.
+Physical cache phases and general cache-control coverage remain unqualified.
+Automatic stack-error interrupts, actual per-frame
+operand/product latches, physical PCU/BIU/cache/IRQ/RMW timing, bounded overlapping
+execution, forwarding/interlocks/annul/checkpoints, native staged JIT, realtime
+and complete consumer/instrument acceptance remain required. No manufacturer
+program, device traffic or automatic fuzzing is used. The full objective is open.

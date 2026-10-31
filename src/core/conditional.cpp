@@ -53,7 +53,8 @@ void Core::Impl::execute_jump(const Instruction &decoded) {
       form.short_address ? (decoded.opcode >> condition_shift) & 15 : decoded.opcode & 15;
   // Address calculation/update occurs even when the conditional jump is not taken.
   if (form.conditional && !condition({.status = cpu.reg.sr, .selector = selector})) { return; }
-  if (form.call) { push(cpu.reg.pc, cpu.reg.sr); }
+  if (form.call) { push(cpu.reg.pc, cpu.reg.sr, StackOwner::pcu); }
+  mark_pcu_field({.storage = RegisterStorage::pc, .mask = word_mask});
   cpu.reg.pc = address;
 }
 
@@ -83,8 +84,9 @@ void Core::Impl::execute_branch(const Instruction &decoded) {
     offset = cpu.reg.r[(opcode >> 8) & 7];
   }
   if ((opcode & (short_offset ? short_no_call : long_no_call)) == 0) {
-    push(cpu.reg.pc, cpu.reg.sr);
+    push(cpu.reg.pc, cpu.reg.sr, StackOwner::pcu);
   }
+  mark_pcu_field({.storage = RegisterStorage::pc, .mask = word_mask});
   cpu.reg.pc = address_add(current_pc, signed_word(offset));
 }
 

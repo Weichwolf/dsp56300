@@ -3,11 +3,13 @@
 #include "core_impl.hpp"
 #include "dsp56300/core.hpp"
 #include "execution_state.hpp"
+#include "hidden_retirement.hpp"
 #include "instruction.hpp"
 #include "staged.hpp"
 
 #include <cstddef>
 #include <stdexcept>
+#include <utility>
 
 namespace dsp56300::detail {
 Word StagedState::sample(const InstructionEffect effect) {
@@ -43,6 +45,7 @@ void Core::Impl::restore_published_results() {
     if (effect.move_update) { apply_move(*effect.move_update); }
     if (effect.alu_update) { apply_alu(*effect.alu_update); }
     if (effect.unit_update) { apply_unit(*effect.unit_update); }
+    if (effect.pcu_update) { apply_pcu(*effect.pcu_update); }
   }
 }
 
@@ -65,18 +68,24 @@ void Core::Impl::compute_instruction() {
   work.cursor = 0;
   work.alu_result = {};
   work.unit_result = {};
+  work.pcu_result = {};
+  work.hidden_result = {};
+  work.pcu_source = false;
   work.unit_active = false;
   work.pending.reset();
   work.complete = false;
   work.computing = true;
   try {
     if (work.fetch_words) { capture_program_words(); }
-    step();
+    if (fault.kind == FaultKind::none) { step(); }
     if (fault.kind == FaultKind::none && work.cursor != work.used) {
       throw std::logic_error("Instruction did not consume every accepted effect");
     }
     if (fault.kind == FaultKind::none) {
       work.candidate = execution_state();
+      if (pcu_publication()) {
+        work.hidden_result.value = detail::retirement_values(cpu, vector, debug_vector, repeated);
+      }
       work.complete = true;
       work.pending = InstructionEffect{.kind = EffectKind::retire,
                                        .address = work.input.address,
@@ -100,7 +109,11 @@ void Core::Impl::compute_instruction() {
   work.computed.a >>= detail::padding_bits;
   work.computed.b >>= detail::padding_bits;
   const auto failure = fault;
+  // Cache mutations belong to the completed native prefix, not CPU retirement.
+  // Only one staged instruction may own the core at a time.
+  auto cache = std::move(icache);
   restore_execution(work.base);
+  icache = std::move(cache);
   restore_published_results();
   if (failure.kind != FaultKind::none) {
     fault = failure;
@@ -131,6 +144,7 @@ bool Core::Impl::perform_instruction(const InstructionEffect effect, Word &respo
     case EffectKind::move_update:
     case EffectKind::alu_update:
     case EffectKind::unit_update:
+    case EffectKind::pcu_update:
     case EffectKind::retire:
     default: throw std::logic_error("CPU publication is not an external bus operation");
   }

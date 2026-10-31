@@ -10,7 +10,7 @@
 namespace dsp56300 {
 using namespace detail;
 
-Word Core::Impl::read_register(const unsigned number) {
+Word Core::Impl::read_register(const unsigned number, const StackOwner owner) {
   const auto &reg = cpu.reg;
   if (number >= r_register_base && number < n_register_base) {
     return reg.r[number - r_register_base];
@@ -45,7 +45,7 @@ Word Core::Impl::read_register(const unsigned number) {
     case sp_register: return reg.sp;
     case la_register: return reg.la;
     case lc_register: return reg.lc;
-    case ssh_register: return static_cast<Word>(pop() >> word_bits);
+    case ssh_register: return static_cast<Word>(pop(owner) >> word_bits);
     case ssl_register:
       return static_cast<Word>(reg.stack[reg.sp & (stack_entries - 1)]) & word_mask;
     default: fail(FaultKind::invalid_instruction, Space::program, current_pc, number); return 0;

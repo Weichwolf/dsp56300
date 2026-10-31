@@ -7,6 +7,8 @@
 #include <cstdint>
 
 namespace dsp56300::detail {
+enum class StackOwner : std::uint8_t { operand, pcu };
+
 struct AddressForm {
   unsigned mode = 0;
   unsigned index = 0;

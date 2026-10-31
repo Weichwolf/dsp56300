@@ -15,7 +15,8 @@ bool Core::Impl::move_publication() const noexcept {
   return staged_computing() &&
          (staged->publication == InstructionPublication::move_updates ||
           staged->publication == InstructionPublication::alu_updates ||
-          staged->publication == InstructionPublication::unit_updates) &&
+          staged->publication == InstructionPublication::unit_updates ||
+          staged->publication == InstructionPublication::pcu_updates) &&
          fault.kind == FaultKind::none;
 }
 
@@ -80,6 +81,9 @@ void Core::Impl::transfer_status(const Word flags, const std::optional<unsigned>
     capture_move(update);
   }
   if (!source_register) { mark_unit_field({.storage = RegisterStorage::sr, .mask = flags}); }
+  if (!source_register && pcu_publication() && staged->pcu_source) {
+    mark_pcu_field({.storage = RegisterStorage::sr, .mask = flags});
+  }
   cpu.reg.sr |= flags;
   publish_move(update);
 }

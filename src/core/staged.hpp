@@ -3,6 +3,7 @@
 
 #include "dsp56300/core.hpp"
 #include "execution_state.hpp"
+#include "hidden_retirement.hpp"
 #include "instruction.hpp"
 
 #include <array>
@@ -26,6 +27,9 @@ struct StagedState {
   Registers computed;
   AluWriteback alu_result;
   UnitWriteback unit_result;
+  PcuWriteback pcu_result;
+  HiddenRetirement hidden_result;
+  bool pcu_source = false;
   bool unit_active = false;
   std::array<AcceptedEffect, capacity> records{};
   Instruction decoded;

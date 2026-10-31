@@ -17,8 +17,10 @@ registers/progress       Retain their pre-instruction values until retirement
 checkpoint/restore      Include accepted responses and the pending computation
 request_interrupt       Retains admitted vector/priority and genuine normal resume PC
 
-All staged P/X/Y word accesses use the supplied Io, including ordinary low RAM
-and program-data operations. RAM bit instructions use a genuine read followed
+Staged program-cache hits use retained cache data; misses, program writes and
+X/Y word accesses use the supplied Io, including ordinary low RAM. Caller-supplied
+instruction words are already fetched and cause no implicit P read or cache fill.
+RAM bit instructions use a genuine read followed
 by a native modified-word write, or just a read for TEST. Only addresses in the
 upper peripheral window (0xffff80..0xffffff) use atomic Io::bit transactions.
 This transport correction applies to every CPU publication policy.
@@ -126,11 +128,18 @@ and accepted/rejected RESET with post-acknowledgement restoration. At 669e223,
 thirteen unchanged caller results retained exact ELF/source/recipe identity
 after test-only controls. No fuzzing or manufacturer programs are involved.
 
-Staged CE/cache execution rejects explicitly. Other native unit phases,
-calibrated AGU/MOVE/ALU phase clocks, overlapping instructions, physical RMW
+Single-instruction staged CE/cache execution has bounded direct coverage for
+fetch, bursts, refusal, flush, program writes and checkpoint continuation.
+Physical cache timing and all cache-control combinations remain unqualified.
+Other native unit phases, calibrated AGU/MOVE/ALU phase clocks, overlapping instructions, physical RMW
 phases, complete pipeline/cache/IRQ timing and realtime throughput remain
 required integration work. computed is an observation, not permission to patch
 visible registers.
 The consumer owns physical F1/F2 receipts, derivative arbitration, selected-source
 ACK, memory resources, clock edges and devices. Faster host execution cannot
 advance those emulated clocks. This interface is not complete device acceptance.
+
+
+The pcu_updates mode adds native PC/stack/loop publication and sparse hidden
+retirement; see native-pcu-publication.txt for its pending qualification and
+remaining clock/overlap limitations. PCU results are CPU writes, not Io requests.

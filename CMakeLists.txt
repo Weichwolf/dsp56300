@@ -23,7 +23,7 @@ set(CMAKE_CXX_CLANG_TIDY "${DSP56300_CLANG_TIDY};--warnings-as-errors=*")
 
 add_library(dsp56300_core STATIC
   src/core.cpp src/core/core_state.cpp src/core/checkpoint.cpp src/core/execution_state.cpp
-  src/core/staged.cpp src/core/staged_compute.cpp src/core/move_publication.cpp src/core/move_storage.cpp src/core/alu_publication.cpp src/core/unit_publication.cpp src/core/program_capture.cpp src/core/instruction_shape.cpp
+  src/core/staged.cpp src/core/staged_compute.cpp src/core/move_publication.cpp src/core/move_storage.cpp src/core/alu_publication.cpp src/core/unit_publication.cpp src/core/pcu_publication.cpp src/core/hidden_retirement.cpp src/core/native_retirement.cpp src/core/program_capture.cpp src/core/instruction_shape.cpp
   src/core/transfer_info.cpp src/core/transfer_parallel.cpp src/core/transfer_special.cpp
   src/core/transfer_description.cpp src/core/arithmetic.cpp src/core/saturation.cpp src/core/shifts.cpp
   src/core/conditional.cpp src/core/immediate.cpp src/core/integer.cpp src/core/decode.cpp src/core/moves.cpp
@@ -165,6 +165,13 @@ if(BUILD_TESTING)
   add_executable(dsp56300_program_fetch_test test/program_fetch_test.cpp)
   target_link_libraries(dsp56300_program_fetch_test PRIVATE dsp56300::core)
   add_test(NAME native-program-fetch COMMAND dsp56300_program_fetch_test)
+  add_executable(dsp56300_pcu_publication_test test/pcu_publication_test.cpp)
+  target_link_libraries(dsp56300_pcu_publication_test PRIVATE dsp56300::core)
+  add_test(NAME native-pcu-publication COMMAND dsp56300_pcu_publication_test)
+  add_executable(dsp56300_hidden_retirement_test test/hidden_retirement_test.cpp)
+  target_include_directories(dsp56300_hidden_retirement_test PRIVATE src/core)
+  target_link_libraries(dsp56300_hidden_retirement_test PRIVATE dsp56300::core)
+  add_test(NAME hidden-retirement-merge COMMAND dsp56300_hidden_retirement_test)
   add_executable(dsp56300_unit_publication_test test/unit_publication_test.cpp
     test/unit_publication_model.cpp test/unit_publication_bits.cpp test/unit_publication_boundaries.cpp
     test/unit_publication_ram.cpp)
@@ -336,6 +343,10 @@ if(BUILD_TESTING)
   endforeach()
   foreach(archive bit-access bit-branches control-bytes address-calculations)
     add_test(NAME unit-publication-${archive} COMMAND dsp56300_alu_fixture_test --units
+      "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/${archive}.d56")
+  endforeach()
+  foreach(archive loops loop-control return-state return-sequences exception-state exception-sequences debug-state debug-sequences processing-state processing-sequences)
+    add_test(NAME pcu-publication-${archive} COMMAND dsp56300_alu_fixture_test --pcu
       "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/${archive}.d56")
   endforeach()
   add_executable(dsp56300_fixture_test test/fixture_test.cpp)

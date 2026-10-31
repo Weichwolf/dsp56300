@@ -994,3 +994,17 @@ PCU/hidden retirement, per-stage input/product latches, calibrated forwarding,
 overlap/cache/IRQ/RMW, native staged JIT, realtime and complete consumer migration
 remain unqualified.
 All prior gaps, the complete objective and all 118 partial ISA rows remain open.
+
+
+Native program-control results and sparse hidden retirement (qualification pending)
+
+The new opt-in pcu_updates mode includes all earlier result policies and owns
+native PC, stack and loop register writes. Hidden repeat, vector, debug and
+processing writes are marked at their actual native assignments; ordered native
+counter deltas commit with only those hidden fields. This mode avoids restoring
+a whole candidate CPU/register file or transient operand/frame state at retire.
+Earlier policies keep their CPU result boundaries. New direct and complete
+control-archive qualification is pending; see native-pcu-publication.txt.
+This does not admit overlapping instructions or qualify physical clocks/cache,
+stack-error interrupts, operand/product forwarding, native staged JIT, realtime,
+consumer replacement or full device operation. All 118 ISA rows remain partial.

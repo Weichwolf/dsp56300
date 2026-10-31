@@ -9,6 +9,7 @@
 #include <exception>
 #include <filesystem>
 #include <iostream>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -18,9 +19,26 @@ namespace dsp56300::test::alu_fixture_test {
 namespace {
 class Ram final : public Io {
 public:
-  explicit Ram(FixtureMemory memory) : words(std::move(memory)) {}
+  explicit Ram(FixtureMemory memory, const std::span<const ResetAction> actions = {})
+      : words(std::move(memory)), resets(actions) {}
 
   FixtureMemory words;
+  std::span<const ResetAction> resets;
+  std::size_t reset_used = 0, reset_requests = 0;
+  bool reset_exact = true;
+
+  bool reset_peripherals(const Word pc) noexcept override {
+    ++reset_requests;
+    // Memory transport can exist while its peripheral RESET participant is absent.
+    if (resets.empty()) { return false; }
+    if (reset_used == resets.size()) {
+      reset_exact = false;
+      return false;
+    }
+    const auto action = resets[reset_used++];
+    reset_exact = reset_exact && pc == action.pc;
+    return reset_exact && action.accepted;
+  }
 
   bool read(const Space space, const Word address, Word /*pc*/, Word &value) noexcept override {
     const auto index = static_cast<std::size_t>(space);
@@ -99,6 +117,21 @@ bool advance(Core &core) {
   const auto before = core.registers();
   const auto progress = core.progress();
   auto after = before;
+  if (pending->effect.kind == EffectKind::pcu_update) {
+    const auto result = pending->effect.pcu_update;
+    if (!result || result->count == 0 || result->count > result->updates.size()) {
+      throw std::runtime_error("Native PCU effect lost its bounded result");
+    }
+    for (unsigned index = 0; index < result->count; ++index) {
+      unit_fixture_test::apply(after, result->updates.at(index));
+    }
+    pending->effect.pcu_update = PcuWriteback{};
+    pending->computed = {};
+    const auto advanced = core.advance_instruction(pending->ticket);
+    require(!advanced.retired && core.registers() == after && core.progress() == progress,
+            "Only the stored native PCU result publishes its selected register prefix");
+    return false;
+  }
   if (pending->effect.kind == EffectKind::unit_update) {
     const auto result = pending->effect.unit_update;
     if (!result) { throw std::runtime_error("Native scalar-unit effect lost its owned result"); }
@@ -150,9 +183,11 @@ void instruction(Core &core, const InstructionPublication policy) {
 }
 
 void check(const BinaryCase &item, const Backend backend, const InstructionPublication policy) {
-  require(item.reset_actions.empty(),
-          "Selected ALU archives require no fabricated peripheral RESET acknowledgement");
-  Ram ram(initial_memory(item));
+  if (policy != InstructionPublication::pcu_updates) {
+    require(item.reset_actions.empty(),
+            "Selected ALU archives require no fabricated peripheral RESET acknowledgement");
+  }
+  Ram ram(initial_memory(item), item.reset_actions);
   auto expected = ram.words;
   patch(expected, item.after);
   Core core(ram, {.backend = backend});
@@ -162,6 +197,10 @@ void check(const BinaryCase &item, const Backend backend, const InstructionPubli
                          core.processing_state() == ProcessingState::running;
        ++retired) {
     instruction(core, policy);
+  }
+  if (policy == InstructionPublication::pcu_updates) {
+    require(ram.reset_exact && ram.reset_used == item.reset_actions.size(),
+            "Real RESET callbacks preserve explicit expected PC/order/count and acceptance");
   }
   require(core.progress() == item.progress && core.progress().instructions == item.dispatches,
           "Independent fixture retirement and documented base costs through real unit publication");
@@ -203,12 +242,14 @@ int main(const int argc, const char *const *const argv) {
   try {
     if (argc < 2) { throw std::runtime_error("Usage: dsp56300_alu_fixture_test FILE.d56 [...]"); }
     const bool units = std::string_view(argv[1]) == "--units";
-    const int first = units ? 2 : 1;
+    const bool pcu = std::string_view(argv[1]) == "--pcu";
+    auto policy = dsp56300::InstructionPublication::alu_updates;
+    if (units) { policy = dsp56300::InstructionPublication::unit_updates; }
+    if (pcu) { policy = dsp56300::InstructionPublication::pcu_updates; }
+    const int first = units || pcu ? 2 : 1;
     if (first == argc) { throw std::runtime_error("No owned fixture archive supplied"); }
     for (int index = first; index < argc; ++index) {
-      dsp56300::test::alu_fixture_test::run(argv[index],
-                                            units ? dsp56300::InstructionPublication::unit_updates
-                                                  : dsp56300::InstructionPublication::alu_updates);
+      dsp56300::test::alu_fixture_test::run(argv[index], policy);
     }
     std::cout << dsp56300::test::checks << " independently expected ALU fixture checks passed\n";
   } catch (const std::exception &error) {

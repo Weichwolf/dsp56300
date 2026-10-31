@@ -4,6 +4,7 @@
 #include "architecture.hpp"
 #include "core_impl.hpp"
 #include "execution_guard.hpp"
+#include "hidden_retirement.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
 
@@ -103,6 +104,9 @@ void Core::Impl::fail(const FaultKind kind,
 
 Word Core::Impl::read_memory(const Space space, const Word address) {
   if (staged_computing()) {
+    if (space == Space::program && cacheable(address) && icache) {
+      if (const auto cached = icache->peek(address)) { return *cached; }
+    }
     return sample_instruction({.kind = EffectKind::read, .space = space, .address = address});
   }
   if (space != Space::program && address >= detail::io_begin) {
@@ -129,6 +133,9 @@ void Core::Impl::write_memory(const Space space, const Word address, const Word 
                                           .space = space,
                                           .address = address,
                                           .value = value & word_mask}));
+    if (space == Space::program && cacheable(address) && icache) {
+      icache->write({.address = address, .value = value});
+    }
     return;
   }
   if (space != Space::program && address >= detail::io_begin) {
@@ -192,34 +199,44 @@ void Core::Impl::step_decoded(const detail::Instruction &decoded) {
     return;
   }
   current_words = decoded.words;
+  mark_hidden(detail::RetirementField::interrupt_inhibited);
+  mark_pcu_field({.storage = RegisterStorage::pc, .mask = word_mask});
   cpu.interrupt_inhibited = false;
   cpu.reg.pc = (current_pc + decoded.words) & word_mask;
   execute(decoded);
+  publish_pcu();
   synchronize_cache_mode();
   if (fault.kind != FaultKind::none) { return; }
   if (repeating) {
+    mark_hidden(detail::RetirementField::repeat_opcode);
+    mark_hidden(detail::RetirementField::repeated_instruction);
+    mark_hidden(detail::RetirementField::repeat_loaded);
+    mark_hidden(detail::RetirementField::repeat_remaining);
     cpu.repeat_opcode = decoded.opcode;
     repeated = decoded;
     cpu.repeat_loaded = true;
     --cpu.repeat_remaining;
     if (cpu.repeat_remaining != 0) {
+      mark_pcu_field({.storage = RegisterStorage::lc, .mask = word_mask});
+      mark_pcu_field({.storage = RegisterStorage::pc, .mask = word_mask});
       cpu.reg.lc = cpu.repeat_remaining;
       cpu.reg.pc = current_pc;
-      ++cpu.instructions;
-      cpu.cycles += decoded.cycles;
+      publish_pcu();
+      retire_instruction(decoded.cycles);
       return;
     }
+    mark_pcu_field({.storage = RegisterStorage::lc, .mask = word_mask});
+    mark_hidden(detail::RetirementField::repeat_completed);
     cpu.reg.lc = cpu.repeat_lc;
     cpu.repeat_completed = true;
     cpu.repeat_loaded = false;
   } else if (!detail::is_repeat(decoded.operation)) {
+    mark_hidden(detail::RetirementField::repeat_completed);
     cpu.repeat_completed = false;
   }
   finish_loop();
-  if (fault.kind == FaultKind::none) {
-    ++cpu.instructions;
-    cpu.cycles += decoded.cycles;
-  }
+  publish_pcu();
+  if (fault.kind == FaultKind::none) { retire_instruction(decoded.cycles); }
 }
 
 Core::Core(const Buffers buffers, Io *const io, const Options options)

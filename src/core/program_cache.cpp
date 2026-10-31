@@ -62,19 +62,38 @@ std::optional<Word> ProgramCache::fetch(const Word address,
                                         const std::span<const Word> memory,
                                         const bool burst,
                                         const Word cacheable_end) {
-  if (address >= memory.size()) { return std::nullopt; }
+  const auto reader = [](void *context, const Word index) -> std::optional<Word> {
+    return (*static_cast<const std::span<const Word> *>(context))[index];
+  };
+  auto source = memory;
+  return fetch(address, memory.size(), burst, cacheable_end, reader, &source);
+}
+
+std::optional<Word> ProgramCache::fetch(const Word address,
+                                        const std::size_t size,
+                                        const bool burst,
+                                        const Word cacheable_end,
+                                        const Reader reader,
+                                        void *const context) {
+  if (address >= size) { return std::nullopt; }
+  if (reader == nullptr) { throw std::invalid_argument("Cache reader is missing"); }
   const auto slot = acquire(address);
-  if (slot == sector_count) { return memory[address] & word_mask; }
+  if (slot == sector_count) {
+    const auto value = reader(context, address);
+    return value ? std::optional(*value & word_mask) : std::nullopt;
+  }
   touch(slot);
   auto &sector = sectors_[slot];
   const auto offset = address % sector_words_;
   if (sector.valid.test(offset)) { return words_[(slot * sector_words_) + offset]; }
   const auto count = burst ? 4U - (address % 4) : 1U;
   const auto end =
-      std::ranges::min(std::array<std::size_t, 3>{address + count, memory.size(), cacheable_end});
+      std::ranges::min(std::array<std::size_t, 3>{address + count, size, cacheable_end});
   for (std::size_t next = address; next < end; ++next) {
     const auto word = next % sector_words_;
-    words_[(slot * sector_words_) + word] = memory[next] & word_mask;
+    const auto value = reader(context, static_cast<Word>(next));
+    if (!value) { return std::nullopt; }
+    words_[(slot * sector_words_) + word] = *value & word_mask;
     sector.valid.set(word);
   }
   return words_[(slot * sector_words_) + offset];

@@ -42,6 +42,7 @@ FaultKind rejected_effect(const InstructionEffect effect) {
     case EffectKind::move_update:
     case EffectKind::alu_update:
     case EffectKind::unit_update:
+    case EffectKind::pcu_update:
     case EffectKind::retire:
     default: throw std::logic_error("No rejection class for retirement");
   }
@@ -115,17 +116,13 @@ InstructionProgress Core::begin_owned(const std::optional<InstructionWords> capt
       publication != InstructionPublication::address_updates &&
       publication != InstructionPublication::move_updates &&
       publication != InstructionPublication::alu_updates &&
-      publication != InstructionPublication::unit_updates) {
+      publication != InstructionPublication::unit_updates &&
+      publication != InstructionPublication::pcu_updates) {
     throw std::invalid_argument("Unknown instruction publication mode");
   }
   if (captured && (words.address != fetch.address ||
                    (fetch.latched_opcode && *fetch.latched_opcode != words.opcode))) {
     throw std::invalid_argument("Captured instruction differs from the actual CPU fetch/latch");
-  }
-  if ((impl_->cpu.reg.sr & detail::cache_enable) != 0) {
-    impl_->current_pc = words.address;
-    impl_->fail(FaultKind::unsupported_mode, Space::program, words.address, impl_->cpu.reg.sr);
-    return {.progress = progress(), .fault = fault()};
   }
   if (!impl_->effect_owner) { impl_->effect_owner = std::make_shared<const bool>(false); }
   if (!impl_->staged) { impl_->staged = std::make_unique<detail::StagedState>(); }
@@ -158,7 +155,7 @@ InstructionProgress Core::advance_instruction(const EffectTicket &ticket) {
   const auto effect = *selected;
   if (effect.kind == EffectKind::retire) {
     if (!work.complete) { throw std::logic_error("Retirement lost its native computation"); }
-    impl_->restore_execution(work.candidate);
+    impl_->retire_owned();
     work.active = false;
     work.pending.reset();
     return {.progress = progress(), .fault = fault(), .retired = true};
@@ -175,6 +172,8 @@ InstructionProgress Core::advance_instruction(const EffectTicket &ticket) {
     if (!effect.alu_update) { throw std::logic_error("Native ALU writeback is missing"); }
   } else if (effect.kind == EffectKind::unit_update) {
     if (!effect.unit_update) { throw std::logic_error("Native scalar-unit writeback is missing"); }
+  } else if (effect.kind == EffectKind::pcu_update) {
+    if (!effect.pcu_update) { throw std::logic_error("Native PCU writeback is missing"); }
   } else if (!impl_->perform_instruction(effect, response)) {
     impl_->current_pc = effect.pc;
     impl_->fail(rejected_effect(effect),

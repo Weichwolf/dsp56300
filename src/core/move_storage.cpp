@@ -33,6 +33,7 @@ void storage(State &state, const RegisterUpdate update, const Visitor &visit) {
     case RegisterStorage::ep: visit(state.ep, 0U); return;
     case RegisterStorage::vba: visit(state.vba, 0U); return;
     case RegisterStorage::stack: visit(state.stack.at(update.index), 0U); return;
+    case RegisterStorage::pc: visit(state.pc, 0U); return;
     default: throw std::logic_error("Unknown native MOVE storage");
   }
 }

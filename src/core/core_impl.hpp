@@ -63,6 +63,16 @@ struct Core::Impl {
 
   void compute_instruction();
   void capture_program_words();
+  [[nodiscard]] bool pcu_publication() const noexcept;
+  void mark_pcu_field(RegisterUpdate update) const;
+  void publish_pcu() const;
+  void apply_pcu(const PcuWriteback &update);
+  [[nodiscard]] Word read_pcu_register(unsigned number);
+  void mark_hidden(detail::RetirementField field) const;
+  void mark_debug(std::uint8_t mask) const;
+  void mark_vector() const;
+  void retire_instruction(unsigned cycles);
+  void retire_owned();
   [[nodiscard]] bool unit_publication() const noexcept;
   void begin_unit(RegisterUnit unit) const;
   void mark_unit_field(RegisterUpdate update) const;
@@ -110,6 +120,7 @@ struct Core::Impl {
                                                const detail::NativeOp *operation) noexcept;
   void execute(const detail::Instruction &decoded);
   void execute_operation(const detail::Instruction &decoded);
+  void execute_return(const detail::Instruction &decoded);
   void execute_immediate(const detail::Instruction &decoded);
   void execute_iteration(const detail::Instruction &decoded);
   void normalize_fast(Word opcode);
@@ -163,7 +174,8 @@ struct Core::Impl {
   void execute_shift(const detail::Instruction &decoded);
   void arithmetic_shift(std::uint64_t value, detail::ShiftControl control);
   void logical_shift(detail::ShiftControl control, bool rotate = false);
-  [[nodiscard]] Word read_register(unsigned number);
+  [[nodiscard]] Word read_register(unsigned number,
+                                   detail::StackOwner owner = detail::StackOwner::operand);
   void write_register(unsigned number, Word value);
   [[nodiscard]] Word effective(detail::AddressForm form);
   [[nodiscard]] Word update_address(detail::AddressUpdate update);
@@ -175,8 +187,8 @@ struct Core::Impl {
   void arithmetic_flags(std::uint64_t value, bool overflowed);
   void logical_flags(Word value);
   void round(std::uint64_t &value);
-  void push(Word high, Word low);
-  [[nodiscard]] std::uint64_t pop();
+  void push(Word high, Word low, detail::StackOwner owner = detail::StackOwner::operand);
+  [[nodiscard]] std::uint64_t pop(detail::StackOwner owner = detail::StackOwner::operand);
   void finish_loop();
   void restore_loop();
   void execute_loop(const detail::Instruction &decoded);

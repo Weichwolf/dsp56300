@@ -143,7 +143,8 @@ enum class InstructionPublication : std::uint8_t {
   address_updates,
   move_updates,
   alu_updates,
-  unit_updates
+  unit_updates,
+  pcu_updates
 };
 
 enum class EffectKind : std::uint8_t {
@@ -157,7 +158,8 @@ enum class EffectKind : std::uint8_t {
   alu_update,
   fetch_opcode,
   fetch_extension,
-  unit_update
+  unit_update,
+  pcu_update
 };
 
 struct AddressWriteback {
@@ -185,7 +187,8 @@ enum class RegisterStorage : std::uint8_t {
   sz,
   ep,
   vba,
-  stack
+  stack,
+  pc
 };
 enum class MoveProducer : std::uint8_t { register_write, accumulator_read, stack_read, long_load };
 
@@ -223,6 +226,14 @@ struct UnitWriteback {
   bool operator==(const UnitWriteback &) const = default;
 };
 
+// Actual native program-control register writes; hidden state retires separately.
+struct PcuWriteback {
+  Word opcode = 0;
+  std::uint8_t count = 0;
+  std::array<RegisterUpdate, 8> updates{};
+  bool operator==(const PcuWriteback &) const = default;
+};
+
 struct InstructionEffect {
   EffectKind kind = EffectKind::retire;
   Space space = Space::program;
@@ -234,6 +245,7 @@ struct InstructionEffect {
   std::optional<MoveWriteback> move_update = std::nullopt;
   std::optional<AluWriteback> alu_update = std::nullopt;
   std::optional<UnitWriteback> unit_update = std::nullopt;
+  std::optional<PcuWriteback> pcu_update = std::nullopt;
   bool operator==(const InstructionEffect &) const = default;
 };
 
@@ -304,7 +316,8 @@ class Core {
 public:
   explicit Core(Buffers buffers, Io *io = nullptr, Options options = {});
   // External instruction owner supplies captured words and advances real effects.
-  // All staged P/X/Y access uses this bus; ordinary run requires RAM buffers.
+  // Staged transfers use this bus except for retained program-cache hits;
+  // ordinary run requires RAM buffers.
   explicit Core(Io &bus, Options options = {});
   ~Core();
   Core(const Core &) = delete;

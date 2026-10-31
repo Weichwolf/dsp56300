@@ -3,6 +3,7 @@
 #include "conditions.hpp"
 #include "core_impl.hpp"
 #include "dsp56300/core.hpp"
+#include "hidden_retirement.hpp"
 #include "instruction.hpp"
 
 namespace dsp56300 {
@@ -22,6 +23,7 @@ void Core::Impl::execute_exception(const Instruction &decoded) {
   // Repeated ILLEGAL raises one pending exception, admitted after REP finishes.
   if (vector.phase != VectorPhase::none) { return; }
   const bool illegal = decoded.operation == Operation::illegal;
+  mark_vector();
   vector = {.resume = illegal ? address_add(current_pc, 2) : cpu.reg.pc,
             .address = (cpu.reg.vba & vector_base_mask) | (illegal ? illegal_vector : trap_vector),
             .level = maximum_level,
@@ -33,18 +35,24 @@ void Core::Impl::call_vector(const Instruction &decoded) {
                           ? decoded.opcode & short_address_mask
                           : control_address(decoded);
   if (fault.kind != FaultKind::none) { return; }
-  push(vector.resume, cpu.reg.sr);
+  push(vector.resume, cpu.reg.sr, StackOwner::pcu);
   if (fault.kind != FaultKind::none) { return; }
   constexpr Word cleared =
       scale_up | scale_down | arithmetic_16 | loop_flag | forever_flag | priority_mask;
   const auto priority = vector.level == maximum_level ? maximum_level : vector.level + 1;
+  mark_pcu_field({.storage = RegisterStorage::sr, .mask = cleared});
+  mark_pcu_field({.storage = RegisterStorage::pc, .mask = word_mask});
   cpu.reg.sr = (cpu.reg.sr & ~cleared) | (priority << priority_shift);
   cpu.reg.pc = target;
+  mark_hidden(RetirementField::vector_phase);
   vector.phase = VectorPhase::none;
 }
 
 void Core::Impl::step_vector() {
   if (vector.phase == VectorPhase::pending) {
+    mark_pcu_field({.storage = RegisterStorage::pc, .mask = word_mask});
+    mark_hidden(RetirementField::repeat_completed);
+    mark_hidden(RetirementField::vector_phase);
     cpu.reg.pc = vector.resume;
     cpu.repeat_completed = false;
     vector.phase = VectorPhase::first;
@@ -68,17 +76,19 @@ void Core::Impl::step_vector() {
     execute(decoded);
     if (fault.kind != FaultKind::none) { return; }
     if (decoded.words == 2 || vector.phase == VectorPhase::second) {
+      mark_hidden(RetirementField::vector_phase);
+      mark_hidden(RetirementField::interrupt_inhibited);
+      mark_pcu_field({.storage = RegisterStorage::pc, .mask = word_mask});
       vector.phase = VectorPhase::none;
       cpu.reg.pc = vector.resume;
       cpu.interrupt_inhibited = true;
     } else {
+      mark_hidden(RetirementField::vector_phase);
       vector.phase = VectorPhase::second;
     }
   }
+  publish_pcu();
   synchronize_cache_mode();
-  if (fault.kind == FaultKind::none) {
-    ++cpu.instructions;
-    cpu.cycles += decoded.cycles;
-  }
+  if (fault.kind == FaultKind::none) { retire_instruction(decoded.cycles); }
 }
 } // namespace dsp56300

@@ -27,9 +27,12 @@ public:
   };
 
   explicit ProgramCache(unsigned sector_words);
+  using Reader = std::optional<Word> (*)(void *context, Word address);
   [[nodiscard]] std::optional<Word> peek(Word address) const;
   [[nodiscard]] std::optional<Word>
   fetch(Word address, std::span<const Word> memory, bool burst, Word cacheable_end);
+  [[nodiscard]] std::optional<Word> fetch(
+      Word address, std::size_t size, bool burst, Word cacheable_end, Reader reader, void *context);
   void write(Write transfer);
   void lock(Word address, bool locked);
   void free();

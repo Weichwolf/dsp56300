@@ -118,9 +118,10 @@ void Core::Impl::execute_bit(const Instruction &decoded) {
     publish_unit();
     if (previous != ((decoded.opcode & (1U << 5)) != 0)) { return; }
     if (bit_call(decoded)) {
-      push(cpu.reg.pc, cpu.reg.sr);
+      push(cpu.reg.pc, cpu.reg.sr, StackOwner::pcu);
       if (fault.kind != FaultKind::none) { return; }
     }
+    mark_pcu_field({.storage = RegisterStorage::pc, .mask = word_mask});
     cpu.reg.pc = decoded.operation == Operation::bit_jump
                      ? decoded.extension
                      : address_add(current_pc, signed_word(decoded.extension));

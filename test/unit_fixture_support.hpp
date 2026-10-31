@@ -21,6 +21,7 @@ inline void apply(Registers &state, const RegisterUpdate field) {
     case RegisterStorage::n: word = &state.n.at(field.index); break;
     case RegisterStorage::m: word = &state.m.at(field.index); break;
     case RegisterStorage::sr: word = &state.sr; break;
+    case RegisterStorage::pc: word = &state.pc; break;
     case RegisterStorage::omr: word = &state.omr; break;
     case RegisterStorage::la: word = &state.la; break;
     case RegisterStorage::lc: word = &state.lc; break;

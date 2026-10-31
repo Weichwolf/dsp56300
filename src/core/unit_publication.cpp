@@ -14,7 +14,9 @@ namespace dsp56300 {
 using namespace detail;
 
 bool Core::Impl::unit_publication() const noexcept {
-  return staged_computing() && staged->publication == InstructionPublication::unit_updates &&
+  return staged_computing() &&
+         (staged->publication == InstructionPublication::unit_updates ||
+          staged->publication == InstructionPublication::pcu_updates) &&
          fault.kind == FaultKind::none;
 }
 

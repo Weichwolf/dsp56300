@@ -4,6 +4,7 @@
 #include "core_impl.hpp"
 #include "dsp56300/core.hpp"
 #include "fields.hpp"
+#include "hidden_retirement.hpp"
 #include "instruction.hpp"
 
 namespace dsp56300 {
@@ -15,8 +16,11 @@ constexpr Word repeat_zero_count = 65536;
 }
 
 void Core::Impl::restore_loop() {
-  const auto saved = pop();
-  const auto previous = pop();
+  const auto saved = pop(StackOwner::pcu);
+  const auto previous = pop(StackOwner::pcu);
+  mark_pcu_field({.storage = RegisterStorage::sr, .mask = loop_status});
+  mark_pcu_field({.storage = RegisterStorage::la, .mask = word_mask});
+  mark_pcu_field({.storage = RegisterStorage::lc, .mask = word_mask});
   cpu.reg.sr = (cpu.reg.sr & ~loop_status) | (static_cast<Word>(saved) & loop_status);
   cpu.reg.la = static_cast<Word>(previous >> word_bits);
   cpu.reg.lc = static_cast<Word>(previous) & word_mask;
@@ -34,6 +38,8 @@ void Core::Impl::finish_loop() {
     return;
   }
   if (reg.lc != 1 || (reg.sr & forever_flag) != 0) {
+    mark_pcu_field({.storage = RegisterStorage::lc, .mask = word_mask});
+    mark_pcu_field({.storage = RegisterStorage::pc, .mask = word_mask});
     reg.lc = address_add(reg.lc, -1);
     reg.pc = static_cast<Word>(reg.stack[reg.sp & (stack_entries - 1)] >> word_bits);
     return;
@@ -55,7 +61,7 @@ Word Core::Impl::loop_count(const Instruction &decoded) {
       fail(FaultKind::invalid_instruction, Space::program, current_pc, opcode);
       return 0;
     }
-    return read_register(selector);
+    return read_pcu_register(selector);
   }
   Word address = (opcode >> 8) & six_bit_mask;
   if (operation == Operation::loop_effective || operation == Operation::repeat_effective) {
@@ -77,6 +83,7 @@ void Core::Impl::execute_loop(const Instruction &decoded) {
   if (operation == Operation::end_loop || operation == Operation::break_loop) {
     if (operation == Operation::break_loop) {
       if (!condition({.status = reg.sr, .selector = decoded.opcode & 15U})) { return; }
+      mark_pcu_field({.storage = RegisterStorage::pc, .mask = word_mask});
       reg.pc = (reg.la + 1) & word_mask;
     }
     restore_loop();
@@ -86,6 +93,11 @@ void Core::Impl::execute_loop(const Instruction &decoded) {
     const auto saved_count = reg.lc;
     const auto count = loop_count(decoded);
     if (fault.kind != FaultKind::none) { return; }
+    mark_hidden(RetirementField::repeat_remaining);
+    mark_hidden(RetirementField::repeat_pc);
+    mark_hidden(RetirementField::repeat_lc);
+    mark_hidden(RetirementField::repeat_loaded);
+    mark_pcu_field({.storage = RegisterStorage::lc, .mask = word_mask});
     cpu.repeat_remaining = count == 0 ? repeat_zero_count : count;
     cpu.repeat_pc = reg.pc;
     cpu.repeat_lc = saved_count;
@@ -101,20 +113,25 @@ void Core::Impl::execute_loop(const Instruction &decoded) {
   const bool relative = forever ? (decoded.opcode & 1U) == 0 : (decoded.opcode & 16U) != 0;
   const auto last =
       relative ? address_add(current_pc, signed_word(decoded.extension)) : decoded.extension;
-  push(reg.la, reg.lc);
+  push(reg.la, reg.lc, StackOwner::pcu);
   if (fault.kind != FaultKind::none) { return; }
   // The count is sampled after the first push: DO SP/SC see its increment and
   // DO SSL reads the saved outer LC, as specified by the instruction sequence.
   const auto count = forever ? reg.lc : loop_count(decoded);
   if (fault.kind != FaultKind::none) { return; }
   if (!forever && count == 0) {
-    static_cast<void>(pop());
+    static_cast<void>(pop(StackOwner::pcu));
+    mark_pcu_field({.storage = RegisterStorage::pc, .mask = word_mask});
     reg.pc = (last + 1) & word_mask;
     return;
   }
+  mark_pcu_field({.storage = RegisterStorage::lc, .mask = word_mask});
   reg.lc = count;
-  push(reg.pc, reg.sr);
+  publish_pcu();
+  push(reg.pc, reg.sr, StackOwner::pcu);
   if (fault.kind != FaultKind::none) { return; }
+  mark_pcu_field({.storage = RegisterStorage::la, .mask = word_mask});
+  mark_pcu_field({.storage = RegisterStorage::sr, .mask = loop_status});
   reg.la = last;
   reg.sr = (reg.sr & ~forever_flag) | loop_flag | (forever ? forever_flag : 0U);
 }
