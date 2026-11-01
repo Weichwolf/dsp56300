@@ -16,6 +16,7 @@ namespace {
 constexpr Word payload = 0x765432, incoming = 0xab765432;
 constexpr Word low_port = 0xffff80, high_port = 0xffffc0;
 constexpr Word ram_address = 0x180, negate = 0x200036;
+constexpr Word mode_sa = Word{1} << 17;
 
 struct Event {
   Space space = Space::x;
@@ -155,7 +156,7 @@ void register_ports(const Backend backend) {
 }
 
 struct MemoryCase {
-  Word opcode = 0, cycles = 2;
+  Word opcode = 0, cycles = 2, modes = 0;
   Space peripheral_space = Space::x, memory_space = Space::x;
   bool write = false, immediate = false;
 };
@@ -174,6 +175,7 @@ void memory_port(const Backend backend, const MemoryCase input) {
   }
   auto state = initial_state();
   state.r[0] = ram_address;
+  state.sr = input.modes;
   machine.core.set_registers(state);
   const auto result = machine.core.run(1);
   state.pc += static_cast<Word>(program.size());
@@ -205,7 +207,7 @@ void fast_memory_port(const Backend backend, const MemoryCase input, const Word 
   }
   auto state = initial_state();
   state.r[0] = ram_address;
-  state.sr = status_byte;
+  state.sr = status_byte | input.modes;
   machine.core.set_registers(state);
   machine.core.request_interrupt(vector, 0, {.address = start, .opcode = 0});
   const bool rejected = input.immediate && slot != 0;
@@ -239,12 +241,14 @@ void fast_memory_port(const Backend backend, const MemoryCase input, const Word 
           "Fast MOVEP resumes the foreground without an RTI or repeated peripheral effect");
 }
 
-void staged_fast_immediate(const Backend backend) {
+void staged_fast_immediate(const Backend backend, const Word modes) {
   constexpr Word vector = 0x54;
   constexpr Word opcode = 0x07f405;
   Script io({{.address = low_port + 5, .pc = vector, .value = payload, .write = true}});
   Machine machine(backend, &io);
-  const auto state = initial_state();
+  auto state = initial_state();
+  state.sr = modes;
+  machine.core.set_registers(state);
   machine.core.request_interrupt(vector, 0, {.address = start, .opcode = 0});
   const auto first =
       machine.core.begin_instruction({.address = vector, .opcode = opcode, .extension = payload});
@@ -284,10 +288,14 @@ void memory_ports(const Backend backend) {
        {.opcode = 0x00d805, .cycles = 6, .memory_space = Space::program, .write = true},
        {.opcode = 0x07f405, .write = true, .immediate = true},
        {.opcode = 0x07b485, .peripheral_space = Space::y, .write = true, .immediate = true}}};
-  for (const auto item : cases) {
-    memory_port(backend, item);
-    fast_memory_port(backend, item, 0);
-    fast_memory_port(backend, item, 1);
+  constexpr std::array modes{Word{0}, mode_sa, mode_sa | mode_down, mode_sa | mode_up};
+  for (auto item : cases) {
+    for (const auto status : modes) {
+      item.modes = status;
+      memory_port(backend, item);
+      fast_memory_port(backend, item, 0);
+      fast_memory_port(backend, item, 1);
+    }
   }
 }
 
@@ -363,7 +371,9 @@ int main() {
       dsp56300::test::vector_base_register(backend);
       dsp56300::test::register_ports(backend);
       dsp56300::test::memory_ports(backend);
-      dsp56300::test::staged_fast_immediate(backend);
+      for (const auto modes : {0U, dsp56300::test::mode_sa}) {
+        dsp56300::test::staged_fast_immediate(backend, modes);
+      }
       dsp56300::test::self_modify(backend, false);
       dsp56300::test::self_modify(backend, true);
       dsp56300::test::mode_change(backend);

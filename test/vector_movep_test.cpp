@@ -252,6 +252,69 @@ void atomic(const Backend backend, const Form form, const Word slot) {
           "Atomic entry resumes its actual foreground without another peripheral transaction");
 }
 
+void sa_case(const Backend backend,
+             const Word slot,
+             const InstructionPublication policy,
+             Form form,
+             const Word reg) {
+  // FM3.4.1 register mapping is separate from raw memory/peripheral word copies.
+  constexpr Word sa = Word{1} << 17;
+  constexpr Word r0 = 16;
+  form.opcode = (form.opcode & ~register_mask) | (reg << 8);
+  auto bus = script(form, slot);
+  auto state = initial();
+  state.sr |= sa;
+  Core core(bus, {.backend = backend});
+  core.set_registers(state);
+  core.request_interrupt(vector, 0, {.address = foreground, .opcode = foreground_move});
+  static_cast<void>(core.begin_fetch(policy));
+  if (slot == 1) {
+    finish(core);
+    bus.pc = vector + 1;
+    static_cast<void>(core.begin_fetch(policy));
+  }
+  if (reg == r0) {
+    finish(core);
+    if (slot == 0) {
+      static_cast<void>(core.begin_fetch(policy));
+      finish(core);
+    }
+    state.r[0] = payload;
+    require(core.registers() == state &&
+                core.progress() == Progress{.instructions = 2, .estimated_cycles = 2} &&
+                core.fault().kind == FaultKind::none && bus.exact && bus.calls == 3 &&
+                bus.accepted == 3 && !core.instruction_fetch().exception_vector,
+            "SA does not truncate a 24-bit peripheral read into non-Data-ALU register R0");
+    return;
+  }
+  for (unsigned effect = 0; effect < effect_bound && core.fault().kind == FaultKind::none;
+       ++effect) {
+    static_cast<void>(core.advance_instruction(pending(core).ticket));
+  }
+  require(core.fault() == Fault{.kind = FaultKind::unsupported_mode,
+                                .space = Space::program,
+                                .address = vector + slot,
+                                .value = state.sr,
+                                .pc = vector + slot} &&
+              core.registers() == state &&
+              core.progress() == Progress{.instructions = slot, .estimated_cycles = slot} &&
+              bus.exact && bus.calls == 2 && bus.accepted == 2 && !core.instruction_outcome(),
+          "Unimplemented SA Data-ALU mapping refuses before any register/peripheral effect");
+}
+
+unsigned mode_checks(const Backend backend,
+                     const InstructionPublication policy,
+                     const Form form,
+                     const Word slot) {
+  constexpr Word first_data = 4;
+  constexpr Word first_address = 16;
+  for (Word reg = first_data; reg < first_address; ++reg) {
+    sa_case(backend, slot, policy, form, reg);
+  }
+  if (!form.write) { sa_case(backend, slot, policy, form, first_address); }
+  return first_address - first_data + (form.write ? 0U : 1U);
+}
+
 unsigned restrictions(const Backend backend,
                       const InstructionPublication policy,
                       const Form form,
@@ -274,6 +337,7 @@ int main() {
     unsigned refusal = 0;
     unsigned guards = 0;
     unsigned atomic_cases = 0;
+    unsigned sa_cases = 0;
     for (const auto backend : dsp56300::test::staged_test::backends) {
       for (const auto policy : policies) {
         for (const auto form : forms) {
@@ -283,6 +347,7 @@ int main() {
             refused(backend, policy, form, slot);
             ++refusal;
             guards += restrictions(backend, policy, form, slot);
+            sa_cases += mode_checks(backend, policy, form, slot);
           }
         }
       }
@@ -295,6 +360,7 @@ int main() {
     }
     std::cout << positive << " register-MOVEP vectors, " << refusal << " refusals, " << guards
               << " restrictions, " << atomic_cases << " atomic entries passed.\n";
+    std::cout << sa_cases << " SA register mapping/read guards passed.\n";
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';
     return 1;

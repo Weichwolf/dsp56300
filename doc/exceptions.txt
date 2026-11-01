@@ -67,6 +67,14 @@ foreground without RTI. Captured immediate execution also restores after an
 accepted peripheral write without replaying that effect. These component checks
 do not calibrate interrupt-entry latency or establish derivative/device behavior.
 
+Raw memory/program/immediate MOVEP transfers preserve the complete 24-bit bus
+word with SR.SA set, including either valid scaling direction (FM3.4.1/13-134).
+They do not pass through a Data-ALU register. SA Data-ALU register/accumulator
+MOVEP mappings remain unsupported and refuse before the operand; non-Data-ALU
+R0 reads remain 24-bit. Directed cases cover both fast slots, byte preservation,
+flags/address updates, operand refusal, invalid second-slot length and a staged
+post-write checkpoint. This does not qualify SA arithmetic or all register forms.
+
   cmake --build build/strict --target dsp56300_transfer_test -j4
   ctest --test-dir build/strict -R '^transfer-boundaries$' --output-on-failure
 

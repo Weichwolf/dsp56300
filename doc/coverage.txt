@@ -59,6 +59,8 @@ Core-owned and atomic vector entry retain both words before first-slot effects;
 the remaining opcode latch survives self-modifying P stores and checkpoints.
 Fast MOVEM and register MOVEP preserve the documented SSH-read and
 control-destination restrictions.
+Raw memory/program/immediate MOVEP accepts SA without truncation; unimplemented
+SA Data-ALU register mappings fail before I/O. SA arithmetic remains open.
 Captured per-instruction input still belongs to its consumer; logical pair
 capture does not qualify physical IRQ acknowledgement or pipeline timing.
 Register-MOVEP vectors have directed X0/I/O/refusal/checkpoint/guard evidence

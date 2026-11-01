@@ -144,7 +144,12 @@ void Core::Impl::peripheral_register_move(const Instruction &decoded) {
     fail(FaultKind::invalid_instruction, Space::program, current_pc, opcode);
     return;
   }
-  if (accumulator(reg) && !numeric_mode_supported()) { return; }
+  const bool data_alu = reg >= x0_register && reg <= b_register;
+  // SA Data-ALU register mapping (FM3.4.1) is not the ordinary 24-bit mapping.
+  if ((accumulator(reg) || (data_alu && (cpu.reg.sr & arithmetic_16) != 0)) &&
+      !numeric_mode_supported()) {
+    return;
+  }
   const auto value = port.write ? read_move_register(reg) : read_memory(port.space, port.address);
   if (fault.kind != FaultKind::none) { return; }
   if (port.write) {
@@ -161,7 +166,8 @@ void Core::Impl::peripheral_move(const Instruction &decoded) {
   }
   const auto port = peripheral(decoded);
   const auto opcode = decoded.opcode;
-  if (!numeric_mode_supported()) { return; }
+  // FM3.4.1/13-134: this path copies full bus words without a Data-ALU register.
+  if (!numeric_mode_supported(arithmetic_16)) { return; }
   const auto form = transfer_form(decoded);
   const bool program = decoded.operation == Operation::move_peripheral_program;
   const bool immediate = form.mode == 6 && form.index == 4;
