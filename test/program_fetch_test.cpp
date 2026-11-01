@@ -364,6 +364,49 @@ void repeat(const Backend backend) {
   });
 }
 
+void invalid_repeat_fetch(const Backend backend,
+                          const InstructionPublication publication,
+                          const bool known_extension) {
+  // FM13-160/A.3.8: a REP body is one instruction word, before any extension read.
+  const Word pc = staged_test::boot;
+  Bus bus;
+  Core original(bus, {.backend = backend});
+  original.set_registers(initial(pc));
+  static_cast<void>(
+      original.begin_instruction({.address = pc, .opcode = repeat_twice}, publication));
+  complete(original);
+  bus.pc = pc + 1;
+  bus.events = {{.space = Space::program, .address = pc + 1, .value = immediate_x0}};
+  if (known_extension) {
+    bus.events.push_back({.space = Space::program, .address = pc + 2, .value = payload});
+  }
+  const auto state = original.registers();
+  const auto progress = original.progress();
+  const auto admitted = original.begin_fetch(publication);
+  require(admitted.fault.kind == FaultKind::none &&
+              pending(original).effect.kind == EffectKind::fetch_opcode,
+          "An unloaded REP body requests its actual first opcode");
+  const auto saved = original.checkpoint();
+  Bus clone_bus = bus;
+  Core clone(clone_bus, {.backend = backend});
+  clone.restore(saved);
+  for (Core *core : {&original, &clone}) {
+    const auto result = core->advance_instruction(pending(*core).ticket);
+    const Fault expected{.kind = FaultKind::invalid_instruction,
+                         .space = Space::program,
+                         .address = pc + 1,
+                         .value = immediate_x0,
+                         .pc = pc + 1};
+    require(result.fault == expected && !result.pending && !result.retired &&
+                core->registers() == state && core->progress() == progress,
+            "Invalid two-word REP body must fail before requesting even a known extension");
+    rejected([&] { static_cast<void>(core->begin_fetch(publication)); });
+  }
+  require(bus.calls == 1 && bus.accepted == 1 && bus.exact && clone_bus.calls == 1 &&
+              clone_bus.accepted == 1 && clone_bus.exact,
+          "Both checkpoint owners read only the real invalid opcode, never its extension");
+}
+
 void run() {
   for (const auto pc : {staged_test::boot, word_mask}) {
     for (const auto from : backends) {
@@ -382,7 +425,12 @@ void run() {
                                     InstructionPublication::unit_updates,
                                     InstructionPublication::pcu_updates};
   for (const auto backend : backends) {
-    for (const auto publication : publications) { cache_burst_checkpoint(backend, publication); }
+    for (const auto publication : publications) {
+      cache_burst_checkpoint(backend, publication);
+      for (const bool known_extension : {false, true}) {
+        invalid_repeat_fetch(backend, publication, known_extension);
+      }
+    }
   }
   for (const auto backend : backends) { cache_flush_checkpoint(backend); }
   for (const auto backend : backends) {

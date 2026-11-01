@@ -43,6 +43,13 @@ void Core::Impl::capture_program_words() {
   if (fault.kind != FaultKind::none) { return; }
   work.input.extension.reset();
   work.decoded = detail::decode(work.input.opcode);
+  // FM13-160/A.3.8: reject an invalid REP body before offering an extension
+  // transaction. A missing extension must not hide the actual invalid opcode.
+  if (cpu.repeat_remaining != 0 &&
+      (work.decoded.words != 1 || !detail::repeatable(work.decoded.operation))) {
+    fail(FaultKind::invalid_instruction, Space::program, current_pc, work.input.opcode);
+    return;
+  }
   if (work.decoded.words == 2) {
     const auto address = (work.input.address + 1) & word_mask;
     const auto value = fetch(address, EffectKind::fetch_extension);

@@ -150,3 +150,9 @@ advance those emulated clocks. This interface is not complete device acceptance.
 The pcu_updates mode adds native PC/stack/loop publication and sparse hidden
 retirement; see native-pcu-publication.txt for its pending qualification and
 remaining clock/overlap limitations. PCU results are CPU writes, not Io requests.
+
+Native REP fetch rejects a non-repeatable or two-word body immediately after
+its actual opcode read, before offering an extension transaction. Missing
+extension storage cannot replace this invalid-instruction fault. The native
+fetch gate covers known/absent extensions, all six publication modes, three
+backend selections and restored owners; valid opcode latching remains separate.
