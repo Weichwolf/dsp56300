@@ -117,6 +117,15 @@ both port source values are captured before either destination changes. The
 model uses signed modular coordinates and quotient/remainder bus conversion,
 never the emulator's decoder or execution helpers. All visible registers, RAM,
 progress and interrupt admission must agree across all three backends.
+Absolute-short X/Y MOVE uses the distinct FM A-6 base costs: reads=1, stores=2.
+The corrected generator changes 72 clock fields; every program/register/memory/
+control byte remains identical. Both sanitizer generators reproduce the same file.
+short-move-base-cycles adds 39936 independent assertions per sanitizer profile:
+all 64 addresses, both directions/spaces, three backends, buffered/external owners
+and six staged publication modes. No intermediate effect publishes base clocks.
+FIR output stores, executed IIR state-store prefixes and stream cursor/progress
+stores use the same directional cost. All nine affected fixture files retain
+their exact program/register/memory/control bytes; only base-clock fields change.
 Host tests require actual emitted transfers and separately check warm M changes,
 failed guards, full-span I/O, overlapping X/Y buffers, program-alias stores,
 shorter budgets and exact four-byte accesses before an inaccessible guard page.

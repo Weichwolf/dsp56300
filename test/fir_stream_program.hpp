@@ -13,7 +13,7 @@ inline constexpr Word input_base = 0x1000, coefficient_base = 0x400, output_base
 inline constexpr Word cursor_base = 8, progress_address = 24, output_words = 1024;
 inline constexpr Word channel_instructions = taps + 8;
 inline constexpr Word frame_instructions = (channels * channel_instructions) + 5;
-inline constexpr Word frame_cycles = frame_instructions + (4 * channels) + 6;
+inline constexpr Word frame_cycles = frame_instructions + (4 * channels) + 7;
 inline constexpr Word loop_flag = Word{1} << 15;
 inline constexpr Word outer_do = 0x06df00, loop_prefix = 0x060080;
 inline constexpr Word pipelined_mac = 0xf098d2, rounded = 0x200011;

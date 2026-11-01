@@ -120,6 +120,8 @@ void single(Cases &cases, const SingleInput input) {
   if (transfer.space == Space::y) { opcode |= y_space; }
   if (transfer.short_form) {
     opcode |= short_address << 8;
+    // FM A-6 lists distinct one-clock reads and two-clock short-address stores.
+    if (!transfer.load) { ++item.progress.estimated_cycles; }
   } else {
     opcode |= effective_bit | (transfer.mode << 11) | (transfer.index << 8);
     if (transfer.mode >= 5) { ++item.progress.estimated_cycles; }

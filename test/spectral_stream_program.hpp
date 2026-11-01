@@ -89,9 +89,9 @@ inline Program program() {
   result.hop_end = pc(code) - 1;
   code.words[1] = result.hop_end;
   constexpr Word channel_overhead = 14;
-  constexpr Word channel_extra_cycles = 14;
+  constexpr Word channel_extra_cycles = 15;
   constexpr Word hop_overhead = 5;
-  constexpr Word hop_extra_cycles = 6;
+  constexpr Word hop_extra_cycles = 7;
   const auto samples = std::uint64_t{size} * (window_steps + power_steps);
   result.hop_progress = {
       .instructions = hop_overhead + (channels * (result.transform.progress.instructions + samples +

@@ -179,6 +179,8 @@ void trace(BinaryCase &item, Data &memory, const Input input, const std::vector<
     unsigned section = 0;
     for (std::size_t pc = 0; pc < steps.size() && retired < item.budget; ++pc) {
       step(item.expected, memory, steps[pc], index);
+      // Each executed short state store adds one clock beyond the one-clock body baseline.
+      if (steps[pc].action == Action::state_store) { ++item.progress.estimated_cycles; }
       if (steps[pc].completes_section) {
         check_section(item.expected, memory, outputs, section);
         ++section;

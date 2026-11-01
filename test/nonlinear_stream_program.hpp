@@ -18,7 +18,7 @@ inline constexpr Word input_words = channels * signal_period, state_words = chan
 inline constexpr Word coefficient_words = stages * 2;
 inline constexpr Word channel_instructions = (stages * 6) + 3;
 inline constexpr Word frame_instructions = (channels * channel_instructions) + 7;
-inline constexpr Word frame_cycles = frame_instructions + channels + 8;
+inline constexpr Word frame_cycles = frame_instructions + channels + 9;
 inline constexpr Word sm = Word{1} << 20, loop_flag = Word{1} << 15;
 inline constexpr Word set_sm = 0x0af974, clear_sm = 0x0af954;
 

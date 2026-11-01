@@ -123,7 +123,8 @@ BinaryCase fixture(const Input input) {
   item.expected.pc = start + static_cast<Word>(words.size());
   item.budget = input.taps + 4;
   item.dispatches = item.budget;
-  item.progress = {.instructions = item.budget, .estimated_cycles = item.budget + 4};
+  // DO adds four base clocks; the final absolute-short store adds one.
+  item.progress = {.instructions = item.budget, .estimated_cycles = item.budget + 5};
   item.before = {{.words = words, .address = start},
                  {.words = std::move(data), .address = data_base, .space = Space::x},
                  {.words = std::move(weights), .address = coefficient_base, .space = Space::y}};

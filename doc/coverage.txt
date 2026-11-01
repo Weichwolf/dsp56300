@@ -45,6 +45,18 @@ exclusion and pending-event sequences, physical reset/boot/defaults, source
 arbitration, cache prefetch/bus/pipeline timing and complete OnCE/debug behavior
 remain incomplete. A valid form diagnosed as unimplemented remains an ISA gap.
 
+Absolute-short MOVE base costs now distinguish ordinary X/Y stores=2 from reads=1
+(FM table A-1, A-6); long L: transfers and other addressing classes retain their
+prior costs. Directed literal encodings cover all 64 addresses, both directions,
+three backends, buffered/external owners and six publication modes: 39936 checks
+per sanitizer profile. The 14952-case parallel fixture changes only 72 clock fields.
+Both sanitizer generations are byte-identical; 25 CPU test groups and 9 generator
+runs per profile pass ASan/UBSan and separate TSan. The published pre-fix archive fails the same directed
+cost check. This qualifies base-cost accounting, not physical pipeline timing.
+FIR/IIR and stream models also retain all program and state bytes, correcting
+only executed-store clock fields. Earlier throughput/reference-load figures
+retain their recorded binary scope; this is not a new speed qualification.
+
 Guest VBA writes clear the eight read-only low bits; directed native MOVEC
 write/readback and retained transfer/publication cases cover this restriction.
 

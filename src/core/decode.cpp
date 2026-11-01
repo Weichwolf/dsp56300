@@ -492,6 +492,18 @@ bool parallel_address(const Word opcode) noexcept {
          (opcode & class_two_mask) == class_two;
 }
 
+std::uint8_t parallel_cycles(const Word opcode) noexcept {
+  constexpr Word effective_address = 0x4000;
+  constexpr Word load = 0x8000;
+  // FM table A-1, A-6: absolute-short MOVE reads cost one clock, stores two.
+  const bool short_store = (opcode & memory_group_mask) == memory_group &&
+                           (opcode & long_selector_mask) != 0 &&
+                           (opcode & (effective_address | load)) == 0;
+  if (short_store) { return 2; }
+  return static_cast<std::uint8_t>(1 +
+                                   (parallel_address(opcode) && address_penalty(opcode) ? 1 : 0));
+}
+
 bool transfer_address(const Operation operation) noexcept {
   return operation == Operation::viterbi_shift || operation == Operation::move_control_effective ||
          operation == Operation::move_program_effective ||
@@ -527,8 +539,7 @@ Instruction decode(const Word opcode) noexcept {
     return {.opcode = opcode,
             .operation = Operation::parallel,
             .words = static_cast<std::uint8_t>(has_extension(opcode) ? 2 : 1),
-            .cycles = static_cast<std::uint8_t>(
-                1 + (parallel_address(opcode) && address_penalty(opcode) ? 1 : 0))};
+            .cycles = parallel_cycles(opcode)};
   }
   for (const auto &rule : rules) {
     if (!rule.bits.matches(opcode)) { continue; }
