@@ -47,6 +47,8 @@ struct Core::Impl {
   }
 
   [[nodiscard]] Word fetch_program(Word address);
+  [[nodiscard]] Word read_external(Space space, Word address);
+  void write_external(Space space, Word address, Word value);
   void execute_processing(const detail::Instruction &decoded);
   void execute_cache(const detail::Instruction &decoded);
   void execute_exception(const detail::Instruction &decoded);

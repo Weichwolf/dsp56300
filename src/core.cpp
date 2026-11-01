@@ -109,6 +109,7 @@ Word Core::Impl::read_memory(const Space space, const Word address) {
     }
     return sample_instruction({.kind = EffectKind::read, .space = space, .address = address});
   }
+  if (external) { return read_external(space, address); }
   if (space != Space::program && address >= detail::io_begin) {
     Word value = 0;
     if (io == nullptr || !io->read(space, address, current_pc, value)) {
@@ -136,6 +137,10 @@ void Core::Impl::write_memory(const Space space, const Word address, const Word 
     if (space == Space::program && cacheable(address) && icache) {
       icache->write({.address = address, .value = value});
     }
+    return;
+  }
+  if (external) {
+    write_external(space, address, value);
     return;
   }
   if (space != Space::program && address >= detail::io_begin) {
@@ -321,9 +326,6 @@ std::uint32_t Core::Impl::run_general(const std::uint32_t budget) {
 
 RunResult Core::run(const std::uint32_t instruction_budget) {
   impl_->validate_staged_mutation();
-  if (impl_->external) {
-    throw std::logic_error("External instruction owner requires captured words");
-  }
   if (instruction_budget != 0) { impl_->last_outcome.reset(); }
   const detail::ExecutionGuard guard(impl_->executing);
   RunResult result;

@@ -391,6 +391,17 @@ all inactive record slots per instruction. Sequential read/NOP/write/NOP checks
 cover three backend selections, six publication modes, 18 snapshots and 36
 original/fresh continuations with exact register/I/O/count and stale-ticket
 expectations. This preserves effect capacity and does not qualify real-time use.
+Core(Io&) also executes ordinary synchronous budgets through actual P/X/Y and
+peripheral callbacks, preserving architectural cache/REP/vector latches. No native
+JIT is constructed for external storage. Host read/load/write remain span-only.
+The external-memory gate has74526 independent assertions/profile:literal access
+prefixes and60 refusals,24 direct X/Y port cases, buffer-read failure, cache128/256,
+burst faults, mixed ordinary/staged ownership and trusted continuations. Three
+authored domains share raw56/bit models with the optional all/selected diagnostic
+bench. Fifteen groups/profile qualify ASan/UBSan and TSan. Same-object CPU-archive
+controls expose the former ordinary-run rejection and failed-read destination
+corruption; the common MOVE path now stops before publishing substitute data.
+This is a CPU/host-bus contract, not physical timing, arbitration or real-time use.
 Native REP capture rejects invalid bodies before any extension request; known/
 absent extensions, six publication modes and restored owners are checked.
 Candidate checkpoints expose a completed but unpublished native continuation

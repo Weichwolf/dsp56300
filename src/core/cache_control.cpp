@@ -6,6 +6,7 @@
 #include "program_cache.hpp"
 
 #include <memory>
+#include <optional>
 
 namespace dsp56300 {
 using namespace detail;
@@ -17,8 +18,26 @@ ProgramCache &Core::Impl::program_cache() {
 
 Word Core::Impl::fetch_program(const Word address) {
   if (!cacheable(address)) { return read_memory(Space::program, address); }
-  const auto value = program_cache().fetch(
-      address, buffers.program, (cpu.reg.omr & burst_enable) != 0, options.cacheable_end);
+  const auto read = [](void *context, const Word index) -> std::optional<Word> {
+    auto &core = *static_cast<Impl *>(context);
+    Word value = 0;
+    if (core.fault.kind != FaultKind::none || core.io == nullptr ||
+        !core.io->read(Space::program, index, core.current_pc, value)) {
+      core.fail(FaultKind::memory_read, Space::program, index);
+      return std::nullopt;
+    }
+    return value & word_mask;
+  };
+  const auto value =
+      external
+          ? program_cache().fetch(address,
+                                  address_words,
+                                  (cpu.reg.omr & burst_enable) != 0,
+                                  options.cacheable_end,
+                                  read,
+                                  this)
+          : program_cache().fetch(
+                address, buffers.program, (cpu.reg.omr & burst_enable) != 0, options.cacheable_end);
   if (!value) {
     fail(FaultKind::memory_read, Space::program, address);
     return 0;

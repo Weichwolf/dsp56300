@@ -1,26 +1,45 @@
 Host I/O contract
 
-This document describes ordinary buffer-backed run/interrupt execution. The
-alternative captured-instruction route also uses Io for all staged low-RAM and
-P data accesses, retains visible CPU/progress until retirement, and records
-accepted responses without repeating external effects. Its callbacks observe
-that held CPU state; computed is observation only. See doc/staged-execution.txt.
+Memory owner             Ordinary execution                  Staged execution
+Core(Buffers, Io*)        P/X/Y spans, high X/Y Io ports       Explicit Io effects
+Core(Io&)                All P/X/Y accesses through Io        Explicit Io effects
 
-The embedder supplies derivative peripherals through Io. Guest X/Y accesses in
-0xffff80..0xffffff are dispatched to that interface; P accesses use the supplied
-program RAM. The CPU library supplies no peripheral register values or board
-behavior. Without an accepting host callback, guest I/O stops with an explicit
-fault and the instruction does not retire.
+Core(Io&) owns no RAM. Ordinary run uses the general executor and optional
+validated decode cache; this route does not construct or claim native JIT code.
+Every opcode, extension, RAM word and peripheral operation comes from the actual
+owner. Architectural cache hits and REP/vector latches retain their modeled
+values and suppress the corresponding physical reads. Host read/load/write still
+require RAM spans. Construction performs no execution; run explicitly supplies
+an instruction budget. Neither route supplies clocks, board registers or devices.
+
+Ordinary callbacks observe native pre-retirement PC/register effects. A failed
+operation stops the instruction without retirement; accepted writes and native
+prefix state remain visible. Further run calls stay faulted without replay.
+The staged route holds CPU/progress according to its selected publication mode,
+retains accepted responses and exposes real effect tickets. An active staged
+instruction rejects ordinary run; actual retirement permits an ordinary suffix.
+See staged-execution.txt. Stopped checkpoints preserve CPU/cache/latch/fault state;
+the owner separately pairs matching external memory and peripheral snapshots.
+
+Without an accepting callback, ordinary high X/Y accesses report io_read/io_write;
+external RAM/P refusals report memory_read/memory_write. The accessing instruction
+PC and actual logical address remain in the fault. The library supplies no
+successful substitute data or peripheral response.
 
 read/write exchange a 24-bit word. Returned read data is masked to 24 bits and
 outgoing writes contain only 24 significant bits. The pc argument identifies
 the accessing guest instruction, including each iteration of a REP body.
+A refused ordinary parallel MOVE read does not publish a replacement destination
+value. A failed effective-address calculation prevents the subsequent transfer.
+The native PC/source prefix remains visible; this applies to both memory owners.
 
-bit performs one host bit action. The CPU calls it once with the space, address,
+For high X/Y ports, bit performs one host-owned atomic action. The CPU calls it
+once with the space, address,
 instruction PC, bit index in [0,23] and BitAction. previous receives the bit's
 value before the action. test observes without modification; clear, set and
 change request read/modify/write as one indivisible action owned by the host.
-The CPU does not synthesize this operation from separate read/write callbacks.
+Low X/Y RAM bit instructions use a real read and, for modification, a real write.
+High-port atomic actions are not synthesized from separate read/write callbacks.
 Conditional bit jumps and branches request test. Their tested bit does not
 replace the DSP Carry flag. A rejected bit callback reports FaultKind::io_bit;
 Fault.value contains the requested bit index. Invalid bit numbers fault before

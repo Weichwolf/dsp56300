@@ -23,7 +23,7 @@ option(DSP56300_BUILD_TESTING "Build DSP library tests" ${PROJECT_IS_TOP_LEVEL})
 set(CMAKE_CXX_CLANG_TIDY "${DSP56300_CLANG_TIDY};--warnings-as-errors=*")
 
 add_library(dsp56300_core STATIC
-  src/core.cpp src/core/core_state.cpp src/core/checkpoint.cpp src/core/execution_state.cpp
+  src/core.cpp src/core/external_memory.cpp src/core/core_state.cpp src/core/checkpoint.cpp src/core/execution_state.cpp
   src/core/staged.cpp src/core/staged_compute.cpp src/core/move_publication.cpp src/core/move_storage.cpp src/core/alu_publication.cpp src/core/unit_publication.cpp src/core/pcu_publication.cpp src/core/hidden_retirement.cpp src/core/native_retirement.cpp src/core/program_capture.cpp src/core/instruction_shape.cpp
   src/core/transfer_info.cpp src/core/transfer_parallel.cpp src/core/transfer_special.cpp
   src/core/transfer_description.cpp src/core/arithmetic.cpp src/core/saturation.cpp src/core/shifts.cpp
@@ -164,6 +164,14 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   add_executable(dsp56300_candidate_checkpoint_test test/candidate_checkpoint_test.cpp)
   target_link_libraries(dsp56300_candidate_checkpoint_test PRIVATE dsp56300::core)
   add_test(NAME candidate-checkpoint-boundaries COMMAND dsp56300_candidate_checkpoint_test)
+  add_library(dsp56300_external_run_fixture STATIC test/external_run_fixture.cpp)
+  target_link_libraries(dsp56300_external_run_fixture PUBLIC dsp56300::core)
+  add_executable(dsp56300_external_run_test test/external_run_test.cpp
+    test/external_run_cache.cpp test/external_run_continuation.cpp)
+  target_link_libraries(dsp56300_external_run_test PRIVATE dsp56300_external_run_fixture)
+  add_test(NAME external-memory-execution COMMAND dsp56300_external_run_test)
+  add_executable(dsp56300_external_run_bench test/external_run_bench.cpp)
+  target_link_libraries(dsp56300_external_run_bench PRIVATE dsp56300_external_run_fixture)
   add_executable(dsp56300_staged_test test/staged_test.cpp test/staged_control.cpp
     test/staged_effects.cpp test/staged_events.cpp)
   target_link_libraries(dsp56300_staged_test PRIVATE dsp56300::core)

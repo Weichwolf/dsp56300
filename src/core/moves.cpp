@@ -132,6 +132,7 @@ void Core::Impl::memory_move(const Instruction &decoded) {
   const bool extended = (opcode & effective_address_field) != 0;
   const bool load = (opcode & store_to_register) != 0;
   const auto address = extended ? effective(form) : (opcode >> 8) & six_bit_mask;
+  if (fault.kind != FaultKind::none) { return; }
   if (!load) {
     write_memory(space, address, read_move_register(reg));
     return;
@@ -139,7 +140,8 @@ void Core::Impl::memory_move(const Instruction &decoded) {
   if (extended && form.mode == 6 && form.index == 4) {
     write_move_register(reg, decoded.extension);
   } else {
-    write_move_register(reg, read_memory(space, address));
+    const auto value = read_memory(space, address);
+    if (fault.kind == FaultKind::none) { write_move_register(reg, value); }
   }
 }
 

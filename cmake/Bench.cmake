@@ -37,3 +37,16 @@ add_custom_target(bench
   DEPENDS dsp56300_continuous_bench
   USES_TERMINAL
   VERBATIM)
+
+# Authored external-bus microfixtures share full-state correctness oracles with
+# external-memory-execution. They diagnose API cost, not continuous throughput.
+set(DSP56300_EXTERNAL_BENCH_CASE "all" CACHE STRING "all, audio-mac, image-add, or communications-xor")
+set_property(CACHE DSP56300_EXTERNAL_BENCH_CASE PROPERTY STRINGS all audio-mac image-add communications-xor)
+if(NOT DSP56300_EXTERNAL_BENCH_CASE MATCHES "^(all|audio-mac|image-add|communications-xor)$")
+  message(FATAL_ERROR "Unknown authored external-bus benchmark workload")
+endif()
+add_custom_target(bench-external-io
+  COMMAND $<TARGET_FILE:dsp56300_external_run_bench> "${DSP56300_EXTERNAL_BENCH_CASE}"
+  DEPENDS dsp56300_external_run_bench
+  USES_TERMINAL
+  VERBATIM)

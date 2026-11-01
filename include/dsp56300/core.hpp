@@ -329,9 +329,10 @@ private:
 class Core {
 public:
   explicit Core(Buffers buffers, Io *io = nullptr, Options options = {});
-  // External instruction owner supplies captured words and advances real effects.
-  // Staged transfers use this bus except for retained program-cache hits;
-  // ordinary run requires RAM buffers.
+  // External memory owner supplies every real P/X/Y/peripheral transfer.
+  // Ordinary run uses the general executor (no native JIT); staged interfaces
+  // additionally expose effect boundaries. Architectural cache hits stay native.
+  // Host read/load/write still require RAM spans; the owner pairs bus snapshots.
   explicit Core(Io &bus, Options options = {});
   ~Core();
   Core(const Core &) = delete;
