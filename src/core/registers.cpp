@@ -87,7 +87,8 @@ void Core::Impl::write_register(const unsigned number, const Word value) {
     case a_register: reg.a = aligned_word(value); break;
     case b_register: reg.b = aligned_word(value); break;
     case ep_register: reg.ep = value; break;
-    case vba_register: reg.vba = value; break;
+    // FM5.4.4.4: VBA[7:0] are read-only zero, including guest MOVEC readback.
+    case vba_register: reg.vba = value & (word_mask ^ byte_mask); break;
     case sc_register: reg.sc = value & (stack_entries * 2 - 1); break;
     case sz_register: reg.sz = value; break;
     case sr_register: reg.sr = value; break;

@@ -45,6 +45,9 @@ exclusion and pending-event sequences, physical reset/boot/defaults, source
 arbitration, cache prefetch/bus/pipeline timing and complete OnCE/debug behavior
 remain incomplete. A valid form diagnosed as unimplemented remains an ISA gap.
 
+Guest VBA writes clear the eight read-only low bits; directed native MOVEC
+write/readback and retained transfer/publication cases cover this restriction.
+
 Functional coverage includes ordinary arithmetic, integer/bit-field families,
 register/memory/parallel/MOVE forms, AGU modes, REP/DO/DOR/FOREVER/BRK/ENDDO,
 branches/subroutines/RTI, internal exceptions, RESET/WAIT/STOP, DEBUG/DEBUGcc and

@@ -103,8 +103,10 @@ https://www.nxp.com/docs/en/reference-manual/DSP56303UM.pdf
 
 Those vector tables identify VBA offsets 04 (illegal) and 08 (trap), and
 VBA's low byte does not select the bank. The ILLEGAL entry's literal 3E vector
-conflicts with these core tables; the implementation uses 04. VBA register
-readback/writable masks themselves still need separate qualification.
+conflicts with these core tables; the implementation uses 04. Guest VBA writes
+clear VBA[7:0] (FM5.4.4.4). Native MOVEC write/readback checks every low byte on
+three backends; direct host-injected register states and wider PCU masks remain
+separate qualification domains.
 ILLEGAL's documented continuation is its instruction plus two. Its instruction
 entry recommends abort/reinitialization; the guest's handler determines that
 response. TRAP/TRAPcc continuation is modeled at the next instruction from the

@@ -116,6 +116,32 @@ void register_port(const Backend backend, const PortCase input) {
           "MOVEP maps every X/Y high/low port and preserves full state");
 }
 
+void vector_base_register(const Backend backend) {
+  // FM5.4.4.4: VBA[7:0] always read as zero. Read back through native MOVEC.
+  constexpr Word bank = 0x123400;
+  constexpr Word previous_bank = 0x654300;
+  constexpr Word byte_values = 256;
+  constexpr Word move_vba = 0x05f430;
+  constexpr Word vba_to_y0 = 0x0446b0;
+  constexpr Word preserved_y1 = 0xabcdef;
+  for (Word low = 0; low < byte_values; ++low) {
+    Machine machine(backend);
+    const std::array program{move_vba, bank + low, vba_to_y0};
+    machine.core.load(Space::program, start, program);
+    auto expected = initial_state();
+    expected.vba = previous_bank;
+    expected.y = std::uint64_t{preserved_y1} << word_bits;
+    machine.core.set_registers(expected);
+    const auto result = machine.core.run(2);
+    expected.vba = ((bank + low) / byte_values) * byte_values;
+    expected.y |= expected.vba;
+    expected.pc += program.size();
+    require(result.dispatches == 2 && result.fault.kind == FaultKind::none &&
+                machine.core.progress().instructions == 2 && machine.core.registers() == expected,
+            "VBA ignores every written low byte and native MOVEC reads the aligned bank");
+  }
+}
+
 void register_ports(const Backend backend) {
   for (Word index = 0; index < 64; ++index) {
     for (const bool high : {false, true}) {
@@ -334,6 +360,7 @@ int main() {
   try {
     for (const auto backend :
          {dsp56300::Backend::reference, dsp56300::Backend::cached, dsp56300::Backend::jit}) {
+      dsp56300::test::vector_base_register(backend);
       dsp56300::test::register_ports(backend);
       dsp56300::test::memory_ports(backend);
       dsp56300::test::staged_fast_immediate(backend);

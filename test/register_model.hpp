@@ -159,7 +159,8 @@ inline void write(Registers &state, const unsigned number, const Word value) {
           accumulator_mask;
       break;
     case reg_ep: state.ep = value; break;
-    case reg_vba: state.vba = value; break;
+    // FM5.4.4.4 aligns the guest-written vector table to a 256-word bank.
+    case reg_vba: state.vba = (value / 256) * 256; break;
     case reg_sc: state.sc = value % 32; break;
     case reg_sz: state.sz = value; break;
     case reg_sr: state.sr = value; break;
