@@ -41,11 +41,12 @@ boundary policy; a long service saturates the mask at three. This is not a
 complete nonmaskable-source arbiter or hardware pipeline model.
 
 The implemented vector subset comprises unconditional short/effective JSR,
-parallel ALU/data moves, NOP, MOVEM and MOVEP memory/program forms. Fast MOVEM
-cannot read SSH or load LA/LC/SP/SC/SSH/SSL, following FM A.3.7. Register MOVEP
-remains unsupported in fast vectors, including the restricted stack/loop
-register destinations listed in FM Appendix A.3.7. One two-word fast instruction is admitted at
-the first vector word. Existing long-call entry can use either vector slot.
+parallel ALU/data moves, NOP, MOVEM and MOVEP register/memory/program forms.
+Fast MOVEM and register MOVEP cannot read SSH or load LA/LC/SP/SC/SSH/SSL,
+following FM A.3.7. MOVEP direction is peripheral-relative, opposite to MOVEM;
+the native register/operand implementation handles the accepted transfer.
+One two-word fast instruction is admitted at the first vector word. Existing
+long-call entry can use either vector slot.
 Conditional/bit-call vector forms and other legal fast instruction classes are
 still explicit unsupported cases. Decoder, EA, stack and I/O failures do not
 retire the failed instruction; already accepted vector or address effects are
@@ -77,6 +78,19 @@ effect, self-modifying P stores, fresh owners before/after first retirement,
 atomic entry, prohibited MOVEM registers and invalid two-word second slots.
 The fully supplied begin_instruction route retains its no-implicit-fetch
 contract; a consumer choosing that route owns its captured vector inputs.
+
+Register-MOVEP vector regression uses eight authored X0 transfers across X/Y,
+high/low I/O groups and both directions in either slot. Three backends and six
+publication policies cover 288 positive contexts with fresh checkpoint owners
+before/after the actual operand, 288 explicit operand refusals, 1008 prohibited
+source/destination cases and 48 atomic entries. It checks full registers/stack,
+CCR, vector callback PC, 24-bit input masking, listed base costs and actual
+foreground resumption. The identical strict test object fails on the prior core
+and passes after admission is added. Other register/numerical combinations and
+physical pipeline/entry timing remain separate qualification requirements.
+
+  cmake --build build/strict --target dsp56300_vector_movep_test
+  ctest --test-dir build/strict -R '^native-vector-movep$' --output-on-failure
 
 Sources and unresolved details
 

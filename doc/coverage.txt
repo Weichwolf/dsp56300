@@ -49,16 +49,18 @@ Functional coverage includes ordinary arithmetic, integer/bit-field families,
 register/memory/parallel/MOVE forms, AGU modes, REP/DO/DOR/FOREVER/BRK/ENDDO,
 branches/subroutines/RTI, internal exceptions, RESET/WAIT/STOP, DEBUG/DEBUGcc and
 architectural cache controls. None is complete merely because code/tests exist.
-Fast vectors additionally execute memory/program MOVEP forms, with real I/O,
-manual base costs and native EA updates in either legal slot. Two-word slot-two
+Fast vectors additionally execute register/memory/program MOVEP forms, with
+real I/O, manual base costs and native EA updates in either legal slot. Two-word slot-two
 refusal and captured immediate post-I/O restore retain the accepted prefix.
 Core-owned and atomic vector entry retain both words before first-slot effects;
 the remaining opcode latch survives self-modifying P stores and checkpoints.
-Fast MOVEM preserves the documented SSH-read/control-destination restrictions.
+Fast MOVEM and register MOVEP preserve the documented SSH-read and
+control-destination restrictions.
 Captured per-instruction input still belongs to its consumer; logical pair
 capture does not qualify physical IRQ acknowledgement or pipeline timing.
-Register MOVEP fast forms, other legal classes and physical entry/pipeline
-latency remain open; see doc/exceptions.txt and transfer-boundaries.
+Register-MOVEP vectors have directed X0/I/O/refusal/checkpoint/guard evidence
+across both slots; other register/mode combinations, legal classes and physical
+entry/pipeline latency remain open. See doc/exceptions.txt and native-vector-movep.
 Exact qualified domains and assumptions remain in the ISA table and in
 doc/exceptions.txt, doc/processing.txt, doc/debugging.txt and doc/program-cache.txt.
 

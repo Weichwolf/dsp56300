@@ -16,15 +16,22 @@ namespace {
 constexpr Word vector_base_mask = 0xffff00, illegal_vector = 4, trap_vector = 8;
 constexpr Word short_address_mask = 0xfff, priority_mask = 0x300;
 constexpr unsigned maximum_level = 3, priority_shift = 8;
-constexpr Word program_read = Word{1} << 15;
+constexpr Word transfer_direction = Word{1} << 15;
 
-bool permitted_program_move(const Instruction &decoded) {
-  if (decoded.operation != Operation::move_program_effective &&
-      decoded.operation != Operation::move_program_short) {
+bool permitted_fast_move(const Instruction &decoded) {
+  Word reg = 0;
+  bool load = false;
+  if (decoded.operation == Operation::move_program_effective ||
+      decoded.operation == Operation::move_program_short) {
+    reg = decoded.opcode & six_bit_mask;
+    load = (decoded.opcode & transfer_direction) != 0;
+  } else if (decoded.operation == Operation::move_peripheral_register) {
+    reg = (decoded.opcode >> 8) & six_bit_mask;
+    // MOVEP W writes the peripheral; MOVEM W reads program memory.
+    load = (decoded.opcode & transfer_direction) == 0;
+  } else {
     return false;
   }
-  const auto reg = decoded.opcode & six_bit_mask;
-  const bool load = (decoded.opcode & program_read) != 0;
   // FM A.3.7: SSH reads pop; these control destinations are prohibited in fast vectors.
   if (!load) { return reg != ssh_register; }
   return reg != la_register && reg != lc_register && reg != sp_register && reg != sc_register &&
@@ -101,8 +108,8 @@ void Core::Impl::step_vector() {
   } else {
     if ((decoded.operation != Operation::parallel && decoded.operation != Operation::nop &&
          decoded.operation != Operation::move_peripheral_memory &&
-         decoded.operation != Operation::move_peripheral_program &&
-         !permitted_program_move(decoded) && decoded.operation != Operation::reset_peripherals &&
+         decoded.operation != Operation::move_peripheral_program && !permitted_fast_move(decoded) &&
+         decoded.operation != Operation::reset_peripherals &&
          decoded.operation != Operation::debug &&
          decoded.operation != Operation::conditional_debug) ||
         (decoded.words == 2 && vector.phase == VectorPhase::second)) {
