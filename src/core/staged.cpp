@@ -147,7 +147,9 @@ InstructionProgress Core::begin_owned(const std::optional<InstructionWords> capt
   const auto base = impl_->execution_state();
   impl_->invalidate_effect_tickets();
   auto &work = *impl_->staged;
-  work = {};
+  // Only [0, used) owns accepted effects. Computation replaces all scratch
+  // before publication; keep inactive record storage out of the reset path.
+  work.used = 0;
   work.base = base;
   work.input = words;
   work.decoded = decoded;

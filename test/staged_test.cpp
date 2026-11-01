@@ -87,6 +87,74 @@ void memory() {
 }
 
 namespace {
+void drain(Core &core, InstructionProgress progress) {
+  constexpr unsigned limit = 32;
+  for (unsigned step = 0; !progress.retired && step < limit; ++step) {
+    require(progress.fault.kind == FaultKind::none, "Reused native instruction remains healthy");
+    progress = core.advance_instruction(pending(core).ticket);
+  }
+  require(progress.retired, "Reused native instruction retires within its actual effect bound");
+}
+
+void successive_instructions() {
+  constexpr std::array publications{InstructionPublication::retirement,
+                                    InstructionPublication::address_updates,
+                                    InstructionPublication::move_updates,
+                                    InstructionPublication::alu_updates,
+                                    InstructionPublication::unit_updates,
+                                    InstructionPublication::pcu_updates};
+  for (const auto backend : backends) {
+    for (const auto publication : publications) {
+      Bus bus;
+      bus.events = {{}};
+      Core core(bus, {.backend = backend});
+      core.set_registers(seed());
+      drain(core, core.begin_instruction({.address = boot, .opcode = read_x0}, publication));
+      auto expected = seed();
+      expected.x = datum;
+      ++expected.r[0];
+      ++expected.pc;
+      require(core.registers() == expected && bus.calls == 1 && bus.accepted == 1 && bus.exact,
+              "First instruction publishes exactly the independent accepted read");
+      static_cast<void>(core.begin_instruction({.address = expected.pc, .opcode = 0}, publication));
+      const auto old = pending(core).ticket;
+      const auto saved = core.checkpoint();
+      Bus clone_bus = bus;
+      Core clone(clone_bus, {.backend = backend});
+      clone.restore(saved);
+      core.restore(saved);
+      rejected([&] { static_cast<void>(core.advance_instruction(old)); });
+      rejected([&] { static_cast<void>(clone.advance_instruction(old)); });
+      ++expected.pc;
+      for (auto *owner : {&core, &clone}) {
+        auto &wire = owner == &core ? bus : clone_bus;
+        drain(*owner,
+              {.pending = owner->pending_instruction(),
+               .progress = owner->progress(),
+               .fault = owner->fault()});
+        require(owner->registers() == expected && wire.calls == 1 && wire.exact &&
+                    owner->progress().instructions == 2,
+                "Original/fresh NOP checkpoints never consume a preceding instruction's read");
+        wire.pc = expected.pc;
+        wire.events.push_back(
+            {.kind = EffectKind::write, .address = data_address + 1, .value = datum});
+        drain(*owner,
+              owner->begin_instruction({.address = expected.pc, .opcode = write_x0}, publication));
+        auto stored = expected;
+        ++stored.pc;
+        ++stored.r[0];
+        require(owner->registers() == stored && wire.calls == 2 && wire.accepted == 2 &&
+                    wire.x_written == datum && wire.exact,
+                "The next instruction owns one new store, not a retained read or duplicate write");
+        drain(*owner, owner->begin_instruction({.address = stored.pc, .opcode = 0}, publication));
+        ++stored.pc;
+        require(owner->registers() == stored && wire.calls == 2 && wire.x_written == datum,
+                "An empty successor never republishes the preceding accepted store");
+      }
+    }
+  }
+}
+
 void opcode_ownership() {
   constexpr Word load_absolute = 0x44f000;
   for (const auto backend : backends) {
@@ -169,6 +237,7 @@ int main() {
     arithmetic();
     memory();
     opcode_ownership();
+    successive_instructions();
     multiple_effects();
     restore();
     interrupt();

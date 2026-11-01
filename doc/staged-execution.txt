@@ -19,6 +19,14 @@ registers/progress       Retain their pre-instruction values until retirement
 checkpoint/restore      Include accepted responses and the pending computation
 request_interrupt       Retains admitted vector/priority and genuine normal resume PC
 
+Instruction starts reset the logical accepted-effect prefix, retaining its bounded
+storage. Only [0, used) is readable; computation replaces all instruction scratch
+before publication. Capacity, ticket generations and checkpoint contents keep
+their existing contracts. The staged gate exercises sequential read/NOP/write/NOP
+on all three backend selections and six publication modes, including 18 pending
+NOP snapshots and 36 original/fresh continuations. Previous responses/stores must
+never become the next instruction's effects or replay after restore.
+
 Staged program-cache hits use retained cache data; misses, program writes and
 X/Y word accesses use the supplied Io, including ordinary low RAM. Caller-supplied
 instruction words are already fetched and cause no implicit P read or cache fill.

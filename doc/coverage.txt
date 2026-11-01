@@ -386,6 +386,11 @@ retirement tickets. Every staged P/X/Y, atomic-bit and RESET action requires a
 real accepting callback. Computation reuses accepted responses without replay;
 restored tickets rebind to the new owner/generation. Copied computed views never
 supply replacement results. See doc/staged-execution.txt for the exact contract.
+Staged storage reuse resets only the readable accepted prefix, without clearing
+all inactive record slots per instruction. Sequential read/NOP/write/NOP checks
+cover three backend selections, six publication modes, 18 snapshots and 36
+original/fresh continuations with exact register/I/O/count and stale-ticket
+expectations. This preserves effect capacity and does not qualify real-time use.
 Native REP capture rejects invalid bodies before any extension request; known/
 absent extensions, six publication modes and restored owners are checked.
 Candidate checkpoints expose a completed but unpublished native continuation
