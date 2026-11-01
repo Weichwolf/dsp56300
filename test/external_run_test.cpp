@@ -174,6 +174,7 @@ int main() {
         static_cast<void>(workload(sample, backend, false, false));
         static_cast<void>(workload(sample, backend, false, true));
         static_cast<void>(workload(sample, backend, true, true));
+        static_cast<void>(captured_workload(sample, backend));
       }
     }
     cache_checks();

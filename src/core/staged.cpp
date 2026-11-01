@@ -150,6 +150,7 @@ InstructionProgress Core::begin_owned(const std::optional<InstructionWords> capt
   // Only [0, used) owns accepted effects. Computation replaces all scratch
   // before publication; keep inactive record storage out of the reset path.
   work.used = 0;
+  work.planning_disabled = false;
   work.base = base;
   work.input = words;
   work.decoded = decoded;

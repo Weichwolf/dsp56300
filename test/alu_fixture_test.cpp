@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/instruction.hpp"
 #include "fixture_memory.hpp"
 #include "support.hpp"
 #include "unit_fixture_support.hpp"
@@ -171,8 +172,32 @@ bool advance(Core &core) {
   return result.retired;
 }
 
-void instruction(Core &core, const InstructionPublication policy) {
-  static_cast<void>(core.begin_fetch(policy));
+InstructionProgress
+begin(Core &core, const Ram &ram, const InstructionPublication policy, const bool captured) {
+  constexpr Word cache_enable = Word{1} << 19;
+  if (!captured || (core.registers().sr & cache_enable) != 0) { return core.begin_fetch(policy); }
+  const auto request = core.instruction_fetch();
+  const auto &program = ram.words[0];
+  if (request.exception_vector || request.address >= program.size()) {
+    return core.begin_fetch(policy);
+  }
+  const auto opcode = request.latched_opcode.value_or(program[request.address]) & word_mask;
+  const auto shape = inspect_instruction(opcode);
+  if (!shape) { return core.begin_fetch(policy); }
+  InstructionWords words{.address = request.address, .opcode = opcode};
+  if (shape->words == 2) {
+    const auto next = (request.address + 1) & word_mask;
+    if (next >= program.size()) { return core.begin_fetch(policy); }
+    words.extension = program[next] & word_mask;
+  }
+  return core.begin_instruction(words, policy);
+}
+
+void instruction(Core &core,
+                 const Ram &ram,
+                 const InstructionPublication policy,
+                 const bool captured) {
+  static_cast<void>(begin(core, ram, policy, captured));
   constexpr unsigned effect_limit = 65;
   for (unsigned count = 0; core.fault().kind == FaultKind::none; ++count) {
     if (count == effect_limit) {
@@ -182,7 +207,10 @@ void instruction(Core &core, const InstructionPublication policy) {
   }
 }
 
-void check(const BinaryCase &item, const Backend backend, const InstructionPublication policy) {
+void check(const BinaryCase &item,
+           const Backend backend,
+           const InstructionPublication policy,
+           const bool captured) {
   if (policy != InstructionPublication::pcu_updates) {
     require(item.reset_actions.empty(),
             "Selected ALU archives require no fabricated peripheral RESET acknowledgement");
@@ -196,7 +224,7 @@ void check(const BinaryCase &item, const Backend backend, const InstructionPubli
   for (Word retired = 0; retired < item.budget && core.fault().kind == FaultKind::none &&
                          core.processing_state() == ProcessingState::running;
        ++retired) {
-    instruction(core, policy);
+    instruction(core, ram, policy, captured);
   }
   if (policy == InstructionPublication::pcu_updates) {
     require(ram.reset_exact && ram.reset_used == item.reset_actions.size(),
@@ -218,13 +246,15 @@ void check(const BinaryCase &item, const Backend backend, const InstructionPubli
   }
 }
 
-void run(const std::filesystem::path &path, const InstructionPublication policy) {
+void run(const std::filesystem::path &path,
+         const InstructionPublication policy,
+         const bool captured) {
   const auto cases = read_fixture(path);
   require(!cases.empty(), "Owned independent unit archive contains actual cases");
   for (const auto backend : {Backend::reference, Backend::cached, Backend::jit}) {
     for (std::size_t index = 0; index < cases.size(); ++index) {
       try {
-        check(cases[index], backend, policy);
+        check(cases[index], backend, policy, captured);
       } catch (const std::exception &error) {
         throw std::runtime_error(path.string() + ": case " + std::to_string(index) + " (" +
                                  cases[index].name + ", " + std::string(backend_name(backend)) +
@@ -242,14 +272,15 @@ int main(const int argc, const char *const *const argv) {
   try {
     if (argc < 2) { throw std::runtime_error("Usage: dsp56300_alu_fixture_test FILE.d56 [...]"); }
     const bool units = std::string_view(argv[1]) == "--units";
-    const bool pcu = std::string_view(argv[1]) == "--pcu";
+    const bool captured = std::string_view(argv[1]) == "--captured-pcu";
+    const bool pcu = std::string_view(argv[1]) == "--pcu" || captured;
     auto policy = dsp56300::InstructionPublication::alu_updates;
     if (units) { policy = dsp56300::InstructionPublication::unit_updates; }
     if (pcu) { policy = dsp56300::InstructionPublication::pcu_updates; }
     const int first = units || pcu ? 2 : 1;
     if (first == argc) { throw std::runtime_error("No owned fixture archive supplied"); }
     for (int index = first; index < argc; ++index) {
-      dsp56300::test::alu_fixture_test::run(argv[index], policy);
+      dsp56300::test::alu_fixture_test::run(argv[index], policy, captured);
     }
     std::cout << dsp56300::test::checks << " independently expected ALU fixture checks passed\n";
   } catch (const std::exception &error) {

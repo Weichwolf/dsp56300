@@ -87,17 +87,18 @@ void Bus::program(const Word first, const std::initializer_list<Word> words) {
 }
 
 namespace {
-void execute_staged(Core &core, const unsigned count) {
-  for (unsigned index = 0; index < count; ++index) {
-    auto progress = core.begin_fetch();
-    for (unsigned effects = 0; !progress.retired && effects < 32; ++effects) {
-      if (!progress.pending || progress.fault.kind != FaultKind::none) {
-        throw std::runtime_error("Authored external-Io staged workload fault");
-      }
-      progress = core.advance_instruction(progress.pending->ticket);
+void complete_owned(Core &core, InstructionProgress progress) {
+  for (unsigned effects = 0; !progress.retired && effects < 32; ++effects) {
+    if (!progress.pending || progress.fault.kind != FaultKind::none) {
+      throw std::runtime_error("Authored external-Io staged workload fault");
     }
-    require(progress.retired, "The authored staged workload retires its actual instruction");
+    progress = core.advance_instruction(progress.pending->ticket);
   }
+  require(progress.retired, "The authored staged workload retires its actual instruction");
+}
+
+void execute_staged(Core &core, const unsigned count) {
+  for (unsigned index = 0; index < count; ++index) { complete_owned(core, core.begin_fetch()); }
 }
 
 void execute_synchronous(Core &core, const unsigned count, const bool single_step) {
@@ -156,4 +157,32 @@ workload(const Workload input, const Backend backend, const bool staged, const b
           "External memory execution makes no native-JIT claim");
   return {.seconds = seconds, .instructions = count, .reads = bus.reads};
 }
+
+Timing captured_workload(const Workload input, const Backend backend) {
+  constexpr unsigned count = 4096;
+  Bus bus;
+  bus.record = false;
+  Core core(bus, {.backend = backend});
+  auto initial = initial_state();
+  initial.x = input.x;
+  initial.y = input.y;
+  core.set_registers(initial);
+  const auto expected = expected_workload(initial, input, count);
+  const auto begin = std::chrono::steady_clock::now();
+  for (unsigned index = 0; index < count; ++index) {
+    complete_owned(core,
+                   core.begin_instruction({.address = origin + index, .opcode = input.opcode},
+                                          InstructionPublication::pcu_updates));
+  }
+  const auto seconds =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count();
+  require(
+      core.registers() == expected &&
+          core.progress() == Progress{.instructions = count, .estimated_cycles = count},
+      "Captured PCU workloads retain every independently calculated register, flag and base cost");
+  require(bus.reads == 0 && bus.writes == 0 && bus.bits == 0 && bus.resets == 0,
+          "Supplied captured words cause no implicit program read or fabricated peripheral input");
+  return {.seconds = seconds, .instructions = count, .reads = bus.reads};
+}
+
 }

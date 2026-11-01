@@ -24,7 +24,7 @@ set(CMAKE_CXX_CLANG_TIDY "${DSP56300_CLANG_TIDY};--warnings-as-errors=*")
 
 add_library(dsp56300_core STATIC
   src/core.cpp src/core/external_memory.cpp src/core/core_state.cpp src/core/checkpoint.cpp src/core/execution_state.cpp
-  src/core/staged.cpp src/core/staged_compute.cpp src/core/move_publication.cpp src/core/move_storage.cpp src/core/alu_publication.cpp src/core/unit_publication.cpp src/core/pcu_publication.cpp src/core/hidden_retirement.cpp src/core/native_retirement.cpp src/core/program_capture.cpp src/core/instruction_shape.cpp
+  src/core/staged.cpp src/core/staged_compute.cpp src/core/staged_plan.cpp src/core/move_publication.cpp src/core/move_storage.cpp src/core/alu_publication.cpp src/core/unit_publication.cpp src/core/pcu_publication.cpp src/core/hidden_retirement.cpp src/core/native_retirement.cpp src/core/program_capture.cpp src/core/instruction_shape.cpp
   src/core/transfer_info.cpp src/core/transfer_parallel.cpp src/core/transfer_special.cpp
   src/core/transfer_description.cpp src/core/arithmetic.cpp src/core/saturation.cpp src/core/shifts.cpp
   src/core/conditional.cpp src/core/immediate.cpp src/core/integer.cpp src/core/decode.cpp src/core/moves.cpp
@@ -192,6 +192,10 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   add_executable(dsp56300_cpu_continuation_test test/cpu_continuation_test.cpp)
   target_link_libraries(dsp56300_cpu_continuation_test PRIVATE dsp56300::core)
   add_test(NAME bounded-cpu-continuations COMMAND dsp56300_cpu_continuation_test)
+  add_executable(dsp56300_cpu_plan_storage_test test/cpu_plan_storage_test.cpp)
+  target_include_directories(dsp56300_cpu_plan_storage_test PRIVATE src/core)
+  target_link_libraries(dsp56300_cpu_plan_storage_test PRIVATE dsp56300::core)
+  add_test(NAME bounded-cpu-plan-storage COMMAND dsp56300_cpu_plan_storage_test)
   add_executable(dsp56300_instruction_outcome_test test/instruction_outcome_test.cpp)
   target_link_libraries(dsp56300_instruction_outcome_test PRIVATE dsp56300::core)
   add_test(NAME native-instruction-outcome COMMAND dsp56300_instruction_outcome_test)
@@ -385,6 +389,10 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   endforeach()
   foreach(archive bit-access bit-branches control-bytes address-calculations)
     add_test(NAME unit-publication-${archive} COMMAND dsp56300_alu_fixture_test --units
+      "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/${archive}.d56")
+  endforeach()
+  foreach(archive arithmetic addition saturation iteration normalization products-immediate products-mixed bit-fields bfu-logic-sm bfu-shifts-sm selection bit-access bit-branches control-bytes address-calculations)
+    add_test(NAME captured-pcu-publication-${archive} COMMAND dsp56300_alu_fixture_test --captured-pcu
       "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/${archive}.d56")
   endforeach()
   foreach(archive loops loop-control return-state return-sequences exception-state exception-sequences debug-state debug-sequences processing-state processing-sequences)

@@ -13,6 +13,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <memory>
 #include <optional>
 #include <span>
@@ -65,7 +66,11 @@ struct Core::Impl {
   [[nodiscard]] bool staged_computing() const noexcept { return staged && staged->computing; }
 
   void compute_instruction();
+  [[nodiscard]] std::exception_ptr compute_attempt();
   void resume_instruction(const InstructionEffect &effect);
+  [[nodiscard]] bool plan_instruction() const;
+  void finish_computation(const std::exception_ptr &error);
+  void apply_publication(const InstructionEffect &effect);
   void capture_program_words();
   [[nodiscard]] bool pcu_publication() const noexcept;
   void mark_pcu_field(RegisterUpdate update) const;

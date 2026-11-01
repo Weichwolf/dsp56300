@@ -1065,8 +1065,8 @@ callbacks, changed later input, cross-backend restore and stale-receipt refusal.
 Native PCU controls also check call/RTI and REP outcomes. A receipt preserves
 actual control flow at a sequential target; it supplies no stage timestamp.
 The four scoped outcome/fetch/PCU groups pass ASan/UBSan and separate TSan.
-Captured pure NOP, short JMP and absolute JMP can retain their one native PC
-writer without exception/replay, under the explicit guards in pure-control.txt.
+At 94d4a30, captured pure NOP, short JMP and absolute JMP retain their one native
+PC writer without exception/replay, under the guards recorded in pure-control.txt.
 All 4096 short targets, six policies, PC wrapping, full register preservation,
 candidate/stale-ticket guards and same/fresh cross-backend checkpoints pass
 434601 checks/profile. The same test object also passes with the qualified parent
@@ -1076,6 +1076,34 @@ The isolated 32768-instruction captured-control samples improve 31.9–53.8x und
 ASan/UBSan and 2.33–2.88x under TSan, preserving counts and both publications.
 Short audio-MAC/image-add/communications-XOR diagnostic samples retain exact
 results but show timing spread; they do not qualify general or realtime speed.
+
+Captured pcu_updates now retains up to eight CPU writers and their distinct
+intermediate computed registers through the ordinary executor. Reads, writes,
+bits and reset still require actual owned Io operations. Cache, loop and system
+guards retain replay; later native faults discard private planning and preserve
+the original publication/fault order. See cpu-continuations.txt for the state
+table, bounds and targeted commands. CPU-result planning changes host work only.
+
+Directed tests pass ASan/UBSan and separate TSan: literal JSR/RTS intermediate
+states and masks, all nine source/destination backend pairs, same/fresh restore,
+stale/foreign tickets, input mutation/refusal, two CPU writers before a real
+program store, store refusal, later stack faults and independent 8/64 storage
+bounds. The same public test object also passes against the qualified 94d4a30
+archive under both sanitizers (933 checks/profile).
+All 64 selected native integration scopes pass under each sanitizer, including
+15 captured arithmetic/transfer archives with independent full-state oracles.
+Commit 96b32b0 corrects reserved-VBA expectations; both public bench CLI groups pass.
+Captured saturation passes 65536 cases per backend and 2379553
+checks/profile under both sanitizers. Three balanced fresh-process rounds
+against 94d4a30 preserve counts: captured audio/image/communications cases are
+14.0–14.3x faster under ASan/UBSan and 3.00–3.11x under TSan; call/return is
+14.8x and 2.59x faster respectively. Simple NOP/JMP takes 11–18% longer.
+These diagnostics do not qualify general, whole-device or realtime speed.
+Sequential same-process timings are excluded because allocator carryover
+distorts later cases. Existing --pcu archives use owned fetch
+and do not exercise captured planning. Their processing-sequences negative
+control passes 4704 cases/backend and 35550757 checks/profile under ASan/UBSan
+and separate TSan. These scopes do not establish full ISA or device operation.
 
   cmake --build --preset strict --target dsp56300_pure_pcu_test
   ctest --preset strict -R '^captured-pure-control-publication$'
