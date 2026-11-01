@@ -8,12 +8,20 @@
 #include "staged.hpp"
 
 #include <cstddef>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 
 namespace dsp56300::detail {
 Word StagedState::sample(const InstructionEffect effect) {
   if (!active || !computing) { throw std::logic_error("No active instruction computation"); }
+  if (collecting_pcu) {
+    if (effect.kind != EffectKind::pcu_update || pending || used != 0) {
+      throw std::logic_error("Pure control instruction produced an unexpected effect");
+    }
+    pending = effect;
+    return 0; // CPU publication has no external response operand.
+  }
   if (cursor < used) {
     const auto &saved = records.at(cursor++);
     if (saved.effect != effect) { throw std::logic_error("Accepted instruction effect changed"); }
@@ -26,6 +34,27 @@ Word StagedState::sample(const InstructionEffect effect) {
 } // namespace dsp56300::detail
 
 namespace dsp56300 {
+namespace {
+bool collect_pcu(const detail::StagedState &work) {
+  const auto &base = work.base;
+  if (work.fetch_words || work.used != 0 ||
+      work.publication != InstructionPublication::pcu_updates || base.cache ||
+      (base.cpu.reg.sr & (detail::cache_enable | detail::loop_flag)) != 0 ||
+      base.cpu.repeat_remaining != 0 || base.vector.phase != detail::VectorPhase::none ||
+      (base.cpu.debug_flags & detail::debug_interrupt_pending) != 0) {
+    return false;
+  }
+  const auto &decoded = work.decoded;
+  if (decoded.operation == detail::Operation::nop ||
+      decoded.operation == detail::Operation::jump_short) {
+    return true;
+  }
+  constexpr unsigned absolute_mode = 6;
+  return decoded.operation == detail::Operation::jump_effective &&
+         ((decoded.opcode >> 11) & 7U) == absolute_mode && ((decoded.opcode >> 8) & 7U) == 0;
+}
+}
+
 void Core::Impl::publish_address_update(const AddressWriteback update, const Word address) const {
   if (!staged_computing() || staged->publication == InstructionPublication::retirement ||
       fault.kind != FaultKind::none) {
@@ -74,8 +103,10 @@ void Core::Impl::compute_instruction() {
   work.control_transfer = false;
   work.unit_active = false;
   work.pending.reset();
+  work.deferred_retirement.reset();
   work.complete = false;
   work.computing = true;
+  work.collecting_pcu = collect_pcu(work);
   try {
     if (work.fetch_words) { capture_program_words(); }
     if (fault.kind == FaultKind::none) { step(); }
@@ -88,17 +119,23 @@ void Core::Impl::compute_instruction() {
         work.hidden_result.value = detail::retirement_values(cpu, vector, debug_vector, repeated);
       }
       work.complete = true;
-      work.pending = InstructionEffect{.kind = EffectKind::retire,
-                                       .address = work.input.address,
-                                       .value = cpu.reg.pc,
-                                       .pc = work.input.address,
-                                       .omr = work.base.cpu.reg.omr};
+      const InstructionEffect retirement{.kind = EffectKind::retire,
+                                         .address = work.input.address,
+                                         .value = cpu.reg.pc,
+                                         .pc = work.input.address,
+                                         .omr = work.base.cpu.reg.omr};
+      if (work.collecting_pcu && work.pending) {
+        work.deferred_retirement = retirement;
+      } else {
+        work.pending = retirement;
+      }
     }
   } catch (const detail::InstructionPause &) {
     // Retain the native prefix, never a complete result, at the owned bus boundary.
     work.candidate = execution_state();
   } catch (...) {
     work.computing = false;
+    work.collecting_pcu = false;
     restore_execution(work.base);
     restore_published_results();
     work.pending.reset();
@@ -106,6 +143,7 @@ void Core::Impl::compute_instruction() {
     throw;
   }
   work.computing = false;
+  work.collecting_pcu = false;
   work.computed = cpu.reg;
   work.computed.a >>= detail::padding_bits;
   work.computed.b >>= detail::padding_bits;
@@ -149,5 +187,18 @@ bool Core::Impl::perform_instruction(const InstructionEffect effect, Word &respo
     case EffectKind::retire:
     default: throw std::logic_error("CPU publication is not an external bus operation");
   }
+}
+
+void Core::Impl::resume_instruction(const InstructionEffect &effect) {
+  auto &work = *staged;
+  if (!work.deferred_retirement) {
+    compute_instruction();
+    return;
+  }
+  if (effect.kind != EffectKind::pcu_update || !effect.pcu_update) {
+    throw std::logic_error("Deferred control retirement lost its PCU writer");
+  }
+  apply_pcu(*effect.pcu_update);
+  work.pending = std::exchange(work.deferred_retirement, std::nullopt);
 }
 } // namespace dsp56300

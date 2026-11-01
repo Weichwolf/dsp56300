@@ -1,0 +1,16 @@
+Captured pure control publication
+
+Guard: captured NOP, JMP short or JMP absolute; PCU publication; no cache,
+DO/REP, vector or pending debug entry. All other cases retain staged replay.
+The ordinary executor runs once, recording its one PCU writer and native hidden
+retirement. No external input is predicted and no external effect is accepted.
+
+Boundary              Visible state                  Private continuation
+begin                  original registers/progress    PC writer, native retirement
+accept PC writer       masked PC result only           unchanged hidden retirement
+accept retirement      native hidden fields/deltas     instruction finished
+
+Both boundaries retain ordinary tickets, full checkpoints and cross-backend
+restore. Candidate checkpoints require the actual retirement boundary. Computed
+registers are unchanged after the sole PC writer within this guarded domain.
+This changes host execution overhead, not instruction costs or physical timing.

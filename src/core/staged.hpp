@@ -24,6 +24,7 @@ struct StagedState {
   ExecutionState candidate;
   std::size_t used = 0, cursor = 0;
   std::optional<InstructionEffect> pending;
+  std::optional<InstructionEffect> deferred_retirement;
   Registers computed;
   AluWriteback alu_result;
   UnitWriteback unit_result;
@@ -38,6 +39,7 @@ struct StagedState {
   std::optional<Word> latched_opcode;
   InstructionPublication publication = InstructionPublication::retirement;
   bool active = false, computing = false, complete = false, fetch_words = false;
+  bool collecting_pcu = false;
 
   [[nodiscard]] Word sample(InstructionEffect effect);
 };

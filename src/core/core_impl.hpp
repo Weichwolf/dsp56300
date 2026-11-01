@@ -65,6 +65,7 @@ struct Core::Impl {
   [[nodiscard]] bool staged_computing() const noexcept { return staged && staged->computing; }
 
   void compute_instruction();
+  void resume_instruction(const InstructionEffect &effect);
   void capture_program_words();
   [[nodiscard]] bool pcu_publication() const noexcept;
   void mark_pcu_field(RegisterUpdate update) const;

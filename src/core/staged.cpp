@@ -208,7 +208,7 @@ InstructionProgress Core::advance_instruction(const EffectTicket &ticket) {
     return {.progress = progress(), .fault = fault()};
   }
   work.records.at(work.used++) = {.effect = effect, .response = response};
-  impl_->compute_instruction();
+  impl_->resume_instruction(effect);
   return {.pending = pending_instruction(), .progress = progress(), .fault = fault()};
 }
 

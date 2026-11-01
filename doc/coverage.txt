@@ -1065,6 +1065,22 @@ callbacks, changed later input, cross-backend restore and stale-receipt refusal.
 Native PCU controls also check call/RTI and REP outcomes. A receipt preserves
 actual control flow at a sequential target; it supplies no stage timestamp.
 The four scoped outcome/fetch/PCU groups pass ASan/UBSan and separate TSan.
+Captured pure NOP, short JMP and absolute JMP can retain their one native PC
+writer without exception/replay, under the explicit guards in pure-control.txt.
+All 4096 short targets, six policies, PC wrapping, full register preservation,
+candidate/stale-ticket guards and same/fresh cross-backend checkpoints pass
+434601 checks/profile. The same test object also passes with the qualified parent
+archive. All 22 affected groups pass both sanitizers; each audits 114 compile
+contexts. No calibrated clock, general staged JIT or complete ISA claim follows.
+The isolated 32768-instruction captured-control samples improve 31.9–53.8x under
+ASan/UBSan and 2.33–2.88x under TSan, preserving counts and both publications.
+Short audio-MAC/image-add/communications-XOR diagnostic samples retain exact
+results but show timing spread; they do not qualify general or realtime speed.
+
+  cmake --build --preset strict --target dsp56300_pure_pcu_test
+  ctest --preset strict -R '^captured-pure-control-publication$'
+
+Repeat with the thread preset for TSan. No fuzz tests are part of these gates.
 See staged-execution.txt for its lifetime and consumer-validation contract.
 This does not admit overlapping instructions or qualify physical clocks/cache,
 stack-error interrupts, operand/product forwarding, native staged JIT, realtime,
