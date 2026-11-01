@@ -61,6 +61,11 @@ programs explicitly instead of replaying every architectural microfixture.
 
 Binary instruction fixtures
 
+VBA[7:0] is read-only zero (DSP56300FM Rev. 5, 5.4.4.4). Regenerate every
+affected producer when the shared register model changes: transfers, bit-access
+and displacement-long write VBA. The latter two archives correct 96 bit-operation
+and 160 long-MOVE expected VBA fields; programs, inputs and other results are unchanged.
+
 test/fixtures/arithmetic.d56 contains only synthetic instruction cases authored
 for this project. It contains only original programs and no extracted manufacturer data.
 The 9447 checked-in arithmetic cases include all eight signed product selectors
