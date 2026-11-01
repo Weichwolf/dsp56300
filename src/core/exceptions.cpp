@@ -41,7 +41,7 @@ void Core::Impl::call_vector(const Instruction &decoded) {
       scale_up | scale_down | arithmetic_16 | loop_flag | forever_flag | priority_mask;
   const auto priority = vector.level == maximum_level ? maximum_level : vector.level + 1;
   mark_pcu_field({.storage = RegisterStorage::sr, .mask = cleared});
-  mark_pcu_field({.storage = RegisterStorage::pc, .mask = word_mask});
+  mark_control_transfer();
   cpu.reg.sr = (cpu.reg.sr & ~cleared) | (priority << priority_shift);
   cpu.reg.pc = target;
   mark_hidden(RetirementField::vector_phase);
@@ -50,7 +50,7 @@ void Core::Impl::call_vector(const Instruction &decoded) {
 
 void Core::Impl::step_vector() {
   if (vector.phase == VectorPhase::pending) {
-    mark_pcu_field({.storage = RegisterStorage::pc, .mask = word_mask});
+    mark_control_transfer();
     mark_hidden(RetirementField::repeat_completed);
     mark_hidden(RetirementField::vector_phase);
     cpu.reg.pc = vector.resume;
@@ -80,7 +80,7 @@ void Core::Impl::step_vector() {
     if (decoded.words == 2 || vector.phase == VectorPhase::second) {
       mark_hidden(RetirementField::vector_phase);
       mark_hidden(RetirementField::interrupt_inhibited);
-      mark_pcu_field({.storage = RegisterStorage::pc, .mask = word_mask});
+      mark_control_transfer();
       vector.phase = VectorPhase::none;
       cpu.reg.pc = vector.resume;
       cpu.interrupt_inhibited = true;

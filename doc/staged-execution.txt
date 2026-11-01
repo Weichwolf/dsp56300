@@ -151,6 +151,19 @@ The pcu_updates mode adds native PC/stack/loop publication and sparse hidden
 retirement; see native-pcu-publication.txt for its pending qualification and
 remaining clock/overlap limitations. PCU results are CPU writes, not Io requests.
 
+Core::instruction_outcome reports only an actually retired staged instruction:
+instruction count, captured address/opcode and a native control-transfer flag.
+Taken jumps, calls, returns, bit branches, DO redirects and vector transitions
+set the flag at their actual CPU assignments, even for a sequential target.
+REP opcode-latch rewinds do not count as control transfers. Consumers must pair
+the receipt with their admitted instruction and distinguish their own queued
+program samples from later memory. No condition is re-evaluated by the consumer.
+All publication policies provide the receipt after retirement; pending work,
+faults and speculative candidate checkpoints provide none. Actual checkpoints
+preserve it, including a stop after retirement before consumer synchronization.
+Reset, successful register initialization and nonzero atomic run invalidate it.
+The receipt supplies control-flow semantics, not calibrated branch timing.
+
 Native REP fetch rejects a non-repeatable or two-word body immediately after
 its actual opcode read, before offering an extension transaction. Missing
 extension storage cannot replace this invalid-instruction fault. The native

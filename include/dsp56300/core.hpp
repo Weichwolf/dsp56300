@@ -63,6 +63,15 @@ struct Progress {
   bool operator==(const Progress &) const = default;
 };
 
+// A receipt for an actually retired staged instruction, never a prediction.
+// Explicit taken control flow remains visible even when its target is sequential.
+struct InstructionOutcome {
+  std::uint64_t instructions = 0;
+  Word address = 0, opcode = 0;
+  bool control_transfer = false;
+  bool operator==(const InstructionOutcome &) const = default;
+};
+
 struct Fault {
   FaultKind kind = FaultKind::none;
   Space space = Space::program;
@@ -344,6 +353,9 @@ public:
   [[nodiscard]] Checkpoint candidate_checkpoint(const EffectTicket &ticket) const;
   void restore(const Checkpoint &checkpoint);
   [[nodiscard]] InstructionFetch instruction_fetch() const;
+  // Empty during an active instruction, after initialization/fault, or after
+  // nonzero atomic run. Checkpoints retain stopped, actual retirement receipts.
+  [[nodiscard]] std::optional<InstructionOutcome> instruction_outcome() const noexcept;
   [[nodiscard]] InstructionProgress
   begin_instruction(InstructionWords words,
                     InstructionPublication publication = InstructionPublication::retirement);

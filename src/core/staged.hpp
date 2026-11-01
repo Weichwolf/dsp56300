@@ -30,6 +30,7 @@ struct StagedState {
   PcuWriteback pcu_result;
   HiddenRetirement hidden_result;
   bool pcu_source = false;
+  bool control_transfer = false;
   bool unit_active = false;
   std::array<AcceptedEffect, capacity> records{};
   Instruction decoded;

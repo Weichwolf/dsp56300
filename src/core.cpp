@@ -255,6 +255,7 @@ void Core::reset() {
   if (impl_->executing) { throw std::logic_error("Reset requires stopped DSP execution"); }
   impl_->invalidate_effect_tickets();
   impl_->staged.reset();
+  impl_->last_outcome.reset();
   impl_->cpu = {};
   impl_->vector = {};
   impl_->debug_vector = 0;
@@ -323,6 +324,7 @@ RunResult Core::run(const std::uint32_t instruction_budget) {
   if (impl_->external) {
     throw std::logic_error("External instruction owner requires captured words");
   }
+  if (instruction_budget != 0) { impl_->last_outcome.reset(); }
   const detail::ExecutionGuard guard(impl_->executing);
   RunResult result;
   if (!impl_->jit) {

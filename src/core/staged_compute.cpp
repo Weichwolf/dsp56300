@@ -71,6 +71,7 @@ void Core::Impl::compute_instruction() {
   work.pcu_result = {};
   work.hidden_result = {};
   work.pcu_source = false;
+  work.control_transfer = false;
   work.unit_active = false;
   work.pending.reset();
   work.complete = false;

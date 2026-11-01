@@ -1016,6 +1016,16 @@ counter deltas commit with only those hidden fields. This mode avoids restoring
 a whole candidate CPU/register file or transient operand/frame state at retire.
 Earlier policies keep their CPU result boundaries. New direct and complete
 control-archive qualification is pending; see native-pcu-publication.txt.
+Actual staged retirement outcomes have a separate bounded gate:
+native-instruction-outcome checks all 4096 Jcc/CCR combinations per backend,
+all six publication policies, pending/retired/candidate checkpoints, atomic-run
+invalidation and literal zero/finite DO state. native-instruction-outcome-io
+checks 36 backend/publication/bit-input combinations with accepted/refused
+callbacks, changed later input, cross-backend restore and stale-receipt refusal.
+Native PCU controls also check call/RTI and REP outcomes. A receipt preserves
+actual control flow at a sequential target; it supplies no stage timestamp.
+The four scoped outcome/fetch/PCU groups pass ASan/UBSan and separate TSan.
+See staged-execution.txt for its lifetime and consumer-validation contract.
 This does not admit overlapping instructions or qualify physical clocks/cache,
 stack-error interrupts, operand/product forwarding, native staged JIT, realtime,
 consumer replacement or full device operation. All 118 ISA rows remain partial.

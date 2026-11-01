@@ -40,6 +40,11 @@ void Core::Impl::mark_pcu_field(const RegisterUpdate update) const {
   selected->mask |= update.mask;
 }
 
+void Core::Impl::mark_control_transfer() const {
+  if (staged_computing()) { staged->control_transfer = true; }
+  mark_pcu_field({.storage = RegisterStorage::pc, .mask = word_mask});
+}
+
 void Core::Impl::publish_pcu() const {
   if (!pcu_publication() || staged->pcu_result.count == 0) { return; }
   auto result = staged->pcu_result;

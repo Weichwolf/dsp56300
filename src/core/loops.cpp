@@ -39,7 +39,7 @@ void Core::Impl::finish_loop() {
   }
   if (reg.lc != 1 || (reg.sr & forever_flag) != 0) {
     mark_pcu_field({.storage = RegisterStorage::lc, .mask = word_mask});
-    mark_pcu_field({.storage = RegisterStorage::pc, .mask = word_mask});
+    mark_control_transfer();
     reg.lc = address_add(reg.lc, -1);
     reg.pc = static_cast<Word>(reg.stack[reg.sp & (stack_entries - 1)] >> word_bits);
     return;
@@ -83,7 +83,7 @@ void Core::Impl::execute_loop(const Instruction &decoded) {
   if (operation == Operation::end_loop || operation == Operation::break_loop) {
     if (operation == Operation::break_loop) {
       if (!condition({.status = reg.sr, .selector = decoded.opcode & 15U})) { return; }
-      mark_pcu_field({.storage = RegisterStorage::pc, .mask = word_mask});
+      mark_control_transfer();
       reg.pc = (reg.la + 1) & word_mask;
     }
     restore_loop();
@@ -121,7 +121,7 @@ void Core::Impl::execute_loop(const Instruction &decoded) {
   if (fault.kind != FaultKind::none) { return; }
   if (!forever && count == 0) {
     static_cast<void>(pop(StackOwner::pcu));
-    mark_pcu_field({.storage = RegisterStorage::pc, .mask = word_mask});
+    mark_control_transfer();
     reg.pc = (last + 1) & word_mask;
     return;
   }

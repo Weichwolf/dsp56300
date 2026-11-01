@@ -59,7 +59,9 @@ void nop(const Backend backend) {
   retire(core);
   require(core.registers() == state &&
               core.progress() == Progress{.instructions = 1, .estimated_cycles = 1} &&
-              bus.calls == 0,
+              bus.calls == 0 &&
+              core.instruction_outcome() ==
+                  InstructionOutcome{.instructions = 1, .address = boot, .opcode = 0},
           "NOP commits native accounting once without copying an obsolete register file");
 }
 
@@ -91,7 +93,11 @@ void call_phase(Core &core, const unsigned phase) {
     publish(core, pc(call, boot + 1, target), state);
   } else {
     retire(core);
-    require(core.registers() == state && core.progress().instructions == 1,
+    require(core.registers() == state && core.progress().instructions == 1 &&
+                core.instruction_outcome() == InstructionOutcome{.instructions = 1,
+                                                                 .address = boot,
+                                                                 .opcode = call,
+                                                                 .control_transfer = true},
             "A native call retires after its separate genuine stack and target publications");
   }
 }
@@ -148,7 +154,11 @@ void rti(const Backend backend) {
                    field(RegisterStorage::pc, word_mask, boot + 1, target)}}};
   publish(core, returned, state);
   retire(core);
-  require(!core.interruptible() && core.registers() == state,
+  require(!core.interruptible() && core.registers() == state &&
+              core.instruction_outcome() == InstructionOutcome{.instructions = 1,
+                                                               .address = boot,
+                                                               .opcode = opcode,
+                                                               .control_transfer = true},
           "RTI commits its real hidden inhibition after pop, PC and SR results");
 }
 
@@ -185,8 +195,11 @@ void repeat(const Backend backend) {
     publish(core, tail, state);
     retire(core);
     const auto fetch = core.instruction_fetch();
+    const auto outcome = core.instruction_outcome();
     require(fetch.address == state.pc && fetch.latched_opcode.has_value() == !last &&
-                (last || *fetch.latched_opcode == 0),
+                (last || *fetch.latched_opcode == 0) && outcome && !outcome->control_transfer &&
+                outcome->address == boot + 1 && outcome->opcode == 0 &&
+                outcome->instructions == (last ? 3U : 2U),
             "Sparse hidden retirement retains the genuine REP opcode latch and completion");
   }
   require(core.progress().instructions == 3 && state.lc == old_lc && bus.calls == 0,
@@ -221,7 +234,7 @@ void reset(const Backend backend, const bool accepted) {
                                   .value = reset_opcode,
                                   .pc = boot} &&
                 core.registers() == state && core.progress() == Progress{} &&
-                !core.pending_instruction(),
+                !core.pending_instruction() && !core.instruction_outcome(),
             "Real RESET refusal retains original native opcode/fault context without success");
   }
 }

@@ -65,6 +65,7 @@ struct Core::Impl {
   void capture_program_words();
   [[nodiscard]] bool pcu_publication() const noexcept;
   void mark_pcu_field(RegisterUpdate update) const;
+  void mark_control_transfer() const;
   void publish_pcu() const;
   void apply_pcu(const PcuWriteback &update);
   [[nodiscard]] Word read_pcu_register(unsigned number);
@@ -207,6 +208,7 @@ struct Core::Impl {
   unsigned current_words = 1;
   detail::Instruction repeated;
   Fault fault;
+  std::optional<InstructionOutcome> last_outcome;
   Vector vector;
   Options options;
   bool executing = false;

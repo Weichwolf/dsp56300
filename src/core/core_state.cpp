@@ -48,6 +48,7 @@ void Core::set_registers(const Registers &state) {
     throw std::logic_error("Register initialization requires stopped DSP execution");
   }
   validate(state);
+  impl_->last_outcome.reset();
   impl_->cpu.reg = state;
   impl_->cpu.reg.a <<= detail::padding_bits;
   impl_->cpu.reg.b <<= detail::padding_bits;

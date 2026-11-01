@@ -57,7 +57,7 @@ std::uint64_t Core::Impl::pop(const StackOwner owner) {
 void Core::Impl::execute_return(const Instruction &decoded) {
   const auto frame = pop(StackOwner::pcu);
   if (fault.kind != FaultKind::none) { return; }
-  mark_pcu_field({.storage = RegisterStorage::pc, .mask = word_mask});
+  mark_control_transfer();
   cpu.reg.pc = static_cast<Word>(frame >> word_bits);
   if (decoded.operation == Operation::return_interrupt) {
     mark_pcu_field({.storage = RegisterStorage::sr, .mask = word_mask});

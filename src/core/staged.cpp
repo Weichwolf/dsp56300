@@ -83,6 +83,15 @@ InstructionFetch Core::instruction_fetch() const {
                                 : std::nullopt};
 }
 
+std::optional<InstructionOutcome> Core::instruction_outcome() const noexcept {
+  const auto outcome = impl_->last_outcome;
+  if (impl_->executing || impl_->staged_active() || fault().kind != FaultKind::none || !outcome ||
+      outcome->instructions != impl_->cpu.instructions) {
+    return std::nullopt;
+  }
+  return outcome;
+}
+
 std::optional<PendingInstruction> Core::pending_instruction() const {
   if (!impl_->staged_active() || impl_->fault.kind != FaultKind::none) { return std::nullopt; }
   const auto selected = impl_->staged->pending;
@@ -162,6 +171,10 @@ InstructionProgress Core::advance_instruction(const EffectTicket &ticket) {
   if (effect.kind == EffectKind::retire) {
     if (!work.complete) { throw std::logic_error("Retirement lost its native computation"); }
     impl_->retire_owned();
+    impl_->last_outcome = InstructionOutcome{.instructions = impl_->cpu.instructions,
+                                             .address = work.input.address,
+                                             .opcode = work.input.opcode,
+                                             .control_transfer = work.control_transfer};
     work.active = false;
     work.pending.reset();
     return {.progress = progress(), .fault = fault(), .retired = true};

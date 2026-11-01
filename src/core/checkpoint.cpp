@@ -48,6 +48,7 @@ MemoryLayout layout(const Buffers buffers) {
 struct Checkpoint::State {
   detail::ExecutionState execution;
   std::optional<detail::StagedState> staged;
+  std::optional<InstructionOutcome> outcome;
   bool external = false;
   MemoryLayout memory;
   Word cacheable_begin;
@@ -64,6 +65,7 @@ Checkpoint Core::checkpoint() const {
   return Checkpoint(std::make_shared<const Checkpoint::State>(Checkpoint::State{
       .execution = impl_->execution_state(),
       .staged = impl_->staged_active() ? std::optional(*impl_->staged) : std::nullopt,
+      .outcome = impl_->last_outcome,
       .external = impl_->external,
       .memory = layout(impl_->buffers),
       .cacheable_begin = impl_->options.cacheable_begin,
@@ -95,6 +97,7 @@ Checkpoint Core::candidate_checkpoint(const EffectTicket &ticket) const {
     candidate.execution.cache = std::move(cache);
   }
   candidate.staged.reset();
+  candidate.outcome.reset();
   return Checkpoint(std::make_shared<const Checkpoint::State>(std::move(candidate)));
 }
 
@@ -119,5 +122,6 @@ void Core::restore(const Checkpoint &checkpoint) {
   ++impl_->effect_epoch;
   impl_->effect_owner = std::move(owner);
   impl_->staged = std::move(staged);
+  impl_->last_outcome = state.outcome;
 }
 } // namespace dsp56300

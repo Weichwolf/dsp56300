@@ -121,7 +121,7 @@ void Core::Impl::execute_bit(const Instruction &decoded) {
       push(cpu.reg.pc, cpu.reg.sr, StackOwner::pcu);
       if (fault.kind != FaultKind::none) { return; }
     }
-    mark_pcu_field({.storage = RegisterStorage::pc, .mask = word_mask});
+    mark_control_transfer();
     cpu.reg.pc = decoded.operation == Operation::bit_jump
                      ? decoded.extension
                      : address_add(current_pc, signed_word(decoded.extension));
