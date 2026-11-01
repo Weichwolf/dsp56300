@@ -23,6 +23,7 @@ enum class RetirementField : std::uint8_t {
   vector_address,
   vector_level,
   vector_phase,
+  vector_words,
   debug_vector,
   repeated_instruction,
   count

@@ -17,6 +17,7 @@ struct VectorState {
   Word resume = 0, address = 0;
   unsigned level = 0;
   VectorPhase phase = VectorPhase::none;
+  std::optional<std::array<Word, 2>> words = std::nullopt;
 };
 
 // CPU continuation values only; external memory, I/O and host code stay separate.

@@ -2,8 +2,10 @@
 #include "architecture.hpp"
 #include "core_impl.hpp"
 #include "dsp56300/core.hpp"
+#include "hidden_retirement.hpp"
 #include "instruction.hpp"
 
+#include <array>
 #include <optional>
 
 namespace dsp56300 {
@@ -48,6 +50,22 @@ void Core::Impl::capture_program_words() {
   if (cpu.repeat_remaining != 0 &&
       (work.decoded.words != 1 || !detail::repeatable(work.decoded.operation))) {
     fail(FaultKind::invalid_instruction, Space::program, current_pc, work.input.opcode);
+    return;
+  }
+  if (exception_ready() && vector.phase != VectorPhase::second && !vector.words) {
+    // FM2.3.2.7/table2-7: both vector words precede execution of the first slot.
+    const auto second = fetch((vector.address + 1) & word_mask, EffectKind::fetch_extension);
+    if (fault.kind != FaultKind::none) { return; }
+    mark_hidden(detail::RetirementField::vector_words);
+    vector.words = std::array{work.input.opcode, second};
+    if (work.decoded.words == 2) {
+      work.input.extension = second;
+      work.decoded.extension = second;
+    }
+    return;
+  }
+  if (exception_ready() && vector.phase == VectorPhase::second && work.decoded.words == 2) {
+    fail(FaultKind::unsupported_instruction, Space::program, current_pc, work.input.opcode);
     return;
   }
   if (work.decoded.words == 2) {

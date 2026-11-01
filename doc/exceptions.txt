@@ -18,6 +18,15 @@ The register PC remains the selected foreground resume address during fast
 vector execution; the I/O callback pc argument identifies the vector access.
 Callback and host program edits use the normal P invalidation contract.
 
+Atomic entry and Core-owned begin_fetch capture both vector words before the
+first slot executes (FM2.3.2.7/table2-7). A native first-slot P store cannot change
+the accepted second opcode. The pair survives per-instruction retirement and
+trusted checkpoints; the second slot performs no new program read. Its
+instruction_fetch metadata retains exception_vector and the accepted opcode.
+Peripheral acknowledgement belongs to the consumer: a completed second read
+can precede completion of the remaining vector instruction. Do not infer the
+end of native vector execution from peripheral acknowledgement or register PC.
+
 Architectural Progress includes request and injected instruction retirement and
 listed base costs. Internal vectors executed by run count as general helpers
 in JIT statistics; direct host interrupt admission contributes to Progress but
@@ -32,7 +41,8 @@ boundary policy; a long service saturates the mask at three. This is not a
 complete nonmaskable-source arbiter or hardware pipeline model.
 
 The implemented vector subset comprises unconditional short/effective JSR,
-parallel ALU/data moves, NOP and MOVEP memory/program forms. Register MOVEP
+parallel ALU/data moves, NOP, MOVEM and MOVEP memory/program forms. Fast MOVEM
+cannot read SSH or load LA/LC/SP/SC/SSH/SSL, following FM A.3.7. Register MOVEP
 remains unsupported in fast vectors, including the restricted stack/loop
 register destinations listed in FM Appendix A.3.7. One two-word fast instruction is admitted at
 the first vector word. Existing long-call entry can use either vector slot.
@@ -58,6 +68,15 @@ do not calibrate interrupt-entry latency or establish derivative/device behavior
 
   cmake --build build/strict --target dsp56300_transfer_test -j4
   ctest --test-dir build/strict -R '^transfer-boundaries$' --output-on-failure
+
+  cmake --build build/strict --target dsp56300_vector_fetch_test dsp56300_vector_restriction_test
+  ctest --test-dir build/strict -R '^native-vector-(fetch|restrictions)$' --output-on-failure
+
+Vector-pair checks cover actual read order, refusal before any first-slot
+effect, self-modifying P stores, fresh owners before/after first retirement,
+atomic entry, prohibited MOVEM registers and invalid two-word second slots.
+The fully supplied begin_instruction route retains its no-implicit-fetch
+contract; a consumer choosing that route owns its captured vector inputs.
 
 Sources and unresolved details
 

@@ -47,6 +47,7 @@ void merge_vector(VectorState &vector, const HiddenRetirement &result) noexcept 
   if (written(result, RetirementField::vector_address)) { vector.address = value.address; }
   if (written(result, RetirementField::vector_level)) { vector.level = value.level; }
   if (written(result, RetirementField::vector_phase)) { vector.phase = value.phase; }
+  if (written(result, RetirementField::vector_words)) { vector.words = value.words; }
 }
 }
 

@@ -51,6 +51,7 @@ struct Core::Impl {
   void execute_cache(const detail::Instruction &decoded);
   void execute_exception(const detail::Instruction &decoded);
   void step_vector();
+  [[nodiscard]] detail::Instruction vector_instruction();
   void call_vector(const detail::Instruction &decoded);
 
   explicit Impl(Buffers supplied, Io *io, Options settings, bool external_memory = false);

@@ -8,7 +8,7 @@ This is an in-process continuation, not an external serialized input format.
 State                          Captured/restored
 Architectural registers        All, with internal A/B precision unchanged
 REP                            Remaining count, body latch, saved LC and exclusion
-Software/debug vectors         Pending phase, vector, priority and normal resume PC
+Software/debug vectors         Phase, vector, priority, resume PC and accepted vector words
 Progress and faults            Instruction/base-cost counters and full fault context
 WAIT/STOP/debug                 Processing state and hidden debug controls/request
 Architectural instruction cache Contents, valid bits, tags, locks and replacement order

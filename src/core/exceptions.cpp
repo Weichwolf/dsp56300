@@ -3,8 +3,11 @@
 #include "conditions.hpp"
 #include "core_impl.hpp"
 #include "dsp56300/core.hpp"
+#include "fields.hpp"
 #include "hidden_retirement.hpp"
 #include "instruction.hpp"
+
+#include <array>
 
 namespace dsp56300 {
 using namespace detail;
@@ -13,6 +16,20 @@ namespace {
 constexpr Word vector_base_mask = 0xffff00, illegal_vector = 4, trap_vector = 8;
 constexpr Word short_address_mask = 0xfff, priority_mask = 0x300;
 constexpr unsigned maximum_level = 3, priority_shift = 8;
+constexpr Word program_read = Word{1} << 15;
+
+bool permitted_program_move(const Instruction &decoded) {
+  if (decoded.operation != Operation::move_program_effective &&
+      decoded.operation != Operation::move_program_short) {
+    return false;
+  }
+  const auto reg = decoded.opcode & six_bit_mask;
+  const bool load = (decoded.opcode & program_read) != 0;
+  // FM A.3.7: SSH reads pop; these control destinations are prohibited in fast vectors.
+  if (!load) { return reg != ssh_register; }
+  return reg != la_register && reg != lc_register && reg != sp_register && reg != sc_register &&
+         reg != ssh_register && reg != ssl_register;
+}
 }
 
 void Core::Impl::execute_exception(const Instruction &decoded) {
@@ -48,6 +65,23 @@ void Core::Impl::call_vector(const Instruction &decoded) {
   vector.phase = VectorPhase::none;
 }
 
+Instruction Core::Impl::vector_instruction() {
+  if (staged_computing()) { return instruction(current_pc); }
+  if (vector.phase == VectorPhase::first && !vector.words) {
+    const auto first = fetch_program(vector.address);
+    if (fault.kind != FaultKind::none) { return {}; }
+    const auto second = fetch_program((vector.address + 1) & word_mask);
+    if (fault.kind != FaultKind::none) { return {}; }
+    vector.words = std::array{first, second};
+  }
+  if (!vector.words) { return instruction(current_pc); }
+  auto decoded = decode(vector.words->at(vector.phase == VectorPhase::second ? 1U : 0U));
+  if (decoded.words == 2 && vector.phase == VectorPhase::first) {
+    decoded.extension = vector.words->at(1);
+  }
+  return decoded;
+}
+
 void Core::Impl::step_vector() {
   if (vector.phase == VectorPhase::pending) {
     mark_control_transfer();
@@ -58,7 +92,7 @@ void Core::Impl::step_vector() {
     vector.phase = VectorPhase::first;
   }
   current_pc = (vector.address + (vector.phase == VectorPhase::second ? 1U : 0U)) & word_mask;
-  const auto decoded = instruction(current_pc);
+  const auto decoded = vector_instruction();
   if (fault.kind != FaultKind::none) { return; }
   current_words = decoded.words;
   if (decoded.operation == Operation::call_short ||
@@ -68,7 +102,7 @@ void Core::Impl::step_vector() {
     if ((decoded.operation != Operation::parallel && decoded.operation != Operation::nop &&
          decoded.operation != Operation::move_peripheral_memory &&
          decoded.operation != Operation::move_peripheral_program &&
-         decoded.operation != Operation::reset_peripherals &&
+         !permitted_program_move(decoded) && decoded.operation != Operation::reset_peripherals &&
          decoded.operation != Operation::debug &&
          decoded.operation != Operation::conditional_debug) ||
         (decoded.words == 2 && vector.phase == VectorPhase::second)) {

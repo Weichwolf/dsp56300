@@ -28,6 +28,7 @@ void Core::Impl::mark_vector() const {
   mark_hidden(RetirementField::vector_address);
   mark_hidden(RetirementField::vector_level);
   mark_hidden(RetirementField::vector_phase);
+  mark_hidden(RetirementField::vector_words);
 }
 
 void Core::Impl::retire_instruction(const unsigned cycles) {

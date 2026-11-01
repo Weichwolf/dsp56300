@@ -56,6 +56,15 @@ interruptible(words) interface retains complete-word validation. Neither query
 acknowledges a device or advances a guest clock. Logical read tickets do not
 calibrate physical F1/F2, architectural cache prefetch or vector/IRQ bus timing.
 
+At the first Core-owned exception-vector fetch, fetch_extension obtains the
+second vector word even when the first opcode is one word. Both accepted words
+precede the first opcode's operand/effect execution. The remaining vector slot
+then uses its native opcode latch, including after program writes and trusted
+restore. Its instruction_fetch still reports exception_vector until that slot
+executes. The consumer's second-read acknowledgement may complete earlier;
+it does not terminate CPU vector ownership. Fully supplied begin_instruction
+words keep the no-implicit-fetch contract and must match any existing latch.
+
 Directed logical-read qualification passes 1503 assertions per profile under
 ASan/UBSan and separate TSan: real opcode/extension refusal, modulo24 wrapping,
 REP-latch reuse and 72 cross-backend/boundary restore cases. The unchanged eleven
