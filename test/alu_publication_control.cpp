@@ -75,6 +75,27 @@ void normalize_result(const Backend backend) {
           "Native NORM publishes data/R/flags together while retaining carry");
 }
 
+void normalize_no_shift(const Backend backend) {
+  Bus bus;
+  Core core(bus, {.backend = backend});
+  auto state = initial();
+  state.a = std::uint64_t{1} << word_bits;
+  state.sr = flag_z | flag_v | flag_c | flag_s | flag_l;
+  core.set_registers(state);
+  static_cast<void>(core.begin_instruction({.address = boot, .opcode = normalize}, phased));
+  held(core, state);
+  const auto old = state;
+  state.sr = flag_u | flag_c | flag_s | flag_l;
+  AluWriteback expected{.opcode = normalize, .count = 1};
+  expected.updates[0] = field(RegisterStorage::sr, arithmetic_flags, old.sr, state.sr);
+  publish(core, expected, state);
+  retire(core);
+  ++state.pc;
+  require(core.registers() == state &&
+              core.progress() == Progress{.instructions = 1, .estimated_cycles = 5},
+          "Non-shift NORM publishes only refreshed flags with unchanged data/Rn and five cycles");
+}
+
 void loop_fault(const Backend backend) {
   Bus bus;
   Core core(bus, {.backend = backend});
@@ -170,6 +191,7 @@ void controls() {
       for (const bool update_flags : {false, true}) { conditional(backend, taken, update_flags); }
     }
     normalize_result(backend);
+    normalize_no_shift(backend);
     loop_fault(backend);
   }
 }

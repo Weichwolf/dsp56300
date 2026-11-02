@@ -75,15 +75,20 @@ inline void apply(Registers &state, const Input input) {
           false);
     return;
   }
-  // Index 4E+2U+Z, with zero denoting the complete NOP branch.
+  // Index 4E+2U+Z: zero retains data/Rn, but still refreshes the result flags.
   constexpr std::array actions{0, 0, -1, 0, 1, 1, 1, 1};
   const auto index = ((state.sr & flag_e) != 0 ? 4U : 0U) | ((state.sr & flag_u) != 0 ? 2U : 0U) |
                      ((state.sr & flag_z) != 0 ? 1U : 0U);
   const auto count = actions.at(index);
-  if (count == 0) { return; }
+  if (count == 0) {
+    shift(state, 0, input.destination_b, false);
+    return;
+  }
   shift(state, count, input.destination_b, true);
   auto &exponent = state.r.at(input.selector);
-  constexpr auto range = std::int64_t{1} << word_bits;
+  constexpr Word compatibility = Word{1} << 13;
+  const auto address_bits = (state.sr & compatibility) != 0 ? 16U : word_bits;
+  const auto range = std::int64_t{1} << address_bits;
   exponent = static_cast<Word>((static_cast<std::int64_t>(exponent) + count + range) % range);
 }
 } // namespace dsp56300::test::normalization_model

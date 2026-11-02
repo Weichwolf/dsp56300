@@ -107,9 +107,12 @@ DIV and NORM have independently modeled fixtures. The general AGU coordinate
 and serial reverse-carry model is shared only between test generators. DIV has
 a separate serial LSB-first arithmetic circuit and integer-division witnesses;
 NORM has signed-coordinate shifts, flag boundaries and linear exponent updates.
-The stated NORM NOP branch retains state; hardware confirmation of its complete
-CCR behavior remains open. LRA/LUA destination fields are implemented according
-to the explicit five-bit operand lists despite inconsistent notes. Actual manual
+NORM's non-shift branch retains data/Rn and refreshes E/U/N/Z/V, following the
+instruction condition-code table and FM12.4.2. This revises the earlier complete
+state-retention interpretation of NOP; it is not hardware-measured. Established
+SC qualifies a 16-bit exponent update; transitions and other SC forms remain open.
+LRA/LUA destination fields follow the explicit five-bit operand lists despite
+inconsistent notes. Actual manual
 discussion pages correct summary-table page references for DIV/NORM/LUA. Other
 modes and full pipeline/restriction/IRQ/event qualification remain mandatory.
 No affected entry is complete. Section 3.2.3's SM bypass for mixed MPY/MAC and

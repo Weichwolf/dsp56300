@@ -25,6 +25,7 @@ constexpr Word div_base = 0x018040, norm_base = 0x01d815, repeat_base = 0x0600a0
 constexpr Word lf = Word{1} << 15, fv = Word{1} << 16, pointer_range = 64;
 constexpr Word ignored_modifier = 0xab8000;
 constexpr Word arithmetic_flags = flag_n | flag_z | flag_e | flag_u | flag_v;
+constexpr Word compatibility = Word{1} << 13;
 constexpr std::uint64_t word_unit = std::uint64_t{1} << word_bits;
 constexpr std::uint64_t long_sign = std::uint64_t{1} << 47, shift_sign = std::uint64_t{1} << 54;
 constexpr std::array modes{0U, mode_down, mode_up, mode_rm, mode_rm | mode_down, mode_rm | mode_up};
@@ -144,7 +145,6 @@ Word result_flags(const Registers &state, const bool destination_b) {
 void normalize_model(Registers &state, const Input input) {
   const bool right = (state.sr & flag_e) != 0;
   const bool left = !right && (state.sr & flag_u) != 0 && (state.sr & flag_z) == 0;
-  if (!right && !left) { return; }
   auto &destination = input.destination_b ? state.b : state.a;
   const auto original = destination;
   if (right) {
@@ -152,15 +152,18 @@ void normalize_model(Registers &state, const Input input) {
     auto half = value / 2;
     if (value % 2 < 0) { --half; }
     destination = static_cast<std::uint64_t>(half) & accumulator_mask;
-  } else {
+  } else if (left) {
     destination = (original * 2) % (std::uint64_t{1} << accumulator_bits);
   }
   Word flags = result_flags(state, input.destination_b);
   if (left && (original >= sign56) != (destination >= sign56)) { flags |= flag_v | flag_l; }
   state.sr = (state.sr & ~arithmetic_flags) | flags;
-  constexpr auto range = std::int64_t{1} << word_bits;
-  const auto next = static_cast<std::int64_t>(state.r.at(input.selector)) + (left ? -1 : 1);
-  state.r.at(input.selector) = static_cast<Word>((next + range) % range);
+  if (right || left) {
+    const auto address_bits = (state.sr & compatibility) != 0 ? 16U : word_bits;
+    const auto range = std::int64_t{1} << address_bits;
+    const auto next = static_cast<std::int64_t>(state.r.at(input.selector)) + (left ? -1 : 1);
+    state.r.at(input.selector) = static_cast<Word>((next + range) % range);
+  }
 }
 
 void model(Registers &state, const Input input) {
@@ -231,19 +234,27 @@ void normalize_values(Cases &cases, Input input) {
   }
 }
 
+void normalize_modes(Cases &cases, const Input input) {
+  for (const auto mode : modes) {
+    for (const Word flags :
+         {0U, flag_c | flag_l, flag_s | flag_v, flag_s | flag_c | flag_v | flag_l}) {
+      auto sample = input;
+      sample.status |= mode | flags;
+      normalize_values(cases, sample);
+    }
+  }
+}
+
 void normalize_matrix(Cases &cases) {
   for (unsigned selector = 0; selector < agu_registers; ++selector) {
     for (const bool destination_b : {false, true}) {
-      for (const auto mode : modes) {
-        for (const Word flags :
-             {0U, flag_c | flag_l, flag_s | flag_v, flag_s | flag_c | flag_v | flag_l}) {
-          normalize_values(cases,
-                           {.kind = Kind::normalize,
-                            .status = mode | flags,
-                            .exponent = selector % 2 == 0 ? 0U : word_mask,
-                            .selector = selector,
-                            .destination_b = destination_b});
-        }
+      for (const bool compatible : {false, true}) {
+        normalize_modes(cases,
+                        {.kind = Kind::normalize,
+                         .status = compatible ? compatibility : 0U,
+                         .exponent = selector % 2 == 0 ? 0U : word_mask,
+                         .selector = selector,
+                         .destination_b = destination_b});
       }
     }
   }
@@ -454,14 +465,15 @@ void faults(Cases &cases) {
                     .value = mode,
                     .pc = start};
       item.name = "DIV/NORM unimplemented numeric mode is explicit";
-      if (kind == Kind::normalize && mode == 0x100000U) {
-        // E=U=Z=0 selects NOP; SM must not limit this untouched accumulator.
+      if (kind == Kind::normalize && (mode == 0x100000U || mode == compatibility)) {
+        // No shift retains the value/Rn and refreshes flags, without SM limiting.
+        normalize_model(item.expected, input);
         ++item.expected.pc;
         item.dispatches = 1;
         item.progress = {.instructions = 1, .estimated_cycles = 5};
         item.interruptible = true;
         item.fault = {};
-        item.name = "NORM SM NOP preserves the complete old result and flags";
+        item.name = "NORM SM/SC non-shift refreshes flags without changing data or exponent";
       }
       cases.push_back(std::move(item));
     }

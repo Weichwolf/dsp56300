@@ -41,14 +41,15 @@ Current implemented SM domains
 - Parallel single-bit ASL/ASR limit their raw result. Multi-bit immediate/register
   ASL/ASR use the BFU and bypass SM, including counts zero/one. This corrects the
   earlier qualification's erroneous all-forms limiter. NORM's single-bit step
-  can limit; NORMF uses BFU bypass. Old control/flag inputs, Carry and complete
-  NORM NOP behavior remain explicit. All these qualified SM forms retain general
-  execution; see saturated-shifts.txt and saturated-normalization.txt.
+  can limit; NORMF uses BFU bypass. Old control/flag inputs, Carry and NORM
+  non-shift flag refresh remain explicit. These SM forms retain general execution;
+  see saturated-shifts.txt and saturated-normalization.txt.
 - AND/OR/EOR/NOT, logical shifts and rotates now admit their BFU SM bypass in
   the qualified ordinary 56-bit domain, including immediate and old-control forms.
   Outer accumulator bits and E/U/S/L remain preserved, with separate shifted C
   and conditional flag publication. See bfu-logic.txt for exact matrices.
-- SC/SA/DM combinations, reserved scaling, division, other SM ALU forms and
+- NORM additionally admits established SC for its exponent step. Other SC/SA/DM
+  combinations, reserved scaling, division, other SM ALU forms and
   unqualified nonparallel/count transfers are still rejected
   explicitly. The full SM numerical mode is not claimed complete.
 

@@ -317,7 +317,7 @@ for the twelve NORMF and four CLB encodings remain local and optional.
 
 test/fixtures/address-calculations.d56 and iteration.d56 are generated separately
 by dsp56300_generate_address_calc and dsp56300_generate_iteration. Their 53435
-and 31150 cases cover LRA/LUA/LEA and DIV/NORM. Expectations never execute or
+and 37294 cases cover LRA/LUA/LEA and DIV/NORM. Expectations never execute or
 link the core. Address models use integer PC/ring coordinates and a serial
 MSB-first reverse-carry circuit. Every register field, signed seven-bit offset,
 explicit destination alias, ignored N/M field where specified, raw accumulator
@@ -331,12 +331,16 @@ DIV's model instead uses a 56-bit LSB-first add/subtract circuit, old signs and
 Carry insertion. Raw-operation cases, including zero sources, are distinguished
 from valid fractional quotients. Thirty-six completed quotient cases additionally
 check the result plus next Carry bit against ordinary unsigned integer division.
-NORM uses raw signed division/remainders, flag boundaries and linear R updates;
-M is poisoned to ensure it is ignored. Consistent operand flags qualify repeated
-normalization; separate explicit E/U/Z cases check control selection. No-op
-status retention follows the manual's stated NOP and remains a hardware
-qualification point. All six admitted numeric modes, initial flags, shift/Carry
-boundaries, partial REP budgets and complete state/RAM/progress are checked.
+NORM uses raw signed division/remainders and linear R updates: 24-bit ordinarily,
+16-bit under established SC; M is poisoned to ensure it is ignored. Consistent
+operand flags qualify repeated normalization; explicit E/U/Z cases check control
+selection. The non-shift path retains data/Rn and refreshes E/U/N/Z/V under the
+FM13-146 condition-code table and FM12.4.2, preserving Carry/S/L. This resolves the
+operation description's NOP wording by applying it to data/Rn; it is a manual
+interpretation, not a hardware measurement. All six scaling/RM combinations,
+initial flags, shift/Carry boundaries, partial REP budgets and complete
+state/RAM/progress are checked. NORM's matrix additionally covers established SC;
+SC transition timing and other instructions' SC behavior remain separate.
 The separate optional authoring assembler confirms 17556 forms (17584 words),
 using LUA for its unsupported LEA spelling. It is not a dependency or state
 oracle. Remaining modes and pipeline/IRQ/stack-extension qualification stay open.

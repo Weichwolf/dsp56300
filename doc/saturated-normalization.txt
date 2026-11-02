@@ -17,9 +17,9 @@ qualification. Reference copies/extracts and the pre-review design remain privat
 Manufacturer source: https://www.nxp.com/docs/en/reference-manual/DSP56300FM.pdf
 
 Input/state                Operation / invariant
-NORM old E/U/Z             select left, right or complete NOP from old flags
-NORM exponent R0..R7       linear24 +/-1 only after an actual shift, ignoring M/N
-NORM complete NOP          no limiter, flags or exponent changes
+NORM old E/U/Z             select left, right or no shift from old flags
+NORM exponent R0..R7       linear24, or linear16 under SC, after a shift; ignore M/N
+NORM non-shift path        no limiter/data/Rn change; refresh E/U/N/Z/V
 NORM shifted result        single-bit arithmetic, then the existing SM limiter
 NORMF old signed24 source  six sources, including old A1/B1 destination aliases
 NORMF count -55..+56       raw56 shift; BFU result bypasses SM
@@ -42,10 +42,13 @@ logical shifts/rotates with SM; see bfu-logic.txt. Other numerical and instructi
 admission gaps remain explicit. No blanket admission of untested modes occurs.
 
 Counts outside NORMF's specified -55..+56 and ASL/ASR's 0..55 domain retain
-explicit software diagnostics, not claimed hardware traps. SB/SC/DM, reserved
-scaling, complete combinations, physical flags and sequence/IRQ/pipeline/timing
-remain open. In particular the existing NORMF V bit-index inconsistency and
-NORM NOP-status hardware confirmation are not resolved by these tests.
+explicit software diagnostics, not claimed hardware traps. NORM additionally
+admits established SC for its 16-bit exponent update (FM4.2). Other SC operations,
+transitions, SB/DM, reserved scaling, complete combinations and sequence/IRQ/
+pipeline/timing remain open. The non-shift flag refresh follows the FM13-146
+condition-code table and FM12.4.2; the operation's NOP wording is interpreted as
+retaining data/Rn. This corrects earlier status-retention expectations without
+claiming hardware confirmation. The NORMF V bit-index inconsistency remains open.
 
 Independent binary expectations
 
@@ -132,3 +135,34 @@ as described above. Structural ISA audit passes; require-complete fails with
 118 partial/zero complete rows. No fuzzing or publication; the objective remains
 unchanged and incomplete. Measured final runner and fully built runner hashes
 match. No subsequent capture replaces the failed timing budgets.
+
+
+NORM condition-code and established-SC correction
+
+The non-shift path now refreshes E/U/N/Z/V while retaining data/Rn and C/S/L.
+FM13-146's condition-code table and FM12.4.2 take precedence over interpreting
+its NOP operation wording as retaining every flag. This is an explicit manual
+interpretation, not hardware validation. Established SC makes shifted exponent
+updates modulo 2^16 (FM4.2); no shift retains the original complete Rn. NORM's
+five base cycles and public ABI remain unchanged. Other instruction modes,
+SC transitions and complete IRQ/pipeline/timing qualification remain open.
+
+The core-independent iteration archive grows from 31150 to 37294 cases; the
+29312-case saturated iteration archive updates non-shift expectations. The
+50240-case fast archive remains byte-identical. Both sanitizer producers emit
+identical archives. Scoped ASan/UBSan and TSan runs pass fixture execution,
+iteration ALU/captured publication and public normalization boundaries. The
+final boundary test passes 17340 assertions per profile, including both SM
+settings with established SC, all eight Rn, A/B, scaling/RM, left/right/no shift
+and exponent wrap. A rejected I/O read now independently expects an unchanged
+destination; canonical prefix, failure context and no-replay checks remain.
+Only the changed boundary test was repeated after adding its SC/SM cases.
+No full-suite, throughput, hardware or complete-ISA claim follows.
+
+Reproduce after building dsp56300_generate_iteration,
+dsp56300_generate_saturated_normalization, dsp56300_fixture_test,
+dsp56300_alu_fixture_test, dsp56300_alu_publication_test and
+dsp56300_saturated_normalization_test with the selected preset:
+  ctest --test-dir build/strict --output-on-failure -R '^(native-alu-publication|saturated-normalization-(boundaries|(fast|iteration)-(fixtures|reproducibility))|iteration-(fixtures|reproducibility)|alu-publication-iteration|captured-pcu-publication-iteration)$'
+Use build/thread for the separate TSan profile. This selects ten registrations
+per profile, with no fuzzing. All 118 ISA rows remain partial.

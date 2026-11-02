@@ -908,7 +908,7 @@ Primary-source cross-checking found an incorrect earlier SM interpretation:
 section3.1.5 places multi-bit ASL/ASR and NORMF in the BFU, which section3.2.3
 excludes from saturation. Multi-bit shifts now bypass SM, even for encoded count
 one. Single-bit parallel shifts and NORM retain limiting. NORM/NORMF now admit
-these distinct SM paths; complete NORM NOP and NORMF zero-count behavior remain
+these distinct SM paths; NORM non-shift and NORMF zero-count behavior remain
 separate. A private ShiftControl choice preserves public layouts and never
 transiently clears architectural SM. DIV SM/other unqualified modes still reject.
 
@@ -1113,3 +1113,18 @@ See staged-execution.txt for its lifetime and consumer-validation contract.
 This does not admit overlapping instructions or qualify physical clocks/cache,
 stack-error interrupts, operand/product forwarding, native staged JIT, realtime,
 consumer replacement or full device operation. All 118 ISA rows remain partial.
+
+
+NORM condition-code and established-SC correction
+
+The non-shift path retains data/Rn and C/S/L, refreshing E/U/N/Z/V under the
+manual condition-code table interpretation. Shifted exponents wrap at 16 bits
+under established SC. This is not hardware validation or SC transition coverage.
+The independent iteration archive now has 37294 cases; saturated iteration
+retains 29312, while fast normalization's 50240 cases remain byte-identical.
+All ten affected groups pass under ASan/UBSan and TSan; the final public boundary
+test additionally passes 17340 checks/profile, including combined SC/SM shifts.
+Only that changed boundary ELF was repeated. Rejected-read checks now require an
+unchanged destination without weakening prefix/fault/no-replay checks. Reproduction
+and limits: saturated-normalization.txt. All 118 ISA entries remain partial;
+full ISA, performance and other objective requirements remain incomplete.

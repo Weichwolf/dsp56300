@@ -110,6 +110,53 @@ void mode_reuse(const Options options, const Word mode) {
   }
 }
 
+void compatibility_step(const Options options, const Word mode, const Input input) {
+  constexpr Word compatibility = Word{1} << 13;
+
+  struct Sample {
+    std::uint64_t value;
+    Word flags, exponent;
+  };
+
+  constexpr std::array samples{
+      Sample{.value = saturation_model::positive, .flags = flag_u, .exponent = 0},
+      Sample{.value = sign56, .flags = flag_e, .exponent = 0xffff},
+      Sample{.value = saturation_model::negative, .flags = flag_u, .exponent = 0xffffff},
+      Sample{.value = accumulator_mask, .flags = flag_e, .exponent = 0xabcdef},
+      Sample{.value = saturation_model::positive + 1, .flags = 0, .exponent = 0xabcdef},
+      Sample{.value = 0, .flags = flag_z | flag_v, .exponent = 0xffffff}};
+  Machine machine(options);
+  machine.core.write(Space::program, start, normalization_model::opcode(input));
+  for (const bool sm : {false, true}) {
+    for (const auto sample : samples) {
+      auto expected = seed(mode | compatibility | (sm ? saturation_model::mode : 0));
+      expected.sr |= sample.flags;
+      (input.destination_b ? expected.b : expected.a) = sample.value;
+      expected.r[input.selector] = sample.exponent;
+      machine.core.set_registers(expected);
+      normalize(expected, input);
+      const auto before = machine.core.progress();
+      const auto run = machine.core.run(1);
+      require(run.dispatches == 1 && run.fault.kind == FaultKind::none &&
+                  run.progress == Progress{.instructions = before.instructions + 1,
+                                           .estimated_cycles = before.estimated_cycles + 5} &&
+                  machine.core.registers() == expected,
+              "Established SC NORM retains exact SM/bypass flags and 16-bit shifted exponent");
+    }
+  }
+}
+
+void compatibility_steps(const Options options, const Word mode) {
+  for (unsigned selector = 0; selector < agu_registers; ++selector) {
+    for (const bool destination_b : {false, true}) {
+      compatibility_step(
+          options,
+          mode,
+          {.kind = Kind::iteration, .selector = selector, .destination_b = destination_b});
+    }
+  }
+}
+
 void bfu_forms(const Options options, const Word mode) {
   struct Form {
     Word opcode;
@@ -187,6 +234,16 @@ void unqualified_modes(const Options options) {
       machine.core.write(Space::program, start, normalization_model::opcode(input));
       auto expected = seed(mode | saturation_model::mode);
       machine.core.set_registers(expected);
+      if (kind == Kind::iteration && mode == 0x2000U) {
+        normalization_model::apply(expected, input);
+        ++expected.pc;
+        const auto run = machine.core.run(1);
+        require(run.dispatches == 1 && run.fault.kind == FaultKind::none &&
+                    run.progress == Progress{.instructions = 1, .estimated_cycles = 5} &&
+                    machine.core.registers() == expected,
+                "Non-shift NORM qualifies SM/SC without changing data or the exponent");
+        continue;
+      }
       ++expected.pc;
       const auto run = machine.core.run(1);
       require(run.dispatches == 0 && run.progress == Progress{} &&
@@ -267,11 +324,24 @@ void callback(const Options options, const Request input) {
   ++expected.r[0];
   ++expected.pc;
   observer.expected = expected;
-  register_model::write(expected, 15, datum);
   const auto run = machine.core.run(3);
   require(observer.observed && observer.calls == 1,
           "I/O observes the canonical native prefix exactly once before SM normalization");
   if (!input.accept) {
+    const auto actual = machine.core.registers();
+    if (actual != expected || run.fault.kind != FaultKind::io_read || run.fault.pc != start + 1 ||
+        run.fault.address != port || run.fault.value != 0 || run.dispatches != 1) {
+      std::cerr << "CALLBACK backend=" << static_cast<unsigned>(options.backend)
+                << " optimize=" << options.optimize << " mode=" << input.mode << std::hex
+                << " actual-pc=" << actual.pc << " expected-pc=" << expected.pc
+                << " actual-sr=" << actual.sr << " expected-sr=" << expected.sr
+                << " actual-a=" << actual.a << " expected-a=" << expected.a
+                << " actual-b=" << actual.b << " expected-b=" << expected.b
+                << " actual-r0=" << actual.r[0] << " expected-r0=" << expected.r[0]
+                << " fault-kind=" << static_cast<unsigned>(run.fault.kind)
+                << " fault-address=" << run.fault.address << " fault-pc=" << run.fault.pc
+                << " fault-value=" << run.fault.value << std::dec << '\n';
+    }
     require(run.dispatches == 1 &&
                 run.progress == Progress{.instructions = 1, .estimated_cycles = 1} &&
                 run.fault == Fault{.kind = FaultKind::io_read,
@@ -285,6 +355,8 @@ void callback(const Options options, const Request input) {
             "Fault retry never replays the earlier saturated prefix or I/O");
     return;
   }
+  // A declined read publishes no destination data; only an accepted load owns datum.
+  register_model::write(expected, 15, datum);
   normalize(expected, input.patch ? replacement : first);
   require(run.dispatches == 3 && run.fault.kind == FaultKind::none &&
               run.progress == Progress{.instructions = 3, .estimated_cycles = 3} &&
@@ -307,6 +379,7 @@ int main() {
           for (const auto mode : dsp56300::test::modes) {
             dsp56300::test::prefixes(options, mode);
             dsp56300::test::mode_reuse(options, mode);
+            dsp56300::test::compatibility_steps(options, mode);
             dsp56300::test::bfu_forms(options, mode);
             for (const bool accept : {false, true}) {
               for (const bool patch : {false, true}) {
