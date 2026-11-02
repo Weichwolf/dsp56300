@@ -173,7 +173,7 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   add_executable(dsp56300_external_run_bench test/external_run_bench.cpp)
   target_link_libraries(dsp56300_external_run_bench PRIVATE dsp56300_external_run_fixture)
   add_executable(dsp56300_staged_test test/staged_test.cpp test/staged_control.cpp
-    test/staged_effects.cpp test/staged_events.cpp)
+    test/staged_effects.cpp test/staged_events.cpp test/staged_timing.cpp)
   target_link_libraries(dsp56300_staged_test PRIVATE dsp56300::core)
   add_test(NAME staged-instruction-boundaries COMMAND dsp56300_staged_test)
   add_executable(dsp56300_address_publication_test test/address_publication_test.cpp

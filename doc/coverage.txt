@@ -421,6 +421,16 @@ to a separately owned CPU. Directed tests cover all six publication modes,
 accepted I/O without replay, ticket isolation and REP continuation; they do
 not establish instruction overlap, device clocks or bus arbitration.
 
+The PCU retirement_delta query exposes the actual computed per-instruction
+Progress increment through the genuine pending retirement ticket. Authored
+NOP/REP/immediate-MOVE/absolute-JMP cases check independent base costs, no
+publication or repeated I/O, accepted/rejected reads, ownership and restored
+tickets across all three backend selections. Twenty-three actual REP NOP bodies
+check one unit each and a restored pending body. Other publication modes reject
+the query. Scoped staged/PCU/hidden-retirement/candidate-checkpoint groups pass
+ASan/UBSan and separate TSan. These observations do not qualify pipeline or
+external clock timing.
+
 Staged-execution qualification at 669e223 covers 14 unique groups per profile, including
 690 staged assertions and 2839 checkpoint assertions. The initial production
 integration freshly ran all 14 under ASan/UBSan and separate TSan; the final

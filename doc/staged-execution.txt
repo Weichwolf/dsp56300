@@ -20,6 +20,16 @@ registers/progress       Retain their pre-instruction values until retirement
 checkpoint/restore      Include accepted responses and the pending computation
 request_interrupt       Retains admitted vector/priority and genuine normal resume PC
 
+With pcu_updates, retirement_delta(ticket) observes the actual computed Progress
+increment while that owner's genuine retirement ticket remains pending. It
+neither publishes results, performs I/O nor allocates a candidate checkpoint.
+Earlier effects, other publication modes, faults, foreign/stale tickets and
+completed instructions reject the query. Restore preserves the native increment
+but requires a newly obtained ticket. An external scheduler can hold the real
+retirement until its instruction budget expires without committing it early.
+The reported units exclude pipeline interlocks, interrupt-entry overhead and
+external bus waits; this API establishes no hardware clock or bus timing.
+
 Instruction starts reset the logical accepted-effect prefix, retaining its bounded
 storage. Only [0, used) is readable; computation replaces all instruction scratch
 before publication. Capacity, ticket generations and checkpoint contents keep

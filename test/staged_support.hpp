@@ -153,4 +153,5 @@ void vector_provenance();
 void repetition();
 void faults();
 void events();
+void timing();
 } // namespace dsp56300::test::staged_test

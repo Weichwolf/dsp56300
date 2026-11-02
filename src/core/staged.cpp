@@ -163,6 +163,20 @@ InstructionProgress Core::begin_owned(const std::optional<InstructionWords> capt
   return {.pending = pending_instruction(), .progress = progress(), .fault = fault()};
 }
 
+Progress Core::retirement_delta(const EffectTicket &ticket) const {
+  if (impl_->executing || !impl_->staged_active() || !impl_->staged->complete ||
+      impl_->fault.kind != FaultKind::none || ticket.owner_ != impl_->effect_owner ||
+      ticket.epoch_ != impl_->effect_epoch || ticket.position_ != impl_->staged->used) {
+    throw std::invalid_argument("Retirement delta requires the current PCU retirement ticket");
+  }
+  const auto &work = *impl_->staged;
+  if (work.publication != InstructionPublication::pcu_updates || !work.pending ||
+      work.pending->kind != EffectKind::retire) {
+    throw std::invalid_argument("Retirement delta requires the current PCU retirement ticket");
+  }
+  return work.hidden_result.delta;
+}
+
 InstructionProgress Core::advance_instruction(const EffectTicket &ticket) {
   if (impl_->executing || !impl_->staged_active() || !impl_->staged->pending ||
       impl_->fault.kind != FaultKind::none || ticket.owner_ != impl_->effect_owner ||

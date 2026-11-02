@@ -364,6 +364,10 @@ public:
   [[nodiscard]] InstructionProgress
   begin_fetch(InstructionPublication publication = InstructionPublication::retirement);
   [[nodiscard]] std::optional<PendingInstruction> pending_instruction() const;
+  // Actual computed instruction/cycle increment at an owned pcu_updates
+  // retirement boundary. Observation neither publishes nor performs I/O.
+  // These native base units do not establish an external bus/pipeline clock.
+  [[nodiscard]] Progress retirement_delta(const EffectTicket &ticket) const;
   [[nodiscard]] InstructionProgress advance_instruction(const EffectTicket &ticket);
   [[nodiscard]] bool interruptible(InstructionWords words) const;
   // Eligibility needs only the captured opcode; this query performs no fetch.
