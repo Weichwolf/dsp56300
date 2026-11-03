@@ -1238,3 +1238,16 @@ and follow the established no-replacement-on-rejected-read contract. Exact
 binary/input/production identity permits reuse of unchanged qualification; see
 modulo-strides.txt and modulo-strides-reference.json for scope and evidence.
 All 118 ISA rows and the complete objective remain partial.
+
+State-only deferred interrupt admission
+
+Core::request_interrupt(vector, level) admits real WAIT and ordinary unknown
+foreground state without a synthetic instruction, vector execution or device
+acknowledgement. The owner later performs the genuine vector reads/execution.
+Four backends and six publication policies pass 1272 independent directed
+checks in Release and both sanitizer profiles, including cross-backend restore,
+latched vector mutation, real foreground refusal and unchanged rejected state.
+Seven affected groups pass per sanitizer profile, preserving captured and
+synchronous IRQ contracts. Unknown completed-REP metadata remains explicit.
+See deferred-interrupt-reference.json. No derivative timing, complete ISA,
+connected-device acceptance or whole-instrument performance is established.

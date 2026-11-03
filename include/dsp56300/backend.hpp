@@ -48,6 +48,7 @@ concept CoreImplementation = std::constructible_from<Implementation, Buffers, Io
                                {
                                  core.request_interrupt(address, level, instruction)
                                } -> std::same_as<void>;
+                               { core.request_interrupt(address, level) } -> std::same_as<void>;
                                { view.progress() } noexcept -> std::same_as<Progress>;
                                { view.fault() } noexcept -> std::same_as<Fault>;
                                { view.jit_statistics() } noexcept -> std::same_as<JitStatistics>;
@@ -118,6 +119,10 @@ public:
 
   void request_interrupt(const Word vector, const unsigned level, const InstructionWords words) {
     core_.request_interrupt(vector, level, words);
+  }
+
+  void request_interrupt(const Word vector, const unsigned level) {
+    core_.request_interrupt(vector, level);
   }
 
   [[nodiscard]] Progress progress() const noexcept { return core_.progress(); }

@@ -254,6 +254,24 @@ bool Core::interruptible_captured(const InstructionWords words, const bool compl
          impl_->cpu.repeat_remaining == 0 && !impl_->cpu.interrupt_inhibited;
 }
 
+void Core::request_interrupt(const Word vector, const unsigned level) {
+  impl_->validate_staged_mutation();
+  if (impl_->executing) { throw std::logic_error("Interrupt requests require stopped execution"); }
+  constexpr unsigned maximum_level = 3;
+  constexpr unsigned level_shift = 8;
+  const auto mask = (impl_->cpu.reg.sr >> level_shift) & maximum_level;
+  if (vector > word_mask || (vector & 1U) != 0 || level > maximum_level || level < mask ||
+      !interruptible()) {
+    throw std::invalid_argument("Deferred interrupt request is not admissible");
+  }
+  impl_->cpu.processing = ProcessingState::running;
+  impl_->vector = {.resume = impl_->cpu.reg.pc,
+                   .address = vector,
+                   .level = level,
+                   .phase = Impl::VectorPhase::first};
+  impl_->cpu.repeat_completed = false;
+}
+
 void Core::request_interrupt(const Word vector,
                              const unsigned level,
                              const InstructionWords foreground) {

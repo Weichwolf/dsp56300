@@ -429,6 +429,9 @@ public:
   [[nodiscard]] bool interruptible_opcode(InstructionWords words) const;
   // Capture an admitted request without fetching a vector or acknowledging a device.
   void request_interrupt(Word vector, unsigned level, InstructionWords foreground);
+  // Admit from actual CPU state without requiring a foreground snapshot. No
+  // fetch/vector execution occurs; unresolved completed-REP eligibility stays explicit.
+  void request_interrupt(Word vector, unsigned level);
   [[nodiscard]] Progress progress() const noexcept;
   [[nodiscard]] Fault fault() const noexcept;
   // Native ALU instructions may still use an instrumented parallel-move helper.

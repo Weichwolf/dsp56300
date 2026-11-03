@@ -20,6 +20,19 @@ registers/progress       Retain their pre-instruction values until retirement
 checkpoint/restore      Include accepted responses and the pending computation
 request_interrupt       Retains admitted vector/priority and genuine normal resume PC
 
+request_interrupt(vector, level) admits from actual stopped CPU state, including
+WAIT with unknown foreground code. Admission validates priority/exclusions, wakes
+an admitted WAIT and retains the vector; it performs no program read, vector
+execution, device acknowledgement or retirement. begin_fetch/advance_instruction
+or ordinary run later own the real vector effects. Completed REP still requires
+known next-opcode metadata to exclude adjacent REP; unknown metadata throws
+without a bus read or accepted request. The three-argument overload accepts
+genuinely captured foreground words for that eligibility check. The synchronous
+interrupt(vector, level) API retains immediate vector execution.
+The directed deferred-state test passes 1272 independent checks in Release,
+ASan/UBSan and separate TSan; seven affected groups pass in each sanitizer
+profile. See deferred-interrupt-reference.json for the precise evidence scope.
+
 With pcu_updates, retirement_delta(ticket) observes the actual computed Progress
 increment while that owner's genuine retirement ticket remains pending. It
 neither publishes results, performs I/O nor allocates a candidate checkpoint.
