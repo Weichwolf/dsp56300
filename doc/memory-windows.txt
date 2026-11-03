@@ -67,11 +67,11 @@ connected-instrument throughput. Qualification and exact scope are recorded in
 memory-windows-reference.json. Whole-application performance, external guarded
 region admission and native REP expansion remain separate work.
 
-An isolated Release run at revision6ffcd0a compares identical programs with
-callbacks or native windows. Three samples of1048576instructions per mode/kernel
+An isolated Release run at revision 6ffcd0a compares identical programs with
+callbacks or native windows. Three samples of 1048576 instructions per mode/kernel
 retain their timing variation in memory-windows-reference.json. Median callback/
 window time ratios are 4.18 for audio MAC, 4.28 for image ADD and 8.63 for
-communications XOR. Every direct sample removes1048576actual owner callbacks
-and records1048576native MOVE transfers, with the shared independent full-state
+communications XOR. Every direct sample removes 1048576 actual owner callbacks
+and records 1048576 native MOVE transfers, with the shared independent full-state
 oracle still checked. This small hot-word diagnostic does not predict complete
 application, staged-owner or instrument speed.
