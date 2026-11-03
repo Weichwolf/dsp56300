@@ -124,6 +124,11 @@ struct Core::Impl {
   void step();
   void step_decoded(const detail::Instruction &decoded);
   [[nodiscard]] std::uint32_t run_general(std::uint32_t budget);
+  [[nodiscard]] std::optional<detail::Instruction> budget_instruction() const;
+  [[nodiscard]] std::optional<Word> budget_word(Word address) const;
+  [[nodiscard]] BoundedRunResult run_bounded(RunBudget budget);
+  [[nodiscard]] std::optional<RunStop> budget_stop(RunBudget budget,
+                                                   const BoundedRunResult &result) const;
   [[nodiscard]] static std::uint32_t jit_execute(void *owner,
                                                  const detail::NativeOp *operation) noexcept;
   void synchronize_program_view();

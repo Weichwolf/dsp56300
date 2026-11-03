@@ -45,6 +45,7 @@ bool reads_carry(const NativeOp &operation) {
 
 Word JitEmitter::written_flags(const NativeOp &operation) const {
   if (operation.instruction.operation == Operation::nop ||
+      operation.instruction.operation == Operation::jump_short ||
       operation.instruction.operation == Operation::loop_immediate) {
     return 0;
   }

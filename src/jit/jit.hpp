@@ -54,6 +54,7 @@ public:
   Jit &operator=(const Jit &) = delete;
   [[nodiscard]] static bool available() noexcept;
   [[nodiscard]] std::uint32_t run(std::uint32_t budget);
+  [[nodiscard]] std::uint32_t run_bounded(std::uint32_t instructions, std::uint64_t cycles);
   [[nodiscard]] bool exit_requested() const noexcept;
   void request_yield() noexcept;
   void invalidate() noexcept;

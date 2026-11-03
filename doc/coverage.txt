@@ -95,6 +95,13 @@ and loop continuation/backedges use emitted code; other operations/modes use
 general helpers. This is a partial native compiler, not fully translated arbitrary
 DSP programs. See doc/jit.txt for exact guards, boundaries and execution counters.
 
+Bounded CPU-only regions now cap both instructions and documented base cycles,
+with whole-instruction owner/control boundaries and known next-fetch snapshots
+at zero/exhausted budgets. Warm short prefixes are cached native code within
+the existing executable bound. Short absolute JMP outside loop endings has
+native PC/cost retirement. See bounded-execution.txt for conservative admission,
+independent witnesses and remaining connected-scheduler/direct-RAM requirements.
+
 Parallel AND/OR/EOR/NOT now lower natively with exact middle-word writes,
 N/Z/V-only flag effects, preserved parallel MOVE state and product-word reuse.
 Independent per-bit full-state and native-counter tests cover ordinary/SM modes.

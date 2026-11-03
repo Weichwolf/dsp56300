@@ -1,0 +1,220 @@
+{
+  "qualification": "PASS",
+  "scope": "Bounded CPU-only native execution, pre-effect owner boundaries, genuine zero/REP/vector code previews, native short prefixes and JMP; not a connected device or calibrated hardware clock",
+  "source_base": "7d87f922af058da50b7652bf0c6808e40adcb22f",
+  "fuzz": false,
+  "full_suite": false,
+  "compile_context": "LLVM 19/C++23, warnings as errors, clang-tidy zero findings, hardened links; scoped ASan/UBSan and separate TSan",
+  "profiles": {
+    "strict": {
+      "sanitizer": "ASan/UBSan",
+      "archive_sha256": "897700fca9c28799ed10434cad03bc3526015ded1dbcbff2495994bb095a239b",
+      "binaries": {
+        "dsp56300_bounded_run_test": {
+          "sha256": "f105d380b4055ab4b1a64f6a4ec986e1b1db7f7129239551dd02af83722c4692",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_native_prefix_test": {
+          "sha256": "ec2e40713c178afad64b36ae2742093ae3ec5ccfde4d2362d57892599e87ec16",
+          "actual_exit": 0,
+          "reaped": true,
+          "evidence_reused": "Exact executed ELF unchanged after the bounded-facade refinement; original passing receipt retained locally"
+        },
+        "dsp56300_automatic_jit_test": {
+          "sha256": "9bb882c8e7353b08e7d3cf013fbcf592b137431f9b296ac4873e64472c9dd991",
+          "actual_exit": 0,
+          "reaped": true,
+          "evidence_reused": "Exact executed ELF unchanged after the bounded-facade refinement; original passing receipt retained locally"
+        },
+        "dsp56300_core_test": {
+          "sha256": "efe767128c5842fe96ce6d47e04d161b5308e22df0d16412b6fe305dea087c89",
+          "actual_exit": 0,
+          "reaped": true,
+          "evidence_reused": "Exact executed ELF unchanged after the bounded-facade refinement; original passing receipt retained locally"
+        },
+        "dsp56300_native_dataflow_test": {
+          "sha256": "f1f9d3ff178a2e9ec48f2d90d1c47251370dd3bd62f62703ada41e16b09ef5a7",
+          "actual_exit": 0,
+          "reaped": true,
+          "evidence_reused": "Exact executed ELF unchanged after the bounded-facade refinement; original passing receipt retained locally"
+        },
+        "dsp56300_native_inputs_test": {
+          "sha256": "0196f39ed92dcd6ab11f70c44b84a765cb3cc0998a50d757292d71c53ddee463",
+          "actual_exit": 0,
+          "reaped": true,
+          "evidence_reused": "Exact executed ELF unchanged after the bounded-facade refinement; original passing receipt retained locally"
+        },
+        "dsp56300_checkpoint_test": {
+          "sha256": "50c0daf3b98fa47b1d5d4c337b179e0fe2e2c755bf9d33e848afde304ce78159",
+          "actual_exit": 0,
+          "reaped": true,
+          "evidence_reused": "Exact executed ELF unchanged after the bounded-facade refinement; original passing receipt retained locally"
+        },
+        "dsp56300_staged_test": {
+          "sha256": "57d32251db3a131a9a04cfbf6838268743ac4a30e1db5c0a3a342d6e2aa99d7a",
+          "actual_exit": 0,
+          "reaped": true,
+          "evidence_reused": "Exact executed ELF unchanged after the bounded-facade refinement; original passing receipt retained locally"
+        },
+        "dsp56300_external_run_test": {
+          "sha256": "beb15b8a2a7fc648e16a846c91b1b56c0a75a9781040ca392c83424e34f526c6",
+          "actual_exit": 0,
+          "reaped": true,
+          "evidence_reused": "Exact executed ELF unchanged after the bounded-facade refinement; original passing receipt retained locally"
+        },
+        "dsp56300_native_loop_test": {
+          "sha256": "472557b88454374c312a485ad2c231b7680b9c097c3ca5358a5b6b945c49b191",
+          "actual_exit": 0,
+          "reaped": true,
+          "evidence_reused": "Exact executed ELF unchanged after the bounded-facade refinement; original passing receipt retained locally"
+        },
+        "dsp56300_native_backedge_test": {
+          "sha256": "e0d93892c5e40b59d49cccb02313e12f449934b27e41984c1006ac9e3ca84bbe",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_native_status_test": {
+          "sha256": "dfd39882daa9f98090c3500fa20293452ed3711ce6814e610b7623b9bef5add5",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_native_retirement_test": {
+          "sha256": "101dd1752e6bdb8dba2bc39aa6f12c1a29d7e99082e7800a42c7d310e7324d96",
+          "actual_exit": 0,
+          "reaped": true
+        }
+      },
+      "assertions": {
+        "bounded_execution": 15670,
+        "native_prefix_cache": 2815,
+        "automatic_native_external_io": 38,
+        "core_instructions": "independent directed instruction expectations",
+        "native_dataflow": 900,
+        "native_inputs": 202020,
+        "checkpoint": 2839,
+        "staged": 2427,
+        "external_memory": 111408,
+        "native_loop": 2202,
+        "native_backedge": 19104,
+        "native_status": 196874,
+        "native_retirement": 104942
+      }
+    },
+    "thread": {
+      "sanitizer": "TSan",
+      "archive_sha256": "5da4ce9ab6ba1c5c0d8a75f20c95a36141cbe0214ddb895b56a32c5772fc69b0",
+      "binaries": {
+        "dsp56300_bounded_run_test": {
+          "sha256": "8cf6da19fd499d9708454882f77d9b3d46cc244b18f55aa3de7e1f742116a6af",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_native_prefix_test": {
+          "sha256": "1ceedc7902efaa2266df889afba6f0bc722febf26fb012ddc2b1e847c78a0505",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_automatic_jit_test": {
+          "sha256": "e5b769310ddc4ad046fc3b5f867e73fa11a02c9a18ff2ef970a59eee71329e8b",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_core_test": {
+          "sha256": "a5033964114658debbec5212a207d83f02d2625ac5e87b38cff88ae031850c53",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_native_dataflow_test": {
+          "sha256": "3d6093b63c9e2cbaac2a8eb486abc64e9daebe889f62919e17fa881cc9512a4a",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_native_inputs_test": {
+          "sha256": "671ab68a1b3497de15e6688fb8216eaaea7f0366323c33e8f993e1d91e0c2860",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_checkpoint_test": {
+          "sha256": "b893c4999fd9a66db5df76bf7563feafb7006f02add0c869dc887a81bb94362d",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_staged_test": {
+          "sha256": "003a31433cf5b8f267189bf8bdde7260e5a9b321fd6c26386847dfaa836c48f6",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_external_run_test": {
+          "sha256": "dda01c7aa89b7a61d15ca46c38a23e85a52d98786bddc00335c9f56c585602fc",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_native_loop_test": {
+          "sha256": "3d247791d0504e3e6b4e2a5cf1b3efde1685ef383b98aec4f4b44c5dd0fc30a6",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_native_backedge_test": {
+          "sha256": "d86dd58d6de71fe58084ed94356d9dfecc68e9f7c460ce5f285b391531aa989a",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_native_status_test": {
+          "sha256": "17c72f3364c01412e25837fe2a131ca469127239b7d3f156bedae906a4e35f26",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_native_retirement_test": {
+          "sha256": "1ede94a347b8103ecbfc02bdff0c1a328bc68aa00adc1632af6e0f9bd9625bb2",
+          "actual_exit": 0,
+          "reaped": true
+        }
+      },
+      "assertions": {
+        "bounded_execution": 15670,
+        "native_prefix_cache": 2815,
+        "automatic_native_external_io": 38,
+        "core_instructions": "independent directed instruction expectations",
+        "native_dataflow": 900,
+        "native_inputs": 202020,
+        "checkpoint": 2839,
+        "staged": 2427,
+        "external_memory": 111408,
+        "native_loop": 2202,
+        "native_backedge": 19104,
+        "native_status": 196874,
+        "native_retirement": 104942
+      }
+    }
+  },
+  "source_sha256": {
+    "CMakeLists.txt": "b494f40045fcb06cfc8585065550932e26e23e45c7da7c304f00a032b2ca8720",
+    "include/dsp56300/backend.hpp": "8b977b967b195a9838ac57d9c25ca0d5056ce45fd7e6c49d2a9e82626cc31b96",
+    "include/dsp56300/core.hpp": "61621962f6121dc1538750cdf859bef311eb3a840c6505763add765d53bafdcf",
+    "src/core/bounded.cpp": "22272b8b04943c9911c0eb98fb39a9dc2d10575ae262901ba68b60d61ac8b162",
+    "src/core/core_impl.hpp": "41801dca41fa516c8abae2165181b481d009313b8fcf8228ae5fec432909affd",
+    "src/core/instruction_boundary.cpp": "68a9705ec03237622dc6b2d40ea1c7957892d66060a599fb14a1e377ef7682ea",
+    "src/core/instruction_boundary.hpp": "4cf5ee15c5329d2d75f17e08da1e349e6195f35b15db04183e9cf6aa9003e5a1",
+    "src/jit.cpp": "6441ca06184fa398c774d572ccac83ff2a337a719af7cc8ad92f364488b80b66",
+    "src/jit/jit.hpp": "91926521eb2f36dc6a3ff3ca9b3770b30fb5d3b59c52f017efdbce7745e043c8",
+    "src/jit/x64/jit_emitter.cpp": "5fd87a9da80fc0d3517d254772e7b8bf6f0a9461b6fa4702e1d93c678f5a7ba3",
+    "src/jit/x64/jit_flags.cpp": "d8cd3bdf76646a6725c3498857c0ddf743a782341aae75d08ba476f8dc49b2b8",
+    "test/bounded_run_test.cpp": "2718031023bea4d9843397937d69dafc6008cc6044277279bf9ca5d663ca574a",
+    "test/native_backedge_test.cpp": "46c53d7effbad18f943dc66ed97c29746506f7017382d2d9ee42604ed4c83f1c",
+    "test/native_prefix_test.cpp": "a66c22db8423adf0d7e2a6bdf1a791de01f134381563cc92616c45a057908ec5"
+  },
+  "local_evidence": {
+    "build": "doc/local/execution-budget-r1/preview-r2/build.json",
+    "qualification": "doc/local/execution-budget-r1/preview-r2/qualification.json",
+    "release": [
+      "doc/local/execution-budget-r1/release-r4/result.json",
+      "doc/local/execution-budget-r1/release-r5/result.json"
+    ]
+  },
+  "remaining": [
+    "Direct known external RAM views",
+    "Connected native CPU/peripheral event scheduler and original instrument throughput",
+    "Full ISA/mode/control timing qualification"
+  ]
+}

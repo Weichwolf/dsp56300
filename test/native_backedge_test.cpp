@@ -6,6 +6,7 @@
 #include "register_model.hpp"
 #include "support.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -51,10 +52,11 @@ struct Expected {
 
 Expected model(const std::span<const Step> body, const Registers &state, const Word budget) {
   Expected result{.state = state};
-  // A warm complete block with a shorter entry budget is left to the caller's
-  // general tail. Other entries cover complete iterations and final prefixes.
-  while (budget - result.retired >= body.size()) {
-    for (std::size_t index = 0; index < body.size(); ++index) {
+  // A short warm entry now uses its independently expected native prefix.
+  // Complete entries retain the guarded whole-body backedge contract.
+  const auto steps = std::min(static_cast<Word>(body.size()), budget);
+  while (steps != 0 && budget - result.retired >= steps) {
+    for (std::size_t index = 0; index < steps; ++index) {
       const auto step = body[index];
       const bool ending = index == body.size() - 1;
       if (ending && result.state.lc <= 1) { return result; }
@@ -134,8 +136,10 @@ void arithmetic(const std::vector<Step> &body, const Word mode) {
     }
   }
   check_case(jit, cpu, body, initial(body, mode, {.count = word_mask}), size * 3);
-  require(jit.statistics().compiled_blocks == 1,
-          "Loop count, frame target, SP and call budget do not require recompilation");
+  const auto compiled = size == 1 ? 1U : 2U;
+  require(
+      jit.statistics().compiled_blocks == compiled,
+      "Complete body and one short prefix compile once across LC, frame, SP and budget changes");
 }
 } // namespace
 } // namespace dsp56300::test

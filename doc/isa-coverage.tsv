@@ -46,7 +46,7 @@ INC	13-77	partial	src/core/integer.cpp;src/core/saturation.cpp	test/generate_int
 INSERT	13-78	partial	src/core/bit_fields.cpp	test/generate_bit_fields.cpp;test/fixtures/bit-fields.d56	SB/SC/DM semantics; complete event/sequence and pipeline timing qualification
 Jcc	13-80	partial	src/core/conditional.cpp	test/generate_conditions.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 JCLR	13-81	partial	src/core/bits.cpp	test/generate_bit_access.cpp;test/bit_access_test.cpp;test/fixtures/sm-cpu-domains.d56	Other numerical modes; complete operand/alias/sequence and timing qualification
-JMP	13-83	partial	src/core/conditional.cpp	test/generate_conditions.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
+JMP	13-83	partial	src/core/conditional.cpp;src/jit/x64/jit_emitter.cpp	test/generate_conditions.cpp;test/bounded_run_test.cpp	Native short absolute outside loop endings; other operands/control sequences and complete timing qualification
 JScc	13-84	partial	src/core/conditional.cpp	test/generate_conditions.cpp	Other numerical modes; complete operand/alias/sequence and timing qualification
 JSCLR	13-85	partial	src/core/bits.cpp	test/generate_bit_access.cpp;test/bit_access_test.cpp;test/fixtures/sm-cpu-domains.d56	Other numerical modes; complete operand/alias/sequence and timing qualification
 JSET	13-87	partial	src/core/bits.cpp	test/generate_bit_access.cpp;test/bit_access_test.cpp;test/fixtures/sm-cpu-domains.d56	Other numerical modes; complete operand/alias/sequence and timing qualification

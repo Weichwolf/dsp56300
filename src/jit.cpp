@@ -4,6 +4,7 @@
 #include "architecture.hpp"
 #include "dsp56300/core.hpp"
 #include "instruction.hpp"
+#include "instruction_boundary.hpp"
 #include "jit_emitter.hpp"
 #include "translation.hpp"
 
@@ -95,7 +96,10 @@ bool terminates(const Operation operation) {
 struct Block {
   std::vector<NativeOp> operations;
   std::unique_ptr<Executable> code;
-  Word requested_limit = 0;
+  std::vector<Word> prefix_cycles{0};
+  std::vector<std::unique_ptr<Block>> tails;
+  std::size_t storage_bytes = 0;
+  Word requested_limit = 0, pure = 0;
   bool terminated = false;
 };
 }
@@ -123,6 +127,10 @@ struct Jit::Impl {
   }
 
   [[nodiscard]] std::unique_ptr<Block> compile(Word block_limit) const;
+  [[nodiscard]] Block *prepare(Word budget);
+  [[nodiscard]] Block *prefix(Block &block, Word instructions);
+  void retain_current(Block &block);
+  [[nodiscard]] std::uint32_t enter(const Block &block, Word budget);
   Cpu &cpu;
   std::span<const Word> program;
   Options options;
@@ -165,6 +173,12 @@ std::unique_ptr<Block> Jit::Impl::compile(const Word block_limit) const {
   const auto bytes = emitter.generate(block->operations);
   if (bytes.size() > cache_limit / 2) { return nullptr; }
   block->code = std::make_unique<Executable>(bytes);
+  block->storage_bytes = block->code->size();
+  for (std::size_t index = 0; index < block->operations.size(); ++index) {
+    const auto &instruction = block->operations[index].instruction;
+    block->prefix_cycles.push_back(block->prefix_cycles.back() + instruction.cycles);
+    if (block->pure == index && !requires_owner(instruction)) { ++block->pure; }
+  }
   return block;
 }
 
@@ -216,41 +230,94 @@ JitStatistics Jit::statistics() const noexcept {
   return impl_->statistics;
 }
 
+Block *Jit::Impl::prepare(const Word budget) {
+  if (invalidated) {
+    blocks.clear();
+    statistics.executable_bytes = 0;
+    invalidated = false;
+  }
+  exit_requested = false;
+  const auto key = translation_key(cpu.reg);
+  auto found = blocks.find(key);
+  const auto compile_limit = std::min(budget, options.instructions_per_block);
+  if (found == blocks.end() ||
+      (!found->second->terminated && found->second->requested_limit < compile_limit)) {
+    auto block = compile(compile_limit);
+    if (!block) { return nullptr; }
+    if (statistics.executable_bytes + block->storage_bytes > cache_limit) {
+      blocks.clear();
+      statistics.executable_bytes = 0;
+      found = blocks.end();
+    }
+    if (found != blocks.end()) { statistics.executable_bytes -= found->second->storage_bytes; }
+    statistics.executable_bytes += block->storage_bytes;
+    blocks.insert_or_assign(key, std::move(block));
+    ++statistics.compiled_blocks;
+    found = blocks.find(key);
+  }
+  return found->second.get();
+}
+
+void Jit::Impl::retain_current(Block &block) {
+  auto current = blocks.extract(translation_key(cpu.reg));
+  blocks.clear();
+  blocks.insert(std::move(current));
+  block.tails.clear();
+  block.storage_bytes = block.code->size();
+  statistics.executable_bytes = block.storage_bytes;
+}
+
+Block *Jit::Impl::prefix(Block &block, const Word instructions) {
+  if (instructions >= block.operations.size()) { return &block; }
+  for (const auto &tail : block.tails) {
+    if (tail->requested_limit == instructions) { return tail.get(); }
+  }
+  auto tail = compile(instructions);
+  if (!tail) { return nullptr; }
+  if (statistics.executable_bytes + tail->storage_bytes > cache_limit) { retain_current(block); }
+  block.storage_bytes += tail->storage_bytes;
+  statistics.executable_bytes += tail->storage_bytes;
+  ++statistics.compiled_blocks;
+  block.tails.push_back(std::move(tail));
+  return block.tails.back().get();
+}
+
+std::uint32_t Jit::Impl::enter(const Block &block, const Word budget) {
+  const auto helpers = statistics.helper_instructions;
+  context.budget = budget;
+  const auto retired = block.code->enter(cpu, context);
+  statistics.native_alu_instructions += retired - (statistics.helper_instructions - helpers);
+  return retired;
+}
+
 std::uint32_t Jit::run(const std::uint32_t budget) {
   auto &self = *impl_;
-  if (self.invalidated) {
-    self.blocks.clear();
-    self.statistics.executable_bytes = 0;
-    self.invalidated = false;
+  auto *block = self.prepare(budget);
+  if (block == nullptr) { return 0; }
+  block = self.prefix(*block, budget);
+  return block != nullptr ? self.enter(*block, budget) : 0;
+}
+
+std::uint32_t Jit::run_bounded(const std::uint32_t instructions, const std::uint64_t cycles) {
+  auto &self = *impl_;
+  auto *block = self.prepare(instructions);
+  if (block == nullptr || block->pure == 0) { return 0; }
+  const auto count = static_cast<Word>(block->operations.size());
+  Word allowed = 0;
+  auto remaining_cycles = cycles;
+  if (block->pure == count && at_loop_end(block->operations.back())) {
+    const auto body_cycles = block->prefix_cycles.back();
+    if (body_cycles == 0) { return 0; }
+    const auto repeats = std::min(std::uint64_t{instructions / count}, cycles / body_cycles);
+    allowed = static_cast<Word>(repeats * count);
+    remaining_cycles -= repeats * body_cycles;
   }
-  self.exit_requested = false;
-  const auto key = translation_key(self.cpu.reg);
-  auto found = self.blocks.find(key);
-  const auto block_limit = std::min(budget, self.options.instructions_per_block);
-  if (found == self.blocks.end() ||
-      (!found->second->terminated && found->second->requested_limit < block_limit)) {
-    auto block = self.compile(block_limit);
-    if (!block) { return 0; }
-    if (self.statistics.executable_bytes + block->code->size() > cache_limit) {
-      self.blocks.clear();
-      self.statistics.executable_bytes = 0;
-      found = self.blocks.end();
-    }
-    if (found != self.blocks.end()) {
-      self.statistics.executable_bytes -= found->second->code->size();
-    }
-    self.statistics.executable_bytes += block->code->size();
-    self.blocks.insert_or_assign(key, std::move(block));
-    ++self.statistics.compiled_blocks;
-    found = self.blocks.find(key);
-  }
-  const auto &block = *found->second;
-  if (block.operations.size() > budget) { return 0; }
-  const auto helpers = self.statistics.helper_instructions;
-  self.context.budget = budget;
-  const auto retired = block.code->enter(self.cpu, self.context);
-  self.statistics.native_alu_instructions +=
-      retired - (self.statistics.helper_instructions - helpers);
-  return retired;
+  const auto tail_limit = std::min(instructions - allowed, block->pure);
+  Word tail = 0;
+  while (tail < tail_limit && block->prefix_cycles[tail + 1] <= remaining_cycles) { ++tail; }
+  allowed += tail;
+  if (allowed == 0) { return 0; }
+  block = self.prefix(*block, std::min(allowed, count));
+  return block != nullptr ? self.enter(*block, allowed) : 0;
 }
 } // namespace dsp56300::detail

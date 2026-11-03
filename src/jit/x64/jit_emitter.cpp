@@ -99,6 +99,7 @@ bool JitEmitter::lowerable(const NativeOp &operation) const {
   const auto &decoded = operation.instruction;
   if (at_loop_end(operation) && (operation.mode & compatibility_mode) != 0) { return false; }
   if (decoded.operation == Operation::nop) { return true; }
+  if (decoded.operation == Operation::jump_short && !at_loop_end(operation)) { return true; }
   if ((operation.mode & unsupported_modes) != 0 ||
       (operation.mode & (scale_up | scale_down)) == (scale_up | scale_down) ||
       ((operation.mode & arithmetic_saturation) != 0 && !saturation_supported(operation))) {
@@ -280,7 +281,11 @@ void JitEmitter::round(const Word mode) {
 }
 
 void JitEmitter::native(const NativeOp &operation) {
-  if (operation.instruction.operation == Operation::nop) { return; }
+  constexpr std::array retirement_only{Operation::nop, Operation::jump_short};
+  if (std::ranges::find(retirement_only, operation.instruction.operation) !=
+      retirement_only.end()) {
+    return;
+  }
   if (is_logic(operation)) {
     logic(operation);
     return;
@@ -341,10 +346,11 @@ void JitEmitter::retire(const NativeOp &operation, const bool publish) {
   if (at_loop_end(operation)) {
     loop_continue();
   } else if (publish) {
-    code_.store_constant(Reg::r12,
-                         pc_offset,
-                         Width::dword,
-                         (operation.pc + operation.instruction.words) & word_mask);
+    constexpr Word short_target = 0xfff;
+    const auto next = operation.instruction.operation == Operation::jump_short
+                          ? operation.instruction.opcode & short_target
+                          : (operation.pc + operation.instruction.words) & word_mask;
+    code_.store_constant(Reg::r12, pc_offset, Width::dword, next);
   }
   if (region_mode_ != RegionMode::guarded || publish) {
     code_.store_constant(Reg::r12, offsetof(Cpu, repeat_completed), Width::word, 0);

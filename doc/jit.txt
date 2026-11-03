@@ -12,9 +12,10 @@ Core::run has the same exact guest-instruction budget on every backend. One REP
 iteration counts as one guest instruction. RunResult.dispatches retains its
 legacy field name but counts retired guest instructions, never native blocks.
 Progress excludes a failed instruction, including failed DO cleanup. A short
-budget tail may use the general executor. Block length is bounded by
-Options.instructions_per_block in [1,256]. The former unused prototype options
-for block links and DO dispatch batching have been removed.
+budget tail uses a cached native prefix when its operations are eligible.
+General fallback remains explicit for unsupported operations/modes. Block length
+is bounded by Options.instructions_per_block in [1,256]. The former unused
+prototype options for block links and DO dispatch batching have been removed.
 
 The emitter translates signed MPY/MPYR/MAC/MACR variants, RND, CLR, ABS, NEG, single-bit ASR,
 ADD/SUB/CMP, ADC/SBC, parallel AND/OR/EOR/NOT, internal TFR and NOP retirement. ADD/SUB/CMP include
@@ -584,3 +585,11 @@ arithmetic, including P edits/failures and mode changes. No public state/layout,
 host ISA or checkpoint contract changes. See bfu-logic.txt for independent
 truth/serial models, old-stimulus preservation and finite coverage. This does not
 qualify sustained BFU throughput, full modes or arbitrary-program native lowering.
+
+Bounded owner execution
+
+Core::run(RunBudget) caps retired instructions and documented base cycles,
+returning before an entire external-effect/control boundary instruction. Pure
+code/REP/vector-latch metadata remains available at zero and exhausted budgets.
+It does not advance a derivative clock or replace real vector bus reads. See
+bounded-execution.txt for ownership, cached-prefix admission and evidence limits.

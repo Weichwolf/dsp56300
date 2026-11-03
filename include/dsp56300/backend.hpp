@@ -25,6 +25,7 @@ concept CoreImplementation = std::constructible_from<Implementation, Buffers, Io
                                       const Word value,
                                       const std::span<const Word> words,
                                       const std::uint32_t budget,
+                                      const RunBudget cycle_budget,
                                       const unsigned level,
                                       const bool enabled) {
                                { core.reset() } -> std::same_as<void>;
@@ -54,6 +55,8 @@ concept CoreImplementation = std::constructible_from<Implementation, Buffers, Io
                                { core.write(space, address, value) } -> std::same_as<void>;
                                { core.load(space, address, words) } -> std::same_as<void>;
                                { core.run(budget) } -> std::same_as<RunResult>;
+                               { core.run(cycle_budget) } -> std::same_as<BoundedRunResult>;
+                               { core.request_yield() } noexcept -> std::same_as<void>;
                                {
                                  view.processing_state()
                                } noexcept -> std::same_as<ProcessingState>;
@@ -136,6 +139,10 @@ public:
   }
 
   [[nodiscard]] RunResult run(const std::uint32_t budget) { return core_.run(budget); }
+
+  [[nodiscard]] BoundedRunResult run(const RunBudget budget) { return core_.run(budget); }
+
+  void request_yield() noexcept { core_.request_yield(); }
 
   [[nodiscard]] ProcessingState processing_state() const noexcept {
     return core_.processing_state();

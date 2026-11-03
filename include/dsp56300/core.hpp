@@ -89,6 +89,22 @@ struct RunResult {
   bool yielded = false;
 };
 
+struct RunBudget {
+  std::uint32_t instructions = 0;
+  std::uint64_t cycles = 0;
+};
+
+enum class RunStop : std::uint8_t {
+  instruction_budget,
+  cycle_budget,
+  external_effect,
+  unknown_code,
+  control_event,
+  state,
+  yielded,
+  fault
+};
+
 struct Options {
   Backend backend = Backend::automatic;
   // Maximum straight-line translation length, bounded to [1,256].
@@ -149,6 +165,18 @@ public:
 struct InstructionWords {
   Word address = 0, opcode = 0;
   std::optional<Word> extension = std::nullopt;
+};
+
+struct BoundedRunResult {
+  RunResult execution;
+  std::uint64_t cycles = 0;
+  RunStop stop = RunStop::instruction_budget;
+  Word pc = 0;
+  std::optional<Word> next_cycles;
+  // Snapshot of genuinely known code at the stopped boundary. An owner may
+  // latch this instruction before clocks/events advance, retaining original
+  // semantics if code changes during the in-flight reservation.
+  std::optional<InstructionWords> next;
 };
 
 struct InstructionFetch {
@@ -339,9 +367,9 @@ class Core {
 public:
   explicit Core(Buffers buffers, Io *io = nullptr, Options options = {});
   // External memory owner supplies every real P/X/Y/peripheral transfer.
-  // Ordinary run uses the general executor (no native JIT); staged interfaces
-  // additionally expose effect boundaries. Architectural cache hits stay native.
-  // Host read/load/write still require RAM spans; the owner pairs bus snapshots.
+  // A pure known code view enables ordinary native execution. Staged interfaces
+  // additionally expose effect boundaries. Architectural cache state remains
+  // separate from translated code; the owner pairs external bus snapshots.
   explicit Core(Io &bus, Options options = {});
   ~Core();
   Core(const Core &) = delete;
@@ -395,6 +423,10 @@ public:
   // Translated blocks never exceed the budget; a short tail can use the interpreter.
   // Faults require reset. CPU state after a failed dispatch is not committed evidence.
   [[nodiscard]] RunResult run(std::uint32_t instruction_budget);
+  // Execute a completed CPU-only prefix within both bounds. Return before any
+  // unproven external effect/control transition, with actual next PC/base cost.
+  // Unknown code is an explicit boundary; this query never invents a fetch.
+  [[nodiscard]] BoundedRunResult run(RunBudget budget);
   // A synchronous Io callback can return this run after actual instruction
   // retirement. Guest state and compiled code survive; no cross-thread mutation.
   void request_yield() noexcept;

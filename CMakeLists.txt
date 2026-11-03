@@ -23,7 +23,7 @@ option(DSP56300_BUILD_TESTING "Build DSP library tests" ${PROJECT_IS_TOP_LEVEL})
 set(CMAKE_CXX_CLANG_TIDY "${DSP56300_CLANG_TIDY};--warnings-as-errors=*")
 
 add_library(dsp56300_core STATIC
-  src/core.cpp src/core/external_memory.cpp src/core/core_state.cpp src/core/checkpoint.cpp src/core/execution_state.cpp
+  src/core.cpp src/core/bounded.cpp src/core/instruction_boundary.cpp src/core/external_memory.cpp src/core/core_state.cpp src/core/checkpoint.cpp src/core/execution_state.cpp
   src/core/staged.cpp src/core/staged_compute.cpp src/core/staged_plan.cpp src/core/move_publication.cpp src/core/move_storage.cpp src/core/alu_publication.cpp src/core/unit_publication.cpp src/core/pcu_publication.cpp src/core/hidden_retirement.cpp src/core/native_retirement.cpp src/core/program_capture.cpp src/core/instruction_shape.cpp
   src/core/transfer_info.cpp src/core/transfer_parallel.cpp src/core/transfer_special.cpp
   src/core/transfer_description.cpp src/core/arithmetic.cpp src/core/saturation.cpp src/core/shifts.cpp
@@ -65,6 +65,12 @@ add_custom_target(${DSP56300_FORMAT_TARGET}
 
 if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64)$")
+    add_executable(dsp56300_native_prefix_test test/native_prefix_test.cpp)
+    target_link_libraries(dsp56300_native_prefix_test PRIVATE dsp56300::core)
+    add_test(NAME native-cached-prefixes COMMAND dsp56300_native_prefix_test)
+    add_executable(dsp56300_bounded_run_test test/bounded_run_test.cpp)
+    target_link_libraries(dsp56300_bounded_run_test PRIVATE dsp56300::core)
+    add_test(NAME bounded-native-prefixes COMMAND dsp56300_bounded_run_test)
     add_executable(dsp56300_automatic_jit_test test/automatic_jit_test.cpp)
     target_link_libraries(dsp56300_automatic_jit_test PRIVATE dsp56300::core)
     add_test(NAME automatic-native-external-memory COMMAND dsp56300_automatic_jit_test)
