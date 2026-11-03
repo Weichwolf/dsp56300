@@ -1104,8 +1104,8 @@ results but show timing spread; they do not qualify general or realtime speed.
 
 Captured pcu_updates now retains up to eight CPU writers and their distinct
 intermediate computed registers through the ordinary executor. Reads, writes,
-bits and reset still require actual owned Io operations. Cache, loop and system
-guards retain replay; later native faults discard private planning and preserve
+bits and reset still require actual owned Io operations. Cache, REP, vector and
+loop-control/system opcode guards retain replay; later native faults discard private planning and preserve
 the original publication/fault order. See cpu-continuations.txt for the state
 table, bounds and targeted commands. CPU-result planning changes host work only.
 

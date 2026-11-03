@@ -134,11 +134,15 @@ void checkpoints(const BackendPair backend) {
   }
 }
 
-void read_boundary(const Backend backend, const bool accept) {
+void read_boundary(const Backend backend, const bool accept, const bool loop) {
   Bus bus;
   bus.events = {{.value = staged_test::raw_datum, .accept = accept}};
   Core core(bus, {.backend = backend});
   auto before = staged_test::seed();
+  if (loop) {
+    before.sr = 0x8000;
+    before.la = boot + 5;
+  }
   before.x = old_x;
   core.set_registers(before);
   static_cast<void>(core.begin_instruction({.address = boot, .opcode = short_load}, policy));
@@ -195,7 +199,7 @@ void read_boundary(const Backend backend, const bool accept) {
   }
 }
 
-void store_boundary(const Backend backend, const bool accept) {
+void store_boundary(const Backend backend, const bool accept, const bool loop) {
   // FM MOVEM SSH,P:(R0)+: AGU update, source stack pop, real P store, PC.
   constexpr Word opcode = 0x0758bc;
   constexpr Word value = 0x123456;
@@ -207,6 +211,10 @@ void store_boundary(const Backend backend, const bool accept) {
                  .accept = accept}};
   Core core(bus, {.backend = backend});
   auto visible = staged_test::seed();
+  if (loop) {
+    visible.sr = 0x8000;
+    visible.la = boot + 5;
+  }
   visible.sp = visible.sc = 1;
   visible.stack[1] = std::uint64_t{value} << word_bits;
   core.set_registers(visible);
@@ -294,6 +302,188 @@ void late_fault(const BackendPair backend) {
   }
 }
 
+struct LoopCase {
+  Word count = 2, stack_pointer = 2, outer_status = 0;
+  bool last = false, forever = false;
+};
+
+struct LoopFixture {
+  Registers before;
+  std::array<Writer, 4> writers{};
+  unsigned count = 0;
+  bool transfer = false;
+};
+
+LoopFixture loop_body(const LoopCase test) {
+  // FM DO: the top frame saves body start/SR; the preceding frame saves LA/LC.
+  constexpr Word active = 0x8000;
+  constexpr Word forever = 0x10000;
+  constexpr Word outer_la = 0x234;
+  constexpr Word outer_lc = 7;
+  const InstructionWords input{.address = boot}; // Literal NOP, one cycle.
+  LoopFixture result{.before = staged_test::seed()};
+  auto &before = result.before;
+  before.sr = flag_c | active | (test.forever ? forever : 0U);
+  before.la = boot + (test.last ? 0U : 5U);
+  before.lc = test.count;
+  before.sp = test.stack_pointer;
+  before.sc = 2;
+  before.stack[before.sp & 15U] = (std::uint64_t{target} << word_bits) | test.outer_status;
+  before.stack[(before.sp - 1) & 15U] = (std::uint64_t{outer_la} << word_bits) | outer_lc;
+  auto computed = before;
+  ++computed.pc;
+  result.writers[result.count++] = {
+      .effect =
+          pcu(input,
+              {.count = 1, .updates = {{field(RegisterStorage::pc, word_mask, boot, boot + 1)}}}),
+      .computed = computed};
+  if (!test.last) { return result; }
+  if (test.count != 1 || test.forever) {
+    computed.lc = (test.count + word_mask) & word_mask;
+    computed.pc = target;
+    result.transfer = true;
+    result.writers[result.count++] = {
+        .effect = pcu(input,
+                      {.count = 2,
+                       .updates = {{field(RegisterStorage::lc, word_mask, test.count, computed.lc),
+                                    field(RegisterStorage::pc, word_mask, boot + 1, target)}}}),
+        .computed = computed};
+    return result;
+  }
+  for (unsigned popped = 0; popped < 2; ++popped) {
+    const auto prior = computed;
+    computed.sp = (computed.sp - 1) & sp_mask;
+    --computed.sc;
+    result.writers[result.count++] = {
+        .effect = pcu(input,
+                      {.count = 2,
+                       .updates = {{field(RegisterStorage::sp, sp_mask, prior.sp, computed.sp),
+                                    field(RegisterStorage::sc, sc_mask, prior.sc, computed.sc)}}}),
+        .computed = computed};
+  }
+  computed.sr = flag_c | test.outer_status;
+  computed.la = outer_la;
+  computed.lc = outer_lc;
+  result.writers[result.count++] = {
+      .effect =
+          pcu(input,
+              {.count = 3,
+               .updates = {{field(RegisterStorage::sr, active | forever, before.sr, computed.sr),
+                            field(RegisterStorage::la, word_mask, before.la, outer_la),
+                            field(RegisterStorage::lc, word_mask, test.count, outer_lc)}}}),
+      .computed = computed};
+  return result;
+}
+
+void finish_loop_body(Core &core, const LoopFixture &fixture, const unsigned cut) {
+  auto visible = cut == 0 ? fixture.before : fixture.writers.at(cut - 1).computed;
+  for (unsigned phase = cut; phase < fixture.count; ++phase) {
+    const auto &writer = fixture.writers.at(phase);
+    auto action = pending(core);
+    require(core.registers() == visible && core.progress() == Progress{} &&
+                action.effect == writer.effect && action.computed == writer.computed,
+            "Active DO body preserves literal PC, LC, stack-pop and outer-loop publications");
+    rejected([&] { static_cast<void>(core.candidate_checkpoint(action.ticket)); });
+    action.computed = {};
+    action.effect = {};
+    require(!core.advance_instruction(action.ticket).retired,
+            "A loop writer cannot retire accounting or use a tampered observation");
+    visible = writer.computed;
+  }
+  const auto action = pending(core);
+  require(action.effect.kind == EffectKind::retire && action.computed == visible &&
+              core.registers() == visible && core.progress() == Progress{},
+          "The real loop tail is complete before its separately owned retirement");
+  require(core.advance_instruction(action.ticket).retired && core.registers() == visible &&
+              core.progress() == Progress{.instructions = 1, .estimated_cycles = 1} &&
+              core.instruction_outcome() ==
+                  InstructionOutcome{.instructions = 1,
+                                     .address = boot,
+                                     .opcode = 0,
+                                     .control_transfer = fixture.transfer},
+          "Only an actual DO rewind is a transfer; the NOP always retires its literal one cycle");
+}
+
+void loop_restore_case(const BackendPair backend, const LoopFixture &fixture) {
+  for (unsigned cut = 0; cut <= fixture.count; ++cut) {
+    Bus bus;
+    Core original(bus, {.backend = backend.from});
+    Core restored(bus, {.backend = backend.to});
+    original.set_registers(fixture.before);
+    static_cast<void>(original.begin_instruction({.address = boot}, policy));
+    for (unsigned phase = 0; phase < cut; ++phase) {
+      static_cast<void>(original.advance_instruction(pending(original).ticket));
+    }
+    const auto stale = pending(original).ticket;
+    const auto saved = original.checkpoint();
+    restored.restore(saved);
+    original.restore(saved);
+    rejected([&] { static_cast<void>(original.advance_instruction(stale)); });
+    rejected([&] { static_cast<void>(restored.advance_instruction(stale)); });
+    finish_loop_body(original, fixture, cut);
+    finish_loop_body(restored, fixture, cut);
+    require(bus.calls == 0, "DO body continuations and all restores invent no I/O");
+  }
+}
+
+void loop_continuations(const BackendPair backend) {
+  constexpr std::array counts{Word{0}, Word{1}, Word{2}, word_mask};
+  for (const auto count : counts) {
+    for (const auto stack_pointer : std::array{Word{2}, Word{31}, Word{63}}) {
+      for (const auto outer_status : std::array{Word{0}, Word{0x8000}, Word{0x18000}}) {
+        for (const bool last : {false, true}) {
+          for (const bool forever : {false, true}) {
+            const auto fixture = loop_body({.count = count,
+                                            .stack_pointer = stack_pointer,
+                                            .outer_status = outer_status,
+                                            .last = last,
+                                            .forever = forever});
+            loop_restore_case(backend, fixture);
+          }
+        }
+      }
+    }
+  }
+}
+
+void loop_fault(const BackendPair backend, const Word frames) {
+  auto before = loop_body({.count = 1, .last = true}).before;
+  before.sc = frames;
+  Bus bus;
+  Core original(bus, {.backend = backend.from});
+  Core restored(bus, {.backend = backend.to});
+  original.set_registers(before);
+  const auto first = original.begin_instruction({.address = boot}, policy);
+  require(first.pending && first.fault.kind == FaultKind::none &&
+              first.pending->effect.kind == EffectKind::pcu_update &&
+              original.registers() == before,
+          "A future DO stack underflow stays behind the original held PC writer");
+  const auto saved = original.checkpoint();
+  restored.restore(saved);
+  for (Core *machine : {&original, &restored}) {
+    auto visible = before;
+    ++visible.pc;
+    auto receipt = machine->advance_instruction(pending(*machine).ticket);
+    if (frames != 0) {
+      require(receipt.pending && receipt.fault.kind == FaultKind::none &&
+                  machine->registers() == visible,
+              "The valid first frame retains its own publication before a later failing pop");
+      receipt = machine->advance_instruction(pending(*machine).ticket);
+      --visible.sp;
+      --visible.sc;
+    }
+    require(receipt.fault == Fault{.kind = FaultKind::stack,
+                                   .space = Space::program,
+                                   .address = boot,
+                                   .value = visible.sp,
+                                   .pc = boot} &&
+                !receipt.pending && !receipt.retired && machine->registers() == visible &&
+                machine->progress() == Progress{} && !machine->instruction_outcome() &&
+                bus.calls == 0,
+            "Loop underflow retains the exact accepted prefix and fault, never a private suffix");
+  }
+}
+
 } // namespace
 } // namespace dsp56300::test
 
@@ -301,12 +491,18 @@ int main() {
   try {
     for (const auto from : dsp56300::test::backends) {
       for (const bool accept : {false, true}) {
-        dsp56300::test::read_boundary(from, accept);
-        dsp56300::test::store_boundary(from, accept);
+        for (const bool loop : {false, true}) {
+          dsp56300::test::read_boundary(from, accept, loop);
+          dsp56300::test::store_boundary(from, accept, loop);
+        }
       }
       for (const auto to : dsp56300::test::backends) {
         dsp56300::test::checkpoints({.from = from, .to = to});
         dsp56300::test::late_fault({.from = from, .to = to});
+        dsp56300::test::loop_continuations({.from = from, .to = to});
+        for (const dsp56300::Word frames : {0U, 1U}) {
+          dsp56300::test::loop_fault({.from = from, .to = to}, frames);
+        }
       }
     }
     std::cout << dsp56300::test::checks << " bounded CPU continuation checks passed.\n";

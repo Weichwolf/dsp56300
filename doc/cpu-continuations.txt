@@ -17,9 +17,12 @@ Candidate checkpoints require the actual retirement boundary. Copies of pending
 observations cannot alter stored writers. Memory mutation between publications
 is sampled only at the real read; accepted operations are never replayed to Io.
 
-Initial guards require captured words, PCU publication, no cache/active DO/REP,
-vector or pending debug entry. Loop, cache and system opcodes retain general
-replay. A current CE/LF bit stops collection before that publication. Filling
+Guards require captured words, PCU publication, no cache/active REP, vector or
+pending debug entry. DO/DOR setup, explicit loop control, cache and system
+opcodes retain general replay. Ordinary instructions inside an active DO loop
+can plan their CPU writers, including a real loop rewind or final frame pops.
+LF alone does not prohibit planning; a current CE bit still stops collection
+before that publication. Filling
 the bounded queue stops at the next boundary, rather than publishing or failing
 early. The overall accepted-effect capacity remains unchanged.
 
