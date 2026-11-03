@@ -383,7 +383,7 @@ void helper_reuse_case(const native::Direct &code,
   cpu.repeat_completed = cpu.interrupt_inhibited = true;
   probe.cpu = &cpu;
   detail::NativeContext context{.runtime = runtime,
-                                .dirty = &probe.dirty,
+                                .exit_requested = &probe.dirty,
                                 .native_moves = &probe.moves,
                                 .budget = static_cast<Word>(reuse_program.size())};
   const auto count = code.enter(cpu, context);

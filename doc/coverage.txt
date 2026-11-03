@@ -86,7 +86,11 @@ Native translation: partial implementation and continuing optimization
 The Linux x64 JIT emits real machine instructions into bounded memory, publishes
 RX pages and enters them through the production SysV bridge. Code executes
 natively in the host process. The ordinary Core API hides executable storage
-and compilation. Selected arithmetic, single-bit ASR, rounding/addition, data-register and guarded X/Y transfers
+and compilation. The automatic default selects native execution on supported
+hosts, including external Io owners with pure known code views. Real fetches,
+refusals, code revisions, IRQs and cooperative event yields retain explicit
+ownership. Direct external RAM views and connected-device speed remain open;
+see native-io.txt. Selected arithmetic, single-bit ASR, rounding/addition, data-register and guarded X/Y transfers
 and loop continuation/backedges use emitted code; other operations/modes use
 general helpers. This is a partial native compiler, not fully translated arbitrary
 DSP programs. See doc/jit.txt for exact guards, boundaries and execution counters.

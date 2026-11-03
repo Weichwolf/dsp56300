@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 
 namespace dsp56300::detail {
@@ -33,12 +34,13 @@ struct JitRuntime {
   void *owner = nullptr;
   std::array<std::uint64_t, 4> *latched = nullptr;
   JitHelper execute = nullptr, moves = nullptr;
+  std::optional<Word> (*program)(void *, Word) noexcept = nullptr;
   std::array<JitMemory, 2> memory;
 };
 
 struct NativeContext {
   JitRuntime runtime;
-  bool *dirty = nullptr;
+  bool *exit_requested = nullptr;
   std::uint64_t *native_moves = nullptr;
   std::uint64_t *batch_instructions = nullptr, *avx2_instructions = nullptr, *batch_calls = nullptr;
   std::uint32_t budget = 0;
@@ -52,7 +54,8 @@ public:
   Jit &operator=(const Jit &) = delete;
   [[nodiscard]] static bool available() noexcept;
   [[nodiscard]] std::uint32_t run(std::uint32_t budget);
-  [[nodiscard]] bool dirty() const noexcept;
+  [[nodiscard]] bool exit_requested() const noexcept;
+  void request_yield() noexcept;
   void invalidate() noexcept;
   void reset();
   void helper_retired() noexcept;

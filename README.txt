@@ -15,8 +15,8 @@ the seven cache-control instructions; see doc/program-cache.txt for the external
 P mapping/geometry options, CE-enabled general fallback and qualification gaps. A/B use a left-aligned 56-bit representation so
 ordinary 64-bit wrapping arithmetic discards bits beyond DSP precision.
 An independent Linux x86-64 JIT emits selected scalar arithmetic and uses guarded
-general helpers for other implemented forms. Select Options.backend=Backend::jit;
-the cached interpreter remains the default. See doc/jit.txt for supported native
+general helpers for other implemented forms. The automatic default chooses native
+execution on supported hosts; explicit reference/cached/jit choices remain available. See doc/jit.txt for supported native
 operations, invalidation, execution budgets and instrumentation boundaries.
 Full ISA/mode/timing qualification and representative performance measurements remain
 open; see doc/coverage.txt and the complete objective in doc/objective.txt.
@@ -77,10 +77,13 @@ checkpoint restore paired with matching caller-owned memory/I/O. Register views
 are initialization only. Core::checkpoint/restore preserve complete CPU
 continuation, architectural cache and sleep/fault/debug state; see doc/checkpoints.txt.
 See doc/io.txt for synchronous word/atomic-bit callbacks and mutation boundaries.
-For an externally clocked instruction owner, Core(Io&) accepts explicitly
-captured instruction words and returns owned bus/retirement tickets. It has no
-implicit program-fetch/RAM route. Checkpoints preserve the pending computation
-and accepted external responses. This route currently uses the general executor
+Core(Io&) borrows real P/X/Y accesses from synchronous callbacks. A pure known
+program view enables native execution; unknown words retain actual fetches.
+request_yield returns a real instruction boundary while retaining compiled code.
+See doc/native-io.txt for revision, mapping and event ownership.
+For an externally clocked instruction owner, captured words and owned
+bus/retirement tickets remain available. Checkpoints preserve the pending
+computation and accepted external responses. This captured route uses the general executor
 for every backend; early AGU/MOVE publication, CE/cache and staged native JIT
 remain unqualified. See doc/staged-execution.txt for ownership and exact scope.
 The separate <dsp56300/instruction.hpp> query inspect_instruction reports recognized

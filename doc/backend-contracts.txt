@@ -10,6 +10,7 @@ Concept satisfaction alone proves no numerical, timing or ownership semantics.
 
 BackendCore<Backend::reference>, BackendCore<Backend::cached> and
 BackendCore<Backend::jit> are typed adapters of the existing implementations.
+BackendCore<Backend::automatic> selects the fastest supported default path.
 They own the same Core facade, add no virtual dispatch and choose their backend
 at construction. The type's backend wins over Options.backend; other options
 are preserved. These adapters do not introduce three independent ISA models:

@@ -20,7 +20,7 @@ inline constexpr std::size_t agu_registers = 8;
 inline constexpr std::size_t stack_entries = 16;
 
 enum class Space : std::uint8_t { program, x, y };
-enum class Backend : std::uint8_t { cached, reference, jit };
+enum class Backend : std::uint8_t { cached, reference, jit, automatic };
 enum class BatchBackend : std::uint8_t { automatic, disabled, scalar, avx2 };
 enum class ProcessingState : std::uint8_t { running, waiting, stopped, debugging };
 
@@ -86,10 +86,11 @@ struct RunResult {
   ProcessingState state = ProcessingState::running;
   Progress progress;
   Fault fault;
+  bool yielded = false;
 };
 
 struct Options {
-  Backend backend = Backend::cached;
+  Backend backend = Backend::automatic;
   // Maximum straight-line translation length, bounded to [1,256].
   // A native hardware-loop backedge can repeat the body within the run budget.
   Word instructions_per_block = 64;
@@ -130,6 +131,14 @@ public:
   // Guest RESET preserves CPU state. Accept only after resetting derivative
   // peripherals and their interrupt priorities; default rejection is explicit.
   virtual bool reset_peripherals(Word /*pc*/) noexcept { return false; }
+
+  // Optional side-effect-free code view. Unknown/unstable words retain actual
+  // owned fetches. The owner changes the revision on code or mapping mutation.
+  [[nodiscard]] virtual std::optional<Word> inspect_program(Word /*address*/) const noexcept {
+    return std::nullopt;
+  }
+
+  [[nodiscard]] virtual std::uint64_t program_revision() const noexcept { return 0; }
 
   virtual bool read(Space space, Word address, Word pc, Word &value) noexcept = 0;
   virtual bool write(Space space, Word address, Word pc, Word value) noexcept = 0;
@@ -378,6 +387,7 @@ public:
   [[nodiscard]] Fault fault() const noexcept;
   // Native ALU instructions may still use an instrumented parallel-move helper.
   [[nodiscard]] JitStatistics jit_statistics() const noexcept;
+  [[nodiscard]] Backend backend() const noexcept;
   [[nodiscard]] Word read(Space space, Word address) const;
   void write(Space space, Word address, Word value);
   void load(Space space, Word address, std::span<const Word> words);
@@ -385,6 +395,9 @@ public:
   // Translated blocks never exceed the budget; a short tail can use the interpreter.
   // Faults require reset. CPU state after a failed dispatch is not committed evidence.
   [[nodiscard]] RunResult run(std::uint32_t instruction_budget);
+  // A synchronous Io callback can return this run after actual instruction
+  // retirement. Guest state and compiled code survive; no cross-thread mutation.
+  void request_yield() noexcept;
   [[nodiscard]] ProcessingState processing_state() const noexcept;
   [[nodiscard]] DebugStatus debug_status() const noexcept;
   // Configure the functional OnCE interrupt-mode selection at stopped execution.

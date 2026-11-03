@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <sys/mman.h>
@@ -108,11 +109,18 @@ struct Jit::Impl {
         program(supplied),
         options(settings),
         context{.runtime = runtime,
-                .dirty = &invalidated,
+                .exit_requested = &exit_requested,
                 .native_moves = &statistics.native_move_instructions,
                 .batch_instructions = &statistics.batch_instructions,
                 .avx2_instructions = &statistics.avx2_instructions,
                 .batch_calls = &statistics.batch_calls} {}
+
+  [[nodiscard]] std::optional<Word> word(const Word address) const noexcept {
+    if (context.runtime.program != nullptr) {
+      return context.runtime.program(context.runtime.owner, address);
+    }
+    return address < program.size() ? std::optional(program[address] & word_mask) : std::nullopt;
+  }
 
   [[nodiscard]] std::unique_ptr<Block> compile(Word block_limit) const;
   Cpu &cpu;
@@ -121,6 +129,7 @@ struct Jit::Impl {
   std::unordered_map<std::uint64_t, std::unique_ptr<Block>> blocks;
   JitStatistics statistics;
   bool invalidated = false;
+  bool exit_requested = false;
   NativeContext context;
 };
 
@@ -130,21 +139,26 @@ std::unique_ptr<Block> Jit::Impl::compile(const Word block_limit) const {
   auto pc = cpu.reg.pc;
   const auto mode = cpu.reg.sr & numeric_mode_mask;
   const auto loop_address = active_loop_address(cpu.reg);
-  for (Word index = 0; index < block_limit && pc < program.size(); ++index) {
-    auto decoded = decode(program[pc] & word_mask);
-    if (decoded.words > program.size() - pc) { break; }
-    if (decoded.words == 2) { decoded.extension = program[pc + 1] & word_mask; }
+  for (Word index = 0; index < block_limit; ++index) {
+    const auto opcode = word(pc);
+    if (!opcode) { break; }
+    auto decoded = decode(*opcode);
+    if (decoded.words == 2) {
+      const auto following = word((pc + 1) & word_mask);
+      if (!following) { break; }
+      decoded.extension = *following;
+    }
     block->operations.push_back(
         {.instruction = decoded, .pc = pc, .mode = mode, .loop_address = loop_address});
     if (terminates(decoded.operation) || at_loop_end(block->operations.back())) {
       block->terminated = true;
       break;
     }
-    if (decoded.words >= program.size() - pc) {
+    if (context.runtime.program == nullptr && decoded.words >= program.size() - pc) {
       block->terminated = true;
       break;
     }
-    pc += decoded.words;
+    pc = (pc + decoded.words) & word_mask;
   }
   if (block->operations.empty()) { return nullptr; }
   JitEmitter emitter(context.runtime, options.optimize, options.batch_backend, cpu.reg.m);
@@ -170,8 +184,12 @@ bool Jit::available() noexcept {
 #endif
 }
 
-bool Jit::dirty() const noexcept {
-  return impl_->invalidated;
+bool Jit::exit_requested() const noexcept {
+  return impl_->exit_requested;
+}
+
+void Jit::request_yield() noexcept {
+  impl_->exit_requested = true;
 }
 
 void Jit::invalidate() noexcept {
@@ -179,6 +197,7 @@ void Jit::invalidate() noexcept {
   if (!impl_->blocks.empty() && !impl_->invalidated) {
     ++impl_->statistics.invalidations;
     impl_->invalidated = true;
+    impl_->exit_requested = true;
   }
 }
 
@@ -186,6 +205,7 @@ void Jit::reset() {
   impl_->blocks.clear();
   impl_->statistics = {};
   impl_->invalidated = false;
+  impl_->exit_requested = false;
 }
 
 void Jit::helper_retired() noexcept {
@@ -203,6 +223,7 @@ std::uint32_t Jit::run(const std::uint32_t budget) {
     self.statistics.executable_bytes = 0;
     self.invalidated = false;
   }
+  self.exit_requested = false;
   const auto key = translation_key(self.cpu.reg);
   auto found = self.blocks.find(key);
   const auto block_limit = std::min(budget, self.options.instructions_per_block);

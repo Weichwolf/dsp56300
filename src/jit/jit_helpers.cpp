@@ -12,6 +12,7 @@ std::uint32_t Core::Impl::jit_execute(void *const owner,
                                       const detail::NativeOp *const operation) noexcept {
   auto &self = *static_cast<Impl *>(owner);
   self.step_decoded(operation->instruction);
+  self.synchronize_program_view();
   if (self.fault.kind != FaultKind::none) { return 0; }
   self.jit->helper_retired();
   const auto next = (operation->pc + operation->instruction.words) & word_mask;
@@ -19,7 +20,7 @@ std::uint32_t Core::Impl::jit_execute(void *const owner,
                  (self.cpu.debug_flags & detail::debug_interrupt_pending) == 0 &&
                  self.vector.phase == VectorPhase::none &&
                  (self.cpu.reg.sr & detail::cache_enable) == 0 && self.cpu.reg.pc == next &&
-                 self.cpu.repeat_remaining == 0 && !self.jit->dirty() &&
+                 self.cpu.repeat_remaining == 0 && !self.jit->exit_requested() &&
                  (self.cpu.reg.sr & detail::numeric_mode_mask) == operation->mode &&
                  detail::active_loop_address(self.cpu.reg) == operation->loop_address
              ? 2U
@@ -35,6 +36,7 @@ std::uint32_t Core::Impl::jit_moves(void *const owner,
   self.cpu.reg.pc = (operation->pc + operation->instruction.words) & word_mask;
   self.latched = {self.cpu.reg.a, self.cpu.reg.b, self.cpu.reg.x, self.cpu.reg.y};
   self.moves(operation->instruction);
+  self.synchronize_program_view();
   return self.fault.kind == FaultKind::none ? 1U : 0U;
 }
 } // namespace dsp56300

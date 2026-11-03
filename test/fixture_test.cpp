@@ -89,6 +89,7 @@ void check(const BinaryCase &item, const Backend backend) {
 
 void check_backend(const BinaryCase &item, const Backend backend) {
   switch (backend) {
+    case Backend::automatic: check<BackendCore<Backend::automatic>>(item, backend); return;
     case Backend::reference: check<BackendCore<Backend::reference>>(item, backend); return;
     case Backend::cached: check<BackendCore<Backend::cached>>(item, backend); return;
     case Backend::jit: check<BackendCore<Backend::jit>>(item, backend); return;

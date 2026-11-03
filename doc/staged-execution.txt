@@ -148,8 +148,9 @@ external writes. A healthy checkpoint must be paired with external memory/I/O
 state by the consumer. Restored pending effects receive new owner/generation
 tickets; abandoned or foreign tickets do not authorize another access.
 
-The external constructor requires this explicit execution route. Ordinary buffer
-construction/run retain their existing ownership contract. Staged computation
+The external constructor also supports ordinary synchronous run, including native
+execution from a pure known program view; see native-io.txt. Captured effect
+ownership remains explicit and separate from ordinary buffer/external run. Staged computation
 uses the general ISA executor for every backend option; native JIT compilation
 of these boundaries is not yet implemented. Capture/restore, cold setup and the
 internal suspension mechanism belong outside a real-time audio callback.

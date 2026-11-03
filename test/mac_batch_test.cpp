@@ -67,7 +67,7 @@ struct Fixture {
   std::array<unsigned, 2> indices{0, 4};
   detail::NativeContext context{.runtime = {.memory = {{{.data = x.data(), .words = x.size()},
                                                         {.data = y.data(), .words = y.size()}}}},
-                                .dirty = &dirty,
+                                .exit_requested = &dirty,
                                 .native_moves = &moves,
                                 .batch_instructions = &batches,
                                 .avx2_instructions = &vector,

@@ -126,6 +126,8 @@ struct Core::Impl {
   [[nodiscard]] std::uint32_t run_general(std::uint32_t budget);
   [[nodiscard]] static std::uint32_t jit_execute(void *owner,
                                                  const detail::NativeOp *operation) noexcept;
+  void synchronize_program_view();
+  [[nodiscard]] static std::optional<Word> jit_program(void *owner, Word address) noexcept;
   [[nodiscard]] static std::uint32_t jit_moves(void *owner,
                                                const detail::NativeOp *operation) noexcept;
   void execute(const detail::Instruction &decoded);
@@ -225,6 +227,9 @@ struct Core::Impl {
   std::array<bool, 3> aliases_program{true, false, false};
   Word debug_vector = 0;
   bool external = false;
+  bool yield_requested = false;
+  std::uint64_t program_revision = 0;
+  Word program_omr = 0;
   std::unique_ptr<detail::StagedState> staged;
   std::shared_ptr<const bool> effect_owner;
   std::uint64_t effect_epoch = 0;

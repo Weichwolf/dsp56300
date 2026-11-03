@@ -102,7 +102,7 @@ void direct_case(const native::Direct &code, const Shape shape, const Operand op
   std::uint64_t transfers = 0;
   std::array<std::uint64_t, 4> latched{};
   detail::NativeContext context{.runtime = {.owner = &probe, .latched = &latched, .memory = {}},
-                                .dirty = &dirty,
+                                .exit_requested = &dirty,
                                 .native_moves = &transfers,
                                 .budget = 1};
   const auto retired = code.enter(cpu, context);

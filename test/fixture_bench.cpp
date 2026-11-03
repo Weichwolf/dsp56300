@@ -225,6 +225,8 @@ bool benchmark(const BinaryCase &item, const BenchBackend backend, const unsigne
 
 bool benchmark_backend(const BinaryCase &item, const BenchBackend backend, const unsigned replays) {
   switch (backend.kind) {
+    case Backend::automatic:
+      return benchmark<BackendCore<Backend::automatic>>(item, backend, replays);
     case Backend::reference:
       return benchmark<BackendCore<Backend::reference>>(item, backend, replays);
     case Backend::cached: return benchmark<BackendCore<Backend::cached>>(item, backend, replays);

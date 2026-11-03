@@ -1,6 +1,8 @@
 Native x64 execution
 
-Select Options.backend=Backend::jit on Linux x86-64. The default remains cached.
+The automatic default selects native execution on supported Linux x86-64 hosts
+and cached execution elsewhere. Explicit backend choices remain available.
+External-Io native code views and event boundaries are described in native-io.txt.
 This is an independent scalar SysV x64 emitter. No external DSP emulator,
 assembler, LLVM runtime or JIT library is linked. SSE/AVX lowering, block linking,
 native reverse/ordinary-modulo AGU lowering and general register allocation remain

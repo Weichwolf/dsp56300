@@ -65,6 +65,11 @@ add_custom_target(${DSP56300_FORMAT_TARGET}
 
 if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64)$")
+    add_executable(dsp56300_automatic_jit_test test/automatic_jit_test.cpp)
+    target_link_libraries(dsp56300_automatic_jit_test PRIVATE dsp56300::core)
+    add_test(NAME automatic-native-external-memory COMMAND dsp56300_automatic_jit_test)
+    add_executable(dsp56300_automatic_io_bench test/automatic_io_bench.cpp)
+    target_link_libraries(dsp56300_automatic_io_bench PRIVATE dsp56300::core)
     add_executable(dsp56300_native_retirement_test test/native_retirement_test.cpp
       test/native/direct.cpp)
     target_link_libraries(dsp56300_native_retirement_test PRIVATE dsp56300::core)

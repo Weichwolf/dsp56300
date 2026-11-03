@@ -129,7 +129,7 @@ void check(const native::Direct &code, const std::span<const Step> body, const R
                                             .execute = forbidden,
                                             .moves = forbidden,
                                             .memory = {}},
-                                .dirty = &dirty,
+                                .exit_requested = &dirty,
                                 .native_moves = &moves,
                                 .budget = static_cast<Word>(body.size())};
   const auto retired = code.enter(cpu, context);

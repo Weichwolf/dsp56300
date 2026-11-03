@@ -1,0 +1,159 @@
+{
+  "qualification": "PASS",
+  "scope": "Automatic native execution with a side-effect-free known external P view, actual external Io and cooperative instruction-boundary yields; not a board scheduler or instrument qualification",
+  "source_base": "37b41f5f86c2ac3084776a98af8183493f511a56",
+  "fuzz": false,
+  "source_identity": "All project C++ source/header files in the qualified export equal canonical source after promotion. The export excludes binary fixture assets; no binary fixtures were used by this selection.",
+  "compile_context": "LLVM19, C++23, warnings-as-errors, clang-tidy zero findings with full owned-header coverage, hardened link. Private export overrides only the doc/local header exclusion so its owned headers are analyzed; canonical paths are already covered by the normal filter.",
+  "profiles": {
+    "strict": {
+      "sanitizer": "ASan/UBSan",
+      "archive_sha256": "fcbf0549a2950fd82ae1921d51c807308338f6cbe49c4412df8bd299e50d647f",
+      "binaries": {
+        "dsp56300_automatic_jit_test": {
+          "sha256": "5652be0d639ec9ea7c85947b8f3df5c7c00ded186c43caccc1fb31e19adeb477",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_core_test": {
+          "sha256": "1d283d88ddbae29dc5c2175caf29740d4b5d012c7c34805d77b2f54568be1f45",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_native_inputs_test": {
+          "sha256": "c9cfd46c476299ac1bfb15c84ff115b7b07c95851d4cd7d3618ca397f07dfa97",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_external_run_test": {
+          "sha256": "dce32ad181cccd2383fe562772243a5151e8e6a6bbd3f81fb166b36e401ae20d",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_staged_test": {
+          "sha256": "751d03276ebb4ce187421431bf4134a00b2f209554b8a80fa8d686c1a68f7c2d",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_checkpoint_test": {
+          "sha256": "183d05c918ee0b869e83df8d0a307d43bd25a2ea26923761090e0e85b6b1fc48",
+          "actual_exit": 0,
+          "reaped": true
+        }
+      },
+      "assertions": {
+        "automatic_native_io": 38,
+        "native_inputs": 202020,
+        "external_memory": 111408,
+        "staged_instructions": 2427,
+        "checkpoints": 2839,
+        "core_instructions": "independent manual-derived directed checks"
+      }
+    },
+    "thread": {
+      "sanitizer": "TSan",
+      "archive_sha256": "3862d0234e5697b33962611b2f46f6d05ede9d13487cb556c2feb2af9d7bb8ed",
+      "binaries": {
+        "dsp56300_automatic_jit_test": {
+          "sha256": "c8346a830db238aeb521759628241eb5f7777e2d81600a003abc1aee4d25553c",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_core_test": {
+          "sha256": "860f31ad5fbc6a9085e9ef321ceb3c7e9d47ad011dd2f85241575bfdae4c004e",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_native_inputs_test": {
+          "sha256": "9eced897d2bec40dd3d4c28d42db15091316a676a0a5b3ec018761669a214c08",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_external_run_test": {
+          "sha256": "6b26a22372e3f62413f508b870e08d108eb0765d536e37851085bfade75309d3",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_staged_test": {
+          "sha256": "dc3a594f22dababfac59d180f05624f99dffce96b720fba556fd989426ba14b5",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_checkpoint_test": {
+          "sha256": "700274a704a2995ada6c2f2b87d32b80536a0506d9102a049f44baf69d447938",
+          "actual_exit": 0,
+          "reaped": true
+        }
+      },
+      "assertions": {
+        "automatic_native_io": 38,
+        "native_inputs": 202020,
+        "external_memory": 111408,
+        "staged_instructions": 2427,
+        "checkpoints": 2839,
+        "core_instructions": "independent manual-derived directed checks"
+      }
+    }
+  },
+  "source_sha256": {
+    "src/jit.cpp": "2deba3562314e59c4468d1ae445668898ddcd948f25c07c55433cc2dd2baab8b",
+    "src/core.cpp": "69cc0827e1b8828a8129cd0cfdc4e85efdd8f37ff104696242cf987e1e5bc56f",
+    "src/jit/jit.hpp": "9dd438cc3da9463ab750c4a317fcb83ee3cf7a1b08a805ef33a031f904803407",
+    "src/jit/jit_helpers.cpp": "c24a13327abdb7a57174dd81cda5f7c616e1bd7adb15eddbe1fae28c5eee15ce",
+    "src/jit/mac_batch.cpp": "c07434aaf94c180cd9549e0c6b065fd824e2895370d60d3428ca59a8611c21f0",
+    "src/core/control.cpp": "25fa91893c941b564b54a8d50613f38ebdc14388896ddf91dd92a7f1b4c3f178",
+    "src/core/external_memory.cpp": "bf96ad33ba474224ea042937b60f4fac78f01b185350ec89d12e85410dcd646f",
+    "src/core/core_impl.hpp": "e2594bd287742cd06f0184394d30aeea06a9423ccf88e21671522f83793cab47",
+    "src/jit/x64/jit_emitter.cpp": "cb83819a86c81a41f30415e3b6989a5c927a8e0af2f2a2c40be4e4404391cafc",
+    "include/dsp56300/backend.hpp": "d76b9c4e8e24fe229de2d4b4fa3c6c4d1e9de684de08d2a85f985e11457e30e8",
+    "include/dsp56300/core.hpp": "6293aa7fdd3cd6e20202a9b8fa48af43ba4ab9442dd93298a9f9c5c14806e2c7",
+    "test/support.hpp": "7e35687da37ef21f3a8e2dd71f4e34c99b8edfbda124b0acceb4b68849ec53b3",
+    "test/continuous_bench.cpp": "21348844317137ddd0f5d9801dbba031f4527f636439af0cecf80733c3edd643",
+    "test/automatic_io_bench.cpp": "d02517165085cd32f9bf724886c4ed8e57a3b4dba2c33f96a668378d11289305",
+    "test/automatic_jit_test.cpp": "33c92aa67baf67d5a6fc804c83fa58214150017de2ccdee85a6b8460cb1eaca0",
+    "test/fixture_bench.cpp": "c943465b90d46ce4f1a0949363551bf93e1dc994c22d99d4419155da6ed8a67a",
+    "test/mac_batch_test.cpp": "2d7829bea632b3d9c05d175e65d074774f8a65f8d35e09d86270bf4d62df22a5",
+    "test/native_product_test.cpp": "2291b8f1bcc66711fb459f3d96b4b10e16a7c256f2d097c115385193777893ba",
+    "test/native_inputs_test.cpp": "a24151abb1a0008fb721a910a3263a9be656ba08fe9f59dda08975fbc7012b12",
+    "test/fixture_test.cpp": "7ddfae37846bbe4a4d496cc3e3d8feffac94db4f81862ba00ae48cbcdb5b9451",
+    "test/native_address_test.cpp": "c73c5ba00cc86bb3c1f9826ca0529ada6ed1abe949335911103fb135a6a96160"
+  },
+  "local_evidence": {
+    "build": "doc/local/external-jit-r1/sanitizer-auto-r2-build.json",
+    "qualification": "doc/local/external-jit-r1/sanitizer-auto-r2-qualification.json",
+    "release": "doc/local/external-jit-r1/native-r4.json",
+    "supplemental": "doc/local/external-jit-r1/supplemental-auto-r2/qualification.json"
+  },
+  "remaining": [
+    "Direct known external RAM views",
+    "Connected CPU/peripheral scheduler using native run",
+    "Short JMP and small-budget tail helper optimization",
+    "Complete ISA and representative complete-application performance qualification"
+  ],
+  "supplemental_strict": {
+    "scope": "Compile every remaining modified enum-switch driver and native-context client under ASan/UBSan and full owned-header clang-tidy; run the three direct ABI clients once",
+    "core_archive_unchanged_sha256": "fcbf0549a2950fd82ae1921d51c807308338f6cbe49c4412df8bd299e50d647f",
+    "assertions": {
+      "native_product_coordinates": 50452992,
+      "native_address_updates": 7096453,
+      "guarded_mac_batches": 326635
+    },
+    "binaries": {
+      "dsp56300_native_product_test": {
+        "sha256": "df105eddf6c24f0974945675b23f21c610dc607ac489c04696b37a05a778a648",
+        "actual_exit": 0,
+        "reaped": true
+      },
+      "dsp56300_native_address_test": {
+        "sha256": "94c42b33f4bf3703c29281fecbdf50a0b05e6868d5ac42c4840caad2de32cda6",
+        "actual_exit": 0,
+        "reaped": true
+      },
+      "dsp56300_mac_batch_test": {
+        "sha256": "7ac207e4233b5a08e4736c74a14ddbb4342a1594c3cf364cc2cb8ceadcda70d6",
+        "actual_exit": 0,
+        "reaped": true
+      }
+    }
+  }
+}

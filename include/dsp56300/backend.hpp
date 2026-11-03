@@ -68,7 +68,8 @@ concept CoreImplementation = std::constructible_from<Implementation, Buffers, Io
                              };
 
 template <Backend Kind, BatchBackend Batch = BatchBackend::automatic>
-  requires((Kind == Backend::reference || Kind == Backend::cached || Kind == Backend::jit) &&
+  requires((Kind == Backend::reference || Kind == Backend::cached || Kind == Backend::jit ||
+            Kind == Backend::automatic) &&
            (Batch == BatchBackend::automatic || Batch == BatchBackend::disabled ||
             Batch == BatchBackend::scalar || Batch == BatchBackend::avx2))
 class BackendCore {

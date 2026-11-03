@@ -352,7 +352,7 @@ void JitEmitter::retire(const NativeOp &operation, const bool publish) {
   retire_progress(operation);
   if (!coalesced_accounting_) { code_.raw(increment_retired); } // INC R15D.
   if (observable_moves(operation) && (!at_loop_end(operation) || loop_size_ != 0)) {
-    code_.load(Reg::ax, Reg::r13, offsetof(NativeContext, dirty));
+    code_.load(Reg::ax, Reg::r13, offsetof(NativeContext, exit_requested));
     code_.memory_immediate(group_cmp, Reg::ax, 0, Width::byte, 0);
     exit_if(Branch::not_equal);
   }

@@ -18,6 +18,13 @@
 namespace dsp56300 {
 namespace {
 
+Options select(Options options) {
+  if (options.backend == Backend::automatic) {
+    options.backend = detail::Jit::available() ? Backend::jit : Backend::cached;
+  }
+  return options;
+}
+
 Buffers validate(const Buffers buffers, const Options options, const bool external) {
   if (!external && (buffers.program.empty() || buffers.x.empty() || buffers.y.empty() ||
                     buffers.program.size() > address_words || buffers.x.size() > address_words ||
@@ -45,11 +52,11 @@ Core::Impl::Impl(const Buffers supplied,
                  const bool external_memory)
     : io(host_io),
       buffers(validate(supplied, settings, external_memory)),
-      options(settings),
+      options(select(settings)),
       external(external_memory) {
   aliases_program[1] = overlaps_program(buffers.x);
   aliases_program[2] = overlaps_program(buffers.y);
-  if (options.backend == Backend::jit && !external) {
+  if (options.backend == Backend::jit) {
     jit = std::make_unique<detail::Jit>(
         cpu,
         buffers.program,
@@ -58,6 +65,7 @@ Core::Impl::Impl(const Buffers supplied,
                            .latched = &latched,
                            .execute = jit_execute,
                            .moves = jit_moves,
+                           .program = external ? jit_program : nullptr,
                            .memory = {{{.data = buffers.x.data(),
                                         .words = buffers.x.size(),
                                         .aliases_program = aliases_program[1]},
@@ -316,7 +324,7 @@ void Core::load(const Space space, const Word address, const std::span<const Wor
 
 std::uint32_t Core::Impl::run_general(const std::uint32_t budget) {
   std::uint32_t retired = 0;
-  while (retired < budget && fault.kind == FaultKind::none &&
+  while (retired < budget && !yield_requested && fault.kind == FaultKind::none &&
          cpu.processing == ProcessingState::running) {
     step();
     if (fault.kind == FaultKind::none) { ++retired; }
@@ -328,16 +336,20 @@ RunResult Core::run(const std::uint32_t instruction_budget) {
   impl_->validate_staged_mutation();
   if (instruction_budget != 0) { impl_->last_outcome.reset(); }
   const detail::ExecutionGuard guard(impl_->executing);
+  impl_->yield_requested = false;
   RunResult result;
   if (!impl_->jit) {
     result.dispatches = impl_->run_general(instruction_budget);
     result.progress = progress();
     result.fault = fault();
     result.state = processing_state();
+    result.yielded = impl_->yield_requested;
     return result;
   }
-  while (result.dispatches < instruction_budget && fault().kind == FaultKind::none &&
-         impl_->cpu.processing == ProcessingState::running) {
+  impl_->synchronize_program_view();
+  impl_->yield_requested = false;
+  while (result.dispatches < instruction_budget && !impl_->yield_requested &&
+         fault().kind == FaultKind::none && impl_->cpu.processing == ProcessingState::running) {
     if (impl_->cpu.repeat_remaining == 0 && impl_->vector.phase == Impl::VectorPhase::none &&
         (impl_->cpu.reg.sr & detail::cache_enable) == 0 &&
         (impl_->cpu.debug_flags & detail::debug_interrupt_pending) == 0) {
@@ -346,6 +358,7 @@ RunResult Core::run(const std::uint32_t instruction_budget) {
       if (retired != 0 || fault().kind != FaultKind::none) { continue; }
     }
     impl_->step();
+    impl_->synchronize_program_view();
     if (fault().kind == FaultKind::none) {
       ++result.dispatches;
       impl_->jit->helper_retired();
@@ -354,6 +367,7 @@ RunResult Core::run(const std::uint32_t instruction_budget) {
   result.progress = progress();
   result.fault = fault();
   result.state = processing_state();
+  result.yielded = impl_->yield_requested;
   return result;
 }
 
@@ -367,12 +381,18 @@ bool Core::interruptible() const {
     return false;
   }
   if (!impl_->cpu.repeat_completed) { return true; }
-  if (impl_->external) {
-    throw std::logic_error("Interrupt eligibility requires captured next-instruction metadata");
-  }
   const auto pc = impl_->cpu.reg.pc;
-  if (pc >= impl_->buffers.program.size()) { return false; }
-  auto opcode = impl_->buffers.program[pc] & word_mask;
+  Word opcode = 0;
+  if (impl_->external) {
+    const auto known = Impl::jit_program(impl_.get(), pc);
+    if (!known) {
+      throw std::logic_error("Interrupt eligibility requires known next-instruction metadata");
+    }
+    opcode = *known;
+  } else {
+    if (pc >= impl_->buffers.program.size()) { return false; }
+    opcode = impl_->buffers.program[pc] & word_mask;
+  }
   if (impl_->cacheable(pc) && impl_->icache) {
     if (const auto cached = impl_->icache->peek(pc)) { opcode = *cached; }
   }

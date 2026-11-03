@@ -1,0 +1,82 @@
+Automatic native execution with an external memory owner
+
+Options.backend defaults to Backend::automatic. Construction selects the native
+JIT on supported Linux x86-64 hosts and cached execution elsewhere. Explicit
+reference/cached/jit options remain available. Core::backend() reports that
+resolved selection; JitStatistics establishes which instructions actually ran
+natively. A backend name alone does not establish native execution or speed.
+
+Core(Io&) borrows all P/X/Y memory and peripherals. A memory owner may implement:
+
+  std::optional<Word> inspect_program(Word address) const noexcept;
+  std::uint64_t program_revision() const noexcept;
+
+Inspection must be side-effect-free and return only known stable code. Unknown
+or unstable words return nullopt; they cause actual owned instruction fetches,
+with their original effects and precise refusal. Over-wide inspection results
+are rejected as views. Two-word instructions inspect both words, including the
+24-bit P address wrap. There is no implicit zero-filled program or RAM.
+
+The owner changes its revision on code or mapping mutation, including X/Y stores
+that alias P. Unrelated data changes need no invalidation. Core samples the
+revision at run entry and after real helper/I/O calls, rather than every native
+block. A guest P write also invalidates translated code directly. OMR changes
+invalidate code and return a run boundary for the owner to update its mapping.
+A synchronous code-changing callback exits the old block before a stale suffix.
+CPU checkpoints do not save external memory; restored execution must be paired
+with matching owner memory/mapping state. Restore clears translated code.
+
+Native register regions use the existing machine-code emitter. External X/Y and
+peripheral operations still use the actual synchronous Io callbacks. Direct
+known external RAM views remain future optimization work; this increment does
+not claim callback-free external RAM. Buffer-backed native RAM remains available.
+
+A synchronous execution callback can call Core::request_yield(). Run returns
+only after the actual instruction retires, with RunResult.yielded=true and exact
+register/progress/fault state. The guest does not enter WAIT/STOP, and ordinary
+event yields retain compiled blocks. The next run resumes at the real successor.
+Both native and general execution honor this boundary. This is single-owner
+execution; callbacks must not concurrently mutate or reenter the same CPU.
+Ordinary Core::interrupt reads the actual external vector pair before executing
+its first instruction. Post-REP eligibility uses pure known next-code metadata;
+unknown metadata is explicitly rejected without a side-effecting fetch.
+
+This interface supplies neither board clocks nor peripheral timing, DMA, MIDI,
+audio buffering or another CPU's scheduler. Consumers must coordinate causal
+I/O/event boundaries and guest clocks. Captured effect tickets remain a separate
+general-execution interface; selecting automatic/JIT does not make them native.
+Compilation and checkpoint/capture operations allocate host storage and belong
+outside the real-time audio callback.
+
+Targeted qualification uses independently authored code and literal full-state
+expectations: default buffer/external native counters; genuine fallback fetches;
+unknown opcodes/extensions and fail-stop retry; 24-bit extension wrapping; real
+read/write/refusal and code mutation; yield/resume/cache retention; actual IRQ
+entry, RTI, vector refusal and post-REP admission; OMR mapping boundaries.
+The separate core, checkpoint, external-memory, staged and native-input groups
+exercise the neighboring ownership and generated-context contracts.
+
+  cmake --preset strict
+  cmake --build build/strict --target dsp56300_automatic_jit_test dsp56300_core_test dsp56300_checkpoint_test dsp56300_external_run_test dsp56300_staged_test dsp56300_native_inputs_test
+  ctest --test-dir build/strict --output-on-failure -j1 -R '^(automatic-native-external-memory|core-instructions|checkpoint-boundaries|external-memory-execution|staged-instruction-boundaries|native-input-snapshots)$'
+
+Both scoped ASan/UBSan and separate TSan selections pass: 38 automatic-Io,
+202020 native-input, 111408 external-memory, 2427 staged and 2839 checkpoint
+assertions, plus the independent core instruction checks. Source/ELF identities
+and qualification scope are recorded in native-io-reference.json.
+The changed native-context ABI additionally passes the independent product,
+address-update and guarded MAC-batch groups once under ASan/UBSan; the remaining
+modified fixture/benchmark drivers compile with zero findings. No full suite
+is inferred from these selections.
+Use the thread preset/build separately for TSan. No fuzz target is selected.
+The authored register-domain experiment uses optimized, uninstrumented execution:
+
+  cmake --preset release
+  cmake --build build/release --target dsp56300_automatic_io_bench
+  build/release/dsp56300_automatic_io_bench audio-mac
+  build/release/dsp56300_automatic_io_bench image-add
+  build/release/dsp56300_automatic_io_bench communications-xor
+
+It checks independent full state and actual native/helper counts across a real
+DO loop and cold/warm entries. These are core-only register workloads, not
+complete applications, device startup, connected instrument speed or latency.

@@ -47,9 +47,9 @@ bool overlaps_cpu(const Cpu &cpu, const Word *const words, const Word count) noe
       reg.lc > word_mask || cpu.repeat_remaining != 0 ||
       cpu.processing != ProcessingState::running ||
       (cpu.debug_flags & debug_interrupt_pending) != 0 ||
-      (context.dirty != nullptr && *context.dirty) || context.native_moves == nullptr ||
-      context.batch_instructions == nullptr || context.avx2_instructions == nullptr ||
-      context.batch_calls == nullptr) {
+      (context.exit_requested != nullptr && *context.exit_requested) ||
+      context.native_moves == nullptr || context.batch_instructions == nullptr ||
+      context.avx2_instructions == nullptr || context.batch_calls == nullptr) {
     return 0;
   }
   const auto frame = reg.stack[reg.sp & (stack_entries - 1)];

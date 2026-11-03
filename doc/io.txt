@@ -4,13 +4,14 @@ Memory owner             Ordinary execution                  Staged execution
 Core(Buffers, Io*)        P/X/Y spans, high X/Y Io ports       Explicit Io effects
 Core(Io&)                All P/X/Y accesses through Io        Explicit Io effects
 
-Core(Io&) owns no RAM. Ordinary run uses the general executor and optional
-validated decode cache; this route does not construct or claim native JIT code.
-Every opcode, extension, RAM word and peripheral operation comes from the actual
-owner. Architectural cache hits and REP/vector latches retain their modeled
-values and suppress the corresponding physical reads. Host read/load/write still
-require RAM spans. Construction performs no execution; run explicitly supplies
-an instruction budget. Neither route supplies clocks, board registers or devices.
+Core(Io&) owns no RAM. A pure known program view enables native compilation;
+unknown code retains actual owned opcode/extension fetches. External RAM and
+peripherals still use real synchronous callbacks. Reference/cached execution
+remain explicit choices. Architectural cache hits and REP/vector latches retain
+their modeled values and suppress corresponding physical reads. Construction
+performs no execution; run supplies a bounded instruction budget. Neither route
+supplies board clocks or devices. See native-io.txt for code revisions, mapping
+changes, actual IRQ entry and cooperative event yields.
 
 Ordinary callbacks observe native pre-retirement PC/register effects. A failed
 operation stops the instruction without retirement; accepted writes and native

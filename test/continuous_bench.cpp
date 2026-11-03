@@ -208,6 +208,7 @@ bool run(const BinaryCase &item, const Engine engine, const Workload spec) {
 
 bool run_backend(const BinaryCase &item, const Engine engine, const Workload spec) {
   switch (engine.kind) {
+    case Backend::automatic: return run<BackendCore<Backend::automatic>>(item, engine, spec);
     case Backend::reference: return run<BackendCore<Backend::reference>>(item, engine, spec);
     case Backend::cached: return run<BackendCore<Backend::cached>>(item, engine, spec);
     case Backend::jit:
