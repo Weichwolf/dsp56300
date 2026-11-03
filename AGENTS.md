@@ -27,6 +27,8 @@
   manufacturer or application firmware in tests or benchmarks.
   Distinguish arithmetic experiments, emulator execution and whole-device performance.
 - Keep host memory and event/I/O contracts explicit. Do not silently fabricate peripheral results.
+- Fix slow DSP helpers and similar performance bottlenecks immediately in this
+  library, at their source.
 - Use small state/dataflow tables for optimization design. Choose host register
   placement per region/pattern; retain complete checkpoints and guarded fallback.
 - Share correctness fixtures with the bench CMake target and support all or
