@@ -259,12 +259,311 @@
     ]
   },
   "performance": {
-    "status": "Unmeasured; independent correctness and actual callback removal are qualified",
-    "scope": "All-known one-word readonly RAM microkernels; same authored programs with real callbacks or direct grants; no full-application speed claim"
+    "status": "Measured authored RAM-read microkernels only; no connected instrument throughput",
+    "scope": "Single-instance authored all-known RAM-read microkernels, same programs with actual owner callbacks or direct windows; not connected instrument or complete-domain throughput",
+    "core_revision": "6ffcd0abd7a8fcde9b66c98ea0f57f93c0cae2d8",
+    "profile": "LLVM19 Release O3, generic C++ host wrapper, native x64 JIT, no sanitizers",
+    "elf_sha256": "d0cd7f0d130de9ae0749f01581e9bc33aea8156491bd1443c73391d9a2082093",
+    "library_sha256": "e4f41d7f600e773af7c7b08a4d2d8c51839ec86852e04b169b22e2597f9a8726",
+    "cpu_affinity": [
+      7
+    ],
+    "source_sha256": {
+      "src/jit.cpp": "5ac38da6a270221a774bf9839203fea50ff8907996918046a194e309d69715a2",
+      "src/core.cpp": "a89706f90d16e64c2318cff285c735196309b324c69a965add79ace63a9e3865",
+      "src/jit/dataflow.cpp": "7074715fccf8bd993a43be7927aff293fa6b5cd8712d1dcbaf2a4a9ad80c6dbf",
+      "src/jit/mac_batch_scalar.cpp": "3725ce5b7ea4002bb9c83b6afc07d81ce2b07b2b34added8f3ada85665beea7c",
+      "src/jit/native_register_moves.cpp": "494420a8e10fa77f92294c4370547c894d7fceb50b80e56ce48a943555845c8d",
+      "src/jit/native_region.cpp": "102c0dd73e3d8de3c3af3871c03426da19e89713ff8822d5abd67ff1e02e2b32",
+      "src/jit/native_region.hpp": "b7a1bfb1af9573ea6bb4ac673d6838ae59f82dca1b818fa670a6fb149de7d317",
+      "src/jit/translation.hpp": "5a960b1d8fc8f6ccdb354c7e19a0ed7d28b4f7b4a7db9f91fc4d55ad10d2d179",
+      "src/jit/dataflow.hpp": "46aa604d6f07fea817ef2c6254f02005621ca18f09cfe32b7df8a3c8e0f16830",
+      "src/jit/native_moves.hpp": "5e4c4cd2a543dd252154ce97b96ba9e9f3f5ab531534c61c81e85a79a9b23ac8",
+      "src/jit/value_ranges.hpp": "11af95abf8e92c7b17c58a1d6cb5d45f145cd08966cb790dd441397ef21951a6",
+      "src/jit/native_moves.cpp": "d2971d9df15f7b3f6cff15bdd582020394faa0343c82bf307c3dd75c2b32e687",
+      "src/jit/word_reuse.hpp": "fed3b557d59fbd78281a7477306fbddaa8e9ead59df8ee7398a3d27d2e40b3ce",
+      "src/jit/jit.hpp": "199f47224f7ae6e4e6f5ab745be029c7bc336f3f68de34b376572ee2b6ee5551",
+      "src/jit/value_ranges.cpp": "e3f5edb617a548f2cd6d535b498bd9dc3979620c69f94977920c0123c6e199f1",
+      "src/jit/mac_batch.hpp": "4177ef7ec109e6a6804efacc2eb0ea142f2a5e5a6929fb6c38c66015f2020bbb",
+      "src/jit/jit_helpers.cpp": "0384f81768294c2deff78ecd7a3cf7c117afb9b4b49cb08012d2549c1ed80fe7",
+      "src/jit/word_reuse.cpp": "0691c7f4f982f70481b5442729739d849ad67e18525ffa883d8e37363227b95d",
+      "src/jit/mac_batch.cpp": "c07434aaf94c180cd9549e0c6b065fd824e2895370d60d3428ca59a8611c21f0",
+      "src/core/staged.cpp": "0ba396bacbdc799e0d7570fcb196016d2a047b659c3e6479e26c05af3979dfd7",
+      "src/core/move_publication.cpp": "e8157edc558fc45cbb982cdcdca7202706ba37bf17a458a8de7ccf798c89299c",
+      "src/core/control.cpp": "25fa91893c941b564b54a8d50613f38ebdc14388896ddf91dd92a7f1b4c3f178",
+      "src/core/pcu_publication.cpp": "e5edd0782060add0bcc73e8a623a3f7bcbe535bba0fd5f35bc12623b8123676e",
+      "src/core/hidden_retirement.cpp": "1e7d534b0fd7709a68822db822ae45a9b2528aad4bdc6020a9e30f9dc51bdd0d",
+      "src/core/transfer_info.hpp": "689a897eab8e010fb2b7977190fd7cd94008844f301b8d650668470fdc10cf76",
+      "src/core/transfer_description.cpp": "f869e2fd7cfad4bc9ba9ebe22f565e1f15bb551d5496218bf11e9fdf75c119cb",
+      "src/core/debugging.cpp": "835f862264a9a40e41d746e236ea3161df021ec5178874e75fede29e85ad5eaa",
+      "src/core/registers.cpp": "be6545c9346a675760877be92c3424751b596ae1978b3aaae394db9ab9ec68fd",
+      "src/core/program_cache.hpp": "88f8be30f5313b4bbbcfb8b757d21bb8a6d675ccb16034d8562e3c7c159c4620",
+      "src/core/integer.cpp": "e6d00895ee5ebee469945b1c8125bf7925819a3adce7ea4df110294c9b3a4492",
+      "src/core/transfers.cpp": "fb1c1601f0846f51e7b79067a555ee3894c24093657b13bef8d694b0c58137fe",
+      "src/core/moves.cpp": "8fe50254af305239a54b7108842f1d549f2081068a16e4a86ced65118b730c30",
+      "src/core/external_memory.cpp": "5f17648f3733ae502ad176d015899a07675154d9b39358bb2cedbcf8daef4a11",
+      "src/core/staged_plan.cpp": "dff765e04506e4afde70806f4d08428f0e79d1594ee5e8c4326af1a8fbdc4815",
+      "src/core/move_storage.hpp": "9ecdbe9c9fdb60c8fff285baf574ce76c25272561073ca8b7791d5a3b7b3a4fe",
+      "src/core/staged.hpp": "7c18cad6c92d0b540b701f0c85249a9bc226dd0829f10b386b4446a8d231b8b5",
+      "src/core/checkpoint.cpp": "5802cc1844c3d09111d21ccb4db5efedbd2ec857e918833c28eb4e42505ec68c",
+      "src/core/exceptions.cpp": "a8fdaf8f862e5bf630beeb259ef88f4f54eb123bf260d6c7dcf923bdcfcde583",
+      "src/core/decode.cpp": "7dd2a3d8a5923697b69cd7f0fb4984def4bc7ec9b4668d14ee1d2efeaa577cff",
+      "src/core/products.cpp": "4b9f39befc804cddd2c11b36da907f9a645fe3527433c71ad3a7b568d45bef97",
+      "src/core/instruction.hpp": "21f05faf1a9ecd774adb1d60d07458fbd2206d730b08005ee715bfec84dee221",
+      "src/core/hidden_retirement.hpp": "c503ef1a0a7c5c04a3a8b62a18f88d1c8386c187e1cf827badd86e6110ec680f",
+      "src/core/viterbi.cpp": "6ab6357854d93e32ae6c7cbd85261d3c9c1f4912be9d61a7af25c20db95b29f4",
+      "src/core/fields.hpp": "2000d85850a8a2acfd8439f5d2ca63ac3c00b2a24b3c9728e2de7138b3e12ffe",
+      "src/core/conditions.hpp": "31dff89337759163e5d5ff3ba6819e9423afce33d13318479761da7df0629d43",
+      "src/core/iteration.cpp": "b20c5d83ed2c51393e445ca89bd671d519a52247a8fde03a9e4dff96bed1d0cb",
+      "src/core/memory_windows.cpp": "6fc627070b23be3aa5f53a31949299b81d1b5236ce102eca50404fb8e3e5a453",
+      "src/core/instruction_boundary.hpp": "4cf5ee15c5329d2d75f17e08da1e349e6195f35b15db04183e9cf6aa9003e5a1",
+      "src/core/architecture.hpp": "f38548a18b0a32d34fac5df1ca8ca93daa1204a3d04070b5b87b7bc79d33e9a9",
+      "src/core/memory.cpp": "8619c63c1ceaab062b434143cf5ec874ba102f228fc6fa135e7762782f26d83e",
+      "src/core/core_state.cpp": "715939fb6a13103fe59759013bbe451786e0e07e1dfce506d69d546ac13b9971",
+      "src/core/core_impl.hpp": "959790088b084b1a746b92d081698286baedc02e228ba5802903e44930438de9",
+      "src/core/transfer_info.cpp": "504fce5744c95b4cee61812c79e99cff3a09e5ae145600c506ae893186372529",
+      "src/core/bit_fields.cpp": "fabce4c2ca0c80fa8a6066ae9706e2c9aa04515a5000c53dd86204ec2f434ac3",
+      "src/core/instruction_shape.cpp": "d63de1dd1e92edc05114b9186c0b5e329ebfd878227546b2810a87d4747b81fb",
+      "src/core/program_capture.cpp": "87f6247cf3ddf392f4556d45450811282e5fc09c9f195408ab34d45445ba99db",
+      "src/core/processing.cpp": "e9a9d3c0c33ffe6b74ca9bd8f82ca60d6779e0bed17d3f671eb04877cdaf222a",
+      "src/core/native_retirement.cpp": "f6dc49931929aca5fb7177b300445687bc22f47b5324bf2befabb4ee6ab1685a",
+      "src/core/execution_state.cpp": "a3e3d2879fdfdc65eff3823195ac2caf9d01165168fc455957118bc8faeb75f9",
+      "src/core/execution_guard.hpp": "7b5640a6190d48b2c09e00507b505285df68feb4365688316f2ea9286152e1d8",
+      "src/core/program_cache.cpp": "c929291c861fa1988e2034459ce5dde22a2f59397e4eb4f159ecb7b5fdf0350b",
+      "src/core/agu.cpp": "1467046546d260da43a27e5b758bcf49879f866028311c2af24479d32520f98a",
+      "src/core/alu_publication.cpp": "1361373220b38beda95a2196a38f6b540700274f169c9db891d20bf37c4eb2a6",
+      "src/core/immediate.cpp": "811519f51a66ccfc9cb1bd940d7a2385520886e6dd5f3a533df2e995022a8546",
+      "src/core/instruction_boundary.cpp": "68a9705ec03237622dc6b2d40ea1c7957892d66060a599fb14a1e377ef7682ea",
+      "src/core/staged_compute.cpp": "5bce6db0f7345e08987acb4aeb784206fce515a4bd5f83141d5efa763d16f1bc",
+      "src/core/cache_control.cpp": "0f629286cfad4645c2778d50043b03139a228f0b062de6ba67cac4b87c4b3b59",
+      "src/core/unit_publication.cpp": "b52317260e7c0179da1af6dfd35c5a9a2f5d13b9fd36c97a30b18ee537f495b3",
+      "src/core/move_storage.cpp": "e194a81fe96266eebde8d936707264579060be0272299617a5eeed3f539b9ff2",
+      "src/core/loops.cpp": "bacadc64265e47b82f44ff1156b03323245b00a3f0af3c9efdb25a8813c357e2",
+      "src/core/saturation.cpp": "3fff011be07f13ec749065c7ab9419a7b78a0a8a5db9866f39c72f8157efc485",
+      "src/core/transfer_parallel.cpp": "814bf71b1b25a06860044a92c8eed293cd8587ac3b5bb60fe15b789c64dd4af2",
+      "src/core/execution_state.hpp": "42430d91870fadc5d004026a55be23512ce2e2220be652f56dec1b638b19c302",
+      "src/core/transfer_special.cpp": "6a1a9780b58ffaa2764f09a0441532b550001f6c0eab7857546f29cacfcf7a3a",
+      "src/core/bounded.cpp": "f7207d34b9cfa4c5f58619d6128f1fc31add2f08c85c5f1af3d9243a13c7a86f",
+      "src/core/bit_instruction.hpp": "2ed3558d7c502c68f4ca5ae4f6ca0b6146bea17f63be136cbdd0f0aeb120cdba",
+      "src/core/conditional.cpp": "4ce979266803fa128d1176b72fa8e4f11344e000b30ced1c699bec1b8148a196",
+      "src/core/bits.cpp": "3a0a7510b56ea6a59bccb69016fe344ffd0aa363f385a1c51cf1c001a43f0dee",
+      "src/core/shifts.cpp": "0e9b60cb0f41b8017ff99672af02e5f65f325d3a118b1d2be11839ab90c11a53",
+      "src/core/arithmetic.cpp": "9fc477198d0ee20533fa763a7ba78043c6a07bc72033fa193aceacb772e66af6",
+      "src/jit/x64/jit_inputs.cpp": "74e79b97f0bcfd958ca286ffbefedaf198f380dd22a74f728ff94dd4a56cffcf",
+      "src/jit/x64/jit_emitter.cpp": "5fd87a9da80fc0d3517d254772e7b8bf6f0a9461b6fa4702e1d93c678f5a7ba3",
+      "src/jit/x64/jit_regions.cpp": "ee9c02e42c50ade46f5ae341dd2b983ab19aadcd3ac86433d400aa4783ccf36b",
+      "src/jit/x64/jit_emitter.hpp": "df28529fdb68bbdfeaf9482675558d628dffcf4e13b68ee481551cfecc460d8e",
+      "src/jit/x64/jit_windows.cpp": "99134cb9d114081e53e9082cfed8d2038e310836be9f4a0cc347796c6eb2e4e2",
+      "src/jit/x64/jit_logic.cpp": "316264e868ed5af9a5dc67f75569a8ee738fdb0f94b93fb009bdb5162a7454ba",
+      "src/jit/x64/jit_addition.cpp": "622578cb48e655016a3caa9feebc3aaa59e208cc8952649400512c8908218aa7",
+      "src/jit/x64/jit_saturation.cpp": "8336ad17f6bd72ba2b3959a3f7b50aac7c7bfd16d70e2fdf91e0f0b1980623e2",
+      "src/jit/x64/jit_window.cpp": "9001b427e0c877fe2e427712d23b60989dcbfaabb196d227d39c4956cf16c37f",
+      "src/jit/x64/jit_moves.cpp": "51fab6f780eafcf9ceeca1165c6d4f23fa799e7385c110ae7add7a8160f9dd63",
+      "src/jit/x64/x64.cpp": "a10bbca9e802931ce2241b3a811e989ae9d92bc1739061cf3b8bc1bc1058ae39",
+      "src/jit/x64/jit_flags.cpp": "d8cd3bdf76646a6725c3498857c0ddf743a782341aae75d08ba476f8dc49b2b8",
+      "src/jit/x64/jit_word_reuse.cpp": "5a586b562800a61c4dffdee8d2de0293fbd3ead1ae9c828eb01e68f21004d31a",
+      "src/jit/x64/mac_batch_avx2.cpp": "88070d74858c1e18ea8cdd829543e71e12743430b2217ffc33c9e2a7e8df9e01",
+      "src/jit/x64/jit_loops.cpp": "aa6c66a4038293750131d1c9d2c0c846a176deaa7d3b2391063870c2e7be8a1b",
+      "src/jit/x64/region_guards.hpp": "e15d8b9d8a7f0ade5f9c735f847d1630cca60efe4f4a17485b7af2d886da0009",
+      "src/jit/x64/jit_move_address.cpp": "7c2ff905d0383853b31dc6bddb1cc9f280976e1e23fcf3149054be634b02fdcf",
+      "src/jit/x64/jit_move_register.cpp": "108022b5e6dac7fdd3acdaa48086e9294870d7aa18d2dffe13b40d331d22c30f",
+      "src/jit/x64/jit_batch.cpp": "c5caec89f1ecb5f160003a4edc8543841a452695af72ebe5ceb31281eb33ee5a",
+      "src/jit/x64/jit_status.cpp": "f318a0e104ce323adff6f6e622439e82fc7c12578cfa38a8d6d2e109680a851a",
+      "src/jit/x64/region_guards.cpp": "a606e8032d45573e215adffe36a5b3b8306b9162b07b7122d51151d32d914f9f",
+      "src/jit/x64/x64.hpp": "b4d423ed49d0f9ddf89cfe012b94710c81e8b4c353230cd0bac4d157f9cf4736",
+      "src/jit/x64/jit_retirement.cpp": "02a8a9c0c5879d6be588fcdafc38f529f1f4b51e24528baf4f0e891138afb6cd",
+      "src/jit/x64/jit_shifts.cpp": "8fd28d21c1c72e702d9e110fab99fdd893a094821e43f814220d8d767069a61e",
+      "include/dsp56300/checkpoint.hpp": "79c17878620c5b7f2b929a1007711d7eab077c086ae702da9940ab3d6137acb6",
+      "include/dsp56300/backend.hpp": "bd8b7682f22bd088dcd5f2637d473266ba6be40ae159ff04026c4ba7a047b717",
+      "include/dsp56300/transfers.hpp": "838c61e51fb09b665329951c8a0146fddf8257232f426d6dfa463eb1fa4345ed",
+      "include/dsp56300/core.hpp": "ef4ac25e3dc1a0aa795dc5f5909baeec00039fd274b9b47968184c76b4e93fb5",
+      "include/dsp56300/instruction.hpp": "564167bdc1ad3fe89f4a81a429e0fc6e44b119e3cd481a61e6c2e03d66f5e12b",
+      "include/dsp56300/simd.hpp": "6533a8294f06f05477fe036df55ea9d8d2c6cc1770051f28c62dbe954fc88eb7",
+      "test/memory_windows_bench.cpp": "885e58204db9c5480a04d77e03607aa5ba1b18c8ef493046d296bacf8a82a189",
+      "test/memory_window_workloads.hpp": "3b69bd7dc99d1635fdea1efbf8d085794f9479235b57b2e9e6ccfea37d024d80",
+      "test/external_run_fixture.hpp": "33a159899dc88a4637e2fc2b9896d6099f3b21d3fa613d41d3d1582819b2f4d4",
+      "test/bfu_logic_model.hpp": "c012dcdbc92d104c6d7f262845d1bbcfdbe284ce047229cc616524024aabecd2",
+      "test/native_sequence_model.hpp": "632f67ab263075f72640e045b94e94f9c33a0557fb19f8ef7a9a4701d07525fb"
+    },
+    "samples": {
+      "audio-mac": {
+        "callbacks": [
+          {
+            "sample": 0,
+            "instructions": 1048576,
+            "callbacks": 1048576,
+            "native_moves": 0,
+            "seconds": 0.049940001,
+            "guest_mips": 20.996715638832285
+          },
+          {
+            "sample": 1,
+            "instructions": 1048576,
+            "callbacks": 1048576,
+            "native_moves": 0,
+            "seconds": 0.042258128,
+            "guest_mips": 24.813593257136237
+          },
+          {
+            "sample": 2,
+            "instructions": 1048576,
+            "callbacks": 1048576,
+            "native_moves": 0,
+            "seconds": 0.053085708,
+            "guest_mips": 19.752510412030293
+          }
+        ],
+        "windows": [
+          {
+            "sample": 0,
+            "instructions": 1048576,
+            "callbacks": 0,
+            "native_moves": 1048576,
+            "seconds": 0.013883159,
+            "guest_mips": 75.52863148797762
+          },
+          {
+            "sample": 1,
+            "instructions": 1048576,
+            "callbacks": 0,
+            "native_moves": 1048576,
+            "seconds": 0.00870473,
+            "guest_mips": 120.46048527639569
+          },
+          {
+            "sample": 2,
+            "instructions": 1048576,
+            "callbacks": 0,
+            "native_moves": 1048576,
+            "seconds": 0.011944723,
+            "guest_mips": 87.78571089509568
+          }
+        ],
+        "median_speed_ratio": 4.180925836455144
+      },
+      "image-add": {
+        "callbacks": [
+          {
+            "sample": 0,
+            "instructions": 1048576,
+            "callbacks": 1048576,
+            "native_moves": 0,
+            "seconds": 0.047000326,
+            "guest_mips": 22.309972913804895
+          },
+          {
+            "sample": 1,
+            "instructions": 1048576,
+            "callbacks": 1048576,
+            "native_moves": 0,
+            "seconds": 0.051299408,
+            "guest_mips": 20.440313853134523
+          },
+          {
+            "sample": 2,
+            "instructions": 1048576,
+            "callbacks": 1048576,
+            "native_moves": 0,
+            "seconds": 0.040768813,
+            "guest_mips": 25.720052236988113
+          }
+        ],
+        "windows": [
+          {
+            "sample": 0,
+            "instructions": 1048576,
+            "callbacks": 0,
+            "native_moves": 1048576,
+            "seconds": 0.013410986,
+            "guest_mips": 78.18783794122223
+          },
+          {
+            "sample": 1,
+            "instructions": 1048576,
+            "callbacks": 0,
+            "native_moves": 1048576,
+            "seconds": 0.00852883,
+            "guest_mips": 122.9448822405887
+          },
+          {
+            "sample": 2,
+            "instructions": 1048576,
+            "callbacks": 0,
+            "native_moves": 1048576,
+            "seconds": 0.010977011,
+            "guest_mips": 95.5247289084433
+          }
+        ],
+        "median_speed_ratio": 4.281705283888301
+      },
+      "communications-xor": {
+        "callbacks": [
+          {
+            "sample": 0,
+            "instructions": 1048576,
+            "callbacks": 1048576,
+            "native_moves": 0,
+            "seconds": 0.046961946,
+            "guest_mips": 22.328205905266362
+          },
+          {
+            "sample": 1,
+            "instructions": 1048576,
+            "callbacks": 1048576,
+            "native_moves": 0,
+            "seconds": 0.03855467,
+            "guest_mips": 27.1971203488449
+          },
+          {
+            "sample": 2,
+            "instructions": 1048576,
+            "callbacks": 1048576,
+            "native_moves": 0,
+            "seconds": 0.046563732,
+            "guest_mips": 22.519157184394068
+          }
+        ],
+        "windows": [
+          {
+            "sample": 0,
+            "instructions": 1048576,
+            "callbacks": 0,
+            "native_moves": 1048576,
+            "seconds": 0.005473021,
+            "guest_mips": 191.5899829362979
+          },
+          {
+            "sample": 1,
+            "instructions": 1048576,
+            "callbacks": 0,
+            "native_moves": 1048576,
+            "seconds": 0.005386502,
+            "guest_mips": 194.6673369841875
+          },
+          {
+            "sample": 2,
+            "instructions": 1048576,
+            "callbacks": 0,
+            "native_moves": 1048576,
+            "seconds": 0.005393122,
+            "guest_mips": 194.42838489468622
+          }
+        ],
+        "median_speed_ratio": 8.633910376957909
+      }
+    },
+    "actual_exit": 0,
+    "reaped": true,
+    "limitations": [
+      "One hot, all-known readonly RAM word; no writes, unknown-bit or mapping transitions in these timings",
+      "Three short samples; observed timing variation is retained, no confidence interval or fixed-host-frequency claim",
+      "Native MOVE count overlaps native instruction accounting",
+      "Not complete application, external staged-owner or instrument throughput"
+    ],
+    "local_evidence": "doc/local/memory-windows-r1/benchmark-r1/result.json"
   },
   "remaining": [
     "Direct-window board export and connected event scheduler integration",
-    "Deferred request_interrupt(vector, level) without a foreground snapshot for WAIT/unknown P",
     "Native external guarded-region and REP throughput",
     "Original firmware/instrument performance and complete function acceptance"
   ],
