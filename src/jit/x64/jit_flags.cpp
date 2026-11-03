@@ -48,6 +48,7 @@ Word JitEmitter::written_flags(const NativeOp &operation) const {
       operation.instruction.operation == Operation::loop_immediate) {
     return 0;
   }
+  if (is_logic(operation)) { return overflow | zero | negative; }
   if (is_addition(operation) || is_right_shift(operation)) { return observed_flags; }
   const auto alu = operation.instruction.opcode & byte_mask;
   const auto kind = alu & alu_mask;

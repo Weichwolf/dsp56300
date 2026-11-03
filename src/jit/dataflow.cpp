@@ -15,7 +15,7 @@ constexpr Word all_banks = 15;
 constexpr Word accumulator_b_bit = 8, multiply_bit = 0x80, accumulate_bit = 2;
 constexpr Word clear_code = 0x13, round_code = 0x11, absolute_code = 0x26, negate_code = 0x36;
 constexpr Word operation_mask = 0xf7;
-constexpr Word right_shift_code = 0x22;
+constexpr Word right_shift_code = 0x22, complement_code = 0x17;
 
 Word register_bank(const unsigned reg) {
   if (reg == a_register) { return bank_bit(ValueBank::a); }
@@ -51,6 +51,10 @@ Word alu_inputs(const Word opcode) {
     return input_bank(selector, destination_b);
   }
   const auto low = alu & 7U;
+  if (kind == complement_code) { return destination; }
+  if (selector >= 4 && (low == 2 || low == 3 || low == 6)) {
+    return destination | input_bank(selector, destination_b);
+  }
   const bool carry_form = (selector == 2 || selector == 3) && (low == 1 || low == 5);
   const bool sum = (selector >= 1 && (low == 0 || low == 4)) || carry_form ||
                    (low == 5 && (selector == 0 || selector >= 4));

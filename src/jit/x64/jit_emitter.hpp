@@ -90,6 +90,9 @@ private:
   void
   product_word(x64::Reg destination, const NativeOp &operation, unsigned selector, bool scaled);
   [[nodiscard]] std::vector<WordReuseStep> word_effects(std::span<const NativeOp> operations) const;
+  [[nodiscard]] static bool is_logic(const NativeOp &operation);
+  void logic(const NativeOp &operation);
+  void logical_flags(x64::Reg word);
   void addition(const NativeOp &operation);
   void right_shift(const NativeOp &operation);
   void round(Word mode);

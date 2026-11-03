@@ -251,8 +251,11 @@ void fault_after_native(const Options options) {
               result.fault.kind == FaultKind::memory_read && result.fault.pc == start + 2 &&
               result.fault.address == memory_words,
           "A native memory guard fault materializes only previously retired instructions");
-  require(machine.core.registers().a == 0 && machine.core.registers().b == preceding.b,
-          "A fault exit preserves the general helper's partial result without a stale cache flush");
+  ++preceding.pc; // The failed load has fetched its opcode, but no data result exists.
+  require(
+      machine.core.registers() == preceding &&
+          result.progress == Progress{.instructions = 2, .estimated_cycles = 2},
+      "A refused load preserves the complete retired prefix and never fabricates a zero result");
 }
 
 void check(const Backend backend, const bool optimize) {

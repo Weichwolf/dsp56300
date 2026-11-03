@@ -15,8 +15,9 @@ Options.instructions_per_block in [1,256]. The former unused prototype options
 for block links and DO dispatch batching have been removed.
 
 The emitter translates signed MPY/MPYR/MAC/MACR variants, RND, CLR, ABS, NEG, single-bit ASR,
-ADD/SUB/CMP, ADC/SBC, internal TFR and NOP retirement. ADD/SUB/CMP include
-short/long immediate forms. Native flags use full left-aligned 56-bit
+ADD/SUB/CMP, ADC/SBC, parallel AND/OR/EOR/NOT, internal TFR and NOP retirement. ADD/SUB/CMP include
+short/long immediate forms; immediate logic retains general execution.
+See native-logic.txt for middle-word/flag and parallel-input constraints. Native flags use full left-aligned 56-bit
 accumulator coordinates, with distinct ordinary/down/up scaling specializations
 and sticky state preservation. Other supported instructions execute through the general
 executor. Options.optimize=false exercises generated helper-only blocks without

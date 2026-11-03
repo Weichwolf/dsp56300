@@ -119,6 +119,7 @@ bool JitEmitter::lowerable(const NativeOp &operation) const {
     return pure_address_update(decoded) || plan_address_immediate(decoded).valid() ||
            plan_moves(decoded).count != 0 || plan_register_move(decoded).valid();
   }
+  if (is_logic(operation)) { return true; }
   if (is_addition(operation)) { return true; }
   if (is_right_shift(operation)) { return true; }
   if ((alu & 0x80U) != 0) { return true; }
@@ -280,6 +281,10 @@ void JitEmitter::round(const Word mode) {
 
 void JitEmitter::native(const NativeOp &operation) {
   if (operation.instruction.operation == Operation::nop) { return; }
+  if (is_logic(operation)) {
+    logic(operation);
+    return;
+  }
   if (is_addition(operation)) {
     addition(operation);
     return;

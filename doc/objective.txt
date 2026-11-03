@@ -12,6 +12,15 @@ dependency on another DSP emulator in build, API, tests or runtime.
 
 Current user requirements
 
+- High performance is the library's central purpose. Ordinary consumers must
+  automatically receive the fastest correctly supported execution path on the
+  current host, including native JIT execution. Callers must not need to know
+  private backend details or accidentally select a diagnostic interpreter by
+  using the normal memory/I/O interface. Explicit reference execution remains
+  available for independent tests and diagnosis. Extend native execution to
+  external memory and ordinary bounded event/I/O contracts; a fast isolated
+  buffer benchmark is insufficient when real consumers take a slow path.
+  Qualify actual native/helper execution and sustained consumer throughput.
 - The complete DSP56300 ISA must be implemented and independently tested across
   all legal encodings, operands, numerical modes, aliases and observable effects.
   Representative workloads and a green current suite are insufficient evidence.
@@ -84,3 +93,5 @@ Current user requirements
   reference assets or backup branches.
 - Speak German with the user; write code, comments, documentation and commits
   in English. Keep local account names out of tracked source and instructions.
+
+Discovered slow helper fallbacks and similar performance defects must be corrected promptly in this library, with independent correctness expectations and counters proving actual native execution; application-side workarounds are not a substitute.

@@ -91,6 +91,12 @@ and loop continuation/backedges use emitted code; other operations/modes use
 general helpers. This is a partial native compiler, not fully translated arbitrary
 DSP programs. See doc/jit.txt for exact guards, boundaries and execution counters.
 
+Parallel AND/OR/EOR/NOT now lower natively with exact middle-word writes,
+N/Z/V-only flag effects, preserved parallel MOVE state and product-word reuse.
+Independent per-bit full-state and native-counter tests cover ordinary/SM modes.
+Immediate logical forms remain general. See native-logic.txt for targeted gates
+and evidence scope; no ISA row becomes complete.
+
 Native paths preserve old-input ordering, 24/48/56-bit coordinates, sticky flags,
 exact instruction budgets and canonical callback/fault/exit state. P writes,
 including overlapping X/Y storage and extensions, invalidate translations.

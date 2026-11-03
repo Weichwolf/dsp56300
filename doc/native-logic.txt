@@ -1,0 +1,44 @@
+Native parallel word logic
+
+The x64 JIT lowers parallel AND, OR, EOR (XOR) and NOT for A/B, including all
+four X0/X1/Y0/Y1 binary sources. It changes only the middle accumulator word
+and N/Z/V. C/E/U and sticky L/S retain their previous or parallel-transfer
+values. Arithmetic saturation does not limit these BFU results. Existing
+unqualified numerical-mode guards still apply; immediate logic and logical
+shifts/rotates keep their general execution paths.
+
+Parallel MOVE and ALU sample distinct state: the logical operands are the
+pre-transfer words, while the extension and low destination word retain the
+completed transfer. Dataflow snapshots only overwritten banks read by this
+ALU. Native lowering preserves RCX, which can hold a reused product operand
+across mixed MAC/logical sequences. Flag liveness records only N/Z/V writes,
+so a preceding arithmetic instruction still supplies live E/U/C.
+
+The independently authored per-bit truth table supplies exact full-state
+expectations. native-word-logic checks both accumulators, every source/form,
+all 256 CCR combinations, six scaling/rounding modes with SM on/off, raw-56
+boundaries and walking bits, all twelve data-register transfer endpoints,
+and every prefix of mixed MAC/logical sequences. Counters require actual
+native retirement with zero ALU helpers, or the explicitly selected fallback.
+Both canonical ASan/UBSan and separate TSan builds pass 1021058 assertions. This is directed ISA/JIT
+evidence, not complete instruction, full-application or instrument coverage.
+
+The neighboring BFU test also covers real I/O observation/refusal, fail-stop
+retry, code invalidation, unsupported modes and exact instruction/cycle costs.
+The dataflow regression additionally pins full preserved CPU state and progress
+after a refused load; the old zero-result expectation also failed against
+unchanged Core 3903224. No production fault handling changed.
+The BFU test's old CMP-refusal expectation is replaced by independent successful CMP
+state/flag expectations: SM comparison was already qualified separately in
+the vendor differential work. No production mode guard was relaxed here.
+
+Source/ELF hashes and scoped results are in native-logic-reference.json.
+
+Targeted validation (repeat with the thread preset/build for separate TSan):
+
+  cmake --preset strict
+  cmake --build build/strict --target dsp56300_native_logic_test dsp56300_bfu_logic_test dsp56300_native_dataflow_test
+  ctest --test-dir build/strict --output-on-failure -j1 -R '^(native-word-logic|bfu-logic-boundaries|native-dataflow-boundaries)$'
+
+This selection contains no fuzz target. General native-code coverage, immediate
+logic lowering and whole-program throughput remain open.

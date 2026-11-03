@@ -36,6 +36,7 @@ enum Alu : std::uint8_t {
 }
 
 bool JitEmitter::saturation_supported(const NativeOp &operation) {
+  if (is_logic(operation)) { return true; }
   const auto &decoded = operation.instruction;
   const auto opcode = decoded.opcode;
   const auto kind = opcode & 7U;

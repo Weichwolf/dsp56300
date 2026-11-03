@@ -74,10 +74,11 @@ void prefixes(const Options options, const Word mode) {
             "Every native/BFU prefix preserves exact flags, old operands, word lengths and costs");
     if (budget == 5 && options.backend == Backend::jit) {
       const auto stats = machine.core.jit_statistics();
-      const auto native = options.optimize ? 2U : 0U;
+      const auto native = options.optimize ? 3U : 0U;
       require(stats.native_alu_instructions == native &&
                   stats.helper_instructions == budget - native,
-              "New SM BFU domains execute general helpers between real native arithmetic");
+              "Parallel OR executes native logic between native arithmetic and guarded "
+              "immediate/shift helpers");
     }
   }
 }
@@ -156,14 +157,19 @@ void unqualified(const Options options) {
   for (const Word opcode : {compare_a, compare_long}) {
     Machine machine(options);
     machine.core.write(Space::program, start, opcode);
+    machine.core.write(Space::program, start + 1, datum);
     auto expected = seed(bfu_model::sm);
     machine.core.set_registers(expected);
-    expected.pc += opcode == compare_a ? 1U : 2U;
+    // SM CMP was independently qualified after this BFU test was introduced.
+    // The long immediate is the same signed word as X0; compare preserves A.
+    saturation_model::alu(expected, expected, compare_a);
+    const auto words = opcode == compare_a ? 1U : 2U;
+    expected.pc += words;
     const auto run = machine.core.run(1);
-    require(run.dispatches == 0 && run.progress == Progress{} &&
-                run.fault.kind == FaultKind::unsupported_mode &&
-                machine.core.registers() == expected,
-            "Unqualified parallel and immediate CMP remain outside the new whitelist");
+    require(run.dispatches == 1 &&
+                run.progress == Progress{.instructions = 1, .estimated_cycles = words} &&
+                run.fault.kind == FaultKind::none && machine.core.registers() == expected,
+            "Qualified SM parallel/immediate CMP preserve A and independent saturation flags");
   }
 }
 

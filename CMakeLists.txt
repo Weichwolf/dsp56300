@@ -32,7 +32,7 @@ add_library(dsp56300_core STATIC
   src/core/bits.cpp src/core/bit_fields.cpp src/core/loops.cpp src/core/products.cpp src/core/iteration.cpp
   src/core/processing.cpp src/core/debugging.cpp src/core/viterbi.cpp src/core/program_cache.cpp src/core/cache_control.cpp
   src/jit.cpp src/jit/jit_helpers.cpp src/jit/x64/jit_emitter.cpp src/jit/x64/x64.cpp
-  src/jit/x64/jit_addition.cpp
+  src/jit/x64/jit_addition.cpp src/jit/x64/jit_logic.cpp
   src/jit/x64/jit_saturation.cpp
   src/jit/x64/jit_loops.cpp
   src/jit/x64/jit_flags.cpp
@@ -259,6 +259,9 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   add_executable(dsp56300_native_move_test test/native_move_test.cpp)
   target_link_libraries(dsp56300_native_move_test PRIVATE dsp56300::core)
   add_test(NAME native-move-boundaries COMMAND dsp56300_native_move_test)
+  add_executable(dsp56300_native_logic_test test/native_logic_test.cpp)
+  target_link_libraries(dsp56300_native_logic_test PRIVATE dsp56300::core)
+  add_test(NAME native-word-logic COMMAND dsp56300_native_logic_test)
   add_executable(dsp56300_native_dataflow_test test/native_dataflow_test.cpp)
   target_link_libraries(dsp56300_native_dataflow_test PRIVATE dsp56300::core)
   add_test(NAME native-dataflow-boundaries COMMAND dsp56300_native_dataflow_test)
