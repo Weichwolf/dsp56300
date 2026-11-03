@@ -243,9 +243,21 @@ bool Core::Impl::addition(const Word opcode) {
   const bool destination_b = (opcode & 8U) != 0;
   const auto original = latched[destination_b ? 1 : 0];
   const auto input = source(group, destination_b);
+  if (compare_magnitude) {
+    const auto left = magnitude(original);
+    const auto right = magnitude(input);
+    auto result = wrapped_sub(left, right);
+    // Magnitudes occupy [0,2^55], including the unsigned magnitude of min56.
+    // Only a positive difference outside signed56 overflows; 0-|min56| fits.
+    arithmetic_flags(result, left > right && (result >> host_sign_bit) != 0);
+    if ((cpu.reg.sr & arithmetic_saturation) != 0) { saturate_arithmetic(result); }
+    mark_alu(RegisterStorage::sr, carry);
+    cpu.reg.sr = (cpu.reg.sr & ~carry) | (left < right ? carry : 0);
+    return true;
+  }
   add_operands(
-      {.left = compare_magnitude ? magnitude(original) : original,
-       .right = compare_magnitude ? magnitude(input) : input,
+      {.left = original,
+       .right = input,
        .carry_in = with_carry && (cpu.reg.sr & carry) != 0 ? std::uint64_t{1} << padding_bits : 0,
        .destination_b = destination_b,
        .subtract = subtract,

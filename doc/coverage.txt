@@ -1138,3 +1138,16 @@ Only that changed boundary ELF was repeated. Rejected-read checks now require an
 unchanged destination without weakening prefix/fault/no-replay checks. Reproduction
 and limits: saturated-normalization.txt. All 118 ISA entries remain partial;
 full ISA, performance and other objective requirements remain incomplete.
+
+CMPM magnitude boundary flags
+
+CMPM now distinguishes an unsigned magnitude of min56 from a negative signed
+operand when computing V/L. The 15 literal boundary triples exercise 3240 cases
+and 12960 checks/profile across reference/cached/JIT and dispatched/owned/captured
+execution. Ordinary signed CMP remains independently checked. All five affected
+groups/profile pass under ASan/UBSan and TSan, including 3625304 arithmetic/flag/
+saturation fixture checks/profile. The same new boundary fixture rejects the
+old library. This qualifies the declared mathematical/manual interpretation,
+not unobserved silicon minimum-operand flags or complete ISA behavior. See
+magnitude-comparison.txt and magnitude-compare-reference.json; all 118 ISA rows
+and the broader objective retain their existing partial status.
