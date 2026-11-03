@@ -146,7 +146,7 @@ void Core::Impl::memory_move(const Instruction &decoded) {
 }
 
 void Core::Impl::displacement_move(const Instruction &decoded) {
-  if (!numeric_mode_supported()) { return; }
+  if (!numeric_mode_supported(arithmetic_saturation)) { return; }
   const auto opcode = decoded.opcode;
   const bool long_form = decoded.words == 2;
   const auto reg = opcode & (long_form ? six_bit_mask : Word{15});

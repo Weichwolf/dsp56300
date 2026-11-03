@@ -18,6 +18,9 @@ bool Core::Impl::numeric_alu_supported(const Word opcode) {
   constexpr Word tfr_y1 = 0x71;
   constexpr Word clear = 0x13;
   constexpr Word rounded = 0x11;
+  constexpr Word test = 0x03;
+  constexpr Word maximum = 0x1d;
+  constexpr Word maximum_magnitude = 0x15;
   constexpr Word absolute = 0x26;
   constexpr Word negate = 0x36;
   constexpr Word shift_right = 0x22;
@@ -40,30 +43,37 @@ bool Core::Impl::numeric_alu_supported(const Word opcode) {
   const bool bfu = binary_logic || operation == complement || operation == logical_right ||
                    operation == logical_left || operation == rotate_right ||
                    operation == rotate_left;
+  const bool compare = (selector == 0 || selector >= 4) && (kind == 5 || kind == 7);
+  const bool selection =
+      operation == test || operation == maximum || operation == maximum_magnitude;
   const bool shifted = operation == add_right || operation == subtract_right ||
                        operation == add_left || operation == subtract_left;
-  const bool supported = opcode == 0 || (opcode & 0x80U) != 0 || sum || carry_sum ||
-                         operation == tfr || operation == tfr_x0 || operation == tfr_y0 ||
-                         operation == tfr_x1 || operation == tfr_y1 || operation == clear ||
-                         operation == rounded || operation == absolute || operation == negate ||
-                         operation == shift_right || operation == shift_left || shifted || bfu;
+  const bool supported =
+      opcode == 0 || (opcode & 0x80U) != 0 || sum || carry_sum || compare || selection ||
+      operation == tfr || operation == tfr_x0 || operation == tfr_y0 || operation == tfr_x1 ||
+      operation == tfr_y1 || operation == clear || operation == rounded || operation == absolute ||
+      operation == negate || operation == shift_right || operation == shift_left || shifted || bfu;
   return numeric_mode_supported(supported ? arithmetic_saturation : 0);
 }
 
-void Core::Impl::saturate_arithmetic(std::uint64_t &value, const bool rounded) {
-  if ((cpu.reg.sr & arithmetic_saturation) == 0) { return; }
+bool Core::Impl::limit_arithmetic(std::uint64_t &value, const bool rounded) const {
+  if ((cpu.reg.sr & arithmetic_saturation) == 0) { return false; }
   // Table 3-1 observes exactly EXT[7], EXT[0], MSP[23], not all extension bits.
   constexpr unsigned low_extension_bit = 48 + padding_bits;
   constexpr unsigned high_msp_bit = 47 + padding_bits;
   const auto sign = value >> host_sign_bit;
   if (((value >> low_extension_bit) & 1) == sign && ((value >> high_msp_bit) & 1) == sign) {
-    return;
+    return false;
   }
   constexpr std::uint64_t positive = 0x007fffffffffff00;
   constexpr std::uint64_t negative_limit = 0xff80000000000000;
   constexpr std::uint64_t rounded_positive = 0x007fffff00000000;
   value = sign != 0 ? negative_limit : positive;
   if (rounded && sign == 0) { value = rounded_positive; }
-  arithmetic_flags(value, true);
+  return true;
+}
+
+void Core::Impl::saturate_arithmetic(std::uint64_t &value, const bool rounded) {
+  if (limit_arithmetic(value, rounded)) { arithmetic_flags(value, true); }
 }
 } // namespace dsp56300

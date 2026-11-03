@@ -32,7 +32,7 @@ Word Core::Impl::bit_address(const BitOperand &operand, const Instruction &decod
     }
     case BitLocation::port_low: return io_begin + operand.selector;
     case BitLocation::effective: {
-      if (!numeric_mode_supported()) { return 0; }
+      if (!numeric_mode_supported(arithmetic_saturation)) { return 0; }
       const AddressForm form{
           .mode = operand.selector >> 3, .index = operand.selector & 7, .extra = decoded.extension};
       if (form.mode == 6 && (form.index != 0 || decoded.operation != Operation::bit_memory)) {
@@ -50,7 +50,10 @@ bool Core::Impl::register_bit(const BitAccess &access) {
   const auto number = access.operand.selector;
   const bool modify = access.action != BitAction::test;
   const bool stack_high = number == ssh_register && modify;
-  if ((number == a_register || number == b_register) && !numeric_mode_supported()) { return false; }
+  if ((number == a_register || number == b_register) &&
+      !numeric_mode_supported(arithmetic_saturation)) {
+    return false;
+  }
   const auto original =
       stack_high ? static_cast<Word>(cpu.reg.stack[cpu.reg.sp & (stack_entries - 1)] >> word_bits)
                  : read_unit_register(number);

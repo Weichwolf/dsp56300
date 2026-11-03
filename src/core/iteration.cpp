@@ -51,7 +51,7 @@ void Core::Impl::normalize_fast(const Word opcode) {
 void Core::Impl::execute_iteration(const Instruction &decoded) {
   const auto qualified_modes = decoded.operation == Operation::normalize_iteration
                                    ? arithmetic_saturation | compatibility_mode
-                                   : 0U;
+                                   : arithmetic_saturation;
   if (!numeric_mode_supported(qualified_modes)) { return; }
   const auto opcode = decoded.opcode;
   const bool destination_b = (opcode & 8U) != 0;
@@ -71,12 +71,23 @@ void Core::Impl::execute_iteration(const Instruction &decoded) {
       mark_alu(RegisterStorage::sr, overflow | limit);
       cpu.reg.sr |= overflow | limit;
     }
+    // SM limits the result but DIV preserves N/Z/U/E/S and its raw quotient Carry.
+    if (limit_arithmetic(destination)) {
+      mark_alu(RegisterStorage::sr, overflow | limit);
+      cpu.reg.sr |= overflow | limit;
+    }
     return;
   }
   const bool left = (cpu.reg.sr & extension) == 0;
   if (left && ((cpu.reg.sr & unnormalized) == 0 || (cpu.reg.sr & zero) != 0)) {
-    // FM13-146/12.4.2: no shift retains data/Rn, while result flags still refresh.
-    arithmetic_flags(before, false);
+    // A zero normalization shift retains Rn but still passes the SM arithmetic limiter.
+    auto result = before;
+    arithmetic_flags(result, false);
+    saturate_arithmetic(result);
+    if (result != before) {
+      mark_alu_accumulator(destination_b);
+      destination = result;
+    }
     return;
   }
   const auto saved_carry = cpu.reg.sr & carry;

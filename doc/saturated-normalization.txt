@@ -19,7 +19,7 @@ Manufacturer source: https://www.nxp.com/docs/en/reference-manual/DSP56300FM.pdf
 Input/state                Operation / invariant
 NORM old E/U/Z             select left, right or no shift from old flags
 NORM exponent R0..R7       linear24, or linear16 under SC, after a shift; ignore M/N
-NORM non-shift path        no limiter/data/Rn change; refresh E/U/N/Z/V
+NORM non-shift path        apply SM limiter; retain Rn; refresh E/U/N/Z/V
 NORM shifted result        single-bit arithmetic, then the existing SM limiter
 NORMF old signed24 source  six sources, including old A1/B1 destination aliases
 NORMF count -55..+56       raw56 shift; BFU result bypasses SM
@@ -37,7 +37,8 @@ The private ShiftControl carries an explicit saturation choice. Defaults keep
 single-bit/NORM behavior; immediate/register ASL/ASR and NORMF disable it. Path
 selection depends on instruction form, not runtime count. No transient clearing
 of architectural SM, public state field or mode-key relaxation is introduced.
-Other numerical domains still diagnose; DIV SM remains unsupported. The later logical-BFU increment independently qualifies AND/OR/EOR/NOT and
+DIV now admits its distinct SM result limiter without rewriting S/E/U/N/Z or
+raw quotient Carry; see vendor-differential.txt. Logical BFU tests qualify AND/OR/EOR/NOT and
 logical shifts/rotates with SM; see bfu-logic.txt. Other numerical and instruction
 admission gaps remain explicit. No blanket admission of untested modes occurs.
 
@@ -46,9 +47,9 @@ explicit software diagnostics, not claimed hardware traps. NORM additionally
 admits established SC for its 16-bit exponent update (FM4.2). Other SC operations,
 transitions, SB/DM, reserved scaling, complete combinations and sequence/IRQ/
 pipeline/timing remain open. The non-shift flag refresh follows the FM13-146
-condition-code table and FM12.4.2; the operation's NOP wording is interpreted as
-retaining data/Rn. This corrects earlier status-retention expectations without
-claiming hardware confirmation. The NORMF V bit-index inconsistency remains open.
+condition-code table and FM12.4.2. A suppressed shift retains Rn while the result
+still passes the arithmetic limiter. Independent vendor-software controls support
+that interpretation; this is not physical hardware confirmation. The NORMF V bit-index inconsistency remains open.
 
 Independent binary expectations
 
@@ -90,8 +91,8 @@ native/helper/dispatch/base-cycle counts. Same-PC ordinary/SM/ordinary/SM runs
 cannot retain stale assumptions. Equal one-bit shifts through parallel ALU,
 immediate BFU, register BFU and NORMF distinguish saturation/bypass independently.
 NORMF count zero clears stale result flags without limiting the raw accumulator.
-Out-of-domain counts, other modes and DIV SM retain fail-before-retirement
-expectations. Callbacks observe canonical earlier native work, accept/reject a
+Out-of-domain counts and other unqualified numerical modes retain
+fail-before-retirement expectations. DIV SM has separate numerical regressions. Callbacks observe canonical earlier native work, accept/reject a
 parallel load, patch the following P instruction and verify exact partial effects
 and fail-stop state without replay. Reference/cached/JIT, optimizer on/off and
 block limits 1/64 use independently modeled expectations. Full IRQ admission,
@@ -139,7 +140,8 @@ match. No subsequent capture replaces the failed timing budgets.
 
 NORM condition-code and established-SC correction
 
-The non-shift path now refreshes E/U/N/Z/V while retaining data/Rn and C/S/L.
+The non-shift path refreshes E/U/N/Z/V and passes the SM limiter while retaining
+Rn and Carry. A limiting result can set sticky L; S remains unchanged.
 FM13-146's condition-code table and FM12.4.2 take precedence over interpreting
 its NOP operation wording as retaining every flag. This is an explicit manual
 interpretation, not hardware validation. Established SC makes shifted exponent

@@ -75,13 +75,13 @@ inline void apply(Registers &state, const Input input) {
           false);
     return;
   }
-  // Index 4E+2U+Z: zero retains data/Rn, but still refreshes the result flags.
+  // Index 4E+2U+Z: zero retains Rn, but still limits the result and refreshes flags.
   constexpr std::array actions{0, 0, -1, 0, 1, 1, 1, 1};
   const auto index = ((state.sr & flag_e) != 0 ? 4U : 0U) | ((state.sr & flag_u) != 0 ? 2U : 0U) |
                      ((state.sr & flag_z) != 0 ? 1U : 0U);
   const auto count = actions.at(index);
   if (count == 0) {
-    shift(state, 0, input.destination_b, false);
+    shift(state, 0, input.destination_b, true);
     return;
   }
   shift(state, count, input.destination_b, true);

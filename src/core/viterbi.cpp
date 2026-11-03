@@ -8,7 +8,7 @@ namespace dsp56300 {
 using namespace detail;
 
 void Core::Impl::viterbi_shift(const Instruction &decoded) {
-  if (!numeric_mode_supported()) { return; }
+  if (!numeric_mode_supported(arithmetic_saturation)) { return; }
   const auto opcode = decoded.opcode;
   const AddressForm form{
       .mode = (opcode >> 11) & 7U, .index = (opcode >> 8) & 7U, .extra = decoded.extension};

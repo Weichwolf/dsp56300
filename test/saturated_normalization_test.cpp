@@ -241,7 +241,7 @@ void unqualified_modes(const Options options) {
         require(run.dispatches == 1 && run.fault.kind == FaultKind::none &&
                     run.progress == Progress{.instructions = 1, .estimated_cycles = 5} &&
                     machine.core.registers() == expected,
-                "Non-shift NORM qualifies SM/SC without changing data or the exponent");
+                "Non-shift NORM qualifies SM/SC with limiting and an unchanged exponent");
         continue;
       }
       ++expected.pc;
@@ -262,14 +262,12 @@ void unqualified_modes(const Options options) {
   machine.core.set_registers(expected);
   ++expected.pc;
   const auto run = machine.core.run(1);
-  require(run.dispatches == 0 && run.progress == Progress{} &&
-              run.fault == Fault{.kind = FaultKind::unsupported_mode,
-                                 .space = Space::program,
-                                 .address = start,
-                                 .value = expected.sr,
-                                 .pc = start} &&
+  // Raw DIV: 2*(+2^47)+1-(1*2^24) exceeds the positive SM rail.
+  expected.a = saturation_model::positive;
+  expected.sr |= flag_v;
+  require(run.dispatches == 1 && run.fault.kind == FaultKind::none &&
               machine.core.registers() == expected,
-          "Normalization admission does not accidentally admit unqualified DIV with SM");
+          "Original rejected DIV now checks SM data limiting, raw quotient Carry and V/L");
 }
 
 class Observer final : public Io {

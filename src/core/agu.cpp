@@ -131,7 +131,7 @@ Word Core::Impl::effective(const AddressForm form) {
 }
 
 void Core::Impl::execute_address_calculation(const Instruction &decoded) {
-  if (!numeric_mode_supported()) { return; }
+  if (!numeric_mode_supported(arithmetic_saturation)) { return; }
   const auto opcode = decoded.opcode;
   const auto index = (opcode >> 8) & 7U;
   const bool relative = decoded.operation == Operation::load_relative_address;

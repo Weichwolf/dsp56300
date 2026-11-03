@@ -32,7 +32,9 @@ Current implemented SM domains
 - Ordinary parallel ADD/SUB/ADC/SBC, signed MPY/MAC and rounded variants, RND,
   CLR, ABS and NEG use the new qualified SM path. Immediate ADD/SUB and raw-LSB
   INC/DEC are included. Shifted ADDL/ADDR/SUBL/SUBR now admit SM through the
-  same generic limiter; see sm-control-shift.txt. Normal CMP remains unqualified.
+  same generic limiter; see sm-control-shift.txt. CMP/CMPM and TST now qualify
+  virtual-result limiting without writing their operands. MAX/MAXM preserve their
+  transfer/Carry behavior with SM set; see vendor-differential.txt.
 - Immediate signed products and positive power products n=1..23 saturate after
   arithmetic/rounding. DMACss saturates after its existing signed right shift and
   accumulation. MACsu/uu, MPYsu/uu and DMACsu/uu bypass arithmetic saturation.
@@ -50,9 +52,10 @@ Current implemented SM domains
   Outer accumulator bits and E/U/S/L remain preserved, with separate shifted C
   and conditional flag publication. See bfu-logic.txt for exact matrices.
 - NORM additionally admits established SC for its exponent step. Other SC/SA/DM
-  combinations, reserved scaling, division, other SM ALU forms and
-  unqualified nonparallel/count transfers are still rejected
-  explicitly. The full SM numerical mode is not claimed complete.
+  combinations and reserved scaling retain explicit diagnostics. DIV, address
+  calculation, displaced/program/control/peripheral moves, bit operands, VSL and
+  loop/count inputs now admit their named SM paths. The complete SM mode, every
+  transfer/alias and timing are not claimed qualified.
 
 The first increment qualified general SM execution. Selected parallel arithmetic,
 transfers and immediate ADD/SUB now also lower directly to x64; see

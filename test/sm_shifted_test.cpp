@@ -78,6 +78,7 @@ void one(const Input input) {
   }
   Core core({.program = program, .x = x, .y = y}, &bus, {.backend = input.backend});
   auto expected = register_model::seed(input.status);
+  expected.sr = input.status;
   expected.a = input.destination_b ? input.operands.source : input.operands.destination;
   expected.b = input.destination_b ? input.operands.destination : input.operands.source;
   core.set_registers(expected);

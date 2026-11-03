@@ -584,6 +584,18 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
     -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
   add_test(NAME native-dataflow-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/native-dataflow.d56")
+  add_test(NAME sm-loop-counts-fixtures COMMAND dsp56300_fixture_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/sm-loop-counts.d56")
+  add_test(NAME sm-loop-counts-owned-publication COMMAND dsp56300_alu_fixture_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/sm-loop-counts.d56")
+  add_test(NAME sm-loop-counts-captured-publication COMMAND dsp56300_alu_fixture_test --captured-pcu
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/sm-loop-counts.d56")
+  add_test(NAME sm-cpu-domains-fixtures COMMAND dsp56300_fixture_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/sm-cpu-domains.d56")
+  add_test(NAME sm-cpu-domains-owned-publication COMMAND dsp56300_alu_fixture_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/sm-cpu-domains.d56")
+  add_test(NAME sm-cpu-domains-captured-publication COMMAND dsp56300_alu_fixture_test --captured-pcu
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/sm-cpu-domains.d56")
   add_test(NAME saturation-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/saturation.d56")
   add_test(NAME saturation-reproducibility COMMAND "${CMAKE_COMMAND}"

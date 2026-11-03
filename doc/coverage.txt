@@ -584,9 +584,10 @@ in general execution. Ordinary ADD/SUB/ADC/SBC, INC/DEC, signed MPY/MAC/R,
 immediate/power and signed DMAC, RND/CLR/ABS/NEG, transfer bypasses and mixed
 unsigned bypasses have independent raw-width/flag witnesses. IFcc/IFcc.U separate
 conditional stored values and flag publication; Tcc preserves unscaled operands.
-Other SM operations and remaining control/count/nonparallel transfers, SB/SA/SC/DM
-combinations, native SM lowering, pipeline/IRQ interactions and complete modes
-remain open. No ISA row becomes complete.
+Additional SM compare/status/selection, DIV and nonparallel/count/bit/VSL paths
+now have captured numerical or authored bus regressions; see vendor-differential.txt.
+SB/SA/SC/DM combinations, remaining aliases, native lowering, pipeline/IRQ
+interactions and complete modes remain open. No ISA row becomes complete.
 
 The new 65536-case archive checks all extension bytes, representative all-CCR
 arithmetic, six scaling/RM choices, every ordinary signed multiplication code,
@@ -717,8 +718,9 @@ shifted Carry and update result flags. The later BFU review corrects the origina
 all-forms limiting assumption: only single-bit parallel shifts limit; multi-bit
 BFU forms bypass SM, including counts zero/one. See saturated-normalization.txt.
 Native SM shift admission is unchanged; JIT retains general execution. NORM and
-NORMF now admit their distinct SM paths. Other numerical modes, logical shifts
-and DIV SM still retain explicit diagnostics.
+NORMF now admit their distinct SM paths. Logical shifts have their separate BFU
+qualification, and DIV SM is covered in vendor-differential.txt. Other numerical
+mode combinations remain open.
 
 The standalone bit-serial producer adds 52632 original binary cases and 1473697
 complete-state assertions across reference/cached/JIT. All defined counts,
@@ -931,7 +933,8 @@ excludes from saturation. Multi-bit shifts now bypass SM, even for encoded count
 one. Single-bit parallel shifts and NORM retain limiting. NORM/NORMF now admit
 these distinct SM paths; NORM non-shift and NORMF zero-count behavior remain
 separate. A private ShiftControl choice preserves public layouts and never
-transiently clears architectural SM. DIV SM/other unqualified modes still reject.
+transiently clears architectural SM. DIV SM now has its separate limiter and
+flag contract; other unqualified modes still reject.
 
 The new independent bit-serial/action-table matrix contains 79552 cases in two
 archives. NORMF counts/sources/destinations, separate all-CCR/scaling-RM matrices,
@@ -969,8 +972,9 @@ AND/OR/EOR/NOT and logical shifts/rotates now admit the defined BFU bypass in
 ordinary 56-bit operation, including immediate widths, old controls and conditional
 publication. Middle24 results preserve outer bits and E/U/S/L; logic preserves
 Carry, shifts/rotates publish only the specified shifted bit. Native SM admission
-stays unchanged/general. Other modes, reserved scaling and unqualified CMP/TST/
-shifted arithmetic remain explicit gaps. No public layout or contract change.
+stays unchanged/general. CMP/TST/selection and shifted arithmetic have separate
+SM qualification. Other modes and reserved scaling remain explicit. No public
+layout or contract change.
 
 Two original truth-table/serial archives add 76664 cases: all 34 parallel shapes,
 CCR/scaling-RM matrices, exact middle/outer bits, explicit zero/sign truth pairs,
@@ -1138,7 +1142,8 @@ consumer replacement or full device operation. All 118 ISA rows remain partial.
 
 NORM condition-code and established-SC correction
 
-The non-shift path retains data/Rn and C/S/L, refreshing E/U/N/Z/V under the
+The non-shift path retains Rn/C/S, limits data under SM and can set L, refreshing
+E/U/N/Z/V under the
 manual condition-code table interpretation. Shifted exponents wrap at 16 bits
 under established SC. This is not hardware validation or SC transition coverage.
 The independent iteration archive now has 37294 cases; saturated iteration
@@ -1162,3 +1167,30 @@ old library. This qualifies the declared mathematical/manual interpretation,
 not unobserved silicon minimum-operand flags or complete ISA behavior. See
 magnitude-comparison.txt and magnitude-compare-reference.json; all 118 ISA rows
 and the broader objective retain their existing partial status.
+
+
+Vendor-software differential coverage
+
+The deterministic CPU campaign samples 15936 authored cases from 46 archives
+and pairs 20188 single-instruction ordinary/SM inputs. Every comparison checks
+44 register fields, all 16 stack slots and complete 1024-word P/X/Y windows;
+reference reset and exact input readback precede each step. The candidate keeps
+13864 and 18389 exact matches respectively, with no previously matching accepted
+case regressing. The paired matrix has no remaining Core refusal, but 1321/1171
+raw differences and 751/628 reference setup mismatches remain explicit research
+findings. They include seeded hidden loop/exception state, forbidden parallel
+aliases, modifier domains, reserved/16-bit register views and stack semantics;
+they are neither automatically Core bugs nor silently successful comparisons.
+
+The 2433+20 captured SM regressions pass all three backends and dispatched,
+owned/captured publication in both sanitizer profiles. Fifty scoped native
+groups pass and are reaped; the old published core fails the new expectations.
+NORM's suppressed shift still limits, TST/CMP use limited virtual-result flags,
+DIV limits data while preserving its raw quotient Carry and unaffected flags,
+and named transfer/address/count/bit/VSL forms now admit SM. Independent
+producers correct 5472 NORM results and 32 CMPM flag expectations without
+changing any input/program/case count; fast normalization remains byte-identical.
+No manufacturer program or binary is included. See vendor-differential.txt and
+the two sm-*-reference.json manifests. All 118 ISA rows remain partial. Full
+numeric modes, valid modulo-stride boundaries, stack/exception and pipeline
+qualification, physical timing and the complete objective remain unfinished.

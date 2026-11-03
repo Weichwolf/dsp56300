@@ -205,7 +205,12 @@ bool Core::Impl::unary(const Word opcode) {
       destination = 0;
       arithmetic_flags(0, false);
       return true;
-    case 3: arithmetic_flags(before, false); return true;
+    case 3: {
+      auto result = before;
+      arithmetic_flags(result, false);
+      saturate_arithmetic(result);
+      return true;
+    }
     case op_round:
       mark_alu_accumulator(destination_b);
       destination = before;

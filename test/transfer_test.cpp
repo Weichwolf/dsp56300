@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "dsp56300/core.hpp"
+#include "register_model.hpp"
 #include "support.hpp"
 
 #include <array>
@@ -115,6 +116,69 @@ void register_port(const Backend backend, const PortCase input) {
               result.progress == Progress{.instructions = 1, .estimated_cycles = 1} &&
               machine.core.registers() == state && io.complete(),
           "MOVEP maps every X/Y high/low port and preserves full state");
+}
+
+struct SaturatedPort {
+  Backend backend;
+  PortCase port;
+  Word status;
+  std::uint64_t accumulator;
+  bool destination_b;
+};
+
+void saturated_register_port(const SaturatedPort input) {
+  auto expected = register_model::seed(input.status);
+  expected.sr = input.status;
+  const Word reg = input.destination_b ? 15U : 14U;
+  (input.destination_b ? expected.b : expected.a) = input.accumulator;
+  const auto initial = expected;
+  const Word value = input.port.write ? register_model::read(expected, reg) : payload;
+  if (!input.port.write) { register_model::write(expected, reg, value); }
+  ++expected.pc;
+  constexpr Word register_field = 0x3f00;
+  const Word opcode = (port_opcode(input.port) & ~register_field) | (reg << 8);
+  Script io({{.space = input.port.y ? Space::y : Space::x,
+              .address = (input.port.high ? high_port : low_port) + input.port.index,
+              .value = value,
+              .write = input.port.write}});
+  Machine machine(input.backend, &io);
+  machine.p[start] = opcode;
+  machine.core.set_registers(initial);
+  const auto result = machine.core.run(1);
+  require(result.dispatches == 1 && result.fault.kind == FaultKind::none &&
+              result.progress == Progress{.instructions = 1, .estimated_cycles = 1} &&
+              machine.core.registers() == expected && io.complete(),
+          "SM MOVEP A/B uses ordinary bus scaling/limiting and exactly one X/Y I/O event");
+}
+
+void saturated_port_values(SaturatedPort input) {
+  constexpr Word sm = Word{1} << 20;
+  constexpr std::array<std::uint64_t, 4> values{0, sign56, 0x007fffffffffff, 0x00800000000000};
+  for (const Word scale : {0U, mode_down, mode_up}) {
+    for (const Word ccr : {0U, status_byte}) {
+      for (const auto value : values) {
+        input.status = sm | scale | ccr;
+        input.accumulator = value;
+        saturated_register_port(input);
+      }
+    }
+  }
+}
+
+void saturated_ports(const Backend backend) {
+  for (const bool destination_b : {false, true}) {
+    for (const bool high : {false, true}) {
+      for (const bool y : {false, true}) {
+        for (const bool write : {false, true}) {
+          saturated_port_values({.backend = backend,
+                                 .port = {.index = 5, .high = high, .y = y, .write = write},
+                                 .status = 0,
+                                 .accumulator = 0,
+                                 .destination_b = destination_b});
+        }
+      }
+    }
+  }
 }
 
 void vector_base_register(const Backend backend) {
@@ -288,7 +352,15 @@ void memory_ports(const Backend backend) {
        {.opcode = 0x00d805, .cycles = 6, .memory_space = Space::program, .write = true},
        {.opcode = 0x07f405, .write = true, .immediate = true},
        {.opcode = 0x07b485, .peripheral_space = Space::y, .write = true, .immediate = true}}};
-  constexpr std::array modes{Word{0}, mode_sa, mode_sa | mode_down, mode_sa | mode_up};
+  constexpr Word sm = Word{1} << 20;
+  constexpr std::array modes{Word{0},
+                             mode_sa,
+                             mode_sa | mode_down,
+                             mode_sa | mode_up,
+                             sm,
+                             sm | mode_sa,
+                             sm | mode_sa | mode_down,
+                             sm | mode_sa | mode_up};
   for (auto item : cases) {
     for (const auto status : modes) {
       item.modes = status;
@@ -371,6 +443,7 @@ int main() {
       dsp56300::test::vector_base_register(backend);
       dsp56300::test::register_ports(backend);
       dsp56300::test::memory_ports(backend);
+      dsp56300::test::saturated_ports(backend);
       for (const auto modes : {0U, dsp56300::test::mode_sa}) {
         dsp56300::test::staged_fast_immediate(backend, modes);
       }

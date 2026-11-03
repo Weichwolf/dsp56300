@@ -307,6 +307,26 @@ void qualified_shifted(const Backend backend, const Unsupported input) {
           "Original shifted SM stimuli now execute full independent result/flag/stack checks");
 }
 
+void qualified_status(const Backend backend, const Unsupported input) {
+  Machine machine(backend);
+  machine.p[start] = input.instruction;
+  auto expected = seed(input.status);
+  machine.core.set_registers(expected);
+  auto operands = expected;
+  constexpr Word immediate_compare = 0x014085;
+  constexpr Word compare_x0 = 0x200045;
+  if (input.instruction == immediate_compare) {
+    operands.x &= long_mask & ~std::uint64_t{word_mask};
+  }
+  saturation_model::alu(
+      expected, operands, input.instruction == immediate_compare ? compare_x0 : input.instruction);
+  ++expected.pc;
+  const auto result = machine.core.run(1);
+  require(result.dispatches == 1 && result.fault.kind == FaultKind::none &&
+              machine.core.registers() == expected,
+          "Original SM TST/CMP/immediate CMP stimuli now check flags without changing operands");
+}
+
 void rejected_modes(const Backend backend) {
   constexpr Word complement = 0x200017;
   constexpr Word add_left = 0x200012;
@@ -320,7 +340,7 @@ void rejected_modes(const Backend backend) {
     } else if (instruction == add_left || instruction == add_right) {
       qualified_shifted(backend, input);
     } else {
-      reject(backend, input);
+      qualified_status(backend, input);
     }
   }
   constexpr Word asl_a = 0x200032;

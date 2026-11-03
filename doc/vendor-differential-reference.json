@@ -1,0 +1,116 @@
+{
+  "scope": "Finite structured CPU numerical and transport domains; complete ISA and instrument objectives remain open",
+  "baseline_core_revision": "0e6acb2eea9904c1976add193f2a07cefa2e16d4",
+  "fuzz": false,
+  "hardware_traffic": false,
+  "manufacturer_programs": false,
+  "qualified_native_groups_per_profile": {
+    "strict": 25,
+    "thread": 25
+  },
+  "all_50_exit_zero_and_reaped": true,
+  "profiles": {
+    "strict": {
+      "core_archive_sha256": "0208548eb8807a3a6a7d3f64d7ffd07b0930885d443f14bf69a7efc755805a82",
+      "checked_production_contexts": 74
+    },
+    "thread": {
+      "core_archive_sha256": "807c8395a49b63899560b3973f701bebd017abf304a9335f5b02befde864fef9",
+      "checked_production_contexts": 74
+    }
+  },
+  "source_pins": {
+    "src/core/agu.cpp": "25b5e4f060d2405a3dc6feac196e75f8ea2b13085dac13069e6a7e3b085d062a",
+    "src/core/arithmetic.cpp": "9fc477198d0ee20533fa763a7ba78043c6a07bc72033fa193aceacb772e66af6",
+    "src/core/bits.cpp": "3a0a7510b56ea6a59bccb69016fe344ffd0aa363f385a1c51cf1c001a43f0dee",
+    "src/core/core_impl.hpp": "b95d80b062a548ad7119381ef603cf7c2aa9bdb48eb54af77e4c504dfdec8484",
+    "src/core/immediate.cpp": "811519f51a66ccfc9cb1bd940d7a2385520886e6dd5f3a533df2e995022a8546",
+    "src/core/iteration.cpp": "b20c5d83ed2c51393e445ca89bd671d519a52247a8fde03a9e4dff96bed1d0cb",
+    "src/core/loops.cpp": "bacadc64265e47b82f44ff1156b03323245b00a3f0af3c9efdb25a8813c357e2",
+    "src/core/moves.cpp": "b349fe66ac104233d27718eb1bebad53e255c79ba54b55fe20f6fcb9e976d9a7",
+    "src/core/saturation.cpp": "3fff011be07f13ec749065c7ab9419a7b78a0a8a5db9866f39c72f8157efc485",
+    "src/core/transfers.cpp": "fb1c1601f0846f51e7b79067a555ee3894c24093657b13bef8d694b0c58137fe",
+    "src/core/viterbi.cpp": "6ab6357854d93e32ae6c7cbd85261d3c9c1f4912be9d61a7af25c20db95b29f4",
+    "test/generate_bit_operations.cpp": "2bee702b93a437a0e8e2b6ae9227f98632592029316e50bd6b96fe1ca249a476",
+    "test/saturated_normalization_model.hpp": "1d853617dbcab82b6246384c54f13d8ee0fb8f0f022b778575ff3e6f949389e4",
+    "test/saturated_normalization_test.cpp": "6f8b09e55469e8299a11a56c5f370a886546b768c80db956ccc55f53d2282014",
+    "test/saturation_model.hpp": "06ccb2c6e66e6ba223903e14f61f6e82c5fa57746f7d0f187877203a07daa002",
+    "test/saturation_test.cpp": "e9b5a531352000e278e6ccfc7172b5c414d7c43664695a5d267fa3d15390ea8b",
+    "test/sm_shifted_test.cpp": "e79755c5f35843b4cc8383b6f11056410dc7b34c28c3d15ff65ac88699d1651c",
+    "test/transfer_test.cpp": "0a7e08c8790511a2eddae62208593fc8c03edc8ea3fbde6a6d6b4e99e6cab5cd"
+  },
+  "fixture_audit": {
+    "normalization-sm-iteration": {
+      "cases": 29312,
+      "changed_expected_states": 5472,
+      "changed_register_indices": [
+        2,
+        3,
+        29
+      ],
+      "inputs_programs_memory_counts_and_all_other_metadata_unchanged": true,
+      "before_sha256": "2ffdc28a84965e65a3af9765db74bbb9a612b5f1c170105332eb299d7472a3d5",
+      "after_sha256": "b187bcb1c5e9fc11aa6e92f374fce1d2d9cc9176ff966fb7a6627a1f390c69c2"
+    },
+    "normalization-sm-fast": {
+      "cases": 50240,
+      "changed_expected_states": 0,
+      "changed_register_indices": [],
+      "inputs_programs_memory_counts_and_all_other_metadata_unchanged": true,
+      "before_sha256": "190950b61ef28b0dec55aa1f901b94dfa506210e96e2a54a2a4a98f1cee8765c",
+      "after_sha256": "190950b61ef28b0dec55aa1f901b94dfa506210e96e2a54a2a4a98f1cee8765c"
+    },
+    "bit-operations": {
+      "cases": 4175,
+      "changed_expected_states": 32,
+      "changed_register_indices": [
+        29
+      ],
+      "inputs_programs_memory_counts_and_all_other_metadata_unchanged": true,
+      "before_sha256": "5584216af1abab5d3a668856f08ba1cb4362eaa6ba26ec4f15070ed89b9eb854",
+      "after_sha256": "ccbe65c768634eef94b425e95e73fd8e3459bcf4883b059815d5970cd5642c12"
+    }
+  },
+  "broad_regression": {
+    "general": {
+      "before_counts": {
+        "identical": 13796,
+        "different": 1389,
+        "setup-mismatch": 751
+      },
+      "after_counts": {
+        "identical": 13864,
+        "different": 1321,
+        "setup-mismatch": 751
+      },
+      "previously_matching_accepted_cases_now_different": [],
+      "baseline_faults": 0,
+      "candidate_faults": 0,
+      "case_input_archive_byte_identical": true,
+      "reference_capture_byte_identical": true
+    },
+    "paired-SM": {
+      "before_counts": {
+        "identical": 15759,
+        "core-refused-reference-step-accepted": 2640,
+        "different": 1161,
+        "setup-mismatch": 628
+      },
+      "after_counts": {
+        "identical": 18389,
+        "different": 1171,
+        "setup-mismatch": 628
+      },
+      "previously_matching_accepted_cases_now_different": [],
+      "baseline_faults": 2640,
+      "candidate_faults": 0,
+      "case_input_archive_byte_identical": true,
+      "reference_capture_byte_identical": true
+    }
+  },
+  "negative_control": {
+    "actual_exit": 1,
+    "actual_reap_verified": true
+  },
+  "local_evidence": "local/vendor-sm-batch-r1/{build-r4/build,qualification,negative,fixture-audit,broad-regression}.json"
+}

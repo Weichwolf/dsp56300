@@ -180,6 +180,7 @@ struct Core::Impl {
   [[nodiscard]] bool word_shift(Word opcode);
   [[nodiscard]] bool numeric_mode_supported(Word ignored_modes = 0);
   [[nodiscard]] bool numeric_alu_supported(Word opcode);
+  bool limit_arithmetic(std::uint64_t &value, bool rounded = false) const;
   void saturate_arithmetic(std::uint64_t &value, bool rounded = false);
   void execute_shift(const detail::Instruction &decoded);
   void arithmetic_shift(std::uint64_t value, detail::ShiftControl control);

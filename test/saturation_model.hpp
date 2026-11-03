@@ -55,6 +55,9 @@ inline void alu(Registers &state, const Registers &old, const Word opcode) {
   if ((code & 0x80U) != 0) {
     result = sequence_model::multiplication(old, code);
     rounded = (code & 1U) != 0;
+  } else if (operation == 3) {
+    result.full = signed56(destination_b ? old.b : old.a);
+    result.compare = true;
   } else if (operation == sequence_model::clear) {
     result.full = 0;
   } else if (operation == sequence_model::round || operation == sequence_model::absolute ||
@@ -67,11 +70,10 @@ inline void alu(Registers &state, const Registers &old, const Word opcode) {
     result.overflow = result.overflow || sequence_model::overflowed(result.full);
   } else {
     result = sequence_model::addition(old, code);
-    if (result.compare) { throw std::logic_error("SM compare is outside this qualified domain"); }
   }
   const auto limited = apply(static_cast<std::uint64_t>(result.full) & accumulator_mask,
                              {.status = state.sr, .rounded = rounded});
-  destination = limited.value;
+  if (!result.compare) { destination = limited.value; }
   result.full = signed56(limited.value);
   result.overflow = result.overflow || limited.limited;
   sequence_model::flags(state, result);

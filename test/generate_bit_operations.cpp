@@ -345,7 +345,9 @@ void compare_magnitude(Cases &cases, const SumCase input) {
   const auto right = signed56(input.source);
   const auto left_magnitude = static_cast<std::uint64_t>(left < 0 ? -left : left);
   const auto right_magnitude = static_cast<std::uint64_t>(right < 0 ? -right : right);
-  const auto full = signed56(left_magnitude) - signed56(right_magnitude);
+  // Compute the mathematical magnitude difference before reducing to raw56.
+  const auto full =
+      static_cast<std::int64_t>(left_magnitude) - static_cast<std::int64_t>(right_magnitude);
   const auto raw = static_cast<std::uint64_t>(full) & accumulator_mask;
   item.expected.sr =
       input.mode | sticky | arithmetic_status({.value = signed56(raw), .mode = input.mode}) |

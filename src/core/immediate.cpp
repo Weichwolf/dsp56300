@@ -14,7 +14,7 @@ void Core::Impl::execute_immediate(const Instruction &decoded) {
   const auto opcode = decoded.opcode;
   const Word input = decoded.words == 2 ? decoded.extension : (opcode >> 8) & six_bit_mask;
   const auto kind = opcode & 7;
-  const bool qualified = kind == 0 || kind == 4 || kind == 2 || kind == 3 || kind == 6;
+  const bool qualified = kind == 0 || kind == 4 || kind == 5 || kind == 2 || kind == 3 || kind == 6;
   if (!numeric_mode_supported(qualified ? arithmetic_saturation : 0)) { return; }
   const bool destination_b = (opcode & 8U) != 0;
   auto &destination = destination_b ? cpu.reg.b : cpu.reg.a;

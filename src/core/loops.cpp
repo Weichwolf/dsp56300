@@ -53,7 +53,7 @@ Word Core::Impl::loop_count(const Instruction &decoded) {
   if (operation == Operation::loop_immediate || operation == Operation::repeat_immediate) {
     return ((opcode >> 8) & byte_mask) | ((opcode & 15U) << 8);
   }
-  if (!numeric_mode_supported()) { return 0; }
+  if (!numeric_mode_supported(arithmetic_saturation)) { return 0; }
   if (operation == Operation::loop_register || operation == Operation::repeat_register) {
     const auto selector = (opcode >> 8) & six_bit_mask;
     // Unlike REP SSH, DO/DOR cannot pop their own just-created loop frame.
