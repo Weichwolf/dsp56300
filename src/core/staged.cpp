@@ -97,7 +97,7 @@ std::optional<InstructionOutcome> Core::instruction_outcome() const noexcept {
 
 std::optional<PendingInstruction> Core::pending_instruction() const {
   if (!impl_->staged_active() || impl_->fault.kind != FaultKind::none) { return std::nullopt; }
-  const auto selected = impl_->staged->pending;
+  const auto &selected = impl_->staged->pending;
   if (!selected) { return std::nullopt; }
   return PendingInstruction{
       .ticket = EffectTicket(impl_->effect_owner,
