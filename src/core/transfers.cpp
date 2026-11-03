@@ -76,7 +76,8 @@ void Core::Impl::control_move(const Instruction &decoded) {
     control_register_move(opcode);
     return;
   }
-  if (!numeric_mode_supported()) { return; }
+  // SM limits Data-ALU arithmetic, not a control-register bus transfer.
+  if (!numeric_mode_supported(arithmetic_saturation)) { return; }
   const auto form = transfer_form(decoded);
   const bool immediate =
       decoded.operation == Operation::move_control_effective && form.mode == 6 && form.index == 4;

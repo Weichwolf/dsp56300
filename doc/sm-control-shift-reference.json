@@ -1,0 +1,57 @@
+{
+  "scope": "Named SM control-transfer and shifted-arithmetic domains; partial ISA qualification",
+  "manual": "DSP56300FM Rev5 sections 3.1.5/3.2.3, table 3-1 and instruction diagrams",
+  "manual_url": "https://www.nxp.com/docs/en/reference-manual/DSP56300FM.pdf",
+  "baseline_core_revision": "0115bffe7eea3384d8c089cac54af6c0c59eb520",
+  "control_cases_per_profile": 2187,
+  "control_checks_per_profile": 8748,
+  "shifted_cases_per_profile": 10368,
+  "shifted_checks_per_profile": 31104,
+  "execution_backends": [
+    "reference",
+    "cached",
+    "jit"
+  ],
+  "paths": [
+    "dispatched",
+    "owned program fetch",
+    "captured instruction"
+  ],
+  "qualified_control_forms": [
+    "MOVEC long immediate to SR",
+    "MOVEC SR memory load/store, X/Y absolute short/long"
+  ],
+  "qualified_shifted_forms": [
+    "ADDL",
+    "ADDR",
+    "SUBL",
+    "SUBR"
+  ],
+  "profiles": [
+    "ASan/UBSan",
+    "separate TSan"
+  ],
+  "affected_groups_per_profile": 8,
+  "actual_native_exits_zero": 16,
+  "all_reaped": true,
+  "fixture_checks_per_profile": 3625304,
+  "fixture_hashes": {
+    "arithmetic.d56": "f214cae5ecf0be3a757dd5a1d957d7424c5733edfeee3fd7664019da375b0557",
+    "addition.d56": "d6c49d3ac78e9b35a7a5de655606e71a4532326eed86f41768ff3cb0ce7523aa",
+    "flags.d56": "0b757476662fd89e32e190d94a67631d5e949e63818ed1ae563c4f4c4fc27f2e",
+    "saturation.d56": "f251f7698246344407728013f79e1ab58306787a2900e8fbe37e594ba17a57cb"
+  },
+  "local_qualification": "local/sm-control-shift-r1/green-build-r6/qualification.json",
+  "local_negative_control": "local/sm-control-shift-r1/final-negative-r2/qualification.json",
+  "source_pins": {
+    "src/core/transfers.cpp": "fd6aa3e5e98e47ba1c3d20862e2ee125151011c35aed6af10ad639b031718861",
+    "src/core/saturation.cpp": "921f8d832f1e731636ae7d994bade80cdceb03905e393a50ba58d713cb942418",
+    "test/sm_control_test.cpp": "8788240131d5128964f147f86f3f40ce459db4c9ad545993b395cf2689bf9dee",
+    "test/sm_shifted_test.cpp": "55f4b5cb9d9161cddb70113c7339076644795a5e545331aa3c12e9d10d3350eb",
+    "test/shifted_model.hpp": "3dbb2c21af98c096db6e617a343a195e160a6635b708b4835e5d21d0912ca7b6",
+    "test/saturation_test.cpp": "dbebfda668d6ff0fd7f4b0cf9a772db63903f87fc3e0948435d5d64101fd9705"
+  },
+  "limits": "C after initial left-shift overflow has only the manual-qualified observation. Other numeric modes and complete SM/ISA semantics remain partial. JIT-backend success permits its general fallback; no new native lowering, pipeline/IRQ timing, hardware or throughput claim.",
+  "manufacturer_programs_in_tests": false,
+  "fuzz": false
+}

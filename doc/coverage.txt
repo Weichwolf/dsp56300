@@ -568,12 +568,23 @@ part of the unchanged active objective.
 
 Arithmetic saturation qualification
 
+Long-immediate SR replacement and X/Y short/long SR memory transfers now
+retain control-transfer semantics with SM already set. Shifted ADDL/ADDR/SUBL/
+SUBR also admit SM through the existing generic arithmetic/limiter. The new
+2187/10368-case matrices pass all three execution backends and dispatched,
+owned-fetch and captured paths in both sanitizer profiles. Two old rejection
+stimuli retain their inputs and now check full successful state. Eight affected
+groups per profile pass, including four unchanged numeric fixture archives.
+Final-source controls fail with the prior core. This does not complete numerical
+modes, native lowering, physical timing or any ISA row. See sm-control-shift.txt
+and sm-control-shift-reference.json.
+
 Selected SM arithmetic now uses the published three-bit, after-rounding rule
 in general execution. Ordinary ADD/SUB/ADC/SBC, INC/DEC, signed MPY/MAC/R,
 immediate/power and signed DMAC, RND/CLR/ABS/NEG, transfer bypasses and mixed
 unsigned bypasses have independent raw-width/flag witnesses. IFcc/IFcc.U separate
 conditional stored values and flag publication; Tcc preserves unscaled operands.
-Other SM operations and control/count/nonparallel transfers, SB/SA/SC/DM
+Other SM operations and remaining control/count/nonparallel transfers, SB/SA/SC/DM
 combinations, native SM lowering, pipeline/IRQ interactions and complete modes
 remain open. No ISA row becomes complete.
 

@@ -5,6 +5,7 @@
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
 #include "saturation_model.hpp"
+#include "shifted_model.hpp"
 #include "support.hpp"
 
 #include <array>
@@ -290,14 +291,34 @@ void qualified_complement(const Backend backend, const Unsupported input) {
           "The following NOP retires without replaying the qualified BFU result");
 }
 
+void qualified_shifted(const Backend backend, const Unsupported input) {
+  Machine machine(backend);
+  machine.core.write(Space::program, start, input.instruction);
+  auto expected = seed(0);
+  expected.sr = input.status;
+  machine.core.set_registers(expected);
+  require(shifted_model::apply(expected, input.instruction),
+          "The retained shifted stimulus has independently qualified carry");
+  ++expected.pc;
+  const auto run = machine.core.run(1);
+  require(run.dispatches == 1 && run.fault.kind == FaultKind::none &&
+              run.progress == Progress{.instructions = 1, .estimated_cycles = 1} &&
+              machine.core.registers() == expected,
+          "Original shifted SM stimuli now execute full independent result/flag/stack checks");
+}
+
 void rejected_modes(const Backend backend) {
   constexpr Word complement = 0x200017;
+  constexpr Word add_left = 0x200012;
+  constexpr Word add_right = 0x200002;
   constexpr std::array<Word, 6> instructions{
       0x200017, 0x200003, 0x200045, 0x014085, 0x200012, 0x200002};
   for (const auto instruction : instructions) {
     const Unsupported input{.instruction = instruction, .status = saturation_model::mode};
     if (instruction == complement) {
       qualified_complement(backend, input);
+    } else if (instruction == add_left || instruction == add_right) {
+      qualified_shifted(backend, input);
     } else {
       reject(backend, input);
     }

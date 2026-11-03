@@ -1,0 +1,33 @@
+SM control transfers and shifted accumulator arithmetic
+
+DSP56300FM Rev.5 sections 3.1.5/3.2.3 and the instruction diagrams define
+arithmetic limiting separately from control-register transfers. MOVEC can
+replace SR while SM is already set. The qualified SR forms are long immediate,
+X/Y absolute short and X/Y absolute long, in both memory directions.
+
+ADDL/ADDR/SUBL/SUBR use the existing generic shift/add/subtract arithmetic and
+its table 3-1 limiter. Their SM admission is now explicit. Full-width carry,
+shift overflow, sticky flags and scaling retain their separate meanings.
+C after an overflowing initial left shift remains outside the manual's
+qualified domain; the test excludes only that predeclared C observation.
+
+The two new matrices contain 2187 control cases and 10368 shifted arithmetic
+cases across reference/cached/JIT dispatch and genuine owned/captured staged
+execution. They compare complete architectural registers and stack, literal
+instruction lengths/base costs and exact program/operand bus transactions.
+Control RAM callbacks read/write the declared test buffers; absent transactions
+are rejected. Shift expectations use signed integer division/range arithmetic
+and the independent three-bit limiting table, not the core's aligned formulas.
+
+The original ADDL/ADDR unsupported-SM stimuli retain their inputs and now check
+full independently calculated successful outcomes. Other unqualified modes
+retain their failures. Final-source negative controls linked to the prior 0115
+archive reproduce both missing domains. The reference manifest pins the
+sanitizer profiles, tests and unchanged arithmetic/addition/flags/saturation
+archives. This qualifies named forms, not all SM/ISA modes, native lowering,
+pipeline/IRQ timing, throughput or a complete instrument.
+
+  cmake --build --preset strict --target dsp56300_sm_control_test dsp56300_sm_shifted_test
+  ctest --preset strict -R '^(sm-control-transfers|sm-shifted-arithmetic)$' --output-on-failure
+  cmake --build --preset thread --target dsp56300_sm_control_test dsp56300_sm_shifted_test
+  ctest --preset thread -R '^(sm-control-transfers|sm-shifted-arithmetic)$' --output-on-failure

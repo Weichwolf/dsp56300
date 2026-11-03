@@ -31,7 +31,8 @@ Current implemented SM domains
 
 - Ordinary parallel ADD/SUB/ADC/SBC, signed MPY/MAC and rounded variants, RND,
   CLR, ABS and NEG use the new qualified SM path. Immediate ADD/SUB and raw-LSB
-  INC/DEC are included. Normal CMP and shifted add/subtract remain unqualified.
+  INC/DEC are included. Shifted ADDL/ADDR/SUBL/SUBR now admit SM through the
+  same generic limiter; see sm-control-shift.txt. Normal CMP remains unqualified.
 - Immediate signed products and positive power products n=1..23 saturate after
   arithmetic/rounding. DMACss saturates after its existing signed right shift and
   accumulation. MACsu/uu, MPYsu/uu and DMACsu/uu bypass arithmetic saturation.
