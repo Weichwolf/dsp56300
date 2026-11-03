@@ -579,15 +579,13 @@ void callback(const Backend backend, const bool accept, const bool replace_next)
           "A changed entry guard selects ordinary execution with complete callback state");
   if (!accept) {
     auto rejected = observer.expected;
-    register_model::write(rejected, 5, word_mask);
-    require(
-        run.dispatches == 3 && run.progress == observer.progress &&
-            run.fault == Fault{.kind = FaultKind::io_read,
-                               .space = Space::x,
-                               .address = io_begin,
-                               .pc = start + 3} &&
-            core.registers() == rejected && memory.words == expected_memory.words,
-        "Rejected ordinary loads retain the callback-provided partial destination without an ALU");
+    require(run.dispatches == 3 && run.progress == observer.progress &&
+                run.fault == Fault{.kind = FaultKind::io_read,
+                                   .space = Space::x,
+                                   .address = io_begin,
+                                   .pc = start + 3} &&
+                core.registers() == rejected && memory.words == expected_memory.words,
+            "Rejected ordinary loads preserve the destination and do not execute the ALU");
     require(core.run(1).dispatches == 0 && core.registers() == rejected &&
                 core.progress() == run.progress,
             "Faulted region fallback remains stopped without replay or invented retirement");

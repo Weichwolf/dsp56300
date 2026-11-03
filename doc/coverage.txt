@@ -1175,8 +1175,8 @@ The deterministic CPU campaign samples 15936 authored cases from 46 archives
 and pairs 20188 single-instruction ordinary/SM inputs. Every comparison checks
 44 register fields, all 16 stack slots and complete 1024-word P/X/Y windows;
 reference reset and exact input readback precede each step. The candidate keeps
-13864 and 18389 exact matches respectively, with no previously matching accepted
-case regressing. The paired matrix has no remaining Core refusal, but 1321/1171
+13881 and 18423 exact matches respectively, with no previously matching accepted
+case regressing. The paired matrix has no remaining Core refusal, but 1304/1137
 raw differences and 751/628 reference setup mismatches remain explicit research
 findings. They include seeded hidden loop/exception state, forbidden parallel
 aliases, modifier domains, reserved/16-bit register views and stack semantics;
@@ -1192,5 +1192,23 @@ producers correct 5472 NORM results and 32 CMPM flag expectations without
 changing any input/program/case count; fast normalization remains byte-identical.
 No manufacturer program or binary is included. See vendor-differential.txt and
 the two sm-*-reference.json manifests. All 118 ISA rows remain partial. Full
-numeric modes, valid modulo-stride boundaries, stack/exception and pipeline
+numeric modes, complete modulo/alias domains, stack/exception and pipeline
 qualification, physical timing and the complete objective remain unfinished.
+
+Ordinary-modulo block-stride coverage
+
+The original positive Nn/displacement sign now survives addressing +/-. At the
+one-block boundary a positive operand changes the aligned block coordinate;
+the negative control remains within the ring. Independent codec-only production
+of 8896 pure AGU/LUA, 768 indexed-memory and 1536 short/long displaced-memory
+cases reproduces separate mathematical/vendor goldens in both sanitizer
+profiles. All cases pass dispatched/owned/captured execution in three backends;
+the previous library disagrees on 3264 cases of this single defect. Distinct
+RAM sentinels expose wrong X/Y reads and writes. Existing address tests retain
+inputs/programs/counts and correct 1632 expected address states; seven stale
+SM refusals use independently verified success expectations. Existing region/
+accounting error tests retain full fault/prefix/no-retirement/no-replay checks
+and follow the established no-replacement-on-rejected-read contract. Exact
+binary/input/production identity permits reuse of unchanged qualification; see
+modulo-strides.txt and modulo-strides-reference.json for scope and evidence.
+All 118 ISA rows and the complete objective remain partial.

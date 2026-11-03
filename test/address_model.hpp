@@ -60,6 +60,12 @@ inline Word updated(const Input input) {
   const auto length = multi ? (modifier % 0x4000) + 1 : modifier + 1;
   const auto alignment = span(length);
   const auto magnitude = offset < 0 ? -offset : offset;
+  // FM4.5.3: a positive integer number of aligned blocks changes the block
+  // coordinate, including the one-block boundary of a power-of-two ring.
+  const auto original = one ? std::int64_t{1} : signed24(operand);
+  if (!multi && original > 0 && (original / alignment) * alignment == original) {
+    return wrap24(input.cursor + offset);
+  }
   if (!multi && magnitude > length) {
     if (offset % alignment != 0) { throw std::logic_error("Unspecified normal-modulo offset"); }
     return wrap24(input.cursor + offset);

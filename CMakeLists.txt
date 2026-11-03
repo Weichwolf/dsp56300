@@ -322,6 +322,8 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   target_link_libraries(dsp56300_generate_transfers PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_bit_access test/generate_bit_access.cpp)
   target_link_libraries(dsp56300_generate_bit_access PRIVATE dsp56300_fixture_format)
+  add_executable(dsp56300_generate_modulo_strides test/generate_modulo_strides.cpp)
+  target_link_libraries(dsp56300_generate_modulo_strides PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_addressing test/generate_addressing.cpp)
   target_link_libraries(dsp56300_generate_addressing PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_addition test/generate_addition.cpp)
@@ -616,6 +618,20 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/flags.d56")
   add_test(NAME integer-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/integer.d56")
+  foreach(kind pure memory displacement)
+    add_test(NAME modulo-strides-${kind}-fixtures COMMAND dsp56300_fixture_test
+      "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/modulo-strides-${kind}.d56")
+    add_test(NAME modulo-strides-${kind}-owned-publication COMMAND dsp56300_alu_fixture_test
+      "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/modulo-strides-${kind}.d56")
+    add_test(NAME modulo-strides-${kind}-captured-publication COMMAND dsp56300_alu_fixture_test --captured-pcu
+      "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/modulo-strides-${kind}.d56")
+    add_test(NAME modulo-strides-${kind}-reproducibility COMMAND "${CMAKE_COMMAND}"
+      "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_modulo_strides>"
+      "-DGENERATOR_ARGUMENTS=${kind}"
+      "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/modulo-strides-${kind}-regenerated.d56"
+      "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/modulo-strides-${kind}.d56"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
+  endforeach()
   add_test(NAME address-calculation-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/address-calculations.d56")
   add_test(NAME iteration-fixtures COMMAND dsp56300_fixture_test

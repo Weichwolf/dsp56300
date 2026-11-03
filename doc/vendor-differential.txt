@@ -16,14 +16,14 @@ stack slots and complete 1024-word P/X/Y windows must read back exactly before
 stepping. GDI debugger SSH/SSL windows were separately checked to preserve SP/SC.
 
 The three Core backends produce byte-identical actual results in ASan/UBSan and
-separate TSan profiles. Final exact matches are 13864/15936 and 18389/20188.
+separate TSan profiles. Final exact matches are 13881/15936 and 18423/20188.
 The candidate has no refusal in these matrices, and no previously matching,
-accepted baseline case regresses. Remaining 1321/1171 numerical/state differences
+accepted baseline case regresses. Remaining 1304/1137 numerical/state differences
 and 751/628 setup mismatches remain findings, not automatic Core failures.
 The vendor cannot establish every debugger-seeded REP/DO/exception continuation;
 forbidden duplicate parallel destinations and unpredictable modulo inputs do
 not define portable expectations. Reserved bits, 16-bit register views, valid
-modulo-stride boundaries and stack/exception behavior need further adjudication.
+modulo domains and stack/exception behavior need further adjudication.
 The vendor's DSP56371 relocation model already conflicts with documented maps;
 its peripheral, memory-profile and timing behavior is not a hardware oracle.
 
@@ -37,7 +37,9 @@ scope is defined by the actual inputs, not every possible form of each mnemonic.
 Implemented domains now include CMP/CMPM, TST, MAX/MAXM, immediate CMP, DIV,
 address calculations, displaced/program/control/peripheral transfers, bit
 operands, VSL and count inputs under SM. TST/CMP limit a virtual result for flags
-without writing operands. DIV limits its stored result, sets V/L on limiting,
+without writing operands. The ordinary-modulo one-block stride is separately
+qualified in modulo-strides.txt with 11200 independent numerical cases.
+DIV limits its stored result, sets V/L on limiting,
 and preserves S/E/U/N/Z and the pre-limiter quotient Carry. A suppressed NORM
 shift still passes the limiter while retaining its exponent. Other mode guards
 remain explicit; there is no blanket SA/SC/DM or reserved-scaling admission.
@@ -58,6 +60,8 @@ ALU-publication runners with the strict/thread presets:
   ctest --test-dir build/thread -R '^sm-(cpu-domains|loop-counts)-' --output-on-failure
 Reference evidence: doc/local/vendor-sm-batch-r1/{qualification,negative,
 fixture-audit,broad-regression}.json, plus the ignored vendor campaign captures.
+The subsequent AGU qualification and exact unchanged-evidence reuse are recorded
+in modulo-strides-reference.json and doc/local/modulo-stride-r1/.
 No fuzz tests, manufacturer firmware, physical-device traffic, full ISA,
 performance or instrument-equivalence qualification is implied. All ISA rows
 remain partial and the complete objective is active.

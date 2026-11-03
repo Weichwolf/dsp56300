@@ -75,7 +75,10 @@ Word Core::Impl::update_address(const AddressUpdate update) {
   const Word length = modifier + 1;
   const auto span_mask = std::bit_ceil(length) - 1;
   const auto magnitude = offset < 0 ? -static_cast<std::int64_t>(offset) : offset;
-  if (magnitude > length && (static_cast<Word>(offset) & span_mask) == 0) {
+  // The documented P*2^k block stride has a positive original operand.
+  // A negative Nn of exactly the modulus still takes the ordinary ring path.
+  const bool block_stride = magnitude > length || (magnitude == length && update.positive_operand);
+  if (block_stride && (static_cast<Word>(offset) & span_mask) == 0) {
     return address_add(original, offset);
   }
   const auto lower = original & ~span_mask;
@@ -109,7 +112,8 @@ Word Core::Impl::effective(const AddressForm form) {
   }
   const auto modifier = cpu.reg.m[index] & modifier_mask;
   std::int32_t offset = 1;
-  if (mode == 0 || mode == 1 || mode == 5) {
+  const bool register_offset = mode == 0 || mode == 1 || mode == 5;
+  if (register_offset) {
     // Reverse carry reverses the raw operand before applying the addressing sign.
     // In particular N=$800000 is a positive reverse-carry operand, not -2^23.
     offset =
@@ -118,7 +122,10 @@ Word Core::Impl::effective(const AddressForm form) {
   if (mode == 0 || mode == 2 || mode == 7) { offset = -offset; }
   const auto result = modifier == modifier_mask
                           ? address_add(original, offset)
-                          : update_address({.index = index, .offset = offset});
+                          : update_address({.index = index,
+                                            .offset = offset,
+                                            .positive_operand = !register_offset ||
+                                                                signed_word(cpu.reg.n[index]) > 0});
   if (mode != 5) {
     cpu.reg.r[index] = result;
     if (staged_computing()) {
@@ -146,7 +153,11 @@ void Core::Impl::execute_address_calculation(const Instruction &decoded) {
     const auto offset = decoded.words == 2 ? decoded.extension : cpu.reg.r[index];
     result = address_add(current_pc, signed_word(offset));
   } else {
-    result = update_address({.index = index, .offset = calculation_offset(cpu.reg, opcode)});
+    const auto offset = calculation_offset(cpu.reg, opcode);
+    const auto mode = (opcode >> 11) & 3U;
+    const bool positive =
+        displacement ? offset > 0 : mode >= 2 || signed_word(cpu.reg.n[index]) > 0;
+    result = update_address({.index = index, .offset = offset, .positive_operand = positive});
   }
   if (fault.kind == FaultKind::none) {
     begin_unit(RegisterUnit::address_calculation);

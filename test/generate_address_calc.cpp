@@ -19,6 +19,7 @@
 namespace dsp56300::test {
 namespace {
 using Cases = std::vector<BinaryCase>;
+constexpr Word saturation_mode = Word{1} << 20;
 enum class Form : std::uint8_t { relative_register, relative_long, updated, displacement };
 constexpr Word lra_register = 0x04c000, lra_long = 0x044040;
 constexpr Word lua_updated = 0x044000, lua_displacement = 0x040000;
@@ -381,9 +382,18 @@ void faults(Cases &cases) {
   for (const auto form :
        {Form::relative_register, Form::relative_long, Form::updated, Form::displacement}) {
     for (const Word mode : {0x2000U, 0x4000U, 0x20000U, 0x100000U, mode_down | mode_up}) {
-      cases.push_back(rejected({.update = {}, .form = form, .destination = 16, .status = mode},
-                               FaultKind::unsupported_mode,
-                               mode));
+      const Input input{.update = {}, .form = form, .destination = 16, .status = mode};
+      auto item = rejected(input, FaultKind::unsupported_mode, mode);
+      if (mode == saturation_mode) {
+        model(item.expected, input);
+        item.expected.pc += form == Form::relative_long ? 2U : 1U;
+        item.dispatches = 1;
+        item.progress = {.instructions = 1, .estimated_cycles = 3};
+        item.fault = {};
+        item.interruptible = true;
+        item.name = "SM address calculation preserves its formerly rejected input";
+      }
+      cases.push_back(std::move(item));
     }
     if (form == Form::displacement) { continue; }
     for (Word destination = 0; destination < 4; ++destination) {

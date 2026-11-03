@@ -169,7 +169,8 @@ void Core::Impl::displacement_move(const Instruction &decoded) {
   const auto offset = (cpu.reg.m[index] & modifier_mask) == 0
                           ? static_cast<std::int32_t>(displacement)
                           : signed_word(displacement);
-  const auto address = update_address({.index = index, .offset = offset});
+  const auto address = update_address(
+      {.index = index, .offset = offset, .positive_operand = signed_word(displacement) > 0});
   if (fault.kind != FaultKind::none) { return; }
   const auto space = ((opcode >> (long_form ? 16U : 5U)) & 1U) != 0 ? Space::y : Space::x;
   const bool load = ((opcode >> (long_form ? 6U : 4U)) & 1U) != 0;

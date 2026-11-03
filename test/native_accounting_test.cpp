@@ -737,7 +737,6 @@ void callback(const CallbackInput input) {
           "Guard failure publishes exact mixed prefix counters and canonical state before I/O");
   const auto old = state;
   state = observer.expected;
-  register_model::write(state, 6, datum);
   if (!input.accept) {
     require(run.dispatches == io_index && run.progress == observer.progress &&
                 run.fault == Fault{.kind = FaultKind::io_read,
@@ -745,12 +744,13 @@ void callback(const CallbackInput input) {
                                    .address = io_begin,
                                    .pc = observer.opcode_pc} &&
                 core.registers() == state && memory.data == expected_memory.data,
-            "Rejected mixed fallback retains its partial load and no unexecuted ALU/retirement");
+            "Rejected mixed fallback preserves the destination and has no ALU/retirement");
     require(core.run(1).dispatches == 0 && core.registers() == state &&
                 core.progress() == run.progress,
             "A rejected fallback remains fail-stop without replaying a charged prefix");
     return;
   }
+  register_model::write(state, 6, datum);
   arithmetic(state, old, trace[io_index].word);
   if (input.patch) { trace[immediate_index].extension = datum; }
   for (const auto step : std::span(trace).subspan(io_index + 1)) {

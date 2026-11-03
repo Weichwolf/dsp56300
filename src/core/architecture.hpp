@@ -18,6 +18,8 @@ struct AddressForm {
 struct AddressUpdate {
   unsigned index = 0;
   std::int32_t offset = 0;
+  // Sign of the original Nn/displacement before the addressing mode applies +/-.
+  bool positive_operand = false;
 };
 
 struct ShiftControl {

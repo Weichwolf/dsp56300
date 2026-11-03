@@ -21,6 +21,7 @@
 namespace dsp56300::test {
 namespace {
 using Cases = std::vector<BinaryCase>;
+constexpr Word saturation_mode = Word{1} << 20;
 constexpr Word location = 384, datum = 0x923456, repeat_base = 0x0600a0;
 constexpr Word short_base = 0x020080, long_base = 0x0a7080, ignored_n = 0xa54321;
 constexpr Word lf = Word{1} << 15, fv = Word{1} << 16, saved_la = 0x70;
@@ -334,7 +335,13 @@ void faults(Cases &cases, const bool long_form) {
        {Word{1} << 13, Word{1} << 14, Word{1} << 17, Word{1} << 20, mode_down | mode_up}) {
     auto item = single({.long_form = long_form});
     item.initial.sr = mode;
-    reject(cases, std::move(item), FaultKind::unsupported_mode, mode);
+    if (mode == saturation_mode) {
+      item.expected.sr = mode;
+      item.name = "SM displaced MOVE preserves its formerly rejected input";
+      cases.push_back(std::move(item));
+    } else {
+      reject(cases, std::move(item), FaultKind::unsupported_mode, mode);
+    }
   }
   for (const Word modifier : {0x8000U, 0x8002U, 0xc001U, 0xfffeU}) {
     auto item = single({.long_form = long_form});

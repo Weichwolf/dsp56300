@@ -112,5 +112,6 @@
     "actual_exit": 1,
     "actual_reap_verified": true
   },
-  "local_evidence": "local/vendor-sm-batch-r1/{build-r4/build,qualification,negative,fixture-audit,broad-regression}.json"
+  "local_evidence": "local/vendor-sm-batch-r1/{build-r4/build,qualification,negative,fixture-audit,broad-regression}.json",
+  "latest_AGU_refinement_manifest": "doc/modulo-strides-reference.json"
 }

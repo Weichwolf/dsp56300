@@ -20,6 +20,7 @@
 namespace dsp56300::test {
 namespace {
 using Cases = std::vector<BinaryCase>;
+constexpr Word saturation_mode = Word{1} << 20;
 constexpr Word vsl_base = 0x0ac0c0, address = 384, repeat_base = 0x0600a0;
 constexpr Word lf = Word{1} << 15, fv = Word{1} << 16, pointer_range = 64;
 constexpr Word saved_la = 0x70, sentinel_x = 0xabcdef, sentinel_y = 0x654321;
@@ -357,7 +358,11 @@ void reject(Cases &cases, BinaryCase item, const FaultKind kind, const Word valu
 
 void faults(Cases &cases) {
   for (const Word mode : {0x2000U, 0x4000U, 0x20000U, 0x100000U, mode_up | mode_down}) {
-    reject(cases, single({.status = mode}), FaultKind::unsupported_mode, mode);
+    if (mode == saturation_mode) {
+      cases.push_back(single({.status = mode}));
+    } else {
+      reject(cases, single({.status = mode}), FaultKind::unsupported_mode, mode);
+    }
   }
   for (unsigned index = 1; index < agu_registers; ++index) {
     auto item = single({.agu = {.cursor = address, .mode = 6}});
