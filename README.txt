@@ -79,6 +79,8 @@ continuation, architectural cache and sleep/fault/debug state; see doc/checkpoin
 See doc/io.txt for synchronous word/atomic-bit callbacks and mutation boundaries.
 Core(Io&) borrows real P/X/Y accesses from synchronous callbacks. A pure known
 program view enables native execution; unknown words retain actual fetches.
+Optional memory_windows grants enable direct X/Y loads/stores with known-byte,
+permission and executable-alias guards; see doc/memory-windows.txt.
 request_yield returns a real instruction boundary while retaining compiled code.
 See doc/native-io.txt for revision, mapping and event ownership.
 For an externally clocked instruction owner, captured words and owned

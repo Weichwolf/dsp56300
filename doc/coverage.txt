@@ -89,8 +89,9 @@ natively in the host process. The ordinary Core API hides executable storage
 and compilation. The automatic default selects native execution on supported
 hosts, including external Io owners with pure known code views. Real fetches,
 refusals, code revisions, IRQs and cooperative event yields retain explicit
-ownership. Direct external RAM views and connected-device speed remain open;
-see native-io.txt. Selected arithmetic, single-bit ASR, rounding/addition, data-register and guarded X/Y transfers
+ownership. Explicit direct external RAM windows preserve known-byte, permission
+and alias guards; connected-device speed remains open. See native-io.txt and
+memory-windows.txt. Selected arithmetic, single-bit ASR, rounding/addition, data-register and guarded X/Y transfers
 and loop continuation/backedges use emitted code; other operations/modes use
 general helpers. This is a partial native compiler, not fully translated arbitrary
 DSP programs. See doc/jit.txt for exact guards, boundaries and execution counters.
@@ -101,6 +102,14 @@ at zero/exhausted budgets. Warm short prefixes are cached native code within
 the existing executable bound. Short absolute JMP outside loop endings has
 native PC/cost retirement. See bounded-execution.txt for conservative admission,
 independent witnesses and remaining connected-scheduler/direct-RAM requirements.
+
+Sparse external X/Y windows now lower eligible native loads/stores directly.
+Both ports preflight bounds/known bytes/permissions before CPU or data effects;
+real owner callbacks handle readonly/executable aliases, holes and peripherals.
+Descriptor revisions and paired restores rebind embedded host pointers. Bounded
+runs admit proved RAM and preserve whole-instruction owner stops on guard failure.
+The authored test and memory-kernel bench share independent full-state models.
+See memory-windows.txt for evidence scope and remaining region/REP/instrument work.
 
 Parallel AND/OR/EOR/NOT now lower natively with exact middle-word writes,
 N/Z/V-only flag effects, preserved parallel MOVE state and product-word reuse.

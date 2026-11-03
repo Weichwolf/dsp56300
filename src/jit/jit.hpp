@@ -36,6 +36,7 @@ struct JitRuntime {
   JitHelper execute = nullptr, moves = nullptr;
   std::optional<Word> (*program)(void *, Word) noexcept = nullptr;
   std::array<JitMemory, 2> memory;
+  std::array<std::span<const MemoryWindow>, 2> windows{};
 };
 
 struct NativeContext {
@@ -43,6 +44,7 @@ struct NativeContext {
   bool *exit_requested = nullptr;
   std::uint64_t *native_moves = nullptr;
   std::uint64_t *batch_instructions = nullptr, *avx2_instructions = nullptr, *batch_calls = nullptr;
+  std::array<std::uint8_t *, 2> write_known{};
   std::uint32_t budget = 0;
 };
 
@@ -58,6 +60,7 @@ public:
   [[nodiscard]] bool exit_requested() const noexcept;
   void request_yield() noexcept;
   void invalidate() noexcept;
+  void bind_windows(std::array<std::span<const MemoryWindow>, 2> windows) noexcept;
   void reset();
   void helper_retired() noexcept;
   [[nodiscard]] JitStatistics statistics() const noexcept;

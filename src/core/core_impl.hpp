@@ -132,6 +132,7 @@ struct Core::Impl {
   [[nodiscard]] static std::uint32_t jit_execute(void *owner,
                                                  const detail::NativeOp *operation) noexcept;
   void synchronize_program_view();
+  [[nodiscard]] bool bind_memory_windows();
   [[nodiscard]] static std::optional<Word> jit_program(void *owner, Word address) noexcept;
   [[nodiscard]] static std::uint32_t jit_moves(void *owner,
                                                const detail::NativeOp *operation) noexcept;
@@ -233,6 +234,7 @@ struct Core::Impl {
   Word debug_vector = 0;
   bool external = false;
   bool yield_requested = false;
+  bool windows_bound = false, bounded_execution = false, bounded_memory_blocked = false;
   std::uint64_t program_revision = 0;
   Word program_omr = 0;
   std::unique_ptr<detail::StagedState> staged;

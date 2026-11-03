@@ -166,7 +166,12 @@ void Code::load(const Reg destination,
                 const std::size_t offset,
                 const Width width) {
   rex(width, static_cast<unsigned>(destination), static_cast<unsigned>(base));
-  byte(mov_load);
+  if (width == Width::byte) {
+    constexpr unsigned zero_extend_byte = 0xb6;
+    raw({0x0f, zero_extend_byte}); // MOVZX r32, byte [base+offset].
+  } else {
+    byte(mov_load);
+  }
   memory(static_cast<unsigned>(destination), base, offset);
 }
 

@@ -131,6 +131,16 @@ struct JitStatistics {
   std::uint64_t batch_instructions = 0, avx2_instructions = 0, batch_calls = 0;
 };
 
+// Explicit ordinary storage grant. Empty known means all words are initialized;
+// otherwise each byte is zero for unknown or nonzero for a known 24-bit word.
+// Grants never include peripherals, side effects, wait states or unstable maps.
+struct MemoryWindow {
+  Word address = 0;
+  std::span<Word> words;
+  std::span<std::uint8_t> known;
+  bool writable = false, aliases_program = false;
+};
+
 // No derivative peripherals are implemented by this CPU library. False means a
 // visible fail-stop error. Callbacks run synchronously on the execution thread.
 // Callbacks may read state and read/write memory, including P invalidation. They
@@ -154,7 +164,15 @@ public:
     return std::nullopt;
   }
 
+  // Revision also covers granted data-window descriptors, pointers and permissions.
   [[nodiscard]] virtual std::uint64_t program_revision() const noexcept { return 0; }
+
+  // Descriptors/storage remain valid until the owner changes its revision at an
+  // execution boundary or in a synchronous callback. Sorted, disjoint X/Y grants
+  // below the peripheral interval; executable aliases require explicit marking.
+  [[nodiscard]] virtual std::span<const MemoryWindow> memory_windows(Space /*space*/) noexcept {
+    return {};
+  }
 
   virtual bool read(Space space, Word address, Word pc, Word &value) noexcept = 0;
   virtual bool write(Space space, Word address, Word pc, Word value) noexcept = 0;

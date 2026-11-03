@@ -2,6 +2,7 @@
 #include "architecture.hpp"
 #include "core_impl.hpp"
 #include "dsp56300/core.hpp"
+#include "instruction_boundary.hpp"
 #include "jit.hpp"
 #include "translation.hpp"
 
@@ -11,6 +12,10 @@ namespace dsp56300 {
 std::uint32_t Core::Impl::jit_execute(void *const owner,
                                       const detail::NativeOp *const operation) noexcept {
   auto &self = *static_cast<Impl *>(owner);
+  if (self.bounded_execution && detail::requires_owner(operation->instruction)) {
+    self.bounded_memory_blocked = true;
+    return 0;
+  }
   self.step_decoded(operation->instruction);
   self.synchronize_program_view();
   if (self.fault.kind != FaultKind::none) { return 0; }
@@ -30,6 +35,10 @@ std::uint32_t Core::Impl::jit_execute(void *const owner,
 std::uint32_t Core::Impl::jit_moves(void *const owner,
                                     const detail::NativeOp *const operation) noexcept {
   auto &self = *static_cast<Impl *>(owner);
+  if (self.bounded_execution && detail::requires_owner(operation->instruction)) {
+    self.bounded_memory_blocked = true;
+    return 0;
+  }
   self.current_pc = operation->pc;
   self.current_words = operation->instruction.words;
   self.cpu.interrupt_inhibited = false;

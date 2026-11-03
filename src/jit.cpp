@@ -9,6 +9,7 @@
 #include "translation.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
@@ -177,7 +178,10 @@ std::unique_ptr<Block> Jit::Impl::compile(const Word block_limit) const {
   for (std::size_t index = 0; index < block->operations.size(); ++index) {
     const auto &instruction = block->operations[index].instruction;
     block->prefix_cycles.push_back(block->prefix_cycles.back() + instruction.cycles);
-    if (block->pure == index && !requires_owner(instruction)) { ++block->pure; }
+    if (block->pure == index &&
+        (!requires_owner(instruction) || emitter.direct_memory(block->operations[index]))) {
+      ++block->pure;
+    }
   }
   return block;
 }
@@ -213,6 +217,11 @@ void Jit::invalidate() noexcept {
     impl_->invalidated = true;
     impl_->exit_requested = true;
   }
+}
+
+void Jit::bind_windows(const std::array<std::span<const MemoryWindow>, 2> windows) noexcept {
+  impl_->context.runtime.windows = windows;
+  invalidate();
 }
 
 void Jit::reset() {

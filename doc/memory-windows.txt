@@ -1,0 +1,68 @@
+Direct external data-memory windows
+
+Io::memory_windows(Space::x/y) optionally grants ordinary storage to the native
+compiler. Each MemoryWindow gives its guest start address, mutable word span,
+known-byte span and direct-write/executable-alias permissions. Empty known is an
+explicit all-initialized grant; otherwise zero means unknown and nonzero means
+initialized. Successful direct stores mark exactly their corresponding byte 1.
+
+Windows must be sorted, disjoint, nonempty and entirely below the CPU peripheral
+interval. A nonempty known span must match the word count. Invalid grants return
+a visible host_event fault with bank, window address and CPU boundary PC before
+execution. Permissions describe direct access: a refused fast write still uses
+the real owner's callback, which may implement a controller or report a fault.
+
+The grant promises valid stable ordinary storage, without device side effects,
+wait-state behavior or concurrent mutation during CPU execution. Descriptors,
+pointers, extents and permissions remain valid until the owner changes
+program_revision at an execution boundary or synchronous callback. That revision
+covers program and granted data mappings. Non-executable data values and known
+bytes can change between CPU runs without a revision; native guards observe them.
+The owner must schedule DMA/device events before admitting a CPU region that
+would cross them. A grant does not advance a derivative clock or prove bus timing.
+
+A mapping/revision change invalidates generated code and rebinds descriptors.
+clear_code_cache and paired checkpoint restore force rebinding even when an
+owner restores an old revision value. Embedded pointers are not serialized as
+CPU state. Mark executable aliases explicitly: their stores retain genuine owner
+callbacks and program invalidation. Readonly windows and holes likewise retain
+real ownership. Unknown reads never acquire invented initialized data.
+
+The x64 emitter resolves each prospective X/Y address and checks initialization
+and permissions before committing either port's AGU, ALU or memory effects.
+Both old port values are captured before stores, including physical X/Y aliases.
+Ordinary eligible RAM accesses then execute emitted host loads/stores with no
+Io read/write callback. Other transfers/modes keep the existing guarded general
+path. The reference/cached backends continue to use their owner's actual I/O.
+
+run(RunBudget) also admits these proved native RAM transfers, including ordinary
+buffer-backed RAM. If a native guard needs owner handling, it returns before the
+complete boundary instruction. This includes unknown second-port reads after a
+prospective first-port store; no store or known-byte initialization has happened.
+Readonly, executable-alias and peripheral stores preserve the same boundary.
+Unknown program words still require the genuine instruction-fetch protocol.
+
+Reproduce scoped correctness and diagnostic memory-kernel measurements:
+
+  cmake --preset strict
+  cmake --build build/strict --target dsp56300_memory_windows_test dsp56300_bounded_run_test dsp56300_native_move_test
+  ctest --test-dir build/strict --output-on-failure -j1 -R '^(external-native-windows|bounded-native-prefixes|native-move-boundaries)$'
+  cmake --preset release
+  cmake --build build/release --target dsp56300_memory_windows_bench
+  build/release/dsp56300_memory_windows_bench all
+  z3 -smt2 test/window_interval.smt2
+
+The optional SMT query proves unsigned (address - begin) < words equivalent to
+an independent half-open interval for every legal guest address/window. It must
+print unsat, then sat for the deliberately incorrect signed negative control.
+This covers interval arithmetic only, not instruction emission or hardware.
+
+The authored test and bench share independent full-state arithmetic expectations
+for three RAM-read kernels over one explicitly all-initialized readonly word.
+The bench compares actual owner callbacks with direct windows and reports native
+moves, callbacks, guest instructions and base cycles. Known-byte and store guards
+are qualified separately by the directed correctness cases.
+These are memory/helper diagnostics, not complete-domain, derivative-clock or
+connected-instrument throughput. Qualification and exact scope are recorded in
+memory-windows-reference.json. Whole-application performance, external guarded
+region admission and native REP expansion remain separate work.

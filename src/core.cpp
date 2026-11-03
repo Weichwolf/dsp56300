@@ -400,6 +400,7 @@ bool Core::interruptible() const {
 }
 
 void Core::clear_code_cache() {
+  impl_->windows_bound = false;
   if (impl_->jit) { impl_->jit->invalidate(); }
   for (auto &page : impl_->pages) { page.reset(); }
 }

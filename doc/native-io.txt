@@ -26,10 +26,11 @@ A synchronous code-changing callback exits the old block before a stale suffix.
 CPU checkpoints do not save external memory; restored execution must be paired
 with matching owner memory/mapping state. Restore clears translated code.
 
-Native register regions use the existing machine-code emitter. External X/Y and
-peripheral operations still use the actual synchronous Io callbacks. Direct
-known external RAM views remain future optimization work; this increment does
-not claim callback-free external RAM. Buffer-backed native RAM remains available.
+Native register regions use the existing machine-code emitter. Without explicit
+ordinary-storage grants, external X/Y and peripheral operations retain actual
+synchronous Io callbacks. Optional memory_windows grants permit direct guarded
+RAM/ROM transfers; see memory-windows.txt. Buffer-backed native RAM remains
+available. Peripheral and unsuitable accesses retain genuine owner handling.
 
 A synchronous execution callback can call Core::request_yield(). Run returns
 only after the actual instruction retires, with RunResult.yielded=true and exact
@@ -80,3 +81,8 @@ The authored register-domain experiment uses optimized, uninstrumented execution
 It checks independent full state and actual native/helper counts across a real
 DO loop and cold/warm entries. These are core-only register workloads, not
 complete applications, device startup, connected instrument speed or latency.
+
+Direct ordinary X/Y storage can additionally be granted with memory_windows.
+See memory-windows.txt for known bytes, permissions, executable aliases, mapping
+revisions and bounded native owner stops. Without such a grant, actual Io data
+callbacks retain their previous semantics.

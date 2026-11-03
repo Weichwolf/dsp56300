@@ -224,6 +224,10 @@ void JitEmitter::move_guard(const NativeMove &move, x64::Label &slow) {
     }
     code_.immediate(group_and, address, word_mask, Width::dword);
   }
+  if (!runtime_.windows.at(move.space == Space::x ? 0 : 1).empty()) {
+    window_guard(move, slow);
+    return;
+  }
   const auto &memory = runtime_.memory.at(move.space == Space::x ? 0 : 1);
   const auto bound = static_cast<Word>(std::min(memory.words, std::size_t{io_begin}));
   code_.immediate(group_cmp, address, bound, Width::dword);

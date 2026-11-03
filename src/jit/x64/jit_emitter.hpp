@@ -29,6 +29,8 @@ public:
              LoopWindowMode window = LoopWindowMode::automatic);
   [[nodiscard]] std::vector<std::uint8_t> generate(std::span<const NativeOp> operations);
 
+  [[nodiscard]] bool direct_memory(const NativeOp &operation) const;
+
   [[nodiscard]] bool packed_retirement() const noexcept { return packed_retirement_; }
 
   [[nodiscard]] bool cached_status() const noexcept { return cached_status_; }
@@ -72,6 +74,10 @@ private:
   void register_move(const NativeRegisterMove &move, Word mode);
   void move_guard(const NativeMove &move, x64::Label &slow);
   void move_next(const NativeMove &move);
+  void window_guard(const NativeMove &move, x64::Label &slow);
+  void window_candidate(const NativeMove &move, const MemoryWindow &window, x64::Label &next);
+  void window_known(const NativeMove &move, const MemoryWindow &window, x64::Label &slow);
+  void mark_window_written(const NativeMove &move);
   void move_profiled_next(const NativeMove &move, Word modifier);
   void move_delta(const NativeMove &move);
   void address_update(const NativeOp &operation);

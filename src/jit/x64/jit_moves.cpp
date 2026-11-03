@@ -33,9 +33,13 @@ void JitEmitter::move_capture(const NativeMove &move, const Word mode) {
     code_.constant(value, move.address.extra);
   } else if (move.load) {
     const auto &memory = runtime_.memory.at(move.space == Space::x ? 0 : 1);
-    code_.constant(Reg::r11, reinterpret_cast<std::uintptr_t>(memory.data));
-    code_.load_indexed(value,
-                       {.base = Reg::r11, .index = move.space == Space::x ? Reg::cx : Reg::r8});
+    const auto address = move.space == Space::x ? Reg::cx : Reg::r8;
+    if (runtime_.windows.at(move.space == Space::x ? 0 : 1).empty()) {
+      code_.constant(Reg::r11, reinterpret_cast<std::uintptr_t>(memory.data));
+      code_.load_indexed(value, {.base = Reg::r11, .index = address});
+    } else {
+      code_.load(value, address, 0, Width::dword);
+    }
     code_.immediate(group_and, value, word_mask, Width::dword);
   } else {
     move_read_register(value, move, mode);
@@ -48,9 +52,14 @@ void JitEmitter::move_commit(const NativeMove &move) {
     move_write_register(value, move.reg);
   } else {
     const auto &memory = runtime_.memory.at(move.space == Space::x ? 0 : 1);
-    code_.constant(Reg::r11, reinterpret_cast<std::uintptr_t>(memory.data));
-    code_.store_indexed({.base = Reg::r11, .index = move.space == Space::x ? Reg::cx : Reg::r8},
-                        value);
+    const auto address = move.space == Space::x ? Reg::cx : Reg::r8;
+    if (runtime_.windows.at(move.space == Space::x ? 0 : 1).empty()) {
+      code_.constant(Reg::r11, reinterpret_cast<std::uintptr_t>(memory.data));
+      code_.store_indexed({.base = Reg::r11, .index = address}, value);
+    } else {
+      code_.store(address, 0, value, Width::dword);
+      mark_window_written(move);
+    }
   }
 }
 

@@ -67,7 +67,8 @@ BoundedRunResult Core::Impl::run_bounded(const RunBudget budget) {
     }
     const auto instructions = budget.instructions - result.execution.dispatches;
     const auto cycles = budget.cycles - result.cycles;
-    if (jit && cpu.repeat_remaining == 0 && (cpu.reg.sr & detail::cache_enable) == 0 &&
+    if (jit && !bounded_memory_blocked && cpu.repeat_remaining == 0 &&
+        (cpu.reg.sr & detail::cache_enable) == 0 &&
         (cpu.debug_flags & detail::debug_interrupt_pending) == 0) {
       const auto retired = jit->run_bounded(instructions, cycles);
       result.execution.dispatches += retired;
@@ -119,6 +120,8 @@ BoundedRunResult Core::run(const RunBudget budget) {
     impl_->yield_requested = false;
     impl_->synchronize_program_view();
     impl_->yield_requested = false;
+    impl_->bounded_memory_blocked = false;
+    const detail::ExecutionGuard bounded(impl_->bounded_execution);
     result = impl_->run_bounded(budget);
   }
   if (result.stop == RunStop::fault || result.stop == RunStop::state) { return result; }

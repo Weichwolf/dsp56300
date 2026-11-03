@@ -27,7 +27,8 @@ std::optional<Word> Core::Impl::jit_program(void *owner, const Word address) noe
 void Core::Impl::synchronize_program_view() {
   if (!external || !jit || io == nullptr) { return; }
   const auto next = io->program_revision();
-  if (next != program_revision || program_omr != cpu.reg.omr) {
+  if (!windows_bound || next != program_revision || program_omr != cpu.reg.omr) {
+    if (!bind_memory_windows()) { return; }
     if (program_omr != cpu.reg.omr) {
       yield_requested = true;
       jit->request_yield();
