@@ -1,0 +1,275 @@
+{
+  "qualification": "PASS-component-native",
+  "scope": "Effective instruction-cache eligibility for ordinary/bounded JIT, helper continuation and guarded MAC batches; unchanged SR and public SDK",
+  "source_base": "c39050d72eee4f90698cfb59542fb562510f92df",
+  "contract": {
+    "native_allowed": "SR.CE clear, or configured cacheable_begin == cacheable_end",
+    "nonempty_interval": "CE remains a conservative owner boundary; real fetch/fill and cached stale words retained",
+    "low_level_context": "Unknown map defaults to conservative cache eligibility",
+    "remaining": "Native execution of genuinely cached instructions, native REP bodies and connected-instrument performance remain open"
+  },
+  "independent_checks": {
+    "new_cache_eligibility": 1054,
+    "bounded": 15670,
+    "guarded_mac": 327560
+  },
+  "source_sha256": {
+    "CMakeLists.txt": "a7b15e541f312d54ea40ebb5a1a1eef91239a4c1cd4e491fdc32f601c5e432cf",
+    "src/core.cpp": "f8d030737b1e76c1a8293006a1fcf6f3b870a68aa613c64c5a5a4bf315f8c230",
+    "src/core/bounded.cpp": "4301aca93df02f181b78a51483b60f65c230a68ddf313fd8bfcb0b8390f394b6",
+    "src/core/core_impl.hpp": "7bdf4d2772655d8c2347d71abd24bcc2377f5f50c276e8eb0c9533bc195b2910",
+    "src/jit/jit.hpp": "3c282ad7a94de68b54759b78ab4daa484e6f0ef097a4a1dda06b4297cdc7fa75",
+    "src/jit/jit_helpers.cpp": "ccc4bb10a9af404668121013e605c01925eb2c2956846f5fe51ca7d1c4f69e3d",
+    "src/jit/mac_batch.cpp": "76983b9a43bde9b58839a2a1a54e9f4310b88583deff67c45dbccc8f01e80542",
+    "test/bounded_run_test.cpp": "340f7003b03c05e65e4b5b271617862919b22dcf0a34c419a9103cd619a031c8",
+    "test/mac_batch_test.cpp": "015cae8dbd9aeb2b855c92590b90b5632e78dc1048cf161aa8a1ae9fe1c16aeb",
+    "test/native_cache_eligibility_test.cpp": "938f49b10a24c3c8c8a93e87aa11414b4aeae9d41cd7a82d6704142afd69a726"
+  },
+  "profiles": {
+    "strict": {
+      "sanitizer": "ASan/UBSan",
+      "archive_sha256": "b1a2fc6c9a60a0c41dcc0fd583ea4604d0c925c9a5a8d01f71ca2dc9e737c13f",
+      "groups": {
+        "dsp56300_cache_eligibility_test": {
+          "elf_sha256": "a6b1711942e94bc9297f0da9089723c4425d27e385a1a018393e813bdab7ac2c",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_bounded_run_test": {
+          "elf_sha256": "90d98d41f649cdde3dd9070b1149c1aea8c6303eed0f01417c5d420dc9b246ed",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_mac_batch_test": {
+          "elf_sha256": "9228a885d74e307dccb0a67dc8b87f37e3e476f1c4329b52ae02d6807abebbfd",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_cache_control_test": {
+          "elf_sha256": "81bdf9af988833763def337822ce17cf52f8bb6bed5d21e4f77a55b5f5056fbe",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_cache_storage_test": {
+          "elf_sha256": "d6f828e219e26c54825000f1e74798deb3bc92e3137f12efca9b12819f9e9be8",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_automatic_jit_test": {
+          "elf_sha256": "4f283631700cc2f8b8abf3e0ef2b3c6a0f37cebb0e05205a6cab7243704016e3",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_native_prefix_test": {
+          "elf_sha256": "b72cf542447775f78b71fc9800a1ed4a3cc0277a38f78cfd06e9c5c4ee456947",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_memory_windows_test": {
+          "elf_sha256": "60772bc1eaf4b8ae61707b096cc69da8b96108f0a118e777333dcf139c55e685",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_native_move_test": {
+          "elf_sha256": "54f085bcc8388020fae14b053e5cdd30d88cf24d6ae17e7a01e1a9363f06a545",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_native_dataflow_test": {
+          "elf_sha256": "16ef3b005320e2d15c310588899493c24f5cc9beb4a6eff681086e82dde5366c",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_native_inputs_test": {
+          "elf_sha256": "e6aaf8ff988a639e853e78166961702a73998d4b5a9376ffc67810fd4965e2d7",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_native_status_test": {
+          "elf_sha256": "b308b1b0050b01649aece37065a5e9b37c7d22ae67a17e559808975a8ec4a01f",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_native_retirement_test": {
+          "elf_sha256": "1717f2d953cdd2502aae1ad1358fce255d47a6f0bd0a6c8f313b72f6d7284a52",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_native_loop_test": {
+          "elf_sha256": "98734742f5130276505ab3ab15bbe7db61dbebbf3eb47f151128c3289ee4a6d9",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_native_backedge_test": {
+          "elf_sha256": "f10f19b34cf9ee44179e1494c29038960e0d0dd43903a00132ef94a36f0ea153",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_core_test": {
+          "elf_sha256": "10b8b81c9877dbbd06b4cf486509a27625a3cb98ba9d7ed6afd1ebd02eb6f542",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_external_run_test": {
+          "elf_sha256": "01b402a1504024a8485c34eaab5b9cf5dd2333bdbad3335734df69d5fcad2c86",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_checkpoint_test": {
+          "elf_sha256": "8658878b721b48e184608485f8f76f46b2a9a7d660ff47364edfb9c33969fc22",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_staged_test": {
+          "elf_sha256": "994cde95b2dcb0c881491bcc62bc3ca53dc05cc83bdb8a265f2a3be538d29f35",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_debug_test": {
+          "elf_sha256": "12e74f68a03b3f8f46a560f4793c59d0a53dd6fc5b8dfd18578481abd2f28338",
+          "actual_exit": 0,
+          "reaped": true
+        }
+      }
+    },
+    "thread": {
+      "sanitizer": "TSan",
+      "archive_sha256": "c85585e18e9f7395f3921381690b7a70f99b208d973ecebaf51a022f2e5c20bc",
+      "groups": {
+        "dsp56300_cache_eligibility_test": {
+          "elf_sha256": "64d588318f49f5ca0fd49b9808f53a69f48f488feee0ebd48fb3938e5892f6d8",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_bounded_run_test": {
+          "elf_sha256": "40413f95d4771ca43c6c65daf1d0e0091eee494b7fcbd6ac0ebdeb1009beea55",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_mac_batch_test": {
+          "elf_sha256": "9be6b65235f72ed341c9b0ffb33d8da5374d6efc1e93816ed8483d1b29701895",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_cache_control_test": {
+          "elf_sha256": "07316fb1b16b7ea0a40f44716ae56eadad38bdb6ed69183e4617a97cd1e55749",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_cache_storage_test": {
+          "elf_sha256": "3d5e26bc025fa38c4b193d1a285e7b252e8c558e17f5b3736a2c4efc400555e9",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_automatic_jit_test": {
+          "elf_sha256": "d30abad9cf220dcf38417b2f760bbe2020fb48d67bb20ca5d5e4477ee8a72b51",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_native_prefix_test": {
+          "elf_sha256": "114ed15a674f2c7d1522d27c06616e3ec6d6050c5614c8068226f7ed4ce3a413",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_memory_windows_test": {
+          "elf_sha256": "63e7e456fb5f3d59cea180a2e7d9542921c6c11133dc927b98ae2c720e4fbf8a",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_native_move_test": {
+          "elf_sha256": "3eea48d779683c5a8433f99866a434bca3937a9ffc36428f0fec8f3087913812",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_native_dataflow_test": {
+          "elf_sha256": "ddabe63228ed5f02a8d2f28c2e39e2f255b8af66b8ab5a3326065e6a249a3e30",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_native_inputs_test": {
+          "elf_sha256": "34bf673ed0b2ad0e43afc6530ecc7819b035eed7f551eb3e0992a6813a57d42d",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_native_status_test": {
+          "elf_sha256": "1809ac9a7f9c11e7d803e411845253f77703bae6fcc0e45181f3b223356d0ae7",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_native_retirement_test": {
+          "elf_sha256": "0e4bb8e1f50a0c45f3420b37ee5b39b8c124441b1d11a95d31cad3399f4b37dc",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_native_loop_test": {
+          "elf_sha256": "8b52ca3ed584ce9662d034e82b1e5bd8fc856fbf0f618ac6aad745653fba58fc",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_native_backedge_test": {
+          "elf_sha256": "2e76a4c1659dba3f4d242cefaf5271677f42c5e33d667059ab9a0135b2d26078",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_core_test": {
+          "elf_sha256": "f86d482db66282f4113df99fc0d33b1c692e7ee3591570596999386faefbcfea",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_external_run_test": {
+          "elf_sha256": "eb92cf6a45a479cbccfe0a3cf95b69ff358b8b42bf127001dd8c500342233aff",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_checkpoint_test": {
+          "elf_sha256": "18ec6935dbd834ebee70fb4b7ad563ebe471757176092b0cac4be37aad98f760",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_staged_test": {
+          "elf_sha256": "22a3591e13fed45887c4f132ac681095dafc95b587afefe694a4ed3d4695176f",
+          "actual_exit": 0,
+          "reaped": true
+        },
+        "dsp56300_debug_test": {
+          "elf_sha256": "db6153a0d7b8977cb12cf85f36250b43333ed7e1a8b301965eb75eeb4583ff37",
+          "actual_exit": 0,
+          "reaped": true
+        }
+      }
+    }
+  },
+  "release": {
+    "groups": {
+      "dsp56300_cache_eligibility_test": {
+        "elf_sha256": "d92a4cf17c0d7062f1d5775020ca8c7d03f2ee645920605a4d22e10602eacc1a",
+        "actual_exit": 0,
+        "reaped": true
+      },
+      "dsp56300_bounded_run_test": {
+        "elf_sha256": "616dca12075c21e0830b75cb1543a628d413fab1eca5fc20a0ff1784f3ee736c",
+        "actual_exit": 0,
+        "reaped": true
+      },
+      "dsp56300_mac_batch_test": {
+        "elf_sha256": "41abafa282079d4521fd27c4276fae5ed9ac30ff2b598ca213be9c54f6c8bd49",
+        "actual_exit": 0,
+        "reaped": true
+      }
+    }
+  },
+  "old_archive_negative_control": {
+    "revision": "c39050d72eee4f90698cfb59542fb562510f92df",
+    "archive_sha256": "e4f41d7f600e773af7c7b08a4d2d8c51839ec86852e04b169b22e2597f9a8726",
+    "expected_exit": 1,
+    "reason": "Full-state oracle passes before the actual native-path expectation fails"
+  },
+  "timing": "Not measured for this increment; shared benchmark wrapper built, measurement deferred while workspace compilation is active",
+  "reproduction": [
+    "cmake --build --preset strict --target dsp56300_cache_eligibility_test dsp56300_bounded_run_test dsp56300_mac_batch_test",
+    "ctest --preset strict -R '^(native-empty-cache-eligibility|bounded-native-prefixes|guarded-mac-batches)$'",
+    "Repeat with thread preset for separate TSan"
+  ],
+  "fuzz": false,
+  "whole_device_qualified": false
+}

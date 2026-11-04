@@ -36,6 +36,11 @@ struct Core::Impl {
   void execute_debug(const detail::Instruction &decoded);
   void admit_debug();
 
+  [[nodiscard]] bool instruction_cache_active() const noexcept {
+    return (cpu.reg.sr & detail::cache_enable) != 0 &&
+           options.cacheable_begin < options.cacheable_end;
+  }
+
   [[nodiscard]] bool cacheable(const Word address) const noexcept {
     return (cpu.reg.sr & detail::cache_enable) != 0 && address >= options.cacheable_begin &&
            address < options.cacheable_end;

@@ -242,6 +242,13 @@ void boundaries() {
   }
 }
 
+void uncached_ce(const BatchBackend backend) {
+  Fixture fixture;
+  fixture.cpu.reg.sr |= detail::cache_enable;
+  fixture.context.runtime.cacheable_program = false;
+  direct_check(fixture, backend, backend == BatchBackend::disabled ? 0U : 8U);
+}
+
 void rejections() {
   const std::array mutations{
       +[](Fixture &f) { f.cpu.reg.pc = start + 1; },
@@ -578,6 +585,7 @@ int main() {
     dsp56300::test::reduction_selection();
     dsp56300::test::prepared_selection();
     for (const auto backend : dsp56300::test::variants) {
+      dsp56300::test::uncached_ce(backend);
       dsp56300::test::addresses(backend);
       dsp56300::test::overflow_prefixes(backend);
       dsp56300::test::proven_range(backend);
@@ -589,6 +597,14 @@ int main() {
       dsp56300::test::core_prefixes<dsp56300::BatchBackend::scalar>(mode);
       dsp56300::test::core_prefixes<dsp56300::BatchBackend::avx2>(mode);
       dsp56300::test::core_prefixes<dsp56300::BatchBackend::automatic>(mode);
+      dsp56300::test::core_prefixes<dsp56300::BatchBackend::disabled>(
+          mode | dsp56300::detail::cache_enable);
+      dsp56300::test::core_prefixes<dsp56300::BatchBackend::scalar>(mode |
+                                                                    dsp56300::detail::cache_enable);
+      dsp56300::test::core_prefixes<dsp56300::BatchBackend::avx2>(mode |
+                                                                  dsp56300::detail::cache_enable);
+      dsp56300::test::core_prefixes<dsp56300::BatchBackend::automatic>(
+          mode | dsp56300::detail::cache_enable);
     }
     std::cout << dsp56300::test::checks << " guarded MAC batch checks passed\n";
   } catch (const std::exception &error) {

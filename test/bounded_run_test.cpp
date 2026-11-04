@@ -305,9 +305,19 @@ void unknown_and_control() {
       core.request_debug();
     }
     const auto result = core.run(RunBudget{.instructions = 10, .cycles = 10});
-    require(result.stop == RunStop::control_event && result.execution.dispatches == 0 &&
-                result.cycles == 0 && core.registers() == state && memory.reads == 0,
-            "Debug admission/cache transitions stay before actual control or bus effects");
+    if (cache) {
+      auto expected = state;
+      ++expected.pc;
+      require(result.stop == RunStop::unknown_code && result.execution.dispatches == 1 &&
+                  result.cycles == 1 && core.registers() == expected && memory.reads == 0 &&
+                  core.jit_statistics().native_alu_instructions == 1 &&
+                  core.jit_statistics().helper_instructions == 0,
+              "Raw CE with the default empty cache interval retains actual native execution");
+    } else {
+      require(result.stop == RunStop::control_event && result.execution.dispatches == 0 &&
+                  result.cycles == 0 && core.registers() == state && memory.reads == 0,
+              "Debug admission stays before actual control or bus effects");
+    }
   }
 }
 

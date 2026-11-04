@@ -23,9 +23,9 @@ std::uint32_t Core::Impl::jit_execute(void *const owner,
   const auto next = (operation->pc + operation->instruction.words) & word_mask;
   return self.cpu.processing == ProcessingState::running &&
                  (self.cpu.debug_flags & detail::debug_interrupt_pending) == 0 &&
-                 self.vector.phase == VectorPhase::none &&
-                 (self.cpu.reg.sr & detail::cache_enable) == 0 && self.cpu.reg.pc == next &&
-                 self.cpu.repeat_remaining == 0 && !self.jit->exit_requested() &&
+                 self.vector.phase == VectorPhase::none && !self.instruction_cache_active() &&
+                 self.cpu.reg.pc == next && self.cpu.repeat_remaining == 0 &&
+                 !self.jit->exit_requested() &&
                  (self.cpu.reg.sr & detail::numeric_mode_mask) == operation->mode &&
                  detail::active_loop_address(self.cpu.reg) == operation->loop_address
              ? 2U

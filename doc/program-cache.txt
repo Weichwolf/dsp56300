@@ -73,12 +73,19 @@ Single-word cache controls can repeat. Two-word forms cannot be REP bodies.
 
 Execution and qualification limits
 
-All CE-enabled instruction execution currently uses the general executor, on
-reference, cached and JIT configurations. This keeps actual fetch order, word
-fills, P transfers and replacement state independent of speculative translation.
-A helper setting CE exits its native block before any successor; CE clearing
-permits subsequent native dispatch. This is a guarded correctness fallback,
-not an optimized native cache-enabled backend or a throughput claim.
+With CE set and a nonempty configured cache interval, instruction execution uses
+the general executor. This keeps actual fetch order, word fills, P transfers
+and replacement state independent of speculative translation. A helper enabling
+that cache exits its native block before any successor. Clearing CE permits
+subsequent native dispatch. This remains a guarded correctness fallback.
+
+An empty interval cannot cache any P address. Ordinary/bounded JIT admission,
+helper continuation and guarded MAC batches therefore permit CE in this case,
+without modifying SR. Nonempty intervals retain conservative admission even
+when the current PC lies outside them. Low-level JIT contexts without a declared
+map remain conservative. The public Core constructor supplies its actual map.
+See cache-eligibility-reference.json for independent state/budget/RAM/cache
+controls. This does not qualify native execution of actual cached instructions.
 
 Sources: DSP56300 Family Manual Rev.5 chapters 5/8/12/13 and appendix A,
 https://www.nxp.com/docs/en/reference-manual/DSP56300FM.pdf

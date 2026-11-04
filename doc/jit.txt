@@ -372,15 +372,19 @@ Architectural cache and native execution
 Guest cache state is independent from decoded/native host caches. clear_code_cache
 must preserve DSP tags/valid words/locks. Host backing-RAM writes invalidate
 translations but may leave instructions cached in the DSP. JIT compilation from
-raw RAM is therefore disabled whenever SR.CE is set; the common executor performs
-actual fetch/fill/LRU/PMOVE actions within the exact budget. A helper that sets
-CE exits its block even if numeric mode and PC otherwise match; clearing CE
+raw RAM is therefore disabled when SR.CE is set and the configured cache interval
+is nonempty; the common executor performs actual fetch/fill/LRU/PMOVE actions
+within the exact budget. A helper enabling that cache exits its block even if
+numeric mode and PC otherwise match; clearing CE
 flushes DSP cache state and permits native execution. Directed witnesses require
 two actual native arithmetic instructions around four general instructions across
 that transition. This guard is temporary general fallback, not a performance
 optimization of cache-enabled programs. A future native cache-enabled backend
 must preserve architectural fetch order and cached data instead of speculatively
 using raw P or letting translation lookahead alter replacement state.
+An empty interval permits native ordinary/bounded execution, helper continuation
+and guarded MAC batches with CE retained in SR. Low-level contexts lacking an
+explicit map keep the conservative guard. See cache-eligibility-reference.json.
 Cache storage/geometry is separate cold owner state; Cpu/generated-code offsets
 stay unchanged. Exact memory-layout results and the current semantic gaps are
 recorded in doc/coverage.txt and doc/program-cache.txt. No throughput/cache-miss,

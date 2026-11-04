@@ -1251,3 +1251,20 @@ Seven affected groups pass per sanitizer profile, preserving captured and
 synchronous IRQ contracts. Unknown completed-REP metadata remains explicit.
 See deferred-interrupt-reference.json. No derivative timing, complete ISA,
 connected-device acceptance or whole-instrument performance is established.
+
+
+Effective empty-cache native eligibility
+
+SR.CE no longer disables ordinary/bounded native dispatch, helper continuation
+or guarded MAC batches when the configured cache interval is empty. The real
+SR remains unchanged. Nonempty intervals retain owned fetch/cache behavior;
+low-level contexts without an explicit map remain conservative. All six public
+SDK headers are unchanged. The shared three-domain full-state/budget fixture
+passes 1054 checks in Release, ASan/UBSan and TSan; bounded and MAC fixtures
+retain 15670 and 327560 checks. Twenty affected groups pass per sanitizer profile
+after rebuilding the changed private native context. The previous archive fails
+the new native-path expectation after passing its independent state check.
+See cache-eligibility-reference.json. Native REP bodies, truly cached native
+instructions and connected-instrument performance remain open; no speed factor
+is claimed from these functional tests. All ISA rows and the objective remain
+partial.

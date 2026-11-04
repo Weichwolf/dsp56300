@@ -71,7 +71,8 @@ Core::Impl::Impl(const Buffers supplied,
                                         .aliases_program = aliases_program[1]},
                                        {.data = buffers.y.data(),
                                         .words = buffers.y.size(),
-                                        .aliases_program = aliases_program[2]}}}});
+                                        .aliases_program = aliases_program[2]}}},
+                           .cacheable_program = options.cacheable_begin < options.cacheable_end});
   }
 }
 
@@ -351,7 +352,7 @@ RunResult Core::run(const std::uint32_t instruction_budget) {
   while (result.dispatches < instruction_budget && !impl_->yield_requested &&
          fault().kind == FaultKind::none && impl_->cpu.processing == ProcessingState::running) {
     if (impl_->cpu.repeat_remaining == 0 && impl_->vector.phase == Impl::VectorPhase::none &&
-        (impl_->cpu.reg.sr & detail::cache_enable) == 0 &&
+        !impl_->instruction_cache_active() &&
         (impl_->cpu.debug_flags & detail::debug_interrupt_pending) == 0) {
       const auto retired = impl_->jit->run(instruction_budget - result.dispatches);
       result.dispatches += retired;

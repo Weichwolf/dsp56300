@@ -37,6 +37,8 @@ struct JitRuntime {
   std::optional<Word> (*program)(void *, Word) noexcept = nullptr;
   std::array<JitMemory, 2> memory;
   std::array<std::span<const MemoryWindow>, 2> windows{};
+  // Conservative for standalone low-level contexts without a declared chip map.
+  bool cacheable_program = true;
 };
 
 struct NativeContext {

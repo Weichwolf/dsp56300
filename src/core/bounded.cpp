@@ -68,8 +68,7 @@ BoundedRunResult Core::Impl::run_bounded(const RunBudget budget) {
     const auto instructions = budget.instructions - result.execution.dispatches;
     const auto cycles = budget.cycles - result.cycles;
     if (jit && !bounded_memory_blocked && cpu.repeat_remaining == 0 &&
-        (cpu.reg.sr & detail::cache_enable) == 0 &&
-        (cpu.debug_flags & detail::debug_interrupt_pending) == 0) {
+        !instruction_cache_active() && (cpu.debug_flags & detail::debug_interrupt_pending) == 0) {
       const auto retired = jit->run_bounded(instructions, cycles);
       result.execution.dispatches += retired;
       if (retired != 0 || fault.kind != FaultKind::none || yield_requested) { continue; }
@@ -86,7 +85,7 @@ BoundedRunResult Core::Impl::run_bounded(const RunBudget budget) {
       result.stop = RunStop::cycle_budget;
       break;
     }
-    if ((cpu.reg.sr & detail::cache_enable) != 0) {
+    if (instruction_cache_active()) {
       result.stop = RunStop::control_event;
       break;
     }

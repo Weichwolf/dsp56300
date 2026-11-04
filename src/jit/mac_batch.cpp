@@ -42,7 +42,8 @@ bool overlaps_cpu(const Cpu &cpu, const Word *const words, const Word count) noe
                                                const MacBatchPlan plan) noexcept {
   const auto &reg = cpu.reg;
   if (reg.pc != operation.pc || reg.la != operation.pc || (reg.sr & loop_flag) == 0 ||
-      (reg.sr & (cache_enable | forever_flag)) != 0 ||
+      (reg.sr & forever_flag) != 0 ||
+      (context.runtime.cacheable_program && (reg.sr & cache_enable) != 0) ||
       (reg.sr & numeric_mode_mask) != operation.mode || reg.lc <= mac_batch_width ||
       reg.lc > word_mask || cpu.repeat_remaining != 0 ||
       cpu.processing != ProcessingState::running ||

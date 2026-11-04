@@ -20,6 +20,9 @@ unknown_code, control_event, state, yielded and fault. A cycle_budget stop may
 leave unused cycles when the next instruction cannot fit. Debug/vector/cache
 transitions return control_event rather than guessing their ownership. Ordinary
 Core::run(n) retains unrestricted execution and its existing result contract.
+SR.CE with an empty configured cache interval does not create a cache-control
+boundary: no P address is cacheable. A nonempty interval with CE retains the
+conservative boundary and genuine owned fetches. See program-cache.txt.
 
 At a stopped running boundary, pc identifies the genuine next fetch address;
 it can be a vector address while Registers.pc still holds the interrupted PC.
