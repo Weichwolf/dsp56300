@@ -103,6 +103,13 @@ the existing executable bound. Short absolute JMP outside loop endings has
 native PC/cost retirement. See bounded-execution.txt for conservative admission,
 independent witnesses and remaining connected-scheduler/direct-RAM requirements.
 
+The captured atomic run_instruction entry reuses cached single-operation native
+code after caller-owned delay accounting, with real synchronous Io and precise
+refusals. Actual REP latches and ordinary PC ownership remain explicit; pending
+vector/debug/cache fetches and staged publication keep their existing owners.
+This entry removes staged replay for eligible consumers, not the remaining
+general JIT helpers or complete connected-device timing requirements.
+
 Sparse external X/Y windows now lower eligible native loads/stores directly.
 Both ports preflight bounds/known bytes/permissions before CPU or data effects;
 real owner callbacks handle readonly/executable aliases, holes and peripherals.

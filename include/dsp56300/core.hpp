@@ -448,6 +448,12 @@ public:
   // unproven external effect/control transition, with actual next PC/base cost.
   // Unknown code is an explicit boundary; this query never invents a fetch.
   [[nodiscard]] BoundedRunResult run(RunBudget budget);
+  // Execute exactly the captured ordinary instruction through this CPU/JIT,
+  // including synchronous real Io. The caller owns its external clock delay.
+  // Refuses pending vector/debug/cache fetch ownership and mismatched PC/latch.
+  // Backing code may have changed since capture. Like atomic run(), this does
+  // not expose staged publication boundaries or a staged flow receipt.
+  [[nodiscard]] RunResult run_instruction(InstructionWords words);
   // A synchronous Io callback can return this run after actual instruction
   // retirement. Guest state and compiled code survive; no cross-thread mutation.
   void request_yield() noexcept;

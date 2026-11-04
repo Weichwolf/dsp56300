@@ -119,6 +119,8 @@ struct Core::Impl {
   [[nodiscard]] detail::Instruction captured_instruction(Word address) const;
   [[nodiscard]] Word sample_instruction(InstructionEffect effect) const;
   [[nodiscard]] bool perform_instruction(const InstructionEffect &effect, Word &response) const;
+  [[nodiscard]] static detail::Instruction decode_words(InstructionWords words,
+                                                        bool complete = true);
   void validate_staged_mutation() const;
   void invalidate_effect_tickets();
   [[nodiscard]] std::span<Word> area(Space space) const;

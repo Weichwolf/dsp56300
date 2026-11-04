@@ -61,3 +61,19 @@ Eligible latched one-word REP bodies also use native arithmetic/register/RAM
 execution within both limits. The saved opcode survives backing-P mutation;
 rejected operands return before effects and count consumption. Completion at
 an active DO ending retains its final real owner instruction. See native-repeat.txt.
+
+Core::run_instruction(words) executes exactly one captured ordinary instruction
+after its caller has accounted the external delay. A separate cached JIT entry
+uses the full opcode/extension and actual numeric/loop context; backing P edits
+cannot replace captured words. Native RAM lowering and retained REP bodies stay
+native. Real Io callbacks run synchronously once, including refusal and partial
+fault state. Unlowered operations retain general execution, not staged replay.
+The caller must use begin_fetch/advance for pending vector/debug/cache fetch
+ownership, and staged execution when intermediate publication is required.
+Wrong PC/latch/word shape and active staged ownership refuse before execution.
+This atomic entry exposes no staged flow receipt and supplies no board clocks,
+peripheral replies or instrument-equivalence evidence. Existing CPU-only bounded
+runs keep their original owner-effect stopping contract.
+Focused Release evidence is in captured-execution-reference.json: 148 captured
+entry checks plus the existing 15,670 bounded and 6,536 native REP checks.
+No instrument or wall-time performance claim follows from these tests.

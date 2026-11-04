@@ -57,6 +57,7 @@ concept CoreImplementation = std::constructible_from<Implementation, Buffers, Io
                                { core.load(space, address, words) } -> std::same_as<void>;
                                { core.run(budget) } -> std::same_as<RunResult>;
                                { core.run(cycle_budget) } -> std::same_as<BoundedRunResult>;
+                               { core.run_instruction(instruction) } -> std::same_as<RunResult>;
                                { core.request_yield() } noexcept -> std::same_as<void>;
                                {
                                  view.processing_state()
@@ -146,6 +147,10 @@ public:
   [[nodiscard]] RunResult run(const std::uint32_t budget) { return core_.run(budget); }
 
   [[nodiscard]] BoundedRunResult run(const RunBudget budget) { return core_.run(budget); }
+
+  [[nodiscard]] RunResult run_instruction(const InstructionWords words) {
+    return core_.run_instruction(words);
+  }
 
   void request_yield() noexcept { core_.request_yield(); }
 

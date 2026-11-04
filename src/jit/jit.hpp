@@ -60,6 +60,7 @@ public:
   [[nodiscard]] std::uint32_t run(std::uint32_t budget);
   [[nodiscard]] std::uint32_t run_bounded(std::uint32_t instructions, std::uint64_t cycles);
   [[nodiscard]] std::uint32_t run_repeat(NativeOp operation, std::uint32_t budget);
+  [[nodiscard]] std::uint32_t run_captured(NativeOp operation);
   [[nodiscard]] bool exit_requested() const noexcept;
   void request_yield() noexcept;
   void invalidate() noexcept;

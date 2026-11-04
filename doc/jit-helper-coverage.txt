@@ -40,6 +40,10 @@ Direct interpretation also occurs outside emitted code:
 - Impl::run_bounded falls back to step_decoded for an admitted owner-free
   instruction when native dispatch cannot run it. External effects return to
   their owner instead of silently performing I/O.
+- Core::run_instruction executes its captured ordinary instruction through a
+  cached single-operation JIT entry. Rejected native REP bodies and final DO
+  cleanup use step_decoded; unlowered forms still use the existing JIT helpers.
+  This avoids staged replay but does not qualify native peripheral instructions.
 - REP bodies can run natively, but unsupported bodies and final DO cleanup
   still return to general execution. DO ending guards also leave the emitted
   block before final cleanup.
@@ -80,7 +84,7 @@ measurement scope.
 
 Recheck the inventory with:
   rg -n 'helper\(|general_moves\(|runtime_\.(execute|moves)' src/jit
-  rg -n 'step_decoded\(|step\(' src/core.cpp src/core/bounded.cpp src/core/staged_compute.cpp
+  rg -n 'step_decoded\(|step\(' src/core.cpp src/core/bounded.cpp src/core/captured.cpp src/core/staged_compute.cpp
   rg -n 'lowerable|is_loop_setup|is_addition|is_logic|is_right_shift' src/jit/x64
 
 Priority: replace common instruction/transfer fallback bodies with native

@@ -16,20 +16,6 @@
 
 namespace dsp56300 {
 namespace {
-detail::Instruction decoded_words(const InstructionWords words, const bool complete = true) {
-  if (words.address > word_mask || words.opcode > word_mask ||
-      (words.extension && *words.extension > word_mask)) {
-    throw std::invalid_argument("Captured instruction word exceeds 24 bits");
-  }
-  auto decoded = detail::decode(words.opcode);
-  if ((complete && words.extension.has_value() != (decoded.words == 2)) ||
-      (words.extension && decoded.words != 2)) {
-    throw std::invalid_argument("Captured instruction has missing or unexpected extension");
-  }
-  decoded.extension = words.extension.value_or(0);
-  return decoded;
-}
-
 FaultKind rejected_effect(const InstructionEffect &effect) {
   switch (effect.kind) {
     case EffectKind::read:
@@ -47,6 +33,20 @@ FaultKind rejected_effect(const InstructionEffect &effect) {
     default: throw std::logic_error("No rejection class for retirement");
   }
 }
+}
+
+detail::Instruction Core::Impl::decode_words(const InstructionWords words, const bool complete) {
+  if (words.address > word_mask || words.opcode > word_mask ||
+      (words.extension && *words.extension > word_mask)) {
+    throw std::invalid_argument("Captured instruction word exceeds 24 bits");
+  }
+  auto decoded = detail::decode(words.opcode);
+  if ((complete && words.extension.has_value() != (decoded.words == 2)) ||
+      (words.extension && decoded.words != 2)) {
+    throw std::invalid_argument("Captured instruction has missing or unexpected extension");
+  }
+  decoded.extension = words.extension.value_or(0);
+  return decoded;
 }
 
 EffectTicket::EffectTicket(std::shared_ptr<const bool> owner, const Position position)
@@ -129,7 +129,7 @@ InstructionProgress Core::begin_owned(const std::optional<InstructionWords> capt
   }
   const auto fetch = instruction_fetch();
   const auto words = captured.value_or(InstructionWords{.address = fetch.address});
-  const auto decoded = captured ? decoded_words(words) : detail::Instruction{};
+  const auto decoded = captured ? Impl::decode_words(words) : detail::Instruction{};
   if (publication != InstructionPublication::retirement &&
       publication != InstructionPublication::address_updates &&
       publication != InstructionPublication::move_updates &&
@@ -241,7 +241,7 @@ bool Core::interruptible_opcode(const InstructionWords words) const {
 }
 
 bool Core::interruptible_captured(const InstructionWords words, const bool complete) const {
-  const auto decoded = decoded_words(words, complete);
+  const auto decoded = Impl::decode_words(words, complete);
   if (impl_->staged_active()) { return false; }
   if (words.address != impl_->cpu.reg.pc) {
     throw std::invalid_argument("Interrupt metadata differs from the current normal PC");

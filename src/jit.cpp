@@ -357,6 +357,48 @@ std::uint32_t Jit::run_repeat(const NativeOp operation, const std::uint32_t budg
   return self.enter(*found->second, budget);
 }
 
+std::uint32_t Jit::run_captured(NativeOp operation) {
+  auto &self = *impl_;
+  if (self.cpu.repeat_remaining != 0) {
+    // The final REP at a DO endpoint still needs the genuine frame cleanup.
+    if (at_loop_end(operation) && self.cpu.repeat_remaining == 1) { return 0; }
+    operation.loop_address = inactive_loop;
+    return run_repeat(operation, 1);
+  }
+  if (self.invalidated) {
+    self.blocks.clear();
+    self.statistics.executable_bytes = 0;
+    self.invalidated = false;
+  }
+  self.exit_requested = false;
+  constexpr auto captured_tag = std::uint64_t{1} << 62;
+  const auto key = translation_key(self.cpu.reg) | captured_tag;
+  auto found = self.blocks.find(key);
+  if (found == self.blocks.end() ||
+      found->second->operations.front().instruction != operation.instruction) {
+    auto block = std::make_unique<Block>();
+    block->operations.push_back(operation);
+    JitEmitter emitter(
+        self.context.runtime, self.options.optimize, self.options.batch_backend, self.cpu.reg.m);
+    const auto bytes = emitter.generate(block->operations);
+    block->code = std::make_unique<Executable>(bytes);
+    block->storage_bytes = block->code->size();
+    if (self.statistics.executable_bytes + block->storage_bytes > cache_limit) {
+      self.blocks.clear();
+      self.statistics.executable_bytes = 0;
+      found = self.blocks.end();
+    }
+    if (found != self.blocks.end()) {
+      self.statistics.executable_bytes -= found->second->storage_bytes;
+    }
+    self.statistics.executable_bytes += block->storage_bytes;
+    self.blocks.insert_or_assign(key, std::move(block));
+    ++self.statistics.compiled_blocks;
+    found = self.blocks.find(key);
+  }
+  return self.enter(*found->second, 1);
+}
+
 std::uint32_t Jit::run_bounded(const std::uint32_t instructions, const std::uint64_t cycles) {
   auto &self = *impl_;
   auto *block = self.prepare(instructions);
