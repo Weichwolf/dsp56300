@@ -75,6 +75,12 @@ private:
   [[nodiscard]] bool admit_cached_inputs(std::span<const NativeOp> operations) const;
   void register_move(const NativeRegisterMove &move, Word mode);
   void move_guard(const NativeMove &move, x64::Label &slow);
+  void move_effective(const NativeMove &move);
+  void move_memory_guard(const NativeMove &move, x64::Label &slow);
+  void long_guards(const NativeMoves &moves, x64::Label &slow);
+  void long_capture(const NativeMoves &moves, Word mode);
+  void move_guards(const NativeMoves &moves, x64::Label &slow);
+  void move_values(const NativeMoves &moves, Word mode);
   void move_next(const NativeMove &move);
   void window_guard(const NativeMove &move, x64::Label &slow);
   void window_candidate(const NativeMove &move, const MemoryWindow &window, x64::Label &next);

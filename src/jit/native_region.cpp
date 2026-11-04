@@ -67,7 +67,7 @@ bool moves(NativeRegion &region,
     return true;
   }
   const auto plan = plan_moves(instruction);
-  if (plan.count == 0) { return false; }
+  if (plan.count == 0 || plan.long_pair) { return false; }
   for (const auto &move : std::span(plan.transfers).first(plan.count)) {
     if (!transfer(region, move, memory.at(move.space == Space::x ? 0 : 1), modifiers)) {
       return false;

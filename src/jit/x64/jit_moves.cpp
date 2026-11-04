@@ -74,6 +74,29 @@ void JitEmitter::register_move(const NativeRegisterMove &move, const Word mode) 
   count_move();
 }
 
+void JitEmitter::move_guards(const NativeMoves &moves, x64::Label &slow) {
+  if (moves.long_pair) {
+    long_guards(moves, slow);
+    return;
+  }
+  for (const auto &move : std::span(moves.transfers).first(moves.count)) { move_guard(move, slow); }
+}
+
+void JitEmitter::move_values(const NativeMoves &moves, const Word mode) {
+  const auto transfers = std::span(moves.transfers).first(moves.count);
+  capture_inputs();
+  if (moves.long_pair) {
+    move_update(transfers.front());
+    long_capture(moves, mode);
+  } else {
+    for (const auto &move : transfers) { move_update(move); }
+    for (const auto &move : transfers) { move_capture(move, mode); }
+  }
+  // Capture both ports before either destination changes, including host aliases.
+  for (const auto &move : transfers) { move_commit(move); }
+  count_move();
+}
+
 void JitEmitter::moves(const NativeOp &operation) {
   const auto immediate = plan_address_immediate(operation.instruction);
   if (immediate.valid()) {
@@ -103,23 +126,14 @@ void JitEmitter::moves(const NativeOp &operation) {
   }
   if (region_mode_ == RegionMode::guarded) {
     for (const auto &move : transfers) { region_address(move); }
-    capture_inputs();
-    for (const auto &move : transfers) { move_update(move); }
-    for (const auto &move : transfers) { move_capture(move, operation.mode); }
-    for (const auto &move : transfers) { move_commit(move); }
-    count_move();
+    move_values(plan, operation.mode);
     return;
   }
   x64::Label slow;
   x64::Label done;
   const auto first_guard = ring_guards_.size();
-  for (const auto &move : transfers) { move_guard(move, slow); }
-  capture_inputs();
-  for (const auto &move : transfers) { move_update(move); }
-  // Capture both ports before either destination changes, including host aliases.
-  for (const auto &move : transfers) { move_capture(move, operation.mode); }
-  for (const auto &move : transfers) { move_commit(move); }
-  count_move();
+  move_guards(plan, slow);
+  move_values(plan, operation.mode);
   code_.jump(done);
   code_.bind(slow);
   // Late ring checks retain this instruction's target after its local label dies.

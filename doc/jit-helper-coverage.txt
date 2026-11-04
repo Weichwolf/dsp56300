@@ -25,6 +25,13 @@ native arbitrary-modulo specialization covers only selected post-increments;
 other legal modifiers/modes remain gaps. A rejected native address must retain
 its exact AGU update, first fault, alias, code invalidation and I/O ordering.
 
+Ordinary L: stores now lower all eight source views with one shared EA and
+one AGU update, including guarded sparse RAM windows. Native long loads and
+long-store guarded-region/coalescing admission remain open. See
+native-long-stores-reference.json for the focused Release evidence. A lowered
+zero-ALU instruction can count an emitted NOP after a transfer callback; the
+native transfer counter must still prove the RAM operation independently.
+
 Direct interpretation also occurs outside emitted code:
 
 - Core::run falls back to step() if native dispatch retires nothing or if a

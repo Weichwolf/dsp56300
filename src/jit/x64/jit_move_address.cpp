@@ -207,6 +207,11 @@ void JitEmitter::move_ring_delta(const NativeMove &move) {
 
 void JitEmitter::move_guard(const NativeMove &move, x64::Label &slow) {
   if (move.immediate()) { return; }
+  move_effective(move);
+  move_memory_guard(move, slow);
+}
+
+void JitEmitter::move_effective(const NativeMove &move) {
   const auto address = move.space == Space::x ? Reg::cx : Reg::r8;
   const auto &form = move.address;
   const auto offset = form.index * sizeof(Word);
@@ -224,6 +229,10 @@ void JitEmitter::move_guard(const NativeMove &move, x64::Label &slow) {
     }
     code_.immediate(group_and, address, word_mask, Width::dword);
   }
+}
+
+void JitEmitter::move_memory_guard(const NativeMove &move, x64::Label &slow) {
+  const auto address = move.space == Space::x ? Reg::cx : Reg::r8;
   if (!runtime_.windows.at(move.space == Space::x ? 0 : 1).empty()) {
     window_guard(move, slow);
     return;

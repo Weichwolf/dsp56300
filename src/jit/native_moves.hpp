@@ -18,6 +18,7 @@ struct NativeMove {
 struct NativeMoves {
   std::array<NativeMove, 2> transfers;
   unsigned count = 0;
+  bool long_pair = false;
 };
 
 struct NativeRegisterMove {

@@ -12,6 +12,39 @@ namespace dsp56300::detail {
 namespace {
 constexpr unsigned pair_bit = 23, y_mode_shift = 20, x_register_shift = 18, y_load_bit = 22;
 constexpr unsigned high_register_shift = 17;
+
+NativeMoves long_store(const Instruction &instruction) {
+  const auto opcode = instruction.opcode;
+  if ((opcode & (Word{1} << 15)) != 0) { return {}; }
+  const bool effective = (opcode & (Word{1} << 14)) != 0;
+  const AddressForm address = effective
+                                  ? AddressForm{.mode = (opcode >> 11) & 7,
+                                                .index = (opcode >> 8) & 7,
+                                                .extra = instruction.extension}
+                                  : AddressForm{.mode = 6, .extra = (opcode >> 8) & six_bit_mask};
+  if (address.mode == 6 && address.index != 0) { return {}; }
+  const auto selector = ((opcode >> 16) & 3) | ((opcode >> 17) & 4);
+  constexpr std::array high{a1_register,
+                            b1_register,
+                            x1_register,
+                            y1_register,
+                            a_register,
+                            b_register,
+                            a_register,
+                            b_register};
+  constexpr std::array low{a0_register,
+                           b0_register,
+                           x0_register,
+                           y0_register,
+                           a_register,
+                           b_register,
+                           b_register,
+                           a_register};
+  return {.transfers = {NativeMove{.address = address, .reg = high.at(selector)},
+                        NativeMove{.address = address, .reg = low.at(selector), .space = Space::y}},
+          .count = 2,
+          .long_pair = true};
+}
 }
 
 bool pure_address_update(const Instruction &instruction) {
@@ -57,9 +90,8 @@ NativeMoves plan_moves(const Instruction &instruction) {
     result.count = 2;
     return result;
   }
-  if ((opcode & memory_group_mask) != memory_group || (opcode & long_selector_mask) == 0) {
-    return result;
-  }
+  if ((opcode & memory_group_mask) != memory_group) { return result; }
+  if ((opcode & long_selector_mask) == 0) { return long_store(instruction); }
   const unsigned reg =
       ((opcode >> 16) & 7) | ((opcode >> high_register_shift) & high_register_mask);
   const bool load = (opcode & (Word{1} << 15)) != 0;

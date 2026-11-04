@@ -291,9 +291,12 @@ void native_boundary(const Backend backend, const Word alu, const Form form, con
           "Dirty native A/B materialize before long/mixed callbacks; changed successors consume "
           "new data");
   if (backend == Backend::jit) {
-    require(
-        core.jit_statistics().native_alu_instructions == (accept ? 3U + (alu != 0 ? 1U : 0U) : 2U),
-        "The callback/invalidation sequence contains actual native arithmetic around the helper");
+    const bool emitted_nop = form.kind == Kind::long_word && !form.load && alu == 0;
+    const auto native = accept ? 3U + (alu != 0 || emitted_nop ? 1U : 0U) : 2U;
+    require(core.jit_statistics().native_alu_instructions == native &&
+                core.jit_statistics().native_move_instructions == 0,
+            "Native arithmetic/NOP retirement surrounds genuine I/O callbacks, with no native "
+            "RAM transfer claimed for a peripheral side exit");
   }
 }
 

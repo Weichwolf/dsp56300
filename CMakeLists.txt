@@ -40,7 +40,7 @@ add_library(dsp56300_core STATIC
   src/jit/x64/jit_regions.cpp
   src/jit/x64/region_guards.cpp src/jit/x64/jit_window.cpp
   src/jit/x64/jit_word_reuse.cpp
-  src/jit/x64/jit_move_address.cpp src/jit/x64/jit_move_register.cpp
+  src/jit/x64/jit_move_address.cpp src/jit/x64/jit_move_register.cpp src/jit/x64/jit_long_moves.cpp
   src/core/memory.cpp src/jit/x64/jit_retirement.cpp src/jit/x64/jit_status.cpp
   src/jit/x64/jit_shifts.cpp src/jit/native_register_moves.cpp src/jit/x64/jit_inputs.cpp
   src/jit/mac_batch.cpp src/jit/mac_batch_scalar.cpp src/jit/x64/mac_batch_avx2.cpp src/jit/x64/jit_batch.cpp)
@@ -172,6 +172,17 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
     target_link_libraries(dsp56300_native_shift_test PRIVATE dsp56300::core)
     target_include_directories(dsp56300_native_shift_test PRIVATE test)
     add_test(NAME native-shift-boundaries COMMAND dsp56300_native_shift_test)
+    add_library(dsp56300_native_long_store_fixture STATIC test/native_long_store_fixture.cpp)
+    target_link_libraries(dsp56300_native_long_store_fixture PUBLIC dsp56300::core)
+    add_executable(dsp56300_native_long_store_test test/native_long_store_test.cpp
+      test/native_long_store_boundaries.cpp)
+    target_link_libraries(dsp56300_native_long_store_test PRIVATE dsp56300_native_long_store_fixture)
+    add_test(NAME native-long-stores COMMAND dsp56300_native_long_store_test)
+    add_executable(dsp56300_native_long_store_bench test/native_long_store_bench.cpp)
+    target_link_libraries(dsp56300_native_long_store_bench PRIVATE dsp56300_native_long_store_fixture)
+    add_custom_target(bench-native-long-stores
+      COMMAND $<TARGET_FILE:dsp56300_native_long_store_bench> all
+      DEPENDS dsp56300_native_long_store_bench USES_TERMINAL VERBATIM)
     add_library(dsp56300_native_partial_store_fixture STATIC test/native_partial_store_fixture.cpp)
     target_link_libraries(dsp56300_native_partial_store_fixture PUBLIC dsp56300::core)
     add_executable(dsp56300_native_partial_store_test test/native_partial_store_test.cpp)

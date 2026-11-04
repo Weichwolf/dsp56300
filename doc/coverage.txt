@@ -1346,3 +1346,17 @@ isolated timings remain pending an idle host, so no throughput factor is
 claimed. Extensive sanitizer/broad regression campaigns are deferred until
 the integrating firmware's real-time milestone under the current user policy.
 This does not complete native ISA coverage or connected-instrument acceptance.
+
+Native L: stores (native-long-stores-reference.json): eight source views now
+execute emitted ordinary RAM transfers with one shared EA/AGU update. Raw
+A10/B10 bypass scaling; full A/B use one 48-bit limiter; AB/BA use independent
+24-bit limiters. Both windows and known bits are guarded before publication.
+Focused Release checks independent full state/RAM/flags/progress, REP, cached
+old sources, host aliases and genuine I/O first faults. The affected partial
+and extended MOVE fixtures also pass. Identical focused test objects reject
+the previous library after their independent state check. Five alternating
+Release pairs on shared audio/image/communications fixtures measure 5.75-6.35x
+for long-store streams; word controls measure 1.02-1.08x. These are component
+results, not instrument throughput. Long loads, guarded-region coalescing and
+remaining JIT fallbacks stay open. Extensive sanitizer matrices and broad
+regression remain deferred until the integrating firmware runs in real time.
