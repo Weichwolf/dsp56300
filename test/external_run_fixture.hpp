@@ -68,7 +68,7 @@ struct Timing {
 };
 
 [[nodiscard]] Timing workload(Workload input, Backend backend, bool staged, bool single_step);
-[[nodiscard]] Timing captured_workload(Workload input, Backend backend);
+[[nodiscard]] Timing captured_workload(Workload input, Backend backend, bool cache_enabled = false);
 void cache_checks();
 void continuation_checks();
 }

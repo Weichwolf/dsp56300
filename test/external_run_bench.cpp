@@ -24,13 +24,19 @@ struct Selection {
 struct Mode {
   std::string_view name;
   bool staged, single_step, captured;
+  bool cache_enabled = false;
 };
 
 constexpr std::array modes{
     Mode{.name = "synchronous-batch", .staged = false, .single_step = false, .captured = false},
     Mode{.name = "synchronous-step", .staged = false, .single_step = true, .captured = false},
     Mode{.name = "staged", .staged = true, .single_step = true, .captured = false},
-    Mode{.name = "captured-pcu", .staged = true, .single_step = true, .captured = true}};
+    Mode{.name = "captured-pcu", .staged = true, .single_step = true, .captured = true},
+    Mode{.name = "captured-pcu-ce",
+         .staged = true,
+         .single_step = true,
+         .captured = true,
+         .cache_enabled = true}};
 
 void report(const Workload sample, const std::string_view selected, const unsigned repetitions) {
   for (const auto mode : modes) {
@@ -39,7 +45,7 @@ void report(const Workload sample, const std::string_view selected, const unsign
     for (unsigned repetition = 0; repetition < repetitions; ++repetition) {
       const auto measured =
           mode.captured
-              ? captured_workload(sample, dsp56300::Backend::automatic)
+              ? captured_workload(sample, dsp56300::Backend::automatic, mode.cache_enabled)
               : workload(sample, dsp56300::Backend::automatic, mode.staged, mode.single_step);
       result.seconds += measured.seconds;
       result.instructions += measured.instructions;

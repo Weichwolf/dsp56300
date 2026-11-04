@@ -158,12 +158,13 @@ workload(const Workload input, const Backend backend, const bool staged, const b
   return {.seconds = seconds, .instructions = count, .reads = bus.reads};
 }
 
-Timing captured_workload(const Workload input, const Backend backend) {
+Timing captured_workload(const Workload input, const Backend backend, const bool cache_enabled) {
   constexpr unsigned count = 4096;
   Bus bus;
   bus.record = false;
   Core core(bus, {.backend = backend});
   auto initial = initial_state();
+  initial.sr = cache_enabled ? ce : 0U;
   initial.x = input.x;
   initial.y = input.y;
   core.set_registers(initial);

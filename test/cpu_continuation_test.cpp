@@ -134,7 +134,10 @@ void checkpoints(const BackendPair backend) {
   }
 }
 
-void read_boundary(const Backend backend, const bool accept, const bool loop) {
+void read_boundary(const Backend backend,
+                   const bool accept,
+                   const bool loop,
+                   const bool cache_enabled) {
   Bus bus;
   bus.events = {{.value = staged_test::raw_datum, .accept = accept}};
   Core core(bus, {.backend = backend});
@@ -143,6 +146,7 @@ void read_boundary(const Backend backend, const bool accept, const bool loop) {
     before.sr = 0x8000;
     before.la = boot + 5;
   }
+  before.sr |= cache_enabled ? Word{0x80000} : 0U;
   before.x = old_x;
   core.set_registers(before);
   static_cast<void>(core.begin_instruction({.address = boot, .opcode = short_load}, policy));
@@ -199,7 +203,10 @@ void read_boundary(const Backend backend, const bool accept, const bool loop) {
   }
 }
 
-void store_boundary(const Backend backend, const bool accept, const bool loop) {
+void store_boundary(const Backend backend,
+                    const bool accept,
+                    const bool loop,
+                    const bool cache_enabled) {
   // FM MOVEM SSH,P:(R0)+: AGU update, source stack pop, real P store, PC.
   constexpr Word opcode = 0x0758bc;
   constexpr Word value = 0x123456;
@@ -215,6 +222,7 @@ void store_boundary(const Backend backend, const bool accept, const bool loop) {
     visible.sr = 0x8000;
     visible.la = boot + 5;
   }
+  visible.sr |= cache_enabled ? Word{0x80000} : 0U;
   visible.sp = visible.sc = 1;
   visible.stack[1] = std::uint64_t{value} << word_bits;
   core.set_registers(visible);
@@ -492,8 +500,10 @@ int main() {
     for (const auto from : dsp56300::test::backends) {
       for (const bool accept : {false, true}) {
         for (const bool loop : {false, true}) {
-          dsp56300::test::read_boundary(from, accept, loop);
-          dsp56300::test::store_boundary(from, accept, loop);
+          for (const bool cache_enabled : {false, true}) {
+            dsp56300::test::read_boundary(from, accept, loop, cache_enabled);
+            dsp56300::test::store_boundary(from, accept, loop, cache_enabled);
+          }
         }
       }
       for (const auto to : dsp56300::test::backends) {

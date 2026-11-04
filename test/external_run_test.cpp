@@ -174,7 +174,9 @@ int main() {
         static_cast<void>(workload(sample, backend, false, false));
         static_cast<void>(workload(sample, backend, false, true));
         static_cast<void>(workload(sample, backend, true, true));
-        static_cast<void>(captured_workload(sample, backend));
+        for (const bool enabled : {false, true}) {
+          static_cast<void>(captured_workload(sample, backend, enabled));
+        }
       }
     }
     cache_checks();

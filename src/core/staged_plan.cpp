@@ -31,7 +31,7 @@ Word StagedState::sample(const InstructionEffect effect, const Registers &regist
   }
   if (used == capacity) { throw std::overflow_error("Instruction effect capacity exhausted"); }
   if (planning && cpu_publication(effect.kind) && planned < plan_capacity &&
-      used + planned < capacity && (registers.sr & cache_enable) == 0) {
+      used + planned < capacity) {
     auto &next = plan.at(planned++);
     next.effect = effect;
     next.computed = registers;
@@ -55,7 +55,7 @@ bool Core::Impl::plan_instruction() const {
   const auto &base = work.base;
   if (work.planning_disabled || work.fetch_words ||
       work.publication != InstructionPublication::pcu_updates || base.cache ||
-      (base.cpu.reg.sr & detail::cache_enable) != 0 || base.cpu.repeat_remaining != 0 ||
+      instruction_cache_active() || base.cpu.repeat_remaining != 0 ||
       base.vector.phase != detail::VectorPhase::none ||
       (base.cpu.debug_flags & detail::debug_interrupt_pending) != 0) {
     return false;

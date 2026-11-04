@@ -1315,3 +1315,15 @@ The host ALU matrix now uses its existing independent SM expectations and adds
 reserved-scaling refusal controls instead of retaining obsolete SM rejections.
 See staged-copy.txt and staged-copy-reference.json for final qualification and
 measurement limits. No ISA row or connected-instrument milestone becomes complete.
+
+Captured CPU planning with CE and no cacheable words
+-------------------------------------------------
+The effective architectural cache guard also governs captured PCU CPU-result
+planning. CE remains observable; real-cache activation at a new effect stops
+the private plan. Existing fetch/control/capacity/fault exclusions remain.
+Literal CE transitions, actual cache fill/invalidation, held writer state,
+checkpoint/ticket ownership and CE-on real read/write/refusal continuations
+have independent checks. Shared three-domain fixtures add captured-pcu-ce
+without removing previous modes or inputs. See cacheless-plan.txt and
+cacheless-plan-reference.json for qualification; instrument acceptance remains
+open.

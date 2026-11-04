@@ -41,6 +41,10 @@ void Core::Impl::restore_published_results() {
 Word Core::Impl::sample_instruction(InstructionEffect effect) const {
   effect.pc = current_pc;
   effect.omr = staged->base.cpu.reg.omr;
+  // Stop only at a new effect: accepted replay can contain an earlier SR mode.
+  if (staged->planning && staged->cursor == staged->used && instruction_cache_active()) {
+    staged->planning = false;
+  }
   return staged->sample(effect, cpu.reg);
 }
 
