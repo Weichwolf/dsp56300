@@ -362,6 +362,8 @@ struct Buffers {
   std::span<Word> program, x, y;
 };
 
+class Memory;
+
 // Linux virtual address reservation: 192 MiB of zero-on-demand memory, without
 // touching cold pages. Only actually accessed pages contribute to the working set.
 class MemoryArena {
@@ -373,6 +375,7 @@ public:
   MemoryArena(MemoryArena &&) noexcept;
   MemoryArena &operator=(MemoryArena &&) noexcept;
   [[nodiscard]] Buffers buffers() const noexcept;
+  [[nodiscard]] Memory memory() const;
 
 private:
   struct Impl;
@@ -383,6 +386,8 @@ private:
 // The public header deliberately exposes no native dependency types.
 class Core {
 public:
+  explicit Core(Memory memory, Io *io = nullptr, Options options = {});
+  // Raw-view compatibility entry; new integrations use Memory explicitly.
   explicit Core(Buffers buffers, Io *io = nullptr, Options options = {});
   // External memory owner supplies every real P/X/Y/peripheral transfer.
   // A pure known code view enables ordinary native execution. Staged interfaces

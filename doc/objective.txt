@@ -110,3 +110,8 @@ functional firmware experiments and performance work. Until the integrating
 firmware runs in real time, run focused Release correctness/native-path checks
 and defer extensive sanitizer matrices and broad regression campaigns. Retain
 strict compiler diagnostics and record the deferred validation scope.
+
+Public setup follows Core(Memory, Io*, Options): explicit typed borrowed views,
+named unified/separate/partition/external layouts and owned MemoryArena views.
+Keep native architectural units, physical aliases and owner lifetimes explicit.
+No general virtual memory manager belongs in ordinary direct-RAM execution.

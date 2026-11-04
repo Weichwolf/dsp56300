@@ -3,6 +3,7 @@
 
 #include "architecture.hpp"
 #include "core_impl.hpp"
+#include "dsp56300/memory.hpp"
 #include "execution_guard.hpp"
 #include "hidden_retirement.hpp"
 #include "instruction.hpp"
@@ -23,6 +24,13 @@ Options select(Options options) {
     options.backend = detail::Jit::available() ? Backend::jit : Backend::cached;
   }
   return options;
+}
+
+Buffers bind_memory(const Memory memory, Io *const io) {
+  if (memory.externally_owned() && io == nullptr) {
+    throw std::invalid_argument("External DSP memory requires an I/O owner");
+  }
+  return memory.storage();
 }
 
 Buffers validate(const Buffers buffers, const Options options, const bool external) {
@@ -253,15 +261,16 @@ void Core::Impl::step_decoded(const detail::Instruction &decoded) {
   if (fault.kind == FaultKind::none) { retire_instruction(decoded.cycles); }
 }
 
-Core::Core(const Buffers buffers, Io *const io, const Options options)
-    : impl_(std::make_unique<Impl>(buffers, io, options)) {
+Core::Core(const Memory memory, Io *const io, const Options options)
+    : impl_(
+          std::make_unique<Impl>(bind_memory(memory, io), io, options, memory.externally_owned())) {
   reset();
 }
 
-Core::Core(Io &bus, const Options options)
-    : impl_(std::make_unique<Impl>(Buffers{}, &bus, options, true)) {
-  reset();
-}
+Core::Core(const Buffers buffers, Io *const io, const Options options)
+    : Core(Memory::separate(buffers), io, options) {}
+
+Core::Core(Io &bus, const Options options) : Core(Memory::external(), &bus, options) {}
 
 Core::~Core() = default;
 

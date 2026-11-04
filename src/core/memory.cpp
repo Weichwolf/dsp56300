@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "dsp56300/memory.hpp"
+
 #include "dsp56300/core.hpp"
 
 #include <cerrno>
@@ -50,5 +52,9 @@ Buffers MemoryArena::buffers() const noexcept {
   return {.program = impl_->words.first(address_words),
           .x = impl_->words.subspan(address_words, address_words),
           .y = impl_->words.subspan(address_words * 2, address_words)};
+}
+
+Memory MemoryArena::memory() const {
+  return Memory::separate(buffers());
 }
 } // namespace dsp56300

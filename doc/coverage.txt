@@ -414,9 +414,12 @@ working-set and cache evidence on real programs is required.
 
 Memory, events and integration: explicit contracts, incomplete integration
 
-Consumers use ordinary DSP56300 headers, caller-owned buffers or MemoryArena,
-events and synchronous I/O. Bounds, word masks, aliases, host writes and code
-invalidation are explicit. Peripheral replies/reset acceptance are not invented.
+Consumers use Core(Memory, Io*, Options) with typed borrowed P/X/Y views or
+MemoryArena::memory(), events and synchronous I/O. The separate/unified/partition
+layouts make host storage ownership and physical aliases explicit; external()
+requires a real Io owner. See memory.txt and memory-api-reference.json. Bounds,
+word masks, aliases, host writes and code invalidation are explicit. Peripheral
+replies/reset acceptance are not invented.
 Single-thread ownership/stopped mutation remains required; a register view alone
 is not a cache/REP/vector checkpoint. See doc/io.txt for callback/fault state,
 reentry, mutation, ordering and ownership contracts.
@@ -438,8 +441,9 @@ cover three backend selections, six publication modes, 18 snapshots and 36
 original/fresh continuations with exact register/I/O/count and stale-ticket
 expectations. This preserves effect capacity and does not qualify real-time use.
 Core(Io&) also executes ordinary synchronous budgets through actual P/X/Y and
-peripheral callbacks, preserving architectural cache/REP/vector latches. No native
-JIT is constructed for external storage. Host read/load/write remain span-only.
+peripheral callbacks, preserving architectural cache/REP/vector latches. Native
+external execution now uses the explicit program/window grants described in
+native-io.txt; the earlier no-JIT limitation is superseded.
 The external-memory gate has74526 independent assertions/profile:literal access
 prefixes and60 refusals,24 direct X/Y port cases, buffer-read failure, cache128/256,
 burst faults, mixed ordinary/staged ownership and trusted continuations. Three
