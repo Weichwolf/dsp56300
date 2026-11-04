@@ -118,7 +118,7 @@ struct Core::Impl {
   void transfer_status(Word flags, std::optional<unsigned> source_register);
   [[nodiscard]] detail::Instruction captured_instruction(Word address) const;
   [[nodiscard]] Word sample_instruction(InstructionEffect effect) const;
-  [[nodiscard]] bool perform_instruction(InstructionEffect effect, Word &response) const;
+  [[nodiscard]] bool perform_instruction(const InstructionEffect &effect, Word &response) const;
   void validate_staged_mutation() const;
   void invalidate_effect_tickets();
   [[nodiscard]] std::span<Word> area(Space space) const;

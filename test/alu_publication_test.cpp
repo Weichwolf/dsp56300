@@ -12,8 +12,14 @@ namespace {
 constexpr unsigned seed_count = 6;
 constexpr Word full_instruction = 0x200000;
 constexpr Word maxm = 0x15, maximum = 0x1d;
-constexpr std::array modes{
-    Word{0}, mode_down, mode_up, mode_rm, mode_rm | mode_down, mode_rm | mode_up};
+constexpr std::array modes{Word{0},
+                           mode_down,
+                           mode_up,
+                           mode_rm,
+                           mode_rm | mode_down,
+                           mode_rm | mode_up,
+                           mode_down | mode_up,
+                           mode_rm | mode_down | mode_up};
 constexpr std::array ordinary{
     Word{0x01}, Word{0x11}, Word{0x13}, Word{0x26}, Word{0x36}, Word{0x22}, Word{0x32}, Word{0x17},
     Word{0x23}, Word{0x33}, Word{0x27}, Word{0x37}, Word{0x03}, Word{0x05}, Word{0x15}, Word{0x1d},

@@ -30,7 +30,7 @@ detail::Instruction decoded_words(const InstructionWords words, const bool compl
   return decoded;
 }
 
-FaultKind rejected_effect(const InstructionEffect effect) {
+FaultKind rejected_effect(const InstructionEffect &effect) {
   switch (effect.kind) {
     case EffectKind::read:
     case EffectKind::fetch_opcode:
@@ -185,9 +185,9 @@ InstructionProgress Core::advance_instruction(const EffectTicket &ticket) {
   }
   const detail::ExecutionGuard guard(impl_->executing);
   auto &work = *impl_->staged;
-  const auto selected = work.pending;
+  const auto &selected = work.pending;
   if (!selected) { throw std::logic_error("Instruction lost its selected effect"); }
-  const auto effect = *selected;
+  const auto &effect = *selected;
   if (effect.kind == EffectKind::retire) {
     if (!work.complete) { throw std::logic_error("Retirement lost its native computation"); }
     impl_->retire_owned();
@@ -222,8 +222,10 @@ InstructionProgress Core::advance_instruction(const EffectTicket &ticket) {
     work.pending.reset();
     return {.progress = progress(), .fault = fault()};
   }
-  work.records.at(work.used++) = {.effect = effect, .response = response};
-  impl_->resume_instruction(effect);
+  auto &accepted = work.records.at(work.used++);
+  accepted = {.effect = effect, .response = response};
+  // Recalculation replaces pending; the accepted ledger entry remains stable.
+  impl_->resume_instruction(accepted.effect);
   return {.pending = pending_instruction(), .progress = progress(), .fault = fault()};
 }
 

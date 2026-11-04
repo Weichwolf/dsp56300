@@ -111,7 +111,7 @@ std::exception_ptr Core::Impl::compute_attempt() {
   return error;
 }
 
-bool Core::Impl::perform_instruction(const InstructionEffect effect, Word &response) const {
+bool Core::Impl::perform_instruction(const InstructionEffect &effect, Word &response) const {
   if (io == nullptr) { return false; }
   switch (effect.kind) {
     case EffectKind::read:

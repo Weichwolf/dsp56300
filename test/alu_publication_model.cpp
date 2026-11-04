@@ -119,6 +119,7 @@ Registers seed(const unsigned index) {
 
 Expected expected(const Registers &before, const Word code) {
   Expected output{.state = before, .destination_b = (code & 8U) != 0};
+  output.supported = (before.sr & (mode_down | mode_up)) != (mode_down | mode_up);
   const auto operation = code & operation_mask;
   const auto kind = code & 7U;
   const auto selector = (code >> 4) & 7U;
@@ -130,7 +131,6 @@ Expected expected(const Registers &before, const Word code) {
     return output;
   }
   if (code == op_max || code == op_maxm) {
-    output.supported = (before.sr & sm) == 0;
     maximum(output, before, code);
     return output;
   }
@@ -141,7 +141,6 @@ Expected expected(const Registers &before, const Word code) {
   }
   auto result = arithmetic(before, code);
   output.write_data = !result.compare;
-  output.supported = !result.compare || (before.sr & sm) == 0;
   const auto limited = saturation_model::apply(
       static_cast<std::uint64_t>(result.full) & accumulator_mask,
       {.status = before.sr, .rounded = operation == op_round || ((code & 0x81U) == 0x81U)});

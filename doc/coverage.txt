@@ -1302,3 +1302,16 @@ all other bytes and the mixed/saturation archives remain identical. Public SDK
 and checkpoint layout are unchanged. See fused-rounding.txt and its reference
 record for the qualified sanitizer scope. This is component evidence; complete
 ISA, physical timing and connected-instrument correctness remain partial.
+
+Owned-effect copy cost
+
+Read-only owner dispatch and pending selection now borrow actual stored effects.
+Resumption uses the immutable accepted ledger entry, preserving its lifetime
+when computation replaces pending. All ownership/capacity/refusal checks and
+public SDK/checkpoint fields remain unchanged; the already optimized sample
+tail-call is retained. The focused staged/publication/checkpoint/native-boundary
+checks and shared three-domain API microfixtures define this component scope.
+The host ALU matrix now uses its existing independent SM expectations and adds
+reserved-scaling refusal controls instead of retaining obsolete SM rejections.
+See staged-copy.txt and staged-copy-reference.json for final qualification and
+measurement limits. No ISA row or connected-instrument milestone becomes complete.
