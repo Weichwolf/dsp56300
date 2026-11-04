@@ -42,9 +42,9 @@ inline void rounded(Arithmetic &result, const Word status) {
   const unsigned bits =
       word_bits + ((status & mode_down) != 0 ? 1U : 0U) - ((status & mode_up) != 0 ? 1U : 0U);
   const auto unit = std::int64_t{1} << bits;
-  const auto wrapped = signed56(static_cast<std::uint64_t>(result.full) & accumulator_mask);
-  auto quotient = wrapped / unit;
-  auto remainder = wrapped % unit;
+  const auto widened = result.full;
+  auto quotient = widened / unit;
+  auto remainder = widened % unit;
   if (remainder < 0) {
     --quotient;
     remainder += unit;
@@ -54,7 +54,7 @@ inline void rounded(Arithmetic &result, const Word status) {
     ++quotient;
   }
   result.full = quotient * unit;
-  result.overflow = result.overflow || overflowed(result.full);
+  result.overflow = overflowed(result.full);
 }
 
 inline Arithmetic multiplication(const Registers &old, const Word alu) {
@@ -139,7 +139,7 @@ inline void alu(Registers &state, const Registers &old, const Word opcode) {
       result.full = value;
       rounded(result, old.sr);
     }
-    result.overflow = result.overflow || overflowed(result.full);
+    result.overflow = overflowed(result.full);
   } else {
     result = addition(old, code);
   }

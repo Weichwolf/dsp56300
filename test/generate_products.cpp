@@ -178,10 +178,11 @@ void model(Registers &state, const Input input) {
   if (overflowed) { ++witnessed.sum_overflow; }
   auto raw = static_cast<std::uint64_t>(full) & accumulator_mask;
   if (input.rounded) {
-    full = quantize({.value = signed56(raw), .status = state.sr});
-    const bool round_overflow = full < minimum56 || full > maximum56;
-    if (round_overflow) { ++witnessed.round_overflow; }
-    overflowed = overflowed || round_overflow;
+    const auto wrap_delta = full - signed56(raw);
+    full = quantize({.value = full, .status = state.sr});
+    const auto isolated_round = full - wrap_delta;
+    if (isolated_round < minimum56 || isolated_round > maximum56) { ++witnessed.round_overflow; }
+    overflowed = full < minimum56 || full > maximum56;
     raw = static_cast<std::uint64_t>(full) & accumulator_mask;
   }
   const bool saturates = input.family == Family::immediate || input.family == Family::power ||

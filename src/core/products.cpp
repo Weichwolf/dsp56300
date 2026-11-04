@@ -4,6 +4,7 @@
 #include "dsp56300/core.hpp"
 #include "fields.hpp"
 #include "instruction.hpp"
+#include "rounding.hpp"
 
 #include <array>
 #include <bit>
@@ -108,16 +109,18 @@ void Core::Impl::execute_product(const Instruction &decoded) {
   mark_alu_accumulator(product.destination_b);
   destination = wrapped_add(initial, term);
   const bool overflowed = ((initial ^ destination) & (term ^ destination)) >> host_sign_bit != 0;
-  arithmetic_flags(destination, overflowed);
   if (product.rounded) {
-    round(destination);
-    if (overflowed) {
-      mark_alu(RegisterStorage::sr, overflow | limit);
-      cpu.reg.sr |= overflow | limit;
+    const auto result = round_value(
+        {.value = destination, .status = cpu.reg.sr, .arithmetic_overflow = overflowed});
+    destination = result.value;
+    arithmetic_flags(destination, result.overflowed);
+    if ((cpu.reg.sr & arithmetic_saturation) != 0) { saturate_arithmetic(destination, true); }
+  } else {
+    arithmetic_flags(destination, overflowed);
+    if ((cpu.reg.sr & arithmetic_saturation) != 0 &&
+        (ordinary || (decoded.operation == Operation::product_double && sign_mode == 0))) {
+      saturate_arithmetic(destination);
     }
-  } else if ((cpu.reg.sr & arithmetic_saturation) != 0 &&
-             (ordinary || (decoded.operation == Operation::product_double && sign_mode == 0))) {
-    saturate_arithmetic(destination);
   }
 }
 } // namespace dsp56300

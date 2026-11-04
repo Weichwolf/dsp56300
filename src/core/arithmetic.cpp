@@ -2,6 +2,7 @@
 #include "architecture.hpp"
 #include "core_impl.hpp"
 #include "dsp56300/core.hpp"
+#include "rounding.hpp"
 
 #include <array>
 #include <bit>
@@ -94,17 +95,9 @@ Word Core::Impl::transfer_word(const std::uint64_t value,
 }
 
 void Core::Impl::round(std::uint64_t &value) {
-  const unsigned cleared = main_word_shift + ((cpu.reg.sr & scale_down) != 0 ? 1U : 0U) -
-                           ((cpu.reg.sr & scale_up) != 0 ? 1U : 0U);
-  const std::uint64_t half = std::uint64_t{1} << (cleared - 1);
-  const std::uint64_t unit = std::uint64_t{1} << padding_bits;
-  const auto bias = (cpu.reg.sr & rounding_mode) != 0
-                        ? half
-                        : half - unit + (((value >> cleared) & 1) << padding_bits);
-  const auto added = wrapped_add(value, bias);
-  const bool overflowed = signed_overflow(value, bias, added);
-  value = added & ~((std::uint64_t{1} << cleared) - 1);
-  arithmetic_flags(value, overflowed);
+  const auto result = round_value({.value = value, .status = cpu.reg.sr});
+  value = result.value;
+  arithmetic_flags(value, result.overflowed);
   if ((cpu.reg.sr & arithmetic_saturation) != 0) { saturate_arithmetic(value, true); }
 }
 
@@ -147,14 +140,14 @@ void Core::Impl::multiply(const Word opcode) {
   mark_alu_accumulator(destination_b);
   destination = wrapped_add(initial, term);
   const bool overflowed = signed_overflow(initial, term, destination);
-  arithmetic_flags(destination, overflowed);
   if ((opcode & 1U) != 0) {
-    round(destination);
-    if (overflowed) {
-      mark_alu(RegisterStorage::sr, overflow | limit);
-      cpu.reg.sr |= overflow | limit;
-    }
+    const auto result = round_value(
+        {.value = destination, .status = cpu.reg.sr, .arithmetic_overflow = overflowed});
+    destination = result.value;
+    arithmetic_flags(destination, result.overflowed);
+    if ((cpu.reg.sr & arithmetic_saturation) != 0) { saturate_arithmetic(destination, true); }
   } else {
+    arithmetic_flags(destination, overflowed);
     if ((cpu.reg.sr & arithmetic_saturation) != 0) { saturate_arithmetic(destination); }
   }
 }

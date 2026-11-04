@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Helper-forbidden RX execution against independent raw-width SM expectations.
 #include "architecture.hpp"
+#include "bfu_logic_model.hpp"
 #include "dsp56300/core.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
@@ -17,6 +18,7 @@
 #include <exception>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -74,6 +76,36 @@ std::vector<detail::NativeOp> operations(const std::span<const Step> steps, cons
   return result;
 }
 
+std::optional<bfu_model::Input> logical_input(const Word code) {
+  struct Form {
+    Word code;
+    bfu_model::Function function;
+    unsigned source;
+  };
+  using enum bfu_model::Function;
+  // Independent instruction coordinates: X0/X1/Y0/Y1, then unary NOT.
+  constexpr std::array forms{Form{.code = 0x46, .function = bit_and, .source = 0},
+                             Form{.code = 0x66, .function = bit_and, .source = 1},
+                             Form{.code = 0x56, .function = bit_and, .source = 2},
+                             Form{.code = 0x76, .function = bit_and, .source = 3},
+                             Form{.code = 0x42, .function = bit_or, .source = 0},
+                             Form{.code = 0x62, .function = bit_or, .source = 1},
+                             Form{.code = 0x52, .function = bit_or, .source = 2},
+                             Form{.code = 0x72, .function = bit_or, .source = 3},
+                             Form{.code = 0x43, .function = bit_xor, .source = 0},
+                             Form{.code = 0x63, .function = bit_xor, .source = 1},
+                             Form{.code = 0x53, .function = bit_xor, .source = 2},
+                             Form{.code = 0x73, .function = bit_xor, .source = 3},
+                             Form{.code = 0x17, .function = complement, .source = 0}};
+  for (const auto form : forms) {
+    if ((code & alu_destination_mask) == form.code) {
+      return bfu_model::Input{
+          .function = form.function, .source = form.source, .destination_b = (code & 8U) != 0};
+    }
+  }
+  return std::nullopt;
+}
+
 void model(Registers &state, const Step step) {
   if (step.word < parallel_none) {
     auto old = state;
@@ -82,7 +114,12 @@ void model(Registers &state, const Step step) {
     saturation_model::alu(state, old, 0x40U | (step.word & 15U));
     state.pc += extended ? 2U : 1U;
   } else {
-    saturation_model::alu(state, state, step.word);
+    if (const auto logical = logical_input(step.word & status_byte)) {
+      const auto old = state;
+      bfu_model::apply(state, old, *logical);
+    } else {
+      saturation_model::alu(state, state, step.word);
+    }
     ++state.pc;
   }
 }
@@ -155,7 +192,7 @@ bool admitted(const Word code) {
   constexpr std::array<Word, 27> unary_and_sums{
       0x01, 0x11, 0x13, 0x26, 0x36, 0x41, 0x51, 0x61, 0x71, 0x10, 0x14, 0x20, 0x24, 0x30,
       0x34, 0x40, 0x44, 0x50, 0x54, 0x60, 0x64, 0x70, 0x74, 0x21, 0x25, 0x31, 0x35};
-  return code >= 0x80 ||
+  return code >= 0x80 || logical_input(code).has_value() ||
          std::ranges::find(unary_and_sums, code & alu_destination_mask) != unary_and_sums.end();
 }
 

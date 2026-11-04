@@ -645,9 +645,10 @@ Selected native saturation qualification
 The native compiler now intersects its existing admission with an explicit SM
 whitelist. Ordinary parallel signed arithmetic/rounding, documented bypass
 transfers and immediate ADD/SUB lower directly to x64. A branchless three-bit
-limiter follows rounding, preserves raw carry/overflow, and commits the exact
-stored value before ordinary flags. Sticky L still records every intermediate
-limiting event even when result flags are overwritten. SM-clear arithmetic emits
+limiter follows rounding, preserves the applicable carry/final overflow, and
+commits the exact stored value before ordinary flags. Sticky L records actual
+limiting events even when result flags are overwritten. Fused MACR uses final
+widened rounded overflow; opposite accumulation/rounding wraps cancel. SM-clear arithmetic emits
 no new limiting instructions. Existing modes, old operands, RAM bounds/aliases,
 callbacks, P invalidation, progress and dirty-state checkpoints remain explicit.
 Other qualified SM domains retain general execution; unqualified forms and
@@ -1289,3 +1290,15 @@ processes, with all state/counters checked and raw variation retained. This is
 isolated arithmetic, not connected firmware, general throughput or instrument
 realtime qualification. See native-repeat.txt and native-repeat-reference.json.
 All ISA rows and the complete objective remain partial.
+
+Fused MACR rounding boundary
+
+General and native execution use the final widened rounded overflow, preserving
+incoming sticky L and subsequent SM limiting. Independent widened mathematics,
+5185 authored fixture cases, literal native/publication controls and 120 private
+manufacturer-software inputs distinguish fused cancellation from standalone
+MAC/RND overflow. Exactly 224 old immediate/power expected SR values change;
+all other bytes and the mixed/saturation archives remain identical. Public SDK
+and checkpoint layout are unchanged. See fused-rounding.txt and its reference
+record for the qualified sanitizer scope. This is component evidence; complete
+ISA, physical timing and connected-instrument correctness remain partial.

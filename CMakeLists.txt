@@ -133,6 +133,9 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
     target_link_libraries(dsp56300_value_range_test PRIVATE dsp56300::core)
     target_include_directories(dsp56300_value_range_test PRIVATE src/core src/jit test)
     add_test(NAME native-value-ranges COMMAND dsp56300_value_range_test)
+    add_executable(dsp56300_fused_rounding_test test/fused_rounding_test.cpp)
+    target_link_libraries(dsp56300_fused_rounding_test PRIVATE dsp56300::core)
+    add_test(NAME native-fused-product-flags COMMAND dsp56300_fused_rounding_test)
     add_executable(dsp56300_native_product_test test/native_product_test.cpp test/native/direct.cpp)
     target_link_libraries(dsp56300_native_product_test PRIVATE dsp56300::core)
     target_include_directories(dsp56300_native_product_test PRIVATE src/core src/jit src/jit/x64 test)
@@ -422,6 +425,15 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   target_link_libraries(dsp56300_generate_normalization PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_viterbi test/generate_viterbi.cpp)
   target_link_libraries(dsp56300_generate_viterbi PRIVATE dsp56300_fixture_format)
+  add_executable(dsp56300_generate_fused_rounding test/generate_fused_rounding.cpp)
+  target_link_libraries(dsp56300_generate_fused_rounding PRIVATE dsp56300_fixture_format)
+  add_test(NAME fused-rounding-fixtures COMMAND dsp56300_fixture_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/fused-rounding.d56")
+  add_test(NAME fused-rounding-reproducibility COMMAND "${CMAKE_COMMAND}"
+    "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_fused_rounding>"
+    "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/fused-rounding-regenerated.d56"
+    "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/fused-rounding.d56"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/test/reproduce_fixture.cmake")
   add_executable(dsp56300_generate_products test/generate_products.cpp)
   target_link_libraries(dsp56300_generate_products PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_loop_control test/generate_loop_control.cpp)
@@ -430,7 +442,7 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   target_link_libraries(dsp56300_generate_bit_fields PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_alu_fixture_test test/alu_fixture_test.cpp)
   target_link_libraries(dsp56300_alu_fixture_test PRIVATE dsp56300::core dsp56300_fixture_format)
-  foreach(archive arithmetic addition saturation iteration normalization products-immediate products-mixed bit-fields bfu-logic-sm bfu-shifts-sm selection)
+  foreach(archive arithmetic addition saturation iteration normalization products-immediate products-mixed fused-rounding bit-fields bfu-logic-sm bfu-shifts-sm selection)
     add_test(NAME alu-publication-${archive} COMMAND dsp56300_alu_fixture_test
       "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/${archive}.d56")
   endforeach()
@@ -438,7 +450,7 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
     add_test(NAME unit-publication-${archive} COMMAND dsp56300_alu_fixture_test --units
       "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/${archive}.d56")
   endforeach()
-  foreach(archive arithmetic addition saturation iteration normalization products-immediate products-mixed bit-fields bfu-logic-sm bfu-shifts-sm selection bit-access bit-branches control-bytes address-calculations)
+  foreach(archive arithmetic addition saturation iteration normalization products-immediate products-mixed fused-rounding bit-fields bfu-logic-sm bfu-shifts-sm selection bit-access bit-branches control-bytes address-calculations)
     add_test(NAME captured-pcu-publication-${archive} COMMAND dsp56300_alu_fixture_test --captured-pcu
       "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/${archive}.d56")
   endforeach()

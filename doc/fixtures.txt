@@ -954,3 +954,17 @@ after mode admission; it is not converted to a valid input. Complete serialized
 record auditing verifies every original input and unrelated byte; the other 52 old
 archives stay identical. See bfu-logic.txt. These are correctness microfixtures,
 not continuous-work throughput or full-ISA/physical timing qualification.
+
+Fused rounded products
+
+  build/release/dsp56300_generate_fused_rounding build/fused-rounding.d56
+
+The producer links only the fixture format. Its 5185 authored cases quantize
+widened signed sums with quotient/remainder arithmetic, covering parallel,
+immediate and power MACR, standalone MAC/RND controls, both accumulators,
+product signs, three scales, both RM values, SM and incoming sticky flags.
+Fused overflow is measured after rounding; an accumulation wrap followed by
+an opposite rounding wrap cancels. Ordinary MAC and isolated RND retain their
+real overflow. Separate literal tests require native execution without helpers,
+exact budgets and correct publication through all six captured policies.
+See fused-rounding.txt for independent software/math evidence and limits.

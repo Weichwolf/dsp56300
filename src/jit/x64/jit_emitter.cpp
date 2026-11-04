@@ -32,7 +32,7 @@ using x64::Width;
 constexpr auto pc_offset = offsetof(Cpu, reg) + offsetof(Registers, pc);
 constexpr std::array register_offsets{
     offsetof(Registers, a), offsetof(Registers, b), offsetof(Registers, x), offsetof(Registers, y)};
-constexpr unsigned op_add = 0x01, op_sub = 0x29, op_or = 0x09, op_xor = 0x31, op_cmp = 0x39;
+constexpr unsigned op_add = 0x01, op_sub = 0x29, op_xor = 0x31, op_cmp = 0x39;
 constexpr unsigned group_and = 4, group_cmp = 7;
 constexpr unsigned shift_left = 4, shift_right = 5, shift_arithmetic = 7;
 constexpr unsigned condition_overflow = 0x90;
@@ -275,7 +275,8 @@ void JitEmitter::round(const Word mode) {
   code_.binary(op_add, {.destination = Reg::ax, .source = Reg::r11});
   if (value_proof_.rounding_overflow) {
     code_.set(condition_overflow, Reg::dx);
-    code_.binary(op_or, {.destination = Reg::r10, .source = Reg::dx}, Width::dword);
+    // The two opposite signed wraps cancel in the fused rounded result.
+    code_.binary(op_xor, {.destination = Reg::r10, .source = Reg::dx}, Width::dword);
   }
   code_.shift(shift_right, Reg::ax, cleared);
   code_.shift(shift_left, Reg::ax, cleared);
