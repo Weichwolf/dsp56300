@@ -9,6 +9,7 @@
 #include "jit.hpp"
 #include "native_moves.hpp"
 #include "native_region.hpp"
+#include "translation.hpp"
 #include "value_ranges.hpp"
 #include "word_reuse.hpp"
 #include "x64.hpp"
@@ -343,6 +344,10 @@ void JitEmitter::native(const NativeOp &operation) {
 }
 
 void JitEmitter::retire(const NativeOp &operation, const bool publish) {
+  if (repeat_mode_) {
+    repeat_retire(operation);
+    return;
+  }
   if (at_loop_end(operation)) {
     loop_continue();
   } else if (publish) {
@@ -370,6 +375,48 @@ void JitEmitter::retire(const NativeOp &operation, const bool publish) {
       code_.jump(exits_.at(dirty_accumulators()));
     }
   }
+}
+
+std::vector<std::uint8_t> JitEmitter::generate_repeat(const NativeOp &operation) {
+  if (operation.loop_address != inactive_loop || operation.instruction.words != 1 ||
+      !repeatable(operation.instruction.operation) || !lowerable(operation)) {
+    return {};
+  }
+  repeat_mode_ = true;
+  region_mode_ = RegionMode::ordinary;
+  const std::array operations{operation};
+  return generate_body(operations);
+}
+
+void JitEmitter::repeat_retire(const NativeOp &operation) {
+  constexpr auto lc = offsetof(Cpu, reg) + offsetof(Registers, lc);
+  constexpr unsigned group_sub = 5;
+  code_.store_constant(
+      Reg::r12, offsetof(Cpu, repeat_opcode), Width::dword, operation.instruction.opcode);
+  code_.store_constant(Reg::r12, offsetof(Cpu, repeat_loaded), Width::byte, 1);
+  code_.store_constant(Reg::r12, offsetof(Cpu, interrupt_inhibited), Width::byte, 0);
+  retire_progress(operation);
+  code_.raw(increment_retired);
+  code_.memory_immediate(group_sub, Reg::r12, offsetof(Cpu, repeat_remaining), Width::dword, 1);
+  x64::Label completed;
+  code_.jump_if(Branch::equal, completed);
+  code_.load(Reg::ax, Reg::r12, offsetof(Cpu, repeat_remaining), Width::dword);
+  code_.store(Reg::r12, lc, Reg::ax, Width::dword);
+  code_.store_constant(Reg::r12, pc_offset, Width::dword, operation.pc);
+  code_.load(Reg::ax, Reg::r13, offsetof(NativeContext, budget), Width::dword);
+  code_.binary(op_cmp, {.destination = Reg::r15, .source = Reg::ax}, Width::dword);
+  exit_if(Branch::above_equal);
+  // A later RAM guard can fail at the header's zero-dirty exit. Publish the
+  // completed iteration before that edge; the rejected body has no effects.
+  flush_accumulators(dirty_accumulators());
+  code_.jump(loop_header_);
+  code_.bind(completed);
+  code_.load(Reg::ax, Reg::r12, offsetof(Cpu, repeat_lc), Width::dword);
+  code_.store(Reg::r12, lc, Reg::ax, Width::dword);
+  code_.store_constant(Reg::r12, offsetof(Cpu, repeat_loaded), Width::byte, 0);
+  code_.store_constant(Reg::r12, offsetof(Cpu, repeat_completed), Width::byte, 1);
+  code_.store_constant(Reg::r12, pc_offset, Width::dword, (operation.pc + 1) & word_mask);
+  code_.jump(exits_.at(dirty_accumulators()));
 }
 
 std::vector<std::uint8_t> JitEmitter::generate_body(const std::span<const NativeOp> operations) {

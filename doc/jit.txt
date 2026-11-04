@@ -131,7 +131,9 @@ headers, with exact post-admission exit publication. A private full-bank SSE2
 experiment is correct but measured slower and is not automatic; see loop-residency.txt. Flags, PC, progress, dynamic LC/SP/frame reads, callback ordering
 and fault observations keep their per-instruction semantics. The optimization
 reduces dispatcher/entry/exit work, not guest retirement or elapsed DSP time.
-REP bodies use their original latched general execution path.
+Eligible one-word REP bodies now have a separate native loop preserving the
+real retained opcode, count and saved LC. Other bodies retain general execution;
+see native-repeat.txt for exact guard and owner boundaries.
 
 Within a native block, RBP/RBX retain A/B. Native ALU writes update these host
 registers and mark them dirty instead of storing every result to Cpu. Reads do

@@ -351,10 +351,13 @@ RunResult Core::run(const std::uint32_t instruction_budget) {
   impl_->yield_requested = false;
   while (result.dispatches < instruction_budget && !impl_->yield_requested &&
          fault().kind == FaultKind::none && impl_->cpu.processing == ProcessingState::running) {
-    if (impl_->cpu.repeat_remaining == 0 && impl_->vector.phase == Impl::VectorPhase::none &&
-        !impl_->instruction_cache_active() &&
+    if (impl_->vector.phase == Impl::VectorPhase::none && !impl_->instruction_cache_active() &&
         (impl_->cpu.debug_flags & detail::debug_interrupt_pending) == 0) {
-      const auto retired = impl_->jit->run(instruction_budget - result.dispatches);
+      const auto remaining = instruction_budget - result.dispatches;
+      const auto retired =
+          impl_->cpu.repeat_remaining != 0
+              ? impl_->run_repeat_native({.instructions = remaining, .cycles = ~std::uint64_t{0}})
+              : impl_->jit->run(remaining);
       result.dispatches += retired;
       if (retired != 0 || fault().kind != FaultKind::none) { continue; }
     }

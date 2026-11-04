@@ -65,7 +65,8 @@ are qualified separately by the directed correctness cases.
 These are memory/helper diagnostics, not complete-domain, derivative-clock or
 connected-instrument throughput. Qualification and exact scope are recorded in
 memory-windows-reference.json. Whole-application performance, external guarded
-region admission and native REP expansion remain separate work.
+region admission remain separate work. Native REP window guards and retained
+body execution are described separately in native-repeat.txt.
 
 An isolated Release run at revision 6ffcd0a compares identical programs with
 callbacks or native windows. Three samples of 1048576 instructions per mode/kernel

@@ -7,6 +7,7 @@
 #include "instruction_boundary.hpp"
 #include "jit.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -56,6 +57,34 @@ std::optional<RunStop> Core::Impl::budget_stop(const RunBudget budget,
   return std::nullopt;
 }
 
+std::uint32_t Core::Impl::run_repeat_native(const RunBudget budget) {
+  const auto decoded = budget_instruction();
+  if (!decoded || decoded->words != 1 || !detail::repeatable(decoded->operation) ||
+      decoded->cycles == 0) {
+    return 0;
+  }
+  auto count = std::min(budget.instructions, cpu.repeat_remaining);
+  // REP completion at a DO ending must perform genuine frame cleanup. Keep
+  // that last instruction in the owner until native cleanup is qualified.
+  if ((cpu.reg.sr & detail::loop_flag) != 0 && cpu.reg.pc == cpu.reg.la) {
+    count = std::min(count, cpu.repeat_remaining - 1);
+  }
+  count =
+      static_cast<std::uint32_t>(std::min(std::uint64_t{count}, budget.cycles / decoded->cycles));
+  const auto retired = jit->run_repeat(
+      {.instruction = *decoded, .pc = cpu.reg.pc, .mode = cpu.reg.sr & detail::numeric_mode_mask},
+      count);
+  // The native guard may reject before its first effect. Only a retired body
+  // latches the decoded opcode; subsequent owner fallback must see that latch.
+  if (retired != 0) { repeated = *decoded; }
+  return retired;
+}
+
+std::uint32_t Core::Impl::run_bounded_native(const RunBudget budget) {
+  return cpu.repeat_remaining != 0 ? run_repeat_native(budget)
+                                   : jit->run_bounded(budget.instructions, budget.cycles);
+}
+
 BoundedRunResult Core::Impl::run_bounded(const RunBudget budget) {
   BoundedRunResult result;
   const auto before = cpu.cycles;
@@ -67,9 +96,9 @@ BoundedRunResult Core::Impl::run_bounded(const RunBudget budget) {
     }
     const auto instructions = budget.instructions - result.execution.dispatches;
     const auto cycles = budget.cycles - result.cycles;
-    if (jit && !bounded_memory_blocked && cpu.repeat_remaining == 0 &&
-        !instruction_cache_active() && (cpu.debug_flags & detail::debug_interrupt_pending) == 0) {
-      const auto retired = jit->run_bounded(instructions, cycles);
+    if (jit && !bounded_memory_blocked && !instruction_cache_active() &&
+        (cpu.debug_flags & detail::debug_interrupt_pending) == 0) {
+      const auto retired = run_bounded_native({.instructions = instructions, .cycles = cycles});
       result.execution.dispatches += retired;
       if (retired != 0 || fault.kind != FaultKind::none || yield_requested) { continue; }
     }

@@ -137,6 +137,7 @@ struct Jit::Impl {
   Options options;
   std::unordered_map<std::uint64_t, std::unique_ptr<Block>> blocks;
   JitStatistics statistics;
+  std::optional<NativeOp> rejected_repeat;
   bool invalidated = false;
   bool exit_requested = false;
   NativeContext context;
@@ -226,6 +227,7 @@ void Jit::bind_windows(const std::array<std::span<const MemoryWindow>, 2> window
 
 void Jit::reset() {
   impl_->blocks.clear();
+  impl_->rejected_repeat.reset();
   impl_->statistics = {};
   impl_->invalidated = false;
   impl_->exit_requested = false;
@@ -305,6 +307,54 @@ std::uint32_t Jit::run(const std::uint32_t budget) {
   if (block == nullptr) { return 0; }
   block = self.prefix(*block, budget);
   return block != nullptr ? self.enter(*block, budget) : 0;
+}
+
+std::uint32_t Jit::run_repeat(const NativeOp operation, const std::uint32_t budget) {
+  auto &self = *impl_;
+  if (budget == 0 || self.cpu.repeat_remaining == 0 || !self.options.optimize) { return 0; }
+  if (self.invalidated) {
+    self.blocks.clear();
+    self.statistics.executable_bytes = 0;
+    self.invalidated = false;
+  }
+  self.exit_requested = false;
+  if (self.rejected_repeat && self.rejected_repeat->instruction == operation.instruction &&
+      self.rejected_repeat->mode == operation.mode && self.rejected_repeat->pc == operation.pc &&
+      self.rejected_repeat->loop_address == operation.loop_address) {
+    return 0;
+  }
+  constexpr auto repeat_tag = std::uint64_t{1} << 63;
+  const auto key = translation_key(self.cpu.reg) | repeat_tag;
+  auto found = self.blocks.find(key);
+  // A loaded REP body survives backing-P mutation. Reusing the same PC for a
+  // later REP must still distinguish its genuine new opcode from that latch.
+  if (found == self.blocks.end() ||
+      found->second->operations.front().instruction != operation.instruction) {
+    auto block = std::make_unique<Block>();
+    block->operations.push_back(operation);
+    JitEmitter emitter(
+        self.context.runtime, self.options.optimize, self.options.batch_backend, self.cpu.reg.m);
+    const auto bytes = emitter.generate_repeat(block->operations.front());
+    if (bytes.empty()) {
+      self.rejected_repeat = operation;
+      return 0;
+    }
+    block->code = std::make_unique<Executable>(bytes);
+    block->storage_bytes = block->code->size();
+    if (self.statistics.executable_bytes + block->storage_bytes > cache_limit) {
+      self.blocks.clear();
+      self.statistics.executable_bytes = 0;
+      found = self.blocks.end();
+    }
+    if (found != self.blocks.end()) {
+      self.statistics.executable_bytes -= found->second->storage_bytes;
+    }
+    self.statistics.executable_bytes += block->storage_bytes;
+    self.blocks.insert_or_assign(key, std::move(block));
+    ++self.statistics.compiled_blocks;
+    found = self.blocks.find(key);
+  }
+  return self.enter(*found->second, budget);
 }
 
 std::uint32_t Jit::run_bounded(const std::uint32_t instructions, const std::uint64_t cycles) {

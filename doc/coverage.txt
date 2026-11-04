@@ -109,7 +109,8 @@ real owner callbacks handle readonly/executable aliases, holes and peripherals.
 Descriptor revisions and paired restores rebind embedded host pointers. Bounded
 runs admit proved RAM and preserve whole-instruction owner stops on guard failure.
 The authored test and memory-kernel bench share independent full-state models.
-See memory-windows.txt for evidence scope and remaining region/REP/instrument work.
+See memory-windows.txt for remaining region/instrument work and native-repeat.txt
+for native retained-body execution and guard qualification.
 
 Parallel AND/OR/EOR/NOT now lower natively with exact middle-word writes,
 N/Z/V-only flag effects, preserved parallel MOVE state and product-word reuse.
@@ -1264,7 +1265,27 @@ passes 1054 checks in Release, ASan/UBSan and TSan; bounded and MAC fixtures
 retain 15670 and 327560 checks. Twenty affected groups pass per sanitizer profile
 after rebuilding the changed private native context. The previous archive fails
 the new native-path expectation after passing its independent state check.
-See cache-eligibility-reference.json. Native REP bodies, truly cached native
-instructions and connected-instrument performance remain open; no speed factor
+See cache-eligibility-reference.json and the native REP qualification below.
+Truly cached native instructions and connected-instrument performance remain open; no speed factor
 is claimed from these functional tests. All ISA rows and the objective remain
 partial.
+
+
+Native retained REP body execution
+
+Eligible one-word arithmetic/register/guarded-RAM bodies now execute in emitted
+loops under exact instruction/base-cycle budgets, preserving actual retained
+code, LC restore, exclusion and full checkpoint state. Late guards return before
+owner effects and keep the retired prefix. Unsupported bodies retain genuine
+execution with a bounded cached rejection; final DO-ending bodies retain real
+frame cleanup in the general executor. All six public SDK headers are unchanged.
+Release and both sanitizers pass 6536 independent checks, including zero=65536,
+six numeric modes, changed/unknown P, cross-backend restore, RAM knowledge repair,
+owner refusal/yield, stores and DO cleanup. Twenty-three affected groups pass
+per sanitizer profile; the same final test object rejects the previous archive
+only after its independent state expectation passes. The shared three-domain
+benchmark measures 17.19/24.67/28.16 median component ratios in alternating fresh
+processes, with all state/counters checked and raw variation retained. This is
+isolated arithmetic, not connected firmware, general throughput or instrument
+realtime qualification. See native-repeat.txt and native-repeat-reference.json.
+All ISA rows and the complete objective remain partial.

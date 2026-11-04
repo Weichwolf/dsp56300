@@ -56,3 +56,8 @@ independent arithmetic/BFU/register expectations, actual native/helper counters,
 zero/REP/vector previews, accepted/refused owner effects, snapshot P mutation,
 mixed-cost loops and cache-capacity eviction. They do not establish physical
 clock timing, complete ISA, connected firmware startup or instrument throughput.
+
+Eligible latched one-word REP bodies also use native arithmetic/register/RAM
+execution within both limits. The saved opcode survives backing-P mutation;
+rejected operands return before effects and count consumption. Completion at
+an active DO ending retains its final real owner instruction. See native-repeat.txt.

@@ -19,6 +19,10 @@ constexpr unsigned op_test = 0x85, group_and = 4;
 }
 
 void JitEmitter::general_moves(const NativeOp &operation) {
+  if (repeat_mode_) {
+    code_.jump(exits_.at(dirty_accumulators()));
+    return;
+  }
   helper(runtime_.moves, operation);
   code_.binary(op_test, {.destination = Reg::ax, .source = Reg::ax}, Width::dword);
   // helper() materialized all previous results. Preserve the helper's own

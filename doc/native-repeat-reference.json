@@ -1,0 +1,289 @@
+{
+  "qualification": "PASS-component-native",
+  "scope": "Native one-word latched REP bodies with exact budgets, guarded RAM, retained owner/DO cleanup and bounded unsupported-capability cache; not connected firmware or instrument qualification",
+  "source_base": "d6291ac3fe8e95ee525a6e018247b5457545bd5a",
+  "public_sdk_unchanged_from": "d6291ac3fe8e95ee525a6e018247b5457545bd5a",
+  "new_checks_per_profile": 6536,
+  "source_sha256": {
+    "CMakeLists.txt": "8d1eba710059f7668c9e646c5f0d189714bd8cff863a5fcc72265ed6169c95ce",
+    "src/core.cpp": "86f956045a046e9d9739f8a0b5639e3025892bdecf929bb57988351f14d858ae",
+    "src/core/bounded.cpp": "387e4ec1f2e587069e492679aaa25b53358ff0063ceea8aea78bdde78bdb13ae",
+    "src/core/core_impl.hpp": "da2ce6200be8005f2750cebfcbe59a2ce04ee2c32ffe7a2aa57ab8da5da7fcc5",
+    "src/jit.cpp": "2eaba6afa47ea7efb38ec7d707df3eaeed9ef4fa7c639f7c2486dd5a03a324d7",
+    "src/jit/jit.hpp": "48ba5ffb5a933d546f61e731e0f2f36a34a9ae8d23832a1fc54ccd358c2be7a8",
+    "src/jit/x64/jit_emitter.cpp": "4975e74febb7bff95c7caa2235af18dd671fb7af36ce0fe977f912867436cfdf",
+    "src/jit/x64/jit_emitter.hpp": "3bc8257813c848ba4bc42e74b6e77bff628fb5d350b6c5e78f2fdb332389814e",
+    "src/jit/x64/jit_moves.cpp": "2959ca0063b5e97e80b90ddfdea829e282451a8aff9ab02e3894aefa7f0aeda1",
+    "test/native_repeat_test.cpp": "a26ae63c7da13f77c11bfdeaccd82244ec0e195e4b206243d14bb143d5184b92",
+    "test/native_repeat_fixture.hpp": "44697379bd2eb7ef0ddbe7600d97b0d4e6d06c684e49c3536c091dd25a261e6d",
+    "test/native_repeat_bench.cpp": "516d22185b870824b1dcf932fc35a1fcf1d3ccd82b9455e1bfba3ba9eba7a7f6"
+  },
+  "profiles": {
+    "strict": {
+      "sanitizer": "ASan/UBSan",
+      "archive_sha256": "f883402b488baf6bee0f8c95b020e2eb8609d62fc14cdf5f099d502017af0788",
+      "all_actual_exits": 0,
+      "all_reaped": true,
+      "elf_sha256": {
+        "dsp56300_native_repeat_test": "2edc226fd21143bb15f57e8b54783ee4e6827574d76199af57470048ad33a78e",
+        "dsp56300_loop_control_test": "36a645e3e23ae01a40b7743f4d3dd6a4612b09164ae828dbd296d87b431eca01",
+        "dsp56300_deferred_interrupt_test": "41d35fd70c46b44ef273b4340b905d9a737bca6046668d0b3469a704406ea3ca",
+        "dsp56300_cache_eligibility_test": "bf7e69196cb37eff864183de52d622ae4612f9b85055fa8a0e6d406e85956bb8",
+        "dsp56300_bounded_run_test": "67315ca45c0b1b39ca75f222c4b66ad308982d2b14554f01240a5a74b61a2d10",
+        "dsp56300_mac_batch_test": "5164612d8d99ecb51ff75c7f4132a2c50c12db9d5c046c4298a7e9c8f6dd1f6a",
+        "dsp56300_cache_control_test": "dd8f58d3cc7c59992b787dad3729d0352b6cafbdf8592b8b0cc7c0a18a9e4411",
+        "dsp56300_cache_storage_test": "d6f828e219e26c54825000f1e74798deb3bc92e3137f12efca9b12819f9e9be8",
+        "dsp56300_automatic_jit_test": "2843c2bf980bf58806607e089a8fae8c811c6b7dd4a553e6d4019654f1157338",
+        "dsp56300_native_prefix_test": "b662542effe2b5c76047725c749955d91be2545997f7e19ecb318a6163ef9d42",
+        "dsp56300_memory_windows_test": "d4fb83264dc0126ed049bc2f467c34ebea4e51e9180557f496504f0244cc33a5",
+        "dsp56300_native_move_test": "4f351fb58b9ede4f8aa8efb0b230c4813c41dfc3d761acbb3fe79b9c84666d24",
+        "dsp56300_native_dataflow_test": "7c843b8536c6f196c272066f4d2b34575a8927907f3af8a6971e928d04f7048d",
+        "dsp56300_native_inputs_test": "b25840788fd1e316367f9226216fa2bf58b888fe5abb52fa917cef63de5c0745",
+        "dsp56300_native_status_test": "3048e32d0b44465555cab087dc9c270ca94b322b2a711022472523b9668f9937",
+        "dsp56300_native_retirement_test": "4986b32facf95a1e596af4cccc6da13874f4425ad514f60a95f9de91524c293b",
+        "dsp56300_native_loop_test": "ab8faa9c7471559a7ef5f585ddd0ce55c5bb558098363e26dbacffd6af2ed853",
+        "dsp56300_native_backedge_test": "d3fdc592eb714f5fabad0d8b18206f8222849dc00875bd33970ffb9ad4ab9a66",
+        "dsp56300_core_test": "f108d8c7512dfd807150990a0fc2d735d95da63e3aef856ca0fa459a44f1964b",
+        "dsp56300_external_run_test": "5988ffbae3319c5882e7c6cf401110e729a74f8608dbf0f1e333932cc199025c",
+        "dsp56300_checkpoint_test": "beb999e098398fd936d1aa9c8bb1f3a67e1ad6ea5cb1c9540d6ee4b15c6f0d2e",
+        "dsp56300_staged_test": "5deb11c865f8858203436430eb7a7c9a0fdc9dcf0001a7071f08162fa7a0b374",
+        "dsp56300_debug_test": "487028a1c8c4deb4bbae32569e0c7d92bc1f679880799e05141f992424ed4188"
+      },
+      "benchmark_compiled_only": true
+    },
+    "thread": {
+      "sanitizer": "TSan",
+      "archive_sha256": "754a1350889049ad9aceb70a28bb7a902cf64aba1e3f8107f8fcf432cd300638",
+      "all_actual_exits": 0,
+      "all_reaped": true,
+      "elf_sha256": {
+        "dsp56300_native_repeat_test": "d45e1356337f6a14d548605a8ce9ac8a8f1bc66e57f1d9b3d9709335c7465e64",
+        "dsp56300_loop_control_test": "9ff1176218b9f0140d057821e5609656f1848940e16d894150ec1b524613a71b",
+        "dsp56300_deferred_interrupt_test": "f5a5bbe510157d7059daf91471a1a32aa136680be087958ccabfcbed2b3c9f7a",
+        "dsp56300_cache_eligibility_test": "2b7644eef3ac70ffd811143f0daef88298dbab908a516c50113f7908f7b1101d",
+        "dsp56300_bounded_run_test": "43a35ae3b19f84f6d03589f339c2b1a7962c6048c247989461f0e7a3fe7bde1d",
+        "dsp56300_mac_batch_test": "47b4da547d65fb79c79dc777c98b0ca90314d65cb8ce80bc620340d9d634d90b",
+        "dsp56300_cache_control_test": "d1aafebf392ea7ae70cfa23bc926e58512e6de3050ff7a3fdc49738a48b4a6bd",
+        "dsp56300_cache_storage_test": "3d5e26bc025fa38c4b193d1a285e7b252e8c558e17f5b3736a2c4efc400555e9",
+        "dsp56300_automatic_jit_test": "63670d280e6b42ec4b5fe53ef4cbc61723e3eb7b49f01a26dc74813127c97ee8",
+        "dsp56300_native_prefix_test": "adb713c9a00710c055a9b142a5d1c93480525eb0eddf8351178ad21d122d1852",
+        "dsp56300_memory_windows_test": "c788a0b60af9096872f983a78cff1ee06227c81ecaae9f17959210723d5cf9fc",
+        "dsp56300_native_move_test": "02a663bc91bdf022cdcd3cca08fdd661e7648ade0fd6ba288f0b6c5d79337bcc",
+        "dsp56300_native_dataflow_test": "acfff9115f7e176204b36e8b2bbe8825bf5437e47d8541d6414d480dde6cd4b8",
+        "dsp56300_native_inputs_test": "e4f37b17216df9ff82a68a9425577d87a2f23b3df62f1c14c830cff056ad9dc9",
+        "dsp56300_native_status_test": "bc0da997da5d500d89560dd1c8cf7c742b6c16f27b6a563b9face22ac9e78a16",
+        "dsp56300_native_retirement_test": "416101f1dc4c32c78cdb2a21a36f2ab07f42d8f3a673bac5f81c74b723e34879",
+        "dsp56300_native_loop_test": "378b759676712e20d95cadac8bd6034856394d6b9db4a7bb4ea45de9fd9fb891",
+        "dsp56300_native_backedge_test": "2f238393e44323dbb0f9227e42f468bc7c3f5b0998eaf9a85eec4a8aa1eb0f42",
+        "dsp56300_core_test": "48415be3c52c7e6d0f6e98628c3326d6591424b8eb7296d2db6a874955744763",
+        "dsp56300_external_run_test": "134da6e73f23f9284158e52c1882b9e7602dd78cd467a3c908ae22010f7f06c6",
+        "dsp56300_checkpoint_test": "ca664d9cf4abb3cc39b7408f283d9c360ffd0be6b8031f08f6c13147e8b632c5",
+        "dsp56300_staged_test": "904d4a8a062f18f822e96a292759394ee7c6bd76bdefa0fc8ebd381ed8f8ee28",
+        "dsp56300_debug_test": "87ec41ea6646744e399a8e9ced548e858605611bce02bf69b40f5c8b9bfcd375"
+      },
+      "benchmark_compiled_only": true
+    }
+  },
+  "release": {
+    "all_actual_exits": 0,
+    "all_reaped": true,
+    "elf_sha256": {
+      "dsp56300_native_repeat_test": "94cc5261698456a79124e9b4ee4becb23f3bd98a69dec94177be2d84e849bbc9",
+      "dsp56300_loop_control_test": "56fcd99d399d7cca25df7b40b2289353cb7400b071b38b3055e2c9669c134fee",
+      "dsp56300_bounded_run_test": "97fd5fd3de6d73a201ce70960883a1f8f416e1d82431cd9b7c09f88891170f27",
+      "dsp56300_core_test": "b1ad5780db2a5521f34b447b52eeb8f6a57eb2d4e545ae0caab94eac24b6b350",
+      "dsp56300_checkpoint_test": "ee8adf003f59088b0a389cc73c0d47802f36ff65ac6717c23631963707c14857",
+      "dsp56300_deferred_interrupt_test": "1626e0fcfe487431016e4d816a5fa6dac4ad22745bc8d6e86cfa59d60215fb28"
+    }
+  },
+  "old_negative_control": {
+    "revision": "d6291ac3fe8e95ee525a6e018247b5457545bd5a",
+    "actual_exit": 1,
+    "reaped": true,
+    "elf_sha256": "e65d7e15273857477a02eca2df5f1eba2b29f203de031d501f1587ad6bb5542e",
+    "shared_test_object_sha256": "5731c5c6eb95f523521e248c870b29d3424bded6ed5c92d77b9a699c9750dfac",
+    "reason": "Same final test object and SDK: independent full-state expectation passes before the native/fetch/helper witness rejects the old library"
+  },
+  "measurement": {
+    "scope": "Shared independent three-domain authored REP zero-count CPU programs; 16 real REP setups outside each timed 1048576-body sample; exact full-state/progress checks outside timing, not an instrument",
+    "profile": "LLVM19 Release O3 generic shared wrapper object and x64 native JIT, no sanitizers",
+    "cpu_affinity": [
+      7
+    ],
+    "process_order": [
+      [
+        "old",
+        "new"
+      ],
+      [
+        "new",
+        "old"
+      ],
+      [
+        "old",
+        "new"
+      ]
+    ],
+    "instructions_per_timed_sample": 1048576,
+    "warm_sample_excluded": true,
+    "all_actual_exits": 0,
+    "all_reaped": true,
+    "compiler_observations": "No workspace compiler before/after each child; host background activity and frequency are not controlled",
+    "shared_wrapper_object_sha256": "fe254190dddbc55889a33c7269c7362f88841931ead023c0bc41b81355565fcc",
+    "old_archive_sha256": "d1102d7249fa96d37a6ca1dcfaea476393b8df612afbcf3b9d5da79badf4ea26",
+    "new_archive_sha256": "8cf480c5aa56fdd4e67a17b731acb8165f377994be4fff9e52e0d7d9d76f6e90",
+    "domains": {
+      "audio-mac": {
+        "old": {
+          "samples": 9,
+          "median_seconds": 0.109237,
+          "min_seconds": 0.106124,
+          "max_seconds": 0.118106,
+          "seconds": [
+            0.118106,
+            0.110745,
+            0.106568,
+            0.106124,
+            0.109237,
+            0.115668,
+            0.106988,
+            0.107509,
+            0.11104
+          ],
+          "native_instructions_per_sample": 0,
+          "helpers_per_sample": 1048576,
+          "program_reads_per_sample": 16
+        },
+        "new": {
+          "samples": 9,
+          "median_seconds": 0.00635433,
+          "min_seconds": 0.00629033,
+          "max_seconds": 0.00926835,
+          "seconds": [
+            0.00631776,
+            0.00629033,
+            0.00632684,
+            0.00637308,
+            0.00635433,
+            0.00711982,
+            0.00634085,
+            0.00926835,
+            0.00704076
+          ],
+          "native_instructions_per_sample": 1048576,
+          "helpers_per_sample": 0,
+          "program_reads_per_sample": 0
+        },
+        "median_speed_ratio": 17.190954829226683
+      },
+      "image-add": {
+        "old": {
+          "samples": 9,
+          "median_seconds": 0.149924,
+          "min_seconds": 0.138854,
+          "max_seconds": 0.168823,
+          "seconds": [
+            0.138854,
+            0.141274,
+            0.139595,
+            0.163054,
+            0.168823,
+            0.164,
+            0.147802,
+            0.149924,
+            0.150332
+          ],
+          "native_instructions_per_sample": 0,
+          "helpers_per_sample": 1048576,
+          "program_reads_per_sample": 16
+        },
+        "new": {
+          "samples": 9,
+          "median_seconds": 0.00607607,
+          "min_seconds": 0.00578816,
+          "max_seconds": 0.00837146,
+          "seconds": [
+            0.00582979,
+            0.00581334,
+            0.00639358,
+            0.00607607,
+            0.00622332,
+            0.00578816,
+            0.0058287,
+            0.00837146,
+            0.00663037
+          ],
+          "native_instructions_per_sample": 1048576,
+          "helpers_per_sample": 0,
+          "program_reads_per_sample": 0
+        },
+        "median_speed_ratio": 24.67450177499601
+      },
+      "communications-xor": {
+        "old": {
+          "samples": 9,
+          "median_seconds": 0.114952,
+          "min_seconds": 0.103186,
+          "max_seconds": 0.12733,
+          "seconds": [
+            0.111202,
+            0.119518,
+            0.123506,
+            0.12733,
+            0.103283,
+            0.103186,
+            0.10503,
+            0.114952,
+            0.125721
+          ],
+          "native_instructions_per_sample": 0,
+          "helpers_per_sample": 1048576,
+          "program_reads_per_sample": 16
+        },
+        "new": {
+          "samples": 9,
+          "median_seconds": 0.00408254,
+          "min_seconds": 0.00402827,
+          "max_seconds": 0.00648248,
+          "seconds": [
+            0.00409935,
+            0.00497852,
+            0.00648248,
+            0.00403066,
+            0.00403091,
+            0.00409797,
+            0.00402827,
+            0.00408254,
+            0.00406702
+          ],
+          "native_instructions_per_sample": 1048576,
+          "helpers_per_sample": 0,
+          "program_reads_per_sample": 0
+        },
+        "median_speed_ratio": 28.15698070318968
+      }
+    }
+  },
+  "bench_cli": {
+    "qualification": "PASS-functional-only",
+    "all_domains_exercised": 3,
+    "selected_domains_exercised": 1,
+    "reported_skipped_for_selection": 2,
+    "invalid_selection_actual_exit": 1
+  },
+  "reproduction": [
+    "cmake --build --preset strict --target dsp56300_native_repeat_test",
+    "ctest --preset strict -R '^native-repeat-bodies$'",
+    "Repeat with thread preset for separate TSan",
+    "cmake --build --preset release --target bench-native-repeat",
+    "build/release/dsp56300_native_repeat_bench audio-mac"
+  ],
+  "remaining": [
+    "Final REP body at a DO ending retains the real general/owner instruction",
+    "Unsupported lowering retains actual general execution; negative capability cache prevents repeated code generation",
+    "Genuinely cache-enabled programs retain conservative admission",
+    "Physical pipeline timing, complete ISA and connected-instrument throughput remain open"
+  ],
+  "fuzz": false,
+  "whole_device_qualified": false
+}

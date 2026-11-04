@@ -29,6 +29,8 @@ public:
              LoopWindowMode window = LoopWindowMode::automatic);
   [[nodiscard]] std::vector<std::uint8_t> generate(std::span<const NativeOp> operations);
 
+  [[nodiscard]] std::vector<std::uint8_t> generate_repeat(const NativeOp &operation);
+
   [[nodiscard]] bool direct_memory(const NativeOp &operation) const;
 
   [[nodiscard]] bool packed_retirement() const noexcept { return packed_retirement_; }
@@ -143,6 +145,7 @@ private:
   void guard_region_header();
   void batch_entry(std::span<const NativeOp> operations);
   void retire(const NativeOp &operation, bool publish);
+  void repeat_retire(const NativeOp &operation);
   x64::Code code_;
 
   struct RingGuard {
@@ -166,6 +169,7 @@ private:
   bool reused_words_ = false;
   NativeValueProof value_proof_;
   NativeRegion region_;
+  bool repeat_mode_ = false;
   bool mac_batches_ = false;
   bool packed_retirement_ = false;
   bool retirement_helpers_ = false;

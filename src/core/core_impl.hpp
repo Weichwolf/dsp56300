@@ -52,6 +52,8 @@ struct Core::Impl {
     if ((cpu.reg.sr & detail::cache_enable) == 0) { icache.reset(); }
   }
 
+  [[nodiscard]] std::uint32_t run_repeat_native(RunBudget budget);
+  [[nodiscard]] std::uint32_t run_bounded_native(RunBudget budget);
   [[nodiscard]] Word fetch_program(Word address);
   [[nodiscard]] Word read_external(Space space, Word address);
   void write_external(Space space, Word address, Word value);
