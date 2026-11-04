@@ -133,7 +133,9 @@ void NativeValueRanges::moves(const Instruction &instruction) {
   }
   const auto plan = plan_moves(instruction);
   for (const auto &move : std::span(plan.transfers).first(plan.count)) {
-    if (move.load && move.reg >= a_register) {
+    if (move.load && move.reg >= a0_register && move.reg <= b1_register) {
+      widths_.at(move.reg & 1U) = accumulator_bits;
+    } else if (move.load && move.reg >= a_register) {
       widths_.at(move.reg - a_register) = double_word_bits;
     }
   }

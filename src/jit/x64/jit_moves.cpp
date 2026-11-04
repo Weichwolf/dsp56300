@@ -93,7 +93,11 @@ void JitEmitter::move_values(const NativeMoves &moves, const Word mode) {
     for (const auto &move : transfers) { move_capture(move, mode); }
   }
   // Capture both ports before either destination changes, including host aliases.
-  for (const auto &move : transfers) { move_commit(move); }
+  if (moves.long_pair && transfers.front().load) {
+    long_commit(moves);
+  } else {
+    for (const auto &move : transfers) { move_commit(move); }
+  }
   count_move();
 }
 

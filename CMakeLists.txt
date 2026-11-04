@@ -178,6 +178,18 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
       test/native_long_store_boundaries.cpp)
     target_link_libraries(dsp56300_native_long_store_test PRIVATE dsp56300_native_long_store_fixture)
     add_test(NAME native-long-stores COMMAND dsp56300_native_long_store_test)
+    add_library(dsp56300_native_long_load_fixture STATIC test/native_long_load_fixture.cpp
+      test/native_long_load_workload.cpp)
+    target_link_libraries(dsp56300_native_long_load_fixture PUBLIC dsp56300::core)
+    add_executable(dsp56300_native_long_load_test test/native_long_load_test.cpp
+      test/native_long_load_boundaries.cpp)
+    target_link_libraries(dsp56300_native_long_load_test PRIVATE dsp56300_native_long_load_fixture)
+    add_test(NAME native-long-loads COMMAND dsp56300_native_long_load_test)
+    add_executable(dsp56300_native_long_load_bench test/native_long_load_bench.cpp)
+    target_link_libraries(dsp56300_native_long_load_bench PRIVATE dsp56300_native_long_load_fixture)
+    add_custom_target(bench-native-long-loads
+      COMMAND $<TARGET_FILE:dsp56300_native_long_load_bench> all
+      DEPENDS dsp56300_native_long_load_bench USES_TERMINAL VERBATIM)
     add_executable(dsp56300_native_long_store_bench test/native_long_store_bench.cpp)
     target_link_libraries(dsp56300_native_long_store_bench PRIVATE dsp56300_native_long_store_fixture)
     add_custom_target(bench-native-long-stores

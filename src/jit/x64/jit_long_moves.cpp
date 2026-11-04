@@ -6,6 +6,7 @@
 #include "native_moves.hpp"
 #include "x64.hpp"
 
+#include <cstddef>
 #include <cstdint>
 
 namespace dsp56300::detail {
@@ -29,7 +30,7 @@ void JitEmitter::long_guards(const NativeMoves &moves, x64::Label &slow) {
 
 void JitEmitter::long_capture(const NativeMoves &moves, const Word mode) {
   const auto source = moves.transfers[0].reg;
-  if (source != moves.transfers[1].reg) {
+  if (moves.transfers[0].load || source != moves.transfers[1].reg) {
     move_capture(moves.transfers[0], mode);
     move_capture(moves.transfers[1], mode);
     return;
@@ -64,5 +65,51 @@ void JitEmitter::long_capture(const NativeMoves &moves, const Word mode) {
   code_.shift(shift_right, Reg::si, word_bits);
   code_.immediate(group_and, Reg::si, word_mask, Width::dword);
   code_.immediate(group_and, Reg::di, word_mask, Width::dword);
+}
+
+void JitEmitter::long_commit(const NativeMoves &moves) {
+  const auto high = moves.transfers[0].reg;
+  const auto low = moves.transfers[1].reg;
+  if (high >= a_register && high != low) {
+    move_commit(moves.transfers[0]);
+    move_commit(moves.transfers[1]);
+    return;
+  }
+  // Both reads have completed before changing any destination. A10/B10 keeps
+  // the old extension byte; full A/B sign-extends the actual 48-bit memory value.
+  code_.mov({.destination = Reg::ax, .source = Reg::si});
+  code_.shift(shift_left, Reg::ax, word_bits);
+  code_.binary(op_or, {.destination = Reg::ax, .source = Reg::di});
+  if (high == x1_register || high == y1_register) {
+    const bool x = high == x1_register;
+    if (loop_bank_cache_) {
+      code_.packed_from<64>(x ? x64::Xmm::x5 : x64::Xmm::x6, Reg::ax);
+    } else {
+      code_.store(Reg::r12,
+                  offsetof(Cpu, reg) + (x ? offsetof(Registers, x) : offsetof(Registers, y)),
+                  Reg::ax);
+    }
+    return;
+  }
+  const bool partial = high == a1_register || high == b1_register;
+  const bool b = high == b1_register || high == b_register;
+  if (partial) {
+    constexpr unsigned extension_shift = 56;
+    current_value(Reg::r9, b ? 1U : 0U);
+    code_.shift(shift_right, Reg::r9, extension_shift);
+    code_.shift(shift_left, Reg::r9, extension_shift);
+    code_.shift(shift_left, Reg::ax, padding_bits);
+    code_.binary(op_or, {.destination = Reg::ax, .source = Reg::r9});
+  } else {
+    code_.shift(shift_left, Reg::ax, 2 * padding_bits);
+    code_.shift(shift_arithmetic, Reg::ax, padding_bits);
+  }
+  if (loop_residency_) {
+    store_accumulator(b, Reg::ax);
+  } else {
+    code_.store(Reg::r12,
+                offsetof(Cpu, reg) + (b ? offsetof(Registers, b) : offsetof(Registers, a)),
+                Reg::ax);
+  }
 }
 } // namespace dsp56300::detail

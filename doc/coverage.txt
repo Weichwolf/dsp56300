@@ -1357,6 +1357,21 @@ and extended MOVE fixtures also pass. Identical focused test objects reject
 the previous library after their independent state check. Five alternating
 Release pairs on shared audio/image/communications fixtures measure 5.75-6.35x
 for long-store streams; word controls measure 1.02-1.08x. These are component
-results, not instrument throughput. Long loads, guarded-region coalescing and
-remaining JIT fallbacks stay open. Extensive sanitizer matrices and broad
+results, not instrument throughput. Guarded-region coalescing and remaining
+JIT fallbacks stay open. Extensive sanitizer matrices and broad
 regression remain deferred until the integrating firmware runs in real time.
+
+Native L: loads (native-long-loads-reference.json): eight destination views now
+execute emitted ordinary RAM reads through one shared EA/AGU update. A10/B10
+preserve the extension byte; full A/B sign-extend 48 bits; X/Y replace 48 bits;
+AB/BA sign-extend each 24-bit source. Both reads precede destination publication.
+The 2,872 focused Release checks cover independent full state, flags/progress,
+linear EA forms, paired sparse known windows, bounded ownership, REP, shared
+host RAM, real first faults and parallel old-input/post-MOVE behavior. Partial
+loads invalidate narrow saturation proofs. Existing 3,458 long-store checks
+still pass. The same final test objects reject the previous helper path after
+independent architectural checks. Three shared audio/image/communications
+workloads and word controls confirm native transfer counts and architectural
+results on both versions; wall-time ratios are deferred while another process
+executes the connected firmware. This does not qualify instrument performance,
+all addressing modes, guarded-region admission or complete native ISA coverage.

@@ -1,0 +1,129 @@
+{
+  "license": "GPL-3.0-only",
+  "qualification": "PASS-focused-Release-native-long-loads",
+  "source_base": "0c201ba6a9354064e4821ed74f31187d010eaa85",
+  "source_sha256": {
+    "CMakeLists.txt": "bba4cc3938a884e9c60bdcf324819c0d787210a124f286213cd524ae786f33ac",
+    "src/jit/dataflow.cpp": "b55c088890f87619d9c944b04166372395c910c0592d26fee58a513d35dee7d2",
+    "src/jit/native_moves.cpp": "39b8153e92ac9a7656e090a486c12c2662325664d7526c14784252a45ada22e3",
+    "src/jit/value_ranges.cpp": "61a83beb1b46940b9a467c533059bb757e075075f57a9e9373f869eaf2522bd1",
+    "src/jit/x64/jit_emitter.hpp": "0bcde0b5180dab4d41bedfc7c7f5a251af6de24af6986e7518d482295efbccde",
+    "src/jit/x64/jit_long_moves.cpp": "54a2b58ab08c9419e84d5018c3fe7dbfcb493bdd9b78b6ecfe7c3382e3e62400",
+    "src/jit/x64/jit_moves.cpp": "cf01c52b0c91d3da72f443abb3e50bbcc69ba330e4138756d830bfd9ccf64e8e",
+    "test/native_long_load_bench.cpp": "0565137433480ea1811164c09d87eb6a8bad5634e05b804962ec68d8e7cc12d3",
+    "test/native_long_load_boundaries.cpp": "ff2fa211b49995afbbb404d29480df16827cec1a754d94a935a6ce5e1b644a36",
+    "test/native_long_load_fixture.cpp": "7edd573d9db0991d2e6159518a93291f708a21c4330edbca1b66ddbf00e68dcc",
+    "test/native_long_load_fixture.hpp": "297e2779f4a8a414aea756205a9bcfd8c54f598ae92b71c6ff895a0de5485cf3",
+    "test/native_long_load_test.cpp": "3c25eaf1d6820ac5fdb15f3df25de95f292303ba8b078e1f7878689698f94e96",
+    "test/native_long_load_workload.cpp": "cdc3c5f2db76d0dceebb7ca8d56d1c5aefa9e2a3d4e290ed4a889b362bb1a617"
+  },
+  "public_SDK_sha256": {
+    "include/dsp56300/backend.hpp": "bd8b7682f22bd088dcd5f2637d473266ba6be40ae159ff04026c4ba7a047b717",
+    "include/dsp56300/checkpoint.hpp": "79c17878620c5b7f2b929a1007711d7eab077c086ae702da9940ab3d6137acb6",
+    "include/dsp56300/core.hpp": "ef4ac25e3dc1a0aa795dc5f5909baeec00039fd274b9b47968184c76b4e93fb5",
+    "include/dsp56300/instruction.hpp": "564167bdc1ad3fe89f4a81a429e0fc6e44b119e3cd481a61e6c2e03d66f5e12b",
+    "include/dsp56300/simd.hpp": "6533a8294f06f05477fe036df55ea9d8d2c6cc1770051f28c62dbe954fc88eb7",
+    "include/dsp56300/transfers.hpp": "838c61e51fb09b665329951c8a0146fddf8257232f426d6dfa463eb1fa4345ed"
+  },
+  "public_SDK_changed": false,
+  "private_class_fields_changed": false,
+  "reference": "Independently authored raw56 destination model and per-bit logical truth tables; no manufacturer or application programs",
+  "scope": "All eight L: load destination views in ordinary RAM and sparse initialized windows, one shared EA/AGU update, full-state numerical flags and exact progress, REP, dirty parallel ALU operands, host aliases and visible real first faults",
+  "architectural_expectations": [
+    "A10/B10 keep the old extension byte; full A/B sign-extend the 48-bit memory value; loads do not scale or limit",
+    "AB/BA sign-extend each 24-bit input into its accumulator, with zero low word; X/Y replace their full 48-bit bank",
+    "Both source guards/reads complete before any destination publishes; unknown Y cannot fabricate a successful transfer",
+    "Bounded rejected memory guards preserve owner state with no callbacks or AGU update",
+    "Unbounded failed transfers preserve the already advanced fetch PC and one actual AGU update; fault.pc retains the originating instruction",
+    "Parallel ALU inputs are pre-MOVE; logical ALU replaces only its middle word, preserving post-MOVE destination bits",
+    "Partial accumulator loads invalidate prior narrow-width proofs before following arithmetic saturation"
+  ],
+  "checks": {
+    "native_long_loads": 2872,
+    "affected_long_stores": 3458
+  },
+  "runs": {
+    "focused-release-r4": {
+      "pid": 1994938,
+      "actual_exit": 0,
+      "reaped": true,
+      "actual_executable_sha256": "e1d54f6928ae57f8ea33544c8f034e9f185cc833d0e806e66e574cd565ce5312",
+      "log_sha256": "340dab05e385b2edfe07eac83c5aa1f97184e18a11f96db582538d72580fa61c"
+    },
+    "store-regression-r1": {
+      "pid": 1994983,
+      "actual_exit": 0,
+      "reaped": true,
+      "actual_executable_sha256": "b23ad1d1a4b2d19c38f75a864be9fcdc9c93c60427c3eef0e1d29a50d0bb40ff",
+      "log_sha256": "72096244ab7f4f123b7f43348e0c6c6cbe773f47b3b09e1babdd66738ca2bb93"
+    },
+    "negative-release-r1": {
+      "pid": 1995030,
+      "actual_exit": 1,
+      "reaped": true,
+      "actual_executable_sha256": "9a66948fa68383886e19cf7d1f0cf4044d076e896b566b1049a86735eecd1f3c",
+      "log_sha256": "5d81bcfb5c0e106c4ffb8c06dff319c44f643435512e168a74de0790f8390ce1"
+    },
+    "counter-new-r1": {
+      "pid": 1995077,
+      "actual_exit": 0,
+      "reaped": true,
+      "actual_executable_sha256": "7886e69da4890b5fbe6096bc3222450fec7c6941bdcb2e85831ae7c4c13947e0",
+      "log_sha256": "7e0b93fba0ffb8a74315ba29d21e5923d41902d21702e1244db197f1fa1c1ade"
+    },
+    "counter-old-r1": {
+      "pid": 1995097,
+      "actual_exit": 0,
+      "reaped": true,
+      "actual_executable_sha256": "7decdf0d522bcb67606c5228bf6201026e1a1633e185a200656d6eeae6a3569d",
+      "log_sha256": "eaf4292fe76191168ae1aae33e9fa79c4d1fff38cd742f4450d7071574f55757"
+    }
+  },
+  "negative_control": "Same final test/fixture objects linked with the published previous archive; architectural checks pass before its first actual native-transfer assertion fails",
+  "fixture_corrections": "Arithmetic-only sequence_model does not define XOR; use independent bfu truth tables with post-MOVE non-middle preservation. Atomic Core fetch advances PC before a later I/O fault (step_decoded/jit_moves and existing long-store first-fault fixtures); retain fault.pc at the originating address. No production CPU/fault semantics changed for either correction.",
+  "archive_comparison": {
+    "baseline_sha256": "8034ef9bc20b18544d2f9b87311a1683b00c4d409f9869010e0a74de394a25e8",
+    "candidate_sha256": "d7f4c17711cb075824a75b3d2ddc555a85e67af1bc26871bed74d15f14bfbb05",
+    "total_members": 80,
+    "changed_members": [
+      "native_moves.cpp.o",
+      "dataflow.cpp.o",
+      "value_ranges.cpp.o",
+      "jit_moves.cpp.o",
+      "jit_long_moves.cpp.o"
+    ],
+    "unchanged_members": 75,
+    "public_headers_unchanged": true
+  },
+  "compiler": {
+    "language": "C++23",
+    "LLVM": 19,
+    "build": "Release O3/NDEBUG",
+    "sanitizers": "none",
+    "warnings_as_errors": true,
+    "clang_tidy_findings": 0
+  },
+  "workloads": {
+    "scope": "Functional state and execution-path counters only; no qualified wall-time comparison",
+    "cases_per_version": 6,
+    "domains": [
+      "audio-mac",
+      "image-add",
+      "communications-xor"
+    ],
+    "instructions_per_case": 16384,
+    "new_all_native": true,
+    "new_moves_per_case": 8192,
+    "old_long_native": 8192,
+    "old_long_moves": 0,
+    "old_long_helpers": 8192,
+    "word_controls_all_native": true,
+    "same_final_fixture_objects": true,
+    "wall_time_ratios": "Deferred: another live connected-firmware process owns the primary queue; timing is not claimed"
+  },
+  "deferred": "Extensive sanitizer matrices, broad regression and quality campaigns until the integrating original firmware runs in real time",
+  "open": "Native long-transfer guarded regions/coalescing, remaining guarded addressing/numeric modes and general JIT fallbacks; no instrument acceptance or complete native ISA claim",
+  "fuzz": false,
+  "complete_native_ISA": false,
+  "instrument_complete": false
+}

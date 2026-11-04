@@ -79,6 +79,7 @@ private:
   void move_memory_guard(const NativeMove &move, x64::Label &slow);
   void long_guards(const NativeMoves &moves, x64::Label &slow);
   void long_capture(const NativeMoves &moves, Word mode);
+  void long_commit(const NativeMoves &moves);
   void move_guards(const NativeMoves &moves, x64::Label &slow);
   void move_values(const NativeMoves &moves, Word mode);
   void move_next(const NativeMove &move);
