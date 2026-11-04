@@ -1,0 +1,95 @@
+{
+  "license": "GPL-3.0-only",
+  "qualification": "PASS-focused-Release-native-partial-stores",
+  "source_base": "feb66969a12813d9bb6852b5ff1d55ecfec5f3ed",
+  "source_sha256": {
+    "src/jit/native_moves.cpp": "2525990cc8993ca4ad7dd8ab0ec6eaf2d623fce4b01033356b06f1705e0588a2",
+    "src/jit/x64/jit_move_register.cpp": "2caff39cc7bd9eb0dc9546a74a660cf0aa5ec3993c3601120ca3388e50bbc613",
+    "test/native_partial_store_fixture.hpp": "34c89c4d8f78298e437467f3ab740e6858e175b9c37f1c0545a7aa93e4c27196",
+    "test/native_partial_store_fixture.cpp": "605c0225f10f49c1ce57a3f2f3f73101454306bc49aa67439415615fa68e2fc5",
+    "test/native_partial_store_test.cpp": "00b2ff107ac5cbad3781a409d49f55bad6ca80bfa93ec64e2b1f344f36b44623",
+    "test/native_partial_store_bench.cpp": "c23cd5c2b6d4bec7157aab0085d2482dbc9177417915cdaac7e0774b63ec203c",
+    "CMakeLists.txt": "ea1a3259966436f517b9088efcce5f35eb680558d6b5fafae002608adc6d2404"
+  },
+  "public_SDK_sha256": {
+    "include/dsp56300/checkpoint.hpp": "79c17878620c5b7f2b929a1007711d7eab077c086ae702da9940ab3d6137acb6",
+    "include/dsp56300/backend.hpp": "bd8b7682f22bd088dcd5f2637d473266ba6be40ae159ff04026c4ba7a047b717",
+    "include/dsp56300/transfers.hpp": "838c61e51fb09b665329951c8a0146fddf8257232f426d6dfa463eb1fa4345ed",
+    "include/dsp56300/core.hpp": "ef4ac25e3dc1a0aa795dc5f5909baeec00039fd274b9b47968184c76b4e93fb5",
+    "include/dsp56300/instruction.hpp": "564167bdc1ad3fe89f4a81a429e0fc6e44b119e3cd481a61e6c2e03d66f5e12b",
+    "include/dsp56300/simd.hpp": "6533a8294f06f05477fe036df55ea9d8d2c6cc1770051f28c62dbe954fc88eb7"
+  },
+  "public_and_private_class_declarations_unchanged": true,
+  "Release": {
+    "compiler": "LLVM 19",
+    "language": "C++23",
+    "optimization": "O3/NDEBUG",
+    "sanitizers": "none",
+    "actual_exit": 0,
+    "reaped": true,
+    "checks": 9584,
+    "ELF_sha256": "f5b8e351a24ef8a4955d76377288950369be7ed487a25c50ad3f7a3e488e435f",
+    "log_sha256": "ba8792edd32b45f79c7a21788a3b2991703f942a0ace67676bfb798034890a74",
+    "clang_tidy_findings": 0
+  },
+  "baseline_path": {
+    "own_stream_instructions": 32,
+    "partial_fields": [
+      "A0",
+      "B0",
+      "A2",
+      "B2",
+      "A1",
+      "B1"
+    ],
+    "each_helpers": 32,
+    "each_native_moves": 0,
+    "control_full_A_B_native_moves": 32,
+    "actual_exit": 0,
+    "reaped": true,
+    "log_sha256": "31727ac683116d66a73fbf65992c4a1172f4c8070f3b3cb846abc173688a2662"
+  },
+  "qualified": "Ordinary disjoint X/Y RAM partial stores under tested addressing/numerical contexts; exact state, RAM, flags, progress, REP, program-alias and I/O first-fault controls. Remaining side exits and instruction families are incomplete native coverage. Parallel old-value capture from a dirty accumulator before MAC overflow is also checked.",
+  "negative_control": {
+    "same_final_test_and_fixture_objects": true,
+    "actual_exit": 1,
+    "reaped": true,
+    "independent_state_checked_before_native_assertion": true,
+    "log_sha256": "3ff46c81f1c892930d3da8f4b123eb9d5546fb6076b732ac446a76662d0d8ae1"
+  },
+  "helper_audit": {
+    "general_emitted_call_sites": 3,
+    "general_callback_targets": 2,
+    "public_instruction_kinds": 76,
+    "direct_emitter_predicate_families": 5,
+    "other_recognized_kinds_without_direct_emitter_body": 70,
+    "zero_whole_helper_count_does_not_prove_native_transfers": true,
+    "staged_computation_is_separate_scope": true
+  },
+  "benchmark": {
+    "shared_correctness_fixture": true,
+    "domains": [
+      "audio-mac",
+      "image-add",
+      "communications-xor"
+    ],
+    "controls": [
+      "partial-A1-store",
+      "X0-word-store"
+    ],
+    "timing_status": "Deferred pending exclusive idle host; initial admission rejected before any timing child because actual compiler workers were live",
+    "whole_instrument_speed_claim": false
+  },
+  "deferred_until_firmware_realtime": [
+    "Extensive sanitizer matrices",
+    "Broad regression campaign"
+  ],
+  "reproduce": [
+    "cmake --build --preset release --target dsp56300_native_partial_store_test dsp56300_native_partial_store_bench",
+    "build/release/dsp56300_native_partial_store_test",
+    "build/release/dsp56300_native_partial_store_bench all all 4"
+  ],
+  "complete_native_ISA_qualified": false,
+  "whole_instrument_qualified": false,
+  "fuzz": false
+}

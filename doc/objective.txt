@@ -5,7 +5,7 @@ Preserve exact fixed-point precision, rounding, saturation, flags, parallel
 transfer ordering, AGU, loops, stack, interrupts and observable state. Translate
 guest code into native regions, keeping live values in suitable GPR/SIMD
 representations and minimizing host instructions, memory traffic and working set.
-Use guarded general fallbacks, explicit bounded memory/event/I/O contracts and
+Use guarded native side exits, explicit bounded memory/event/I/O contracts and
 independent correctness expectations. Keep the public integration interface
 ordinary and transparent. Implement the CPU only, with no board emulation or
 dependency on another DSP emulator in build, API, tests or runtime.
@@ -95,3 +95,18 @@ Current user requirements
   in English. Keep local account names out of tracked source and instructions.
 
 Discovered slow helper fallbacks and similar performance defects must be corrected promptly in this library, with independent correctness expectations and counters proving actual native execution; application-side workarounds are not a substitute.
+
+JIT execution must not retire legal instructions through the general instruction
+executor or general transfer helper. Audit every emitted helper and every
+dispatcher/staged fallback, including dynamic AGU and numerical modes, memory
+guards, REP/DO boundaries, cache transitions and owner continuations. Native
+code may call the explicit host I/O/event interface; that is distinct from
+interpreting the instruction. Existing correct fallbacks remain temporary open
+coverage while native replacements are implemented and independently verified.
+Do not hide or relabel those gaps or discard their architectural/fault behavior.
+
+Current development priority: use the fastest optimized Release build for
+functional firmware experiments and performance work. Until the integrating
+firmware runs in real time, run focused Release correctness/native-path checks
+and defer extensive sanitizer matrices and broad regression campaigns. Retain
+strict compiler diagnostics and record the deferred validation scope.

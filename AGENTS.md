@@ -21,7 +21,8 @@
 - Instrument project code and native dependencies with ASan/UBSan in strict builds.
 - Do not weaken checks or add NOLINT markers to suppress findings. Analyze upstream separately.
 - Verify architectural state, fixed-point precision, transfer boundaries, flags, AGU,
-  loops and interrupt behavior. Specialized paths require explicit guards and a general fallback.
+  loops and interrupt behavior. Specialized paths require explicit guards and
+  correct side exits; keep reference execution available for diagnosis.
 - Use reproducible single-instance benchmarks with independently authored DSP
   programs covering audio, image/video and communications patterns. Do not use
   manufacturer or application firmware in tests or benchmarks.
@@ -29,6 +30,12 @@
 - Keep host memory and event/I/O contracts explicit. Do not silently fabricate peripheral results.
 - Fix slow DSP helpers and similar performance bottlenecks immediately in this
   library, at their source.
+- Audit every general instruction/transfer helper and interpreter fallback in
+  JIT execution. Legal instructions must ultimately execute natively in JIT
+  mode, including dynamic addressing, numerical modes and loop boundaries.
+  Device I/O callbacks are separate from instruction interpretation. Preserve
+  correct execution while closing gaps; remaining fallbacks are incomplete
+  native coverage, never a completed JIT implementation.
 - Use small state/dataflow tables for optimization design. Choose host register
   placement per region/pattern; retain complete checkpoints and guarded fallback.
 - Share correctness fixtures with the bench CMake target and support all or
@@ -40,5 +47,12 @@
   native JIT execution; do not add a KVM/VMX backend, tests or permissions setup.
 - Keep local account names out of tracked instructions, code and documentation.
 - Do not run fuzz tests unless the user explicitly requests them.
+- Use the fastest optimized Release build for functional experiments and
+  performance measurements. Run sanitizers separately as quality gates;
+  never use instrumented throughput as normal execution performance.
+- Until the current firmware integration runs in real time, prioritize focused
+  Release correctness/path checks and runtime progress. Defer extensive
+  sanitizer matrices and broad regression campaigns until that milestone.
+  Keep compiler diagnostics and existing checks intact; record deferred scope.
 - Commit verified increments and push reviewed source commits to the configured
   origin/main (Weichwolf/dsp56300). Do not publish reference assets or backup branches.

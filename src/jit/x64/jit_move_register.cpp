@@ -6,6 +6,7 @@
 #include "native_moves.hpp"
 #include "x64.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 
@@ -31,6 +32,15 @@ std::size_t bank_offset(const unsigned reg) {
 
 void JitEmitter::move_read_register(const Reg value, const NativeMove &move, const Word mode) {
   const auto reg = move.reg;
+  if (reg >= a0_register && reg <= b1_register) {
+    constexpr std::array shifts{padding_bits, accumulator_bits, main_shift};
+    current_value(value, reg & 1U);
+    const bool sign_extended = reg == a2_register || reg == b2_register;
+    code_.shift(
+        sign_extended ? shift_arithmetic : shift_right, value, shifts.at((reg - a0_register) / 2));
+    code_.immediate(group_and, value, word_mask, Width::dword);
+    return;
+  }
   if (reg >= a_register) {
     current_value(value, reg == a_register ? 0U : 1U);
   } else {

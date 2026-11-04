@@ -1327,3 +1327,22 @@ have independent checks. Shared three-domain fixtures add captured-pcu-ce
 without removing previous modes or inputs. See cacheless-plan.txt and
 cacheless-plan-reference.json for qualification; instrument acceptance remains
 open.
+
+Native partial-accumulator RAM stores and helper audit
+----------------------------------------------------
+Ordinary scalar X/Y stores from A0/A1/A2 and B0/B1/B2 now read the correct
+cached accumulator field in emitted code; extension fields sign-extend and
+partial reads preserve scaling/limiter flags. Existing memory, alias, I/O and
+modifier guards remain. Partial loads/register moves and other general JIT
+paths remain open, as inventoried in jit-helper-coverage.txt.
+Focused optimized Release qualification passes 9584 checks: independent full
+state/RAM/AGU/flags, all six fields/eight address groups, numerical modes,
+actual native counters, retained REP bodies, program aliases, I/O refusal and
+parallel old-value capture from a dirty cached accumulator before MAC overflow.
+The same final test/fixture objects reject the previous library only after
+their independent semantic check. The six public SDK headers and private
+class declarations are unchanged. A shared three-domain benchmark is provided;
+isolated timings remain pending an idle host, so no throughput factor is
+claimed. Extensive sanitizer/broad regression campaigns are deferred until
+the integrating firmware's real-time milestone under the current user policy.
+This does not complete native ISA coverage or connected-instrument acceptance.

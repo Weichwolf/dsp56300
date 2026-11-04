@@ -62,8 +62,10 @@ NativeMoves plan_moves(const Instruction &instruction) {
   }
   const unsigned reg =
       ((opcode >> 16) & 7) | ((opcode >> high_register_shift) & high_register_mask);
+  const bool load = (opcode & (Word{1} << 15)) != 0;
+  const bool partial_store = !load && reg >= a0_register && reg <= b1_register;
   if ((reg < x0_register || reg > y1_register) && reg != a_register && reg != b_register) {
-    return result;
+    if (!partial_store) { return result; }
   }
   const bool effective = (opcode & (Word{1} << 14)) != 0;
   const NativeMove move{
@@ -73,7 +75,7 @@ NativeMoves plan_moves(const Instruction &instruction) {
                            : AddressForm{.mode = 6, .extra = (opcode >> 8) & six_bit_mask},
       .reg = reg,
       .space = (opcode & (Word{1} << 19)) != 0 ? Space::y : Space::x,
-      .load = (opcode & (Word{1} << 15)) != 0};
+      .load = load};
   if (move.address.mode == 6 && move.address.index != 0 && !(move.immediate() && move.load)) {
     return result;
   }
