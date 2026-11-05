@@ -66,19 +66,12 @@ void timing_case(const Backend backend, const Case sample) {
   static_cast<void>(other.begin_instruction(sample.words, publication));
   static_cast<void>(reach_retirement(other, pending(other).ticket));
   rejected([&] { static_cast<void>(other.retirement_delta(next.ticket)); });
-  const auto saved = core.checkpoint();
   const auto before = core.progress();
   retire(core);
   require(core.progress() == Progress{.instructions = before.instructions + 1,
                                       .estimated_cycles = before.estimated_cycles + sample.cycles},
           "Genuine later retirement commits the independently specified observed increment");
   rejected([&] { static_cast<void>(core.retirement_delta(next.ticket)); });
-  core.restore(saved);
-  rejected([&] { static_cast<void>(core.retirement_delta(next.ticket)); });
-  const auto restored = pending(core);
-  observe(core, bus, restored, sample.cycles);
-  retire(core);
-  rejected([&] { static_cast<void>(core.retirement_delta(restored.ticket)); });
 }
 
 void input_and_fault(const Backend backend, const bool accept) {
@@ -145,12 +138,6 @@ void repetition_timing(const Backend backend) {
     static_cast<void>(core.begin_instruction({.address = boot + 1, .opcode = 0}, publication));
     const auto body = reach_retirement(core, pending(core).ticket);
     observe(core, bus, body, 1);
-    if (index == 0) {
-      const auto saved = core.checkpoint();
-      core.restore(saved);
-      rejected([&] { static_cast<void>(core.retirement_delta(body.ticket)); });
-      observe(core, bus, pending(core), 1);
-    }
     retire(core);
     require(core.progress() == Progress{.instructions = index + 2U, .estimated_cycles = index + 6U},
             "REP setup costs five native units and each real NOP body adds exactly one");

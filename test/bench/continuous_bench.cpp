@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Continuous guest execution; initialization and expected-state checks are untimed.
+#include "backend_support.hpp"
 #include "binary_fixture.hpp"
-#include "dsp56300/backend.hpp"
 #include "dsp56300/core.hpp"
 #include "fir_stream_program.hpp"
 #include "fixture_memory.hpp"

@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "dsp56300/checkpoint.hpp"
 #include "dsp56300/core.hpp"
 #include "staged_support.hpp"
 #include "support.hpp"
@@ -62,34 +61,18 @@ void boundary(Core &core, const Word pc, const unsigned ordinal) {
   }
 }
 
-struct BackendPair {
-  Backend from, to;
-};
-
-void restore(const Word pc, const BackendPair backend, const unsigned cut) {
+void fetch_continuation(const Word pc, const Backend backend, const unsigned cut) {
   Bus bus;
   bus.pc = pc;
   bus.events = {{.space = Space::program, .address = pc, .value = immediate_x0},
                 {.space = Space::program, .address = (pc + 1) & word_mask, .value = payload}};
-  Core original(bus, {.backend = backend.from});
+  Core original(bus, {.backend = backend});
   original.set_registers(initial(pc));
   static_cast<void>(original.begin_fetch(policy));
   for (unsigned ordinal = 0; ordinal < cut; ++ordinal) { boundary(original, pc, ordinal); }
-  const auto saved = original.checkpoint();
-  const auto stale = pending(original);
-  Bus resumed_bus = bus;
-  Core resumed(resumed_bus, {.backend = backend.to});
-  resumed.restore(saved);
-  rejected([&] { static_cast<void>(resumed.advance_instruction(stale.ticket)); });
-  original.restore(saved);
-  rejected([&] { static_cast<void>(original.advance_instruction(stale.ticket)); });
-  for (unsigned ordinal = cut; ordinal < 4; ++ordinal) {
-    boundary(original, pc, ordinal);
-    boundary(resumed, pc, ordinal);
-  }
-  require(bus.calls == 2 && resumed_bus.calls == 2 && bus.accepted == 2 &&
-              resumed_bus.accepted == 2 && bus.exact && resumed_bus.exact,
-          "Restoring every read/result boundary never rereads accepted program words");
+  for (unsigned ordinal = cut; ordinal < 4; ++ordinal) { boundary(original, pc, ordinal); }
+  require(bus.calls == 2 && bus.accepted == 2 && bus.exact,
+          "Continuing every read/result boundary never rereads accepted program words");
 }
 
 void failure(const Backend backend, const bool extension, const Word pc) {
@@ -127,7 +110,7 @@ void complete(Core &core) {
   throw std::runtime_error("Expected real instruction retirement");
 }
 
-void cache_burst_checkpoint(const Backend backend, const InstructionPublication publication) {
+void cache_burst_continuation(const Backend backend, const InstructionPublication publication) {
   constexpr Word cache_enable = Word{1} << 19;
   constexpr Word burst_enable = Word{1} << 10;
   const Word pc = staged_test::boot;
@@ -149,40 +132,21 @@ void cache_burst_checkpoint(const Backend backend, const InstructionPublication 
             "Burst reads real program words in order");
     static_cast<void>(original.advance_instruction(action.ticket));
   }
-  const auto saved = original.checkpoint();
-  Bus clone_bus = bus;
-  Core clone(clone_bus, options);
-  clone.restore(saved);
   complete(original);
-  complete(clone);
-  require(bus.calls == 4 && clone_bus.calls == 4 && bus.exact && clone_bus.exact,
-          "Checkpoint continuation never repeats accepted burst reads");
+  require(bus.calls == 4 && bus.exact, "Actual continuation never repeats accepted burst reads");
   bus.pc = pc + 1;
-  clone_bus.pc = pc + 1;
   static_cast<void>(original.begin_fetch(publication));
-  static_cast<void>(clone.begin_fetch(publication));
-  require(pending(original).effect.kind != EffectKind::fetch_opcode &&
-              pending(clone).effect.kind != EffectKind::fetch_opcode && bus.calls == 4 &&
-              clone_bus.calls == 4,
-          "A cached next instruction needs no program-bus read after restore");
+  require(pending(original).effect.kind != EffectKind::fetch_opcode && bus.calls == 4,
+          "A cached next instruction needs no program-bus read during continuation");
   complete(original);
-  complete(clone);
   static_cast<void>(original.begin_instruction({.address = pc + 2, .opcode = 0}, publication));
-  static_cast<void>(clone.begin_instruction({.address = pc + 2, .opcode = 0}, publication));
-  require(pending(original).effect.kind != EffectKind::fetch_opcode &&
-              pending(clone).effect.kind != EffectKind::fetch_opcode && bus.calls == 4 &&
-              clone_bus.calls == 4,
+  require(pending(original).effect.kind != EffectKind::fetch_opcode && bus.calls == 4,
           "Caller-supplied instructions with CE use no implicit program fetch");
   complete(original);
-  complete(clone);
   static_cast<void>(original.begin_fetch(publication));
-  static_cast<void>(clone.begin_fetch(publication));
-  require(pending(original).effect.kind != EffectKind::fetch_opcode &&
-              pending(clone).effect.kind != EffectKind::fetch_opcode && bus.calls == 4 &&
-              clone_bus.calls == 4,
+  require(pending(original).effect.kind != EffectKind::fetch_opcode && bus.calls == 4,
           "Caller-supplied instructions preserve previously cached words");
   complete(original);
-  complete(clone);
 }
 
 void cache_burst_failure(const Backend backend, const Word refused) {
@@ -207,24 +171,17 @@ void cache_burst_failure(const Backend backend, const Word refused) {
     require(action.effect.address == pc + offset, "Accepted burst reads remain ordered");
     static_cast<void>(original.advance_instruction(action.ticket));
   }
-  const auto saved = original.checkpoint();
-  Bus clone_bus = bus;
-  Core clone(clone_bus, options);
-  clone.restore(saved);
   const auto failed = original.advance_instruction(pending(original).ticket);
-  const auto clone_failed = clone.advance_instruction(pending(clone).ticket);
   const Fault expected{
       .kind = FaultKind::memory_read, .space = Space::program, .address = pc + refused, .pc = pc};
-  require(failed.fault == expected && clone_failed.fault == expected && !failed.pending &&
-              !clone_failed.pending && !failed.retired && !clone_failed.retired,
-          "Rejected burst reports its exact program address before and after restore");
-  require(bus.calls == refused + 1 && clone_bus.calls == refused + 1 && bus.accepted == refused &&
-              clone_bus.accepted == refused && bus.exact && clone_bus.exact &&
-              original.registers() == state && clone.registers() == state,
-          "Rejected burst preserves accepted read count and CPU state across checkpoint");
+  require(failed.fault == expected && !failed.pending && !failed.retired,
+          "Rejected burst reports its exact program address before and during continuation");
+  require(bus.calls == refused + 1 && bus.accepted == refused && bus.exact &&
+              original.registers() == state,
+          "Rejected burst preserves accepted read count and CPU state at the failure boundary");
 }
 
-void cache_flush_checkpoint(const Backend backend) {
+void cache_flush_continuation(const Backend backend) {
   constexpr Word cache_enable = Word{1} << 19;
   constexpr Word burst_enable = Word{1} << 10;
   constexpr Word flush_all = 3;
@@ -248,22 +205,13 @@ void cache_flush_checkpoint(const Backend backend) {
   static_cast<void>(original.begin_fetch());
   require(pending(original).effect.kind == EffectKind::retire && bus.calls == 4,
           "Flush instruction comes from cached burst without a bus request");
-  const auto saved = original.checkpoint();
-  Bus clone_bus = bus;
-  Core clone(clone_bus, options);
-  clone.restore(saved);
   retire(original);
-  retire(clone);
   bus.pc = pc + 2;
-  clone_bus.pc = pc + 2;
   static_cast<void>(original.begin_fetch());
-  static_cast<void>(clone.begin_fetch());
-  require(pending(original).effect.address == pc + 2 && pending(clone).effect.address == pc + 2,
-          "Flushed program word requests external fetch after checkpoint restore");
+  require(pending(original).effect.address == pc + 2,
+          "Flushed program word requests external fetch during the actual continuation");
   complete(original);
-  complete(clone);
-  require(bus.calls == 6 && clone_bus.calls == 6 && bus.exact && clone_bus.exact,
-          "Flush invalidates cached burst on both checkpoint paths");
+  require(bus.calls == 6 && bus.exact, "Flush invalidates cached burst during actual continuation");
 }
 
 void cache_program_write(const Backend backend, const bool accepted) {
@@ -297,35 +245,27 @@ void cache_program_write(const Backend backend, const bool accepted) {
   require(write.effect.kind == EffectKind::write && write.effect.address == pc + 3 &&
               write.effect.value == add_x0,
           "PMOVE offers the actual cached program address and data");
-  const auto saved = original.checkpoint();
-  Bus clone_bus = bus;
-  Core clone(clone_bus, options);
-  clone.restore(saved);
   const auto result = original.advance_instruction(write.ticket);
-  const auto clone_result = clone.advance_instruction(pending(clone).ticket);
   if (!accepted) {
     const Fault expected{.kind = FaultKind::memory_write,
                          .space = Space::program,
                          .address = pc + 3,
                          .value = add_x0,
                          .pc = pc};
-    require(result.fault == expected && clone_result.fault == expected && bus.accepted == 4 &&
-                clone_bus.accepted == 4 && original.registers() == state &&
-                clone.registers() == state,
-            "Refused PMOVE fails without publishing CPU state across restore");
+    require(result.fault == expected && bus.accepted == 4 && original.registers() == state,
+            "Refused PMOVE fails without publishing CPU state at the failure boundary");
     return;
   }
   retire(original);
-  retire(clone);
-  for (Core *core : {&original, &clone}) {
-    static_cast<void>(core->begin_fetch());
-    complete(*core);
-    static_cast<void>(core->begin_fetch());
-    complete(*core);
-    require(core->registers().a == (std::uint64_t{add_x0} << word_bits),
-            "Accepted PMOVE changes the subsequently executed cached instruction");
-  }
-  require(bus.calls == 5 && clone_bus.calls == 5 && bus.exact && clone_bus.exact,
+
+  static_cast<void>(original.begin_fetch());
+  complete(original);
+  static_cast<void>(original.begin_fetch());
+  complete(original);
+  require(original.registers().a == (std::uint64_t{add_x0} << word_bits),
+          "Accepted PMOVE changes the subsequently executed cached instruction");
+
+  require(bus.calls == 5 && bus.exact,
           "Accepted PMOVE and later cached fetches do not duplicate bus traffic");
 }
 
@@ -386,33 +326,28 @@ void invalid_repeat_fetch(const Backend backend,
   require(admitted.fault.kind == FaultKind::none &&
               pending(original).effect.kind == EffectKind::fetch_opcode,
           "An unloaded REP body requests its actual first opcode");
-  const auto saved = original.checkpoint();
-  Bus clone_bus = bus;
-  Core clone(clone_bus, {.backend = backend});
-  clone.restore(saved);
-  for (Core *core : {&original, &clone}) {
-    const auto result = core->advance_instruction(pending(*core).ticket);
-    const Fault expected{.kind = FaultKind::invalid_instruction,
-                         .space = Space::program,
-                         .address = pc + 1,
-                         .value = immediate_x0,
-                         .pc = pc + 1};
-    require(result.fault == expected && !result.pending && !result.retired &&
-                core->registers() == state && core->progress() == progress,
-            "Invalid two-word REP body must fail before requesting even a known extension");
-    rejected([&] { static_cast<void>(core->begin_fetch(publication)); });
-  }
-  require(bus.calls == 1 && bus.accepted == 1 && bus.exact && clone_bus.calls == 1 &&
-              clone_bus.accepted == 1 && clone_bus.exact,
-          "Both checkpoint owners read only the real invalid opcode, never its extension");
+
+  const auto result = original.advance_instruction(pending(original).ticket);
+  const Fault expected{.kind = FaultKind::invalid_instruction,
+                       .space = Space::program,
+                       .address = pc + 1,
+                       .value = immediate_x0,
+                       .pc = pc + 1};
+  require(result.fault == expected && !result.pending && !result.retired &&
+              original.registers() == state && original.progress() == progress,
+          "Invalid two-word REP body must fail before requesting even a known extension");
+  rejected([&] { static_cast<void>(original.begin_fetch(publication)); });
+
+  require(bus.calls == 1 && bus.accepted == 1 && bus.exact,
+          "The actual owner reads only the real invalid opcode, never its extension");
 }
 
 void run() {
   for (const auto pc : {staged_test::boot, word_mask}) {
     for (const auto from : backends) {
-      for (const auto to : backends) {
-        for (unsigned cut = 0; cut < 4; ++cut) { restore(pc, {.from = from, .to = to}, cut); }
-      }
+
+      for (unsigned cut = 0; cut < 4; ++cut) { fetch_continuation(pc, from, cut); }
+
       failure(from, false, pc);
       failure(from, true, pc);
     }
@@ -426,13 +361,13 @@ void run() {
                                     InstructionPublication::pcu_updates};
   for (const auto backend : backends) {
     for (const auto publication : publications) {
-      cache_burst_checkpoint(backend, publication);
+      cache_burst_continuation(backend, publication);
       for (const bool known_extension : {false, true}) {
         invalid_repeat_fetch(backend, publication, known_extension);
       }
     }
   }
-  for (const auto backend : backends) { cache_flush_checkpoint(backend); }
+  for (const auto backend : backends) { cache_flush_continuation(backend); }
   for (const auto backend : backends) {
     for (const bool accepted : {false, true}) { cache_program_write(backend, accepted); }
   }

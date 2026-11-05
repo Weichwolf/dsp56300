@@ -250,7 +250,10 @@ Block *Jit::Impl::prepare(const Word budget) {
   exit_requested = false;
   const auto key = translation_key(cpu.reg);
   auto found = blocks.find(key);
-  const auto compile_limit = std::min(budget, options.instructions_per_block);
+  const auto translation_limit = options.instructions_per_block == 0
+                                     ? static_cast<Word>(address_words)
+                                     : options.instructions_per_block;
+  const auto compile_limit = std::min(budget, translation_limit);
   if (found == blocks.end() ||
       (!found->second->terminated && found->second->requested_limit < compile_limit)) {
     auto block = compile(compile_limit);

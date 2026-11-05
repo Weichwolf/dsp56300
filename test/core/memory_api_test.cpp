@@ -39,6 +39,23 @@ void default_run() {
           "Default native run stops at guest STOP with exact PC, registers and RAM");
 }
 
+void natural_translation() {
+  constexpr std::size_t nop_count = 513;
+  std::array<Word, nop_count + 1> backing{};
+  backing.back() = isa::stop[0];
+  const auto expected_memory = backing;
+  Core core(Memory::unified(backing));
+  auto expected = core.registers();
+  expected.pc = backing.size();
+  const auto result = core.run();
+  const auto statistics = core.jit_statistics();
+  require(result.dispatches == backing.size() && result.fault.kind == FaultKind::none &&
+              result.state == ProcessingState::stopped && core.registers() == expected &&
+              backing == expected_memory && statistics.compiled_blocks == 1 &&
+              statistics.native_alu_instructions >= nop_count,
+          "Straight-line code beyond 256 instructions reaches STOP in one native translation");
+}
+
 void partition() {
   constexpr std::size_t region_words = 64;
   std::array<Word, region_words * 3> backing{};
@@ -184,6 +201,7 @@ void validation() {
 int main() {
   try {
     default_run();
+    natural_translation();
     partition();
     unified();
     external();

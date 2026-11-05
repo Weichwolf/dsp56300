@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "dsp56300/checkpoint.hpp"
 #include "dsp56300/core.hpp"
 #include "staged_support.hpp"
 #include "support.hpp"
@@ -61,7 +60,6 @@ void finish(Core &core, const Case &test, const Registers &before, const Progres
   if (action.effect.kind == EffectKind::pcu_update) {
     require(action.effect == publication(test, before),
             "Only the full-width PC writer is published with its original value and context");
-    rejected([&] { static_cast<void>(core.candidate_checkpoint(action.ticket)); });
     require(core.registers() == before, "The unaccepted PC publication stays private");
     require(!core.advance_instruction(action.ticket).retired && core.registers() == expected &&
                 core.progress() == prior,
@@ -139,11 +137,7 @@ void matrix(const Backend backend) {
           "Pure captured control never reads or fabricates an external bus operand");
 }
 
-struct BackendPair {
-  Backend from, to;
-};
-
-void restore(const BackendPair backend) {
+void continuation(const Backend backend) {
   constexpr std::array cases{
       Case{.words = {.address = word_mask}, .target = 0},
       Case{.words = {.address = 0, .opcode = short_jump},
@@ -155,8 +149,7 @@ void restore(const BackendPair backend) {
            .cycles = 4,
            .transfer = true}};
   Bus bus;
-  Core original(bus, {.backend = backend.from});
-  Core restored(bus, {.backend = backend.to});
+  Core original(bus, {.backend = backend});
   for (const auto &test : cases) {
     for (unsigned cut = 0; cut < 2; ++cut) {
       const auto before = seed(test.words, statuses[1]);
@@ -164,30 +157,11 @@ void restore(const BackendPair backend) {
       const auto prior = original.progress();
       static_cast<void>(original.begin_instruction(test.words, pcu));
       if (cut != 0) { static_cast<void>(original.advance_instruction(pending(original).ticket)); }
-      const auto stale = pending(original).ticket;
-      const auto saved = original.checkpoint();
-      restored.restore(saved);
-      original.restore(saved);
-      rejected([&] { static_cast<void>(original.advance_instruction(stale)); });
-      rejected([&] { static_cast<void>(restored.advance_instruction(stale)); });
-      if (cut != 0) {
-        const auto candidate = original.candidate_checkpoint(pending(original).ticket);
-        Core completed(bus, {.backend = backend.to});
-        completed.restore(candidate);
-        auto expected = before;
-        expected.pc = test.target;
-        require(completed.registers() == expected &&
-                    completed.progress() ==
-                        Progress{.instructions = prior.instructions + 1,
-                                 .estimated_cycles = prior.estimated_cycles + test.cycles} &&
-                    !completed.pending_instruction() && !completed.instruction_outcome(),
-                "Candidate checkpoints contain the actual final result without a retirement claim");
-      }
       finish(original, test, before, prior);
-      finish(restored, test, before, prior);
     }
   }
-  require(bus.calls == 0, "Same/fresh cross-backend restores need no hidden external response");
+  require(bus.calls == 0,
+          "Continuing actual pure-control instructions needs no hidden external response");
 }
 } // namespace
 } // namespace dsp56300::test
@@ -196,9 +170,7 @@ int main() {
   try {
     for (const auto backend : dsp56300::test::backends) {
       dsp56300::test::matrix(backend);
-      for (const auto target : dsp56300::test::backends) {
-        dsp56300::test::restore({.from = backend, .to = target});
-      }
+      dsp56300::test::continuation(backend);
     }
     std::cout << dsp56300::test::checks << " captured pure control checks passed.\n";
   } catch (const std::exception &error) {

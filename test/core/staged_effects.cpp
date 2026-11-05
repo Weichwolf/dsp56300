@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "dsp56300/backend.hpp"
+#include "backend_support.hpp"
 #include "dsp56300/core.hpp"
 #include "staged_support.hpp"
 #include "support.hpp"
@@ -15,7 +15,7 @@ constexpr Word y_address = 0x240, y_datum = 0x654321;
 constexpr Word pair_base = 0xb01800, x_load = 0x008000, y_load = 0x400000;
 
 struct PairScenario {
-  Backend origin, destination;
+  Backend origin;
   unsigned direction;
 };
 
@@ -47,26 +47,20 @@ void pair_case(const PairScenario scenario) {
               bus.calls == 1 && bus.accepted == 1 && bus.exact,
           "The first actual transfer occurs once before the second owned bus boundary");
   rejected([&] { static_cast<void>(core.advance_instruction(first.ticket)); });
-  const auto saved = core.checkpoint();
-  Bus clone_bus = bus; // The consumer restores matching external state separately.
-  Core clone(clone_bus, {.backend = scenario.destination});
-  clone.restore(saved);
-  rejected([&] { static_cast<void>(clone.advance_instruction(second.ticket)); });
-  const auto rebound = pending(clone);
-  static_cast<void>(clone.advance_instruction(rebound.ticket));
-  require(clone_bus.calls == 2 && clone_bus.accepted == 2 && clone_bus.exact &&
-              clone.registers() == initial && clone.progress() == Progress{},
-          "Restoring between paired effects never repeats the accepted first read or write");
+  static_cast<void>(core.advance_instruction(second.ticket));
+  require(bus.calls == 2 && bus.accepted == 2 && bus.exact && core.registers() == initial &&
+              core.progress() == Progress{},
+          "Continuing paired effects never repeats the accepted first read or write");
   auto expected = initial;
   ++expected.pc;
   ++expected.r[0];
   ++expected.r[4];
   if (read_x) { expected.x = datum; }
   if (read_y) { expected.y = y_datum; }
-  require(pending(clone).computed == expected,
+  require(pending(core).computed == expected,
           "Both independently specified transfer results remain held before retirement");
-  retire(clone);
-  require(clone.registers() == expected && clone_bus.calls == 2,
+  retire(core);
+  require(core.registers() == expected && bus.calls == 2,
           "Retirement publishes both genuine AGU and transfer results without physical replay");
 }
 
@@ -80,13 +74,8 @@ template <Backend Kind> void typed() {
           "Typed external owner forwards real fetch and admission metadata");
   const auto result = core.begin_instruction({.address = boot, .opcode = add_x0});
   if (!result.pending) { throw std::runtime_error("Typed computation lost retirement"); }
-  const auto saved = core.checkpoint();
-  core.restore(saved);
-  rejected([&] { static_cast<void>(core.advance_instruction(result.pending->ticket)); });
-  const auto rebound = core.pending_instruction();
-  if (!rebound) { throw std::runtime_error("Typed restoration lost pending computation"); }
-  require(core.advance_instruction(rebound->ticket).retired,
-          "Typed adapter preserves owned retirement after restoration");
+  require(core.advance_instruction(result.pending->ticket).retired,
+          "Typed adapter retains actual owned retirement");
   expected.a = std::uint64_t{1} << word_bits;
   expected.sr = flag_u;
   ++expected.pc;
@@ -97,10 +86,8 @@ template <Backend Kind> void typed() {
 
 void multiple_effects() {
   for (const auto origin : backends) {
-    for (const auto destination : backends) {
-      for (unsigned direction = 0; direction < 4; ++direction) {
-        pair_case({.origin = origin, .destination = destination, .direction = direction});
-      }
+    for (unsigned direction = 0; direction < 4; ++direction) {
+      pair_case({.origin = origin, .direction = direction});
     }
   }
   typed<Backend::reference>();

@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "dsp56300/checkpoint.hpp"
 #include "dsp56300/core.hpp"
 #include "staged_support.hpp"
 #include "support.hpp"
@@ -75,34 +74,20 @@ Bus ram_bus(const RamCase input) {
   return bus;
 }
 
-struct BackendPair {
-  Backend from, to;
-};
-
-void ram_restore(const BackendPair backend, const RamCase input, const unsigned cut) {
+void ram_restore(const Backend backend, const RamCase input, const unsigned cut) {
   auto bus = ram_bus(input);
-  Core original(bus, {.backend = backend.from});
+  Core original(bus, {.backend = backend});
   original.set_registers(ram_state(input, 0));
   static_cast<void>(original.begin_instruction({.address = boot, .opcode = input.opcode}, policy));
   for (unsigned phase = 0; phase < cut; ++phase) { ram_phase(original, input, phase); }
   // Accepted RAM samples belong to the CPU continuation, even if host RAM changes.
   if (cut > 1) { bus.events[0].value = raw_prefix | (input.before ^ flag_c); }
-  const auto saved = original.checkpoint();
-  const auto stale = pending(original);
-  auto restored_bus = bus;
-  Core restored(restored_bus, {.backend = backend.to});
-  restored.restore(saved);
-  rejected([&] { static_cast<void>(restored.advance_instruction(stale.ticket)); });
-  original.restore(saved);
-  rejected([&] { static_cast<void>(original.advance_instruction(stale.ticket)); });
   for (unsigned phase = cut; phase <= carry_phase(input) + 1; ++phase) {
     ram_phase(original, input, phase);
-    ram_phase(restored, input, phase);
   }
   const auto count = input.modify ? 2U : 1U;
-  require(bus.calls == count && restored_bus.calls == count && bus.accepted == count &&
-              restored_bus.accepted == count && bus.exact && restored_bus.exact,
-          "Restored RAM RMW/TEST never repeat a read/write or invoke peripheral bit callbacks");
+  require(bus.calls == count && bus.accepted == count && bus.exact,
+          "Actual RAM RMW/TEST never repeat a read/write or invoke peripheral bit callbacks");
 }
 
 void ram_refusal(const Backend backend, const bool writing, const Space space) {
@@ -169,14 +154,11 @@ void ram_restore_space(const Backend from, const Space space) {
       RamCase{.opcode = 0x0a5820, .before = old_clear, .after = old_set},
       RamCase{.opcode = 0x0b5800, .before = old_set, .after = old_clear},
       RamCase{.opcode = 0x0b5820, .before = old_set, .after = old_set, .modify = false}};
-  for (const auto to : backends) {
-    for (auto input : actions) {
-      input.space = space;
-      if (space == Space::y) { input.opcode |= y_space_bit; }
-      for (unsigned cut = 0; cut <= carry_phase(input) + 1; ++cut) {
-        ram_restore({.from = from, .to = to}, input, cut);
-      }
-    }
+
+  for (auto input : actions) {
+    input.space = space;
+    if (space == Space::y) { input.opcode |= y_space_bit; }
+    for (unsigned cut = 0; cut <= carry_phase(input) + 1; ++cut) { ram_restore(from, input, cut); }
   }
 }
 }

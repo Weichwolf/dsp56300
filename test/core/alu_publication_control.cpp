@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "alu_publication_support.hpp"
-#include "dsp56300/checkpoint.hpp"
 #include "dsp56300/core.hpp"
 #include "support.hpp"
 
@@ -106,7 +105,6 @@ void loop_fault(const Backend backend) {
   state.sc = 0;
   core.set_registers(state);
   static_cast<void>(core.begin_instruction({.address = boot, .opcode = add}, phased));
-  const auto saved = core.checkpoint();
   const auto pending_result = pending(core);
   state.a = std::uint64_t{3} << word_bits;
   auto result = add_result(add, true);
@@ -120,10 +118,7 @@ void loop_fault(const Backend backend) {
               !core.pending_instruction(),
           "A later native loop-stack refusal preserves the admitted unit prefix");
   held(core, state);
-  core.restore(saved);
   rejected([&] { static_cast<void>(core.advance_instruction(pending_result.ticket)); });
-  state.a = std::uint64_t{2} << word_bits;
-  held(core, state);
   core.reset();
   require(!core.pending_instruction() && core.progress() == Progress{},
           "Reset cancels pending unit state");
@@ -157,31 +152,16 @@ void pair_boundary(Core &core, const unsigned ordinal) {
   }
 }
 
-struct BackendPair {
-  Backend from, to;
-};
-
-void restore(const BackendPair backend, const unsigned cut) {
+void restore(const Backend backend, const unsigned cut) {
   Bus bus;
   bus.events = {{.address = data_address, .value = data}};
-  Core original(bus, {.backend = backend.from});
+  Core original(bus, {.backend = backend});
   original.set_registers(initial());
   static_cast<void>(original.begin_instruction({.address = boot, .opcode = add_load}, phased));
   for (unsigned ordinal = 0; ordinal < cut; ++ordinal) { pair_boundary(original, ordinal); }
-  const auto saved = original.checkpoint();
-  const auto old = pending(original);
-  Bus resumed_bus = bus;
-  Core resumed(resumed_bus, {.backend = backend.to});
-  resumed.restore(saved);
-  rejected([&] { static_cast<void>(resumed.advance_instruction(old.ticket)); });
-  original.restore(saved);
-  rejected([&] { static_cast<void>(original.advance_instruction(old.ticket)); });
-  for (unsigned ordinal = cut; ordinal < 4; ++ordinal) {
-    pair_boundary(original, ordinal);
-    pair_boundary(resumed, ordinal);
-  }
-  require(bus.calls == 1 && resumed_bus.calls == 1 && bus.exact && resumed_bus.exact,
-          "Every restored unit suffix reuses its accepted source read without replay");
+  for (unsigned ordinal = cut; ordinal < 4; ++ordinal) { pair_boundary(original, ordinal); }
+  require(bus.calls == 1 && bus.exact,
+          "Every actual unit suffix reuses its accepted source read without replay");
 }
 }
 
@@ -198,9 +178,8 @@ void controls() {
 
 void restores() {
   for (const auto from : backends) {
-    for (const auto to : backends) {
-      for (unsigned cut = 0; cut < 4; ++cut) { restore({.from = from, .to = to}, cut); }
-    }
+
+    for (unsigned cut = 0; cut < 4; ++cut) { restore(from, cut); }
   }
 }
 } // namespace dsp56300::test::alu_publication_test

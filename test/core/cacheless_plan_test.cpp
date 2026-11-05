@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "dsp56300/checkpoint.hpp"
 #include "dsp56300/core.hpp"
 #include "external_run_fixture.hpp"
 #include "staged_support.hpp"
@@ -34,12 +33,6 @@ void publications(Core &core,
     require(action.effect.kind == writer.kind && action.computed == computed &&
                 core.registers() == visible && core.progress() == base,
             "Captured cache modes retain each literal held writer and complete observation");
-    const auto old_ticket = action.ticket;
-    core.restore(core.checkpoint());
-    staged_test::rejected([&] { static_cast<void>(core.advance_instruction(old_ticket)); });
-    action = staged_test::pending(core);
-    require(action.effect.kind == writer.kind && action.computed == computed,
-            "Restored cache modes retain the next distinct computation without publishing it");
     action.effect = {};
     action.computed = {};
     require(!core.advance_instruction(action.ticket).retired &&

@@ -39,10 +39,6 @@ Buffers validate(const Buffers buffers, const Options options, const bool extern
                     buffers.y.size() > address_words)) {
     throw std::invalid_argument("DSP requires nonempty memory spans of at most 2^24 words");
   }
-  constexpr Word maximum_block = 256;
-  if (options.instructions_per_block == 0 || options.instructions_per_block > maximum_block) {
-    throw std::invalid_argument("Translation block length must be in [1,256]");
-  }
   if (options.cacheable_begin > options.cacheable_end || options.cacheable_end > address_words ||
       (options.cache_sector_words != 128 && options.cache_sector_words != 256)) {
     throw std::invalid_argument("Invalid DSP instruction cache interval or sector size");

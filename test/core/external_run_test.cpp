@@ -146,18 +146,11 @@ void refused_flow(const Backend backend, const std::size_t rejected) {
           "External refusals retain actual operation class, address, space and instruction PC");
   require(std::ranges::equal(bus.events, std::span(events).first(rejected + 1)),
           "A real refusal preserves the accepted physical prefix and prevents all later callbacks");
-  const auto saved = core.checkpoint();
-  Bus clone_bus = bus;
-  Core clone(clone_bus, {.backend = backend});
-  clone.restore(saved);
-  for (auto *owner : {&core, &clone}) {
-    const auto stopped = owner->run(flow_instructions);
-    require(stopped.dispatches == 0 && stopped.fault == result.fault &&
-                owner->registers() == expected && owner->progress() == result.progress,
-            "Faulted original/fresh diagnostic owners remain blocked without replay or retirement");
-  }
-  require(bus.events.size() == rejected + 1 && clone_bus.events == bus.events,
-          "Diagnostic restore never turns a failed physical operation into a synthetic success");
+  const auto stopped = core.run(flow_instructions);
+  require(stopped.dispatches == 0 && stopped.fault == result.fault &&
+              core.registers() == expected && core.progress() == result.progress &&
+              bus.events.size() == rejected + 1,
+          "A faulted owner remains blocked without replay, retirement or additional bus effects");
 }
 }
 }

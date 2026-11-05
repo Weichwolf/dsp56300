@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "dsp56300/core.hpp"
+#include "dsp56300/isa.hpp"
 #include "saturation_model.hpp"
 #include "support.hpp"
 
@@ -8,13 +9,25 @@
 #include <exception>
 #include <iostream>
 #include <stdexcept>
+#include <utility>
 
 namespace dsp56300::test {
 namespace {
-constexpr Word mac = 0x2000d2, clear = 0x200013, negate = 0x200036;
-constexpr Word io_load_clear = 0x44e013, io_load = 0x44e000;
-constexpr Word io_load_add = 0x44e040, io_load_subtract = 0x44e044;
-constexpr Word io_load_compare = 0x44e045, io_load_adc = 0x44e021, io_load_sbc = 0x44e025;
+constexpr Word mac_pair_bits = 0x50;
+constexpr Word mac = std::to_underlying(isa::Opcode::mac_register_a) | mac_pair_bits;
+constexpr Word clear = std::to_underlying(isa::Opcode::clr_a);
+constexpr Word negate = std::to_underlying(isa::Opcode::neg_a);
+constexpr Word x0_read_r0_fields = 0x00a000;
+constexpr Word alu_field_mask = 0xff;
+constexpr Word io_load = std::to_underlying(isa::Opcode::move_x_effective) | x0_read_r0_fields;
+constexpr Word io_load_clear = io_load | (std::to_underlying(isa::Opcode::clr_a) & alu_field_mask);
+constexpr Word io_load_add = io_load | (std::to_underlying(isa::Opcode::add_x0_a) & alu_field_mask);
+constexpr Word io_load_subtract =
+    io_load | (std::to_underlying(isa::Opcode::sub_x0_a) & alu_field_mask);
+constexpr Word io_load_compare =
+    io_load | (std::to_underlying(isa::Opcode::cmp_x0_a) & alu_field_mask);
+constexpr Word io_load_adc = io_load | (std::to_underlying(isa::Opcode::adc_x_a) & alu_field_mask);
+constexpr Word io_load_sbc = io_load | (std::to_underlying(isa::Opcode::sbc_x_a) & alu_field_mask);
 constexpr Word io_address = 0xffff80;
 
 struct Machine {
@@ -71,7 +84,7 @@ void numeric_modes() {
 
 void rounding_modes() {
   Machine machine({.backend = Backend::jit});
-  constexpr Word round_accumulator = 0x200011;
+  constexpr Word round_accumulator = std::to_underlying(isa::Opcode::rnd_a);
   machine.core.write(Space::program, start, round_accumulator);
   auto state = initial_state();
   state.a = std::uint64_t{1} << (word_bits - 1);
@@ -121,8 +134,12 @@ void native_sums(const bool optimize) {
   constexpr std::array<Word, 23> opcodes{0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x14,
                                          0x24, 0x34, 0x44, 0x54, 0x64, 0x74, 0x05, 0x45,
                                          0x55, 0x65, 0x75, 0x21, 0x31, 0x25, 0x35};
-  constexpr std::array<Word, 6> immediates{
-      0x014080, 0x014084, 0x014085, 0x0140c0, 0x0140c4, 0x0140c5};
+  constexpr std::array<Word, 6> immediates{std::to_underlying(isa::Opcode::add_immediate_short),
+                                           0x014084,
+                                           std::to_underlying(isa::Opcode::cmp_immediate_short),
+                                           0x0140c0,
+                                           0x0140c4,
+                                           0x0140c5};
   constexpr Word long_immediate_bit = 0x40;
   for (const Word destination : {Word{0}, Word{8}}) {
     for (const Word mode : {Word{0}, mode_down, mode_up}) {
@@ -144,7 +161,10 @@ void native_sums(const bool optimize) {
 
 void unsupported_sum_modes() {
   constexpr std::array<Word, 5> modes{0x2000, 0x4000, 0x20000, 0x100000, mode_up | mode_down};
-  constexpr std::array<Word, 4> opcodes{0x200040, 0x200025, 0x014080, 0x014085};
+  constexpr std::array<Word, 4> opcodes{std::to_underlying(isa::Opcode::add_x0_a),
+                                        std::to_underlying(isa::Opcode::sbc_x_a),
+                                        std::to_underlying(isa::Opcode::add_immediate_short),
+                                        std::to_underlying(isa::Opcode::cmp_immediate_short)};
   for (const auto mode : modes) {
     for (const auto opcode : opcodes) {
       Machine machine({.backend = Backend::jit});
@@ -153,20 +173,21 @@ void unsupported_sum_modes() {
       state.sr = mode;
       machine.core.set_registers(state);
       const auto result = machine.core.run(1);
-      constexpr Word cmp_immediate = 0x014085;
-      if (mode == saturation_model::mode && opcode != cmp_immediate) {
+      constexpr Word cmp_immediate = std::to_underlying(isa::Opcode::cmp_immediate_short);
+      if (mode == saturation_model::mode) {
         auto expected = state;
         auto old = state;
         const bool immediate = opcode < parallel_none;
         if (immediate) { old.x = 0; }
-        saturation_model::alu(expected, old, immediate ? 0x40U : opcode);
+        const Word operation = opcode == cmp_immediate ? 0x45U : 0x40U;
+        saturation_model::alu(expected, old, immediate ? operation : opcode);
         ++expected.pc;
         require(result.dispatches == 1 && result.fault.kind == FaultKind::none &&
                     result.progress == Progress{.instructions = 1, .estimated_cycles = 1} &&
                     machine.core.registers() == expected &&
                     machine.core.jit_statistics().native_alu_instructions == 1 &&
                     machine.core.jit_statistics().helper_instructions == 0,
-                "SM sums execute independently calculated native saturation semantics");
+                "SM sums and comparisons execute independently calculated saturation semantics");
         continue;
       }
       require(result.dispatches == 0 && result.progress == Progress{} &&
@@ -178,12 +199,12 @@ void unsupported_sum_modes() {
 }
 
 void native_carry_chains() {
-  constexpr Word adc_x_a = 0x200021;
-  constexpr Word adc_y_b = 0x200039;
-  constexpr Word adc_x_b = 0x200029;
-  constexpr Word sbc_x_b = 0x20002d;
-  constexpr Word sbc_y_b = 0x20003d;
-  constexpr Word sbc_x_a = 0x200025;
+  constexpr Word adc_x_a = std::to_underlying(isa::Opcode::adc_x_a);
+  constexpr Word adc_y_b = std::to_underlying(isa::Opcode::adc_y_b);
+  constexpr Word adc_x_b = std::to_underlying(isa::Opcode::adc_x_b);
+  constexpr Word sbc_x_b = std::to_underlying(isa::Opcode::sbc_x_b);
+  constexpr Word sbc_y_b = std::to_underlying(isa::Opcode::sbc_y_b);
+  constexpr Word sbc_x_a = std::to_underlying(isa::Opcode::sbc_x_a);
 
   struct Chain {
     std::array<Word, 4> program;
@@ -218,11 +239,11 @@ void native_carry_chains() {
     machine.core.set_registers(state);
     require(machine.core.run(1).dispatches == 1 && machine.core.run(3).dispatches == 3 &&
                 machine.core.registers() == expected,
-            "Partitioned carry chains retain flags across general and native execution");
-    require(machine.core.jit_statistics().native_alu_instructions == 7 &&
-                machine.core.jit_statistics().helper_instructions == 1 &&
+            "Partitioned carry chains retain flags across native entries");
+    require(machine.core.jit_statistics().native_alu_instructions == 8 &&
+                machine.core.jit_statistics().helper_instructions == 0 &&
                 machine.core.progress() == Progress{.instructions = 8, .estimated_cycles = 8},
-            "A short carry-chain budget uses one general tail and exact retirement accounting");
+            "Short carry-chain runs remain native with exact retirement accounting");
   }
 }
 
@@ -323,7 +344,7 @@ void memory_fault() {
 void sum_loop_boundary() {
   Machine machine({.backend = Backend::jit});
   constexpr Word do_three = 0x060380;
-  constexpr Word add_x0 = 0x200040;
+  constexpr Word add_x0 = std::to_underlying(isa::Opcode::add_x0_a);
   const std::array program{do_three, start + 3, add_x0, add_x0};
   machine.core.load(Space::program, start, program);
   auto state = initial_state();
@@ -343,8 +364,9 @@ void sum_loop_boundary() {
 
 void sum_repeat() {
   Machine machine({.backend = Backend::jit});
-  constexpr Word repeat_four = 0x0604a0;
-  constexpr Word adc_x = 0x200021;
+  constexpr Word repeat_count_bits = 4U << 8;
+  constexpr Word repeat_four = std::to_underlying(isa::Opcode::rep_immediate) | repeat_count_bits;
+  constexpr Word adc_x = std::to_underlying(isa::Opcode::adc_x_a);
   const std::array program{repeat_four, adc_x};
   machine.core.load(Space::program, start, program);
   auto state = initial_state();
@@ -355,9 +377,10 @@ void sum_repeat() {
   require(machine.core.run(5).dispatches == 5 && machine.core.registers().a == 5 &&
               machine.core.registers().sr == flag_u && machine.core.registers().lc == state.lc &&
               machine.core.registers().pc == start + 2 && machine.core.interruptible(),
-          "Repeated ADC reevaluates Carry and restores LC through the general REP path");
-  require(machine.core.jit_statistics().native_alu_instructions == 0,
-          "REP retains its qualified general instruction continuation");
+          "Repeated ADC reevaluates Carry and restores LC across the REP continuation");
+  require(machine.core.jit_statistics().native_alu_instructions == 4 &&
+              machine.core.jit_statistics().helper_instructions == 1,
+          "REP setup retains one visible helper while all four ADC iterations execute natively");
 }
 
 void interrupt_callback_boundary() {

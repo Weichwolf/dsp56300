@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "dsp56300/checkpoint.hpp"
 #include "dsp56300/core.hpp"
 #include "staged_support.hpp"
 #include "support.hpp"
@@ -150,22 +149,10 @@ void staged(const Backend backend,
   core.set_registers(initial());
   core.request_interrupt(vector, 0, {.address = foreground, .opcode = foreground_move});
   reach_operand(core, bus, form, slot, policy);
-  auto before_bus = bus;
-  Core before(before_bus,
-              {.backend = backend == Backend::reference ? Backend::jit : Backend::reference});
-  before.restore(core.checkpoint());
   static_cast<void>(core.advance_instruction(pending(core).ticket));
   require(bus.exact && bus.calls == 3 && bus.accepted == 3,
           "One native advance accepts exactly one real peripheral effect");
-  auto after_bus = bus;
-  Core after(after_bus, {.backend = Backend::cached});
-  after.restore(core.checkpoint());
   complete(core, bus, form, slot, policy);
-  complete(before, before_bus, form, slot, policy);
-  complete(after, after_bus, form, slot, policy);
-  require(core.registers() == before.registers() && core.registers() == after.registers() &&
-              core.progress() == before.progress() && core.progress() == after.progress(),
-          "Fresh owners on both sides of the operand retain native continuation exactly");
 }
 
 void refused(const Backend backend,

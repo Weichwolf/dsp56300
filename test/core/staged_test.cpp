@@ -14,7 +14,6 @@ void arithmetic() {
     Core core(bus, {.backend = backend});
     const auto before = seed();
     core.set_registers(before);
-    const auto saved = core.checkpoint();
     const auto result = core.begin_instruction({.address = boot, .opcode = add_x0});
     const auto value = pending(core);
     auto expected = before;
@@ -33,7 +32,8 @@ void arithmetic() {
                 core.progress() == Progress{.instructions = 1, .estimated_cycles = 1},
             "Only retirement publishes the real arithmetic and counter result");
     rejected([&] { static_cast<void>(core.advance_instruction(value.ticket)); });
-    core.restore(saved);
+    core.reset();
+    core.set_registers(before);
     static_cast<void>(core.begin_instruction({.address = boot, .opcode = add_x0}));
     rejected([&] { static_cast<void>(core.advance_instruction(value.ticket)); });
     retire(core);
@@ -117,40 +117,30 @@ void successive_instructions() {
       require(core.registers() == expected && bus.calls == 1 && bus.accepted == 1 && bus.exact,
               "First instruction publishes exactly the independent accepted read");
       static_cast<void>(core.begin_instruction({.address = expected.pc, .opcode = 0}, publication));
-      const auto old = pending(core).ticket;
-      const auto saved = core.checkpoint();
-      Bus clone_bus = bus;
-      Core clone(clone_bus, {.backend = backend});
-      clone.restore(saved);
-      core.restore(saved);
-      rejected([&] { static_cast<void>(core.advance_instruction(old)); });
-      rejected([&] { static_cast<void>(clone.advance_instruction(old)); });
       ++expected.pc;
-      for (auto *owner : {&core, &clone}) {
-        auto &wire = owner == &core ? bus : clone_bus;
-        drain(*owner,
-              {.pending = owner->pending_instruction(),
-               .progress = owner->progress(),
-               .fault = owner->fault()});
-        require(owner->registers() == expected && wire.calls == 1 && wire.exact &&
-                    owner->progress().instructions == 2,
-                "Original/fresh NOP checkpoints never consume a preceding instruction's read");
-        wire.pc = expected.pc;
-        wire.events.push_back(
-            {.kind = EffectKind::write, .address = data_address + 1, .value = datum});
-        drain(*owner,
-              owner->begin_instruction({.address = expected.pc, .opcode = write_x0}, publication));
-        auto stored = expected;
-        ++stored.pc;
-        ++stored.r[0];
-        require(owner->registers() == stored && wire.calls == 2 && wire.accepted == 2 &&
-                    wire.x_written == datum && wire.exact,
-                "The next instruction owns one new store, not a retained read or duplicate write");
-        drain(*owner, owner->begin_instruction({.address = stored.pc, .opcode = 0}, publication));
-        ++stored.pc;
-        require(owner->registers() == stored && wire.calls == 2 && wire.x_written == datum,
-                "An empty successor never republishes the preceding accepted store");
-      }
+
+      drain(core,
+            {.pending = core.pending_instruction(),
+             .progress = core.progress(),
+             .fault = core.fault()});
+      require(core.registers() == expected && bus.calls == 1 && bus.exact &&
+                  core.progress().instructions == 2,
+              "Actual successive NOP instructions never consume a preceding instruction's read");
+      bus.pc = expected.pc;
+      bus.events.push_back(
+          {.kind = EffectKind::write, .address = data_address + 1, .value = datum});
+      drain(core,
+            core.begin_instruction({.address = expected.pc, .opcode = write_x0}, publication));
+      auto stored = expected;
+      ++stored.pc;
+      ++stored.r[0];
+      require(core.registers() == stored && bus.calls == 2 && bus.accepted == 2 &&
+                  bus.x_written == datum && bus.exact,
+              "The next instruction owns one new store, not a retained read or duplicate write");
+      drain(core, core.begin_instruction({.address = stored.pc, .opcode = 0}, publication));
+      ++stored.pc;
+      require(core.registers() == stored && bus.calls == 2 && bus.x_written == datum,
+              "An empty successor never republishes the preceding accepted store");
     }
   }
 }
@@ -168,25 +158,16 @@ void opcode_ownership() {
     const auto fetch = pending(core);
     require(fetch.effect.kind == EffectKind::fetch_opcode && !fetch.opcode && bus.calls == 0,
             "Unfetched opcode must remain unknown, including a zero-initialized work slot");
-    const auto initial = core.checkpoint();
     static_cast<void>(core.advance_instruction(fetch.ticket));
     const auto extension = pending(core);
     require(extension.effect.kind == EffectKind::fetch_extension &&
                 extension.opcode == load_absolute && bus.calls == 1,
             "A real accepted opcode must identify its pending extension fetch");
-    const auto decoded = core.checkpoint();
     static_cast<void>(core.advance_instruction(extension.ticket));
     const auto data = pending(core);
     require(data.effect.kind == EffectKind::read && data.effect.address == data_address &&
                 data.opcode == load_absolute && bus.calls == 2,
             "The real pending operand read must retain its owning opcode");
-    core.restore(decoded);
-    const auto restored = pending(core);
-    require(restored.effect.kind == EffectKind::fetch_extension && restored.opcode == load_absolute,
-            "Checkpoint restoration must retain actual opcode ownership");
-    core.restore(initial);
-    require(!pending(core).opcode && bus.calls == 2,
-            "Restoring a prefetch checkpoint must not manufacture an opcode");
     rejected([&] { static_cast<void>(core.advance_instruction(fetch.ticket)); });
     core.reset();
     core.set_registers(seed());
@@ -196,38 +177,25 @@ void opcode_ownership() {
   }
 }
 
-}
-
-void restore() {
-  for (const auto origin : backends) {
-    for (const auto destination : backends) {
-      Bus bus;
-      bus.events = {{}};
-      Core core(bus, {.backend = origin});
-      core.set_registers(seed());
-      static_cast<void>(core.begin_instruction({.address = boot, .opcode = read_x0}));
-      const auto first = pending(core);
-      const auto waiting = core.checkpoint();
-      Bus clone_bus = bus;
-      Core clone(clone_bus, {.backend = destination});
-      clone.restore(waiting);
-      rejected([&] { static_cast<void>(clone.advance_instruction(first.ticket)); });
-      const auto restored = pending(clone);
-      static_cast<void>(clone.advance_instruction(restored.ticket));
-      const auto after_read = clone.checkpoint();
-      const auto old = pending(clone);
-      retire(clone);
-      clone.restore(after_read);
-      rejected([&] { static_cast<void>(clone.advance_instruction(old.ticket)); });
-      retire(clone);
-      auto expected = seed();
-      expected.x = datum;
-      ++expected.pc;
-      ++expected.r[0];
-      require(clone.registers() == expected && clone_bus.calls == 1 && bus.calls == 0,
-              "Restored pending/read-complete owners preserve accepted I/O and rebind tickets");
-    }
+void continuation() {
+  for (const auto backend : backends) {
+    Bus bus;
+    bus.events = {{}};
+    Core core(bus, {.backend = backend});
+    core.set_registers(seed());
+    static_cast<void>(core.begin_instruction({.address = boot, .opcode = read_x0}));
+    const auto first = pending(core);
+    static_cast<void>(core.advance_instruction(first.ticket));
+    rejected([&] { static_cast<void>(core.advance_instruction(first.ticket)); });
+    retire(core);
+    auto expected = seed();
+    expected.x = datum;
+    ++expected.pc;
+    ++expected.r[0];
+    require(core.registers() == expected && bus.calls == 1,
+            "Actual pending/read-complete execution preserves accepted I/O without replay");
   }
+}
 }
 } // namespace dsp56300::test::staged_test
 
@@ -239,7 +207,7 @@ int main() {
     opcode_ownership();
     successive_instructions();
     multiple_effects();
-    restore();
+    continuation();
     interrupt();
     vector_provenance();
     repetition();

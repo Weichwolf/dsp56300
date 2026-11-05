@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "dsp56300/checkpoint.hpp"
 #include "dsp56300/core.hpp"
 #include "staged_support.hpp"
 #include "support.hpp"
@@ -128,26 +127,12 @@ void owned_pair(const Backend backend, const InstructionPublication policy, cons
   require(bus.exact && bus.reads == 2 && bus.writes == (store ? 1U : 0U) &&
               core.progress() == Progress{},
           "The complete pair precedes any real self-modifying P store and all retirements");
-  const auto saved = core.checkpoint();
-  Bus cloned_bus = bus;
-  const auto other = backend == Backend::reference ? Backend::cached : Backend::reference;
-  Core clone(cloned_bus, {.backend = other});
-  clone.restore(saved);
   retire(core);
-  retire(clone);
-  require(core.registers() == initial() && clone.registers() == initial() &&
-              core.progress().instructions == 1 && clone.progress() == core.progress(),
-          "A genuine first vector instruction preserves registers across a fresh-owner restore");
-  const auto stopped = core.checkpoint();
-  Bus resumed_bus = bus;
-  Core resumed(resumed_bus, {.backend = other});
-  resumed.restore(stopped);
+  require(core.registers() == initial() && core.progress().instructions == 1,
+          "The genuine first vector instruction preserves foreground registers");
   second_instruction(core, bus, policy);
-  second_instruction(clone, cloned_bus, policy);
-  second_instruction(resumed, resumed_bus, policy);
-  require(core.progress() == clone.progress() && core.progress() == resumed.progress() &&
-              bus.writes == cloned_bus.writes && bus.writes == resumed_bus.writes,
-          "Pre/post-retirement checkpoints retain the pair and never repeat an accepted P store");
+  require(bus.writes == (store ? 1U : 0U),
+          "The accepted first-slot program store is not repeated during vector completion");
 }
 
 void refused_pair(const Backend backend, const InstructionPublication policy, const bool store) {
@@ -158,8 +143,6 @@ void refused_pair(const Backend backend, const InstructionPublication policy, co
   core.set_registers(initial());
   core.request_interrupt(vector, 0, {.address = foreground, .opcode = 0});
   first_read(core, bus, policy);
-  const auto saved = core.checkpoint();
-  const auto trusted_bus = bus;
   const auto result = core.advance_instruction(pending(core).ticket);
   require(result.fault == Fault{.kind = FaultKind::memory_read,
                                 .space = Space::program,
@@ -168,12 +151,6 @@ void refused_pair(const Backend backend, const InstructionPublication policy, co
               !result.retired && core.registers() == initial() && core.progress() == Progress{} &&
               bus.reads == 2 && bus.writes == 0 && !core.instruction_outcome(),
           "A refused second vector read cannot execute the first opcode or publish a receipt");
-  Core recovered(bus, {.backend = backend});
-  recovered.restore(saved);
-  bus = trusted_bus;
-  bus.refuse_second = false;
-  retire(recovered);
-  second_instruction(recovered, bus, policy);
 }
 
 void atomic_pair(const Backend backend) {

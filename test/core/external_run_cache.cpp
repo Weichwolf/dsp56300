@@ -47,32 +47,23 @@ void cache_case(const Backend backend, const unsigned width, const bool burst) {
       replay.dispatches == 1 && replay.fault.kind == FaultKind::none &&
           core.registers() == expected && bus.reads == initial_reads,
       "Retained architectural code/data override later RAM contents without a fake bus callback");
-  const auto saved = core.checkpoint();
-  Bus clone_bus = bus;
-  Core clone(clone_bus, options);
-  clone.restore(saved);
-  for (auto *owner : {&core, &clone}) {
-    auto &wire = owner == &core ? bus : clone_bus;
-    auto before = expected;
-    before.pc = origin + 4;
-    before.x = short_x0;
-    owner->set_registers(before);
-    const auto store = owner->run(1);
-    require(store.dispatches == 1 && store.fault.kind == FaultKind::none && wire.writes == 1 &&
-                wire.memory.at({Space::program, origin}) == short_x0,
-            "Original/fresh external owners execute a genuine P store into a retained code line");
-    const auto reads = wire.reads;
-    before.pc = origin;
-    owner->set_registers(before);
-    const auto changed = owner->run(1);
-    before.pc += 1;
-    before.x = short_datum;
-    require(changed.dispatches == 1 && changed.fault.kind == FaultKind::none &&
-                owner->registers() == before && wire.reads == reads &&
-                owner->progress().instructions == 4,
-            "Accepted P write-through updates cached instructions once, including after trusted "
-            "restore");
-  }
+  auto before = expected;
+  before.pc = origin + 4;
+  before.x = short_x0;
+  core.set_registers(before);
+  const auto store = core.run(1);
+  require(store.dispatches == 1 && store.fault.kind == FaultKind::none && bus.writes == 1 &&
+              bus.memory.at({Space::program, origin}) == short_x0,
+          "External owners execute a genuine P store into a retained code line");
+  const auto reads = bus.reads;
+  before.pc = origin;
+  core.set_registers(before);
+  const auto changed = core.run(1);
+  before.pc += 1;
+  before.x = short_datum;
+  require(changed.dispatches == 1 && changed.fault.kind == FaultKind::none &&
+              core.registers() == before && bus.reads == reads && core.progress().instructions == 4,
+          "Accepted P write-through updates cached instructions once");
 }
 
 void cache_refusal(const Backend backend, const unsigned width) {
@@ -95,14 +86,10 @@ void cache_refusal(const Backend backend, const unsigned width) {
                                     .pc = origin},
           "A missing real burst-fill word faults at its own address before ISA execution or "
           "retirement");
-  const auto saved = core.checkpoint();
-  Bus clone_bus = bus;
-  Core clone(clone_bus, options);
-  clone.restore(saved);
-  const auto blocked = clone.run(1);
+  const auto blocked = core.run(1);
   require(blocked.dispatches == 0 && blocked.fault == result.fault &&
-              clone.registers() == expected && bus.reads == 3 && clone_bus.events == bus.events,
-          "Faulted partial architectural cache snapshots preserve the strict missing-word refusal");
+              core.registers() == expected && bus.reads == 3,
+          "A faulted architectural cache fill remains blocked without additional source reads");
 }
 }
 

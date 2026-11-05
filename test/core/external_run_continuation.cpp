@@ -98,34 +98,25 @@ void mixed_ownership(const Backend backend) {
   }
   require(progress.pending.has_value() && core.registers() == expected,
           "A synchronous successor can retain an actual pending staged RAM read");
-  const auto old = staged_test::pending(core).ticket;
   staged_test::rejected([&] { static_cast<void>(core.run(1)); });
-  const auto saved = core.checkpoint();
-  Bus clone_bus = bus;
-  Core clone(clone_bus, {.backend = backend});
-  clone.restore(saved);
-  staged_test::rejected([&] { static_cast<void>(clone.advance_instruction(old)); });
-  for (auto *owner : {&core, &clone}) {
-    auto step = owner->advance_instruction(staged_test::pending(*owner).ticket);
-    require(step.pending.has_value() && !step.retired,
-            "Accepted staged read awaits native retirement");
-    staged_test::retire(*owner);
-    auto after = expected;
-    ++after.pc;
-    ++after.r[0];
-    after.x = datum;
-    require(owner->registers() == after && owner->progress().instructions == 2,
-            "Original/fresh mixed owners retain every literal native register and retirement");
-    require(owner->run(3).dispatches == 3,
-            "An ordinary suffix resumes only after actual staged retirement");
-    after.pc += 3;
-    ++after.r[0];
-    auto &wire = owner == &core ? bus : clone_bus;
-    require(owner->registers() == after && owner->progress().instructions == 5 &&
-                wire.writes == 1 && wire.memory.at({Space::x, address + 1}) == datum,
-            "A mixed synchronous/staged checkpoint suffix performs its one actual independent RAM "
-            "store");
-  }
+  auto step = core.advance_instruction(staged_test::pending(core).ticket);
+  require(step.pending.has_value() && !step.retired,
+          "Accepted staged read awaits native retirement");
+  staged_test::retire(core);
+  auto after = expected;
+  ++after.pc;
+  ++after.r[0];
+  after.x = datum;
+  require(core.registers() == after && core.progress().instructions == 2,
+          "Mixed owners retain every literal native register and retirement");
+  require(core.run(3).dispatches == 3,
+          "An ordinary suffix resumes only after actual staged retirement");
+  after.pc += 3;
+  ++after.r[0];
+  require(core.registers() == after && core.progress().instructions == 5 && bus.writes == 1 &&
+              bus.memory.at({Space::x, address + 1}) == datum,
+          "A mixed synchronous/staged suffix performs its one actual independent RAM "
+          "store");
 }
 
 void repeated_opcode(const Backend backend) {
@@ -140,7 +131,6 @@ void repeated_opcode(const Backend backend) {
   const auto prefix = core.run(2);
   require(prefix.dispatches == 2 && prefix.fault.kind == FaultKind::none && bus.reads == 2,
           "External REP fetches the actual body once and retires the first arithmetic operation");
-  const auto saved = core.checkpoint();
   bus.memory[{Space::program, origin + 1}] = 0; // Mutated RAM cannot replace a genuine REP latch.
   const auto suffix = core.run(2);
   expected.pc += 2;
@@ -150,14 +140,6 @@ void repeated_opcode(const Backend backend) {
       suffix.dispatches == 2 && suffix.fault.kind == FaultKind::none &&
           core.registers() == expected && core.progress().instructions == 4 && bus.reads == 2,
       "Remaining external REP iterations preserve the literal original opcode and complete state");
-  Core clone(bus, {.backend = backend});
-  clone.restore(saved);
-  const auto replay = clone.run(2);
-  require(replay.dispatches == 2 && replay.fault.kind == FaultKind::none &&
-              clone.registers() == expected && clone.progress() == core.progress() &&
-              bus.reads == 2,
-          "A fresh external owner restores the actual remaining REP count/latch without a host "
-          "opcode patch");
 }
 
 void vector_pair(const Backend backend) {
@@ -179,17 +161,12 @@ void vector_pair(const Backend backend) {
       prefix.dispatches == 1 && prefix.fault.kind == FaultKind::none && bus.reads == 2 &&
           bus.writes == 1 && bus.memory.at({Space::program, vector + 1}) == changed,
       "External fast interrupt captures both real vector words before its first slot modifies RAM");
-  const auto saved = core.checkpoint();
   const auto suffix = core.run(1);
   expected.r[2] = 7;
   require(suffix.dispatches == 1 && suffix.fault.kind == FaultKind::none &&
               core.registers() == expected && bus.reads == 2,
           "The original second vector slot executes from its genuine pair latch and resumes "
           "foreground");
-  Core clone(bus, {.backend = backend});
-  clone.restore(saved);
-  require(clone.run(1).dispatches == 1 && clone.registers() == expected && bus.reads == 2,
-          "A restored external vector pair retains captured words despite the actual P write");
 }
 }
 

@@ -18,10 +18,17 @@
 
 - Keep the same minimal public Core/Memory/Io/Options API shape in both cores.
   Core owns its state; optional read-only state inspection is outside normal use.
-  Expose no pipeline tickets or opaque checkpoint machinery in the normal API.
+  Remove checkpoint/restore APIs and their implementation completely. Preserve
+  ISA, wait and interrupt behavior; state inspection is read-only. Expose no
+  pipeline tickets in the normal API.
 - Production execution is JIT-only. Future x86/SSE/AVX and ARM/NEON host emitters
   implement the same host concept. Remove interpreter/reference/cached backend
   selection; preserve independent ISA tests and all implemented instructions.
+
+- Translate complete logical blocks/functions independently of execution grants.
+  No artificial instruction-count translation caps or budget-specific fragments.
+  Keep generated code immutable and retained for the entire Core lifetime; no
+  eviction/recompilation. The consumer creates a new Core for a new program.
 
 ## Working rules
 

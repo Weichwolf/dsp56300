@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "architecture.hpp"
-#include "dsp56300/backend.hpp"
+#include "backend_support.hpp"
 #include "dsp56300/core.hpp"
-#include "dsp56300/simd.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
 #include "jit_emitter.hpp"
@@ -11,6 +10,7 @@
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
 #include "saturation_model.hpp"
+#include "simd.hpp"
 #include "support.hpp"
 #include "value_ranges.hpp"
 #include "word_reuse.hpp"
@@ -80,15 +80,21 @@ void extended_encodings() {
           "High-XMM scalar/copy/shift/load/store encodings preserve REX and low ModRM fields");
 }
 
-void extended_copy(const Xmm source, const Xmm destination) {
+struct XmmPair {
+  Xmm source;
+  Xmm destination;
+};
+
+void extended_copy(const XmmPair operands) {
   constexpr std::array counts{0U, 1U, 31U, 32U, 63U};
   for (const auto count : counts) {
     detail::x64::Code code;
     code.raw(entry_landing);
-    code.packed_load(source, Reg::di, offsetof(detail::Cpu, reg) + offsetof(Registers, a));
-    code.packed(detail::x64::Packed::copy, destination, source);
-    code.packed_shift_right(destination, count);
-    code.packed_store(Reg::di, offsetof(detail::Cpu, reg) + offsetof(Registers, x), destination);
+    code.packed_load(operands.source, Reg::di, offsetof(detail::Cpu, reg) + offsetof(Registers, a));
+    code.packed(detail::x64::Packed::copy, operands.destination, operands.source);
+    code.packed_shift_right(operands.destination, count);
+    code.packed_store(
+        Reg::di, offsetof(detail::Cpu, reg) + offsetof(Registers, x), operands.destination);
     code.raw({return_opcode});
     const native::Direct executable(code.bytes());
     for (unsigned bit = 0; bit < 64; ++bit) {
@@ -475,7 +481,7 @@ int main() {
     dsp56300::test::extended_encodings();
     for (const auto source : dsp56300::test::snapshots) {
       for (const auto destination : dsp56300::test::snapshots) {
-        dsp56300::test::extended_copy(source, destination);
+        dsp56300::test::extended_copy({.source = source, .destination = destination});
       }
     }
     dsp56300::test::typed_backend<dsp56300::Backend::reference>();

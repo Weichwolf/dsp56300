@@ -50,7 +50,7 @@ Current user requirements
   including MAC/filter, FFT, address-heavy and control code. Compare qualified
   candidates using live/read/write sets and measured costs. A single fixed host
   assignment is not the final design. Use available GPR/SIMD registers and cache
-  as operation-appropriate storage, retaining complete canonical checkpoints.
+  as operation-appropriate storage, retaining complete canonical Core state.
 - Investigate both-branch evaluation with SIMD masks for suitable short pure
   regions. Commit only the selected state/effects; preserve dependent recurrences,
   failures, I/O and memory bounds. Measure whether prediction is a real bottleneck
@@ -74,8 +74,9 @@ Current user requirements
   Keep complete readable state owned by Core, with optional inspection at safe
   boundaries. The normal consumer does not manage CPU state. Instruction and
   memory effects preserve ISA ordering; physical pipeline phases and electrical
-  wiring are not implementation goals. Retire staged effect-ticket and opaque
-  checkpoint APIs as their consumers migrate to normal native execution.
+  wiring are not implementation goals. Remove opaque checkpoint APIs and their
+  implementation. Retire staged effect-ticket APIs as their consumers migrate to
+  normal native execution.
 - Use C++23, LLVM 19, CMake/Ninja, strict warnings, hardening, clang-format/tidy,
   and nonrecovering ASan/UBSan with native dependencies instrumented in strict
   builds. Keep functions at most 120 lines and do not suppress/weaken checks.

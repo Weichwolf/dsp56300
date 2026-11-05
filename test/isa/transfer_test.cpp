@@ -322,7 +322,6 @@ void staged_fast_immediate(const Backend backend, const Word modes) {
               machine.core.progress() == Progress{},
           "Captured fast MOVEP waits for its actual vector-addressed peripheral effect");
   static_cast<void>(machine.core.advance_instruction(first.pending.value().ticket));
-  const auto after_write = machine.core.checkpoint();
   const auto finish = [&] {
     unsigned effects = 0;
     while (const auto pending = machine.core.pending_instruction()) {
@@ -335,8 +334,6 @@ void staged_fast_immediate(const Backend backend, const Word modes) {
                 !machine.core.interruptible(),
             "Fast MOVEP retires one instruction without changing foreground PC or stack");
   };
-  finish();
-  machine.core.restore(after_write);
   finish();
 }
 

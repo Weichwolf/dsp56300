@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Resume the original IIR at independently predicted instruction checkpoints.
+// Resume the original IIR at independently predicted instruction boundaries.
+#include "backend_support.hpp"
 #include "binary_fixture.hpp"
-#include "dsp56300/backend.hpp"
 #include "dsp56300/core.hpp"
 #include "fixture_memory.hpp"
 #include "support.hpp"
@@ -16,7 +16,7 @@
 
 namespace dsp56300::test {
 namespace {
-constexpr std::size_t expected_groups = 288, expected_checkpoints = 6624;
+constexpr std::size_t expected_groups = 288, expected_observations = 6624;
 
 std::string_view scenario(const BinaryCase &item) {
   const auto separator = item.name.rfind(" budget=");
@@ -31,10 +31,10 @@ struct MemoryViews {
 };
 
 template <CoreImplementation Implementation>
-void checkpoint(Implementation &core,
-                const MemoryViews memory,
-                const BinaryCase &item,
-                const Word previous) {
+void observe_prefix(Implementation &core,
+                    const MemoryViews memory,
+                    const BinaryCase &item,
+                    const Word previous) {
   auto expected = memory.initial;
   patch(expected, item.after);
   const auto dispatches = item.budget - previous;
@@ -43,7 +43,7 @@ void checkpoint(Implementation &core,
               result.progress == item.progress && result.state == ProcessingState::running,
           "Resumed IIR retains exact cumulative progress and dispatch boundaries");
   require(core.registers() == item.expected && memory.current == expected,
-          "Every resumed IIR checkpoint matches independent registers, flags, frames and all RAM");
+          "Every resumed IIR observation matches independent registers, flags, frames and all RAM");
   require(core.interruptible() == item.interruptible && core.debug_status() == item.debug,
           "A stopped IIR prefix preserves the declared interrupt/debug contract");
 }
@@ -59,9 +59,9 @@ void group(const std::span<const BinaryCase> items, const Backend backend) {
   for (const auto &item : items) {
     require(item.initial == items.front().initial && initial_memory(item) == initial &&
                 item.budget >= previous,
-            "Resume scenarios share initialization and ordered independent checkpoints");
+            "Resume scenarios share initialization and ordered independent observations");
     try {
-      checkpoint(core, {.current = memory, .initial = initial}, item, previous);
+      observe_prefix(core, {.current = memory, .initial = initial}, item, previous);
     } catch (const std::exception &error) {
       throw std::runtime_error(item.name + ": " + std::string{backend_name(backend)} + ": " +
                                error.what());
@@ -82,7 +82,7 @@ void group(const std::span<const BinaryCase> items, const Backend backend) {
 template <CoreImplementation Implementation>
 void check(const std::span<const BinaryCase> cases, const Backend backend) {
   std::size_t groups = 0;
-  std::size_t checkpoints = 0;
+  std::size_t observations = 0;
   for (std::size_t first = 0; first < cases.size(); ++first) {
     if (cases[first].budget != 0) { continue; }
     const auto name = scenario(cases[first]);
@@ -90,10 +90,10 @@ void check(const std::span<const BinaryCase> cases, const Backend backend) {
     while (end < cases.size() && scenario(cases[end]) == name) { ++end; }
     group<Implementation>(cases.subspan(first, end - first), backend);
     ++groups;
-    checkpoints += end - first;
+    observations += end - first;
     first = end - 1;
   }
-  require(groups == expected_groups && checkpoints == expected_checkpoints,
+  require(groups == expected_groups && observations == expected_observations,
           "Every declared IIR mode/context/design/signal/schedule resume scenario runs");
 }
 } // namespace
@@ -109,7 +109,7 @@ int main(const int argc, const char *const *const argv) {
         cases, dsp56300::Backend::cached);
     dsp56300::test::check<dsp56300::BackendCore<dsp56300::Backend::jit>>(cases,
                                                                          dsp56300::Backend::jit);
-    std::cout << "864 original IIR resume scenarios, 19872 checkpoints; " << dsp56300::test::checks
+    std::cout << "864 original IIR resume scenarios, 19872 observations; " << dsp56300::test::checks
               << " checks passed\n";
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';

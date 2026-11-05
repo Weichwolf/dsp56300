@@ -41,3 +41,10 @@ implementation goals. ISA-visible cache, loop and interrupt semantics remain.
 Strict compilation, static analysis and independently expected ISA/state tests
 qualify changes. Core tests remain active before instrument real-time operation;
 fuzzing runs only on explicit request. Primary references are in references.json.
+
+Generated code uses compact shared executable arenas, not one page per operation.
+Place frequently connected native blocks together, align entries deliberately,
+and keep fault/diagnostic slow paths out of hot instruction streams. Keep active
+Core data compact and retain live guest values in host registers across chained
+blocks. Qualify locality with code/data working-set and cache measurements; layout
+alone does not establish that a whole hot path fits a particular host cache.

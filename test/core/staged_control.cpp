@@ -138,7 +138,6 @@ void faults() {
     const auto initial = seed();
     core.set_registers(initial);
     rejected([&] { static_cast<void>(core.begin_instruction({.address = 0, .opcode = 0})); });
-    const auto healthy = core.checkpoint();
     static_cast<void>(core.begin_instruction({.address = boot, .opcode = read_x0}));
     const auto value = pending(core);
     const auto failed = core.advance_instruction(value.ticket);
@@ -147,7 +146,8 @@ void faults() {
                 core.progress() == Progress{} && bus.calls == 1 && !failed.pending,
             "Unknown/rejected memory stops visibly without an invented word or retirement");
     rejected([&] { static_cast<void>(core.advance_instruction(value.ticket)); });
-    core.restore(healthy);
+    core.reset();
+    core.set_registers(initial);
     auto cached = initial;
     cached.sr = cache_enable;
     core.set_registers(cached);
@@ -163,7 +163,8 @@ void faults() {
                 core.progress() == Progress{.instructions = 1, .estimated_cycles = 1} &&
                 bus.calls == 1,
             "Captured CE-enabled NOP must retire with literal state and progress");
-    core.restore(healthy);
+    core.reset();
+    core.set_registers(initial);
     bus.events = {{.kind = EffectKind::bit, .address = port, .value = 1, .action = BitAction::set}};
     bus.calls = bus.accepted = 0;
     static_cast<void>(core.begin_instruction({.address = boot, .opcode = bit_set}));

@@ -443,7 +443,6 @@ void rebinding() {
   auto initial = register_model::seed(0);
   initial.r[0] = low_base;
   core.set_registers(initial);
-  const auto checkpoint = core.checkpoint();
   require(core.run(1).dispatches == 1 && (core.registers().x & word_mask) == datum,
           "Warm a genuine first storage mapping");
   auto &window = memory.storage[0].windows[0];
@@ -455,10 +454,11 @@ void rebinding() {
           "A descriptor/pointer revision invalidates old embedded host addresses");
   window.words = memory.storage[0].low;
   window.known = memory.storage[0].low_known;
-  core.restore(checkpoint);
+  ++memory.revision;
+  core.set_registers(initial);
   require(core.run(1).dispatches == 1 && (core.registers().x & word_mask) == datum &&
               memory.reads == 0,
-          "Paired restore forces window rebinding even when an owner's revision value is restored");
+          "A subsequent explicit descriptor revision rebinds the original storage");
 }
 
 void executable_alias() {

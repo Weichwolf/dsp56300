@@ -3,8 +3,8 @@
 
 #include "architecture.hpp"
 #include "dsp56300/core.hpp"
-#include "dsp56300/simd.hpp"
 #include "jit.hpp"
+#include "simd.hpp"
 
 #include <array>
 #include <bit>

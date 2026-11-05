@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "dsp56300/checkpoint.hpp"
 #include "dsp56300/core.hpp"
 #include "staged_support.hpp"
 #include "support.hpp"
@@ -102,30 +101,15 @@ void call_phase(Core &core, const unsigned phase) {
   }
 }
 
-struct BackendPair {
-  Backend from, to;
-};
-
-void call_restore(const BackendPair backend, const unsigned cut) {
+void call_restore(const Backend backend, const unsigned cut) {
   Bus bus;
-  Core original(bus, {.backend = backend.from});
+  Core original(bus, {.backend = backend});
   original.set_registers(staged_test::seed());
   static_cast<void>(original.begin_instruction({.address = boot, .opcode = call}, policy));
   for (unsigned phase = 0; phase < cut; ++phase) { call_phase(original, phase); }
-  const auto saved = original.checkpoint();
-  const auto stale = pending(original);
-  Bus restored_bus;
-  Core restored(restored_bus, {.backend = backend.to});
-  restored.restore(saved);
-  rejected([&] { static_cast<void>(restored.advance_instruction(stale.ticket)); });
-  original.restore(saved);
-  rejected([&] { static_cast<void>(original.advance_instruction(stale.ticket)); });
-  for (unsigned phase = cut; phase < 3; ++phase) {
-    call_phase(original, phase);
-    call_phase(restored, phase);
-  }
-  require(bus.calls == 0 && restored_bus.calls == 0,
-          "PCU checkpoint/backend continuation has no invented memory or peripheral transaction");
+  for (unsigned phase = cut; phase < 3; ++phase) { call_phase(original, phase); }
+  require(bus.calls == 0,
+          "Actual PCU continuation has no invented memory or peripheral transaction");
 }
 
 void rti(const Backend backend) {
@@ -299,9 +283,8 @@ int main() {
       reset(from, true);
       reset(from, false);
       reset_absent(from);
-      for (const auto to : backends) {
-        for (unsigned cut = 0; cut < 3; ++cut) { call_restore({.from = from, .to = to}, cut); }
-      }
+
+      for (unsigned cut = 0; cut < 3; ++cut) { call_restore(from, cut); }
     }
     std::cout << dsp56300::test::checks << " native PCU publication assertions passed\n";
   } catch (const std::exception &error) {

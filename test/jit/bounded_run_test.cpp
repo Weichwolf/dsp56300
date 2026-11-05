@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "backend_support.hpp"
 #include "bfu_logic_model.hpp"
-#include "dsp56300/backend.hpp"
 #include "dsp56300/core.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"

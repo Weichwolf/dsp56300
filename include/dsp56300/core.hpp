@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 
-#include "dsp56300/checkpoint.hpp"
-
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -46,7 +44,7 @@ enum class FaultKind : std::uint8_t {
 };
 
 // Architectural values use unshifted DSP coordinates, including raw 56-bit A/B.
-// These registers are not a complete checkpoint of in-flight REP/IRQ continuation.
+// These registers do not include in-flight REP/IRQ continuation.
 struct Registers {
   std::uint64_t x = 0, y = 0, a = 0, b = 0;
   std::array<Word, agu_registers> r{}, n{}, m{};
@@ -108,9 +106,9 @@ enum class RunStop : std::uint8_t {
 
 struct Options {
   Backend backend = Backend::automatic;
-  // Maximum straight-line translation length, bounded to [1,256].
+  // Zero follows control flow and available code; nonzero limits test partitions.
   // A native hardware-loop backedge can repeat the body within the run budget.
-  Word instructions_per_block = 64;
+  Word instructions_per_block = 0;
   // False keeps generated blocks but executes every operation through the helpers.
   bool optimize = true;
   // Half-open external P interval eligible for the architectural instruction cache.
@@ -403,20 +401,11 @@ public:
   void reset();
   [[nodiscard]] Registers registers() const;
   // Changes visible registers, not hidden execution continuation. Use after reset
-  // for initialization; this is not checkpoint restore.
+  // for initialization; hidden continuation remains owned by Core.
   void set_registers(const Registers &state);
-  // Capture/restore complete stopped CPU continuation and architectural cache.
-  // The caller restores matching RAM and I/O separately. Host code caches clear.
-  [[nodiscard]] Checkpoint checkpoint() const;
-  // Capture the complete computed successor state at an owned retirement
-  // boundary without publishing it on this CPU. This is speculative: the
-  // caller must preserve instruction ordering and pair external memory/I/O
-  // with the already accepted effects. Tickets remain owned by this CPU.
-  [[nodiscard]] Checkpoint candidate_checkpoint(const EffectTicket &ticket) const;
-  void restore(const Checkpoint &checkpoint);
   [[nodiscard]] InstructionFetch instruction_fetch() const;
   // Empty during an active instruction, after initialization/fault, or after
-  // nonzero atomic run. Checkpoints retain stopped, actual retirement receipts.
+  // nonzero atomic run.
   [[nodiscard]] std::optional<InstructionOutcome> instruction_outcome() const noexcept;
   [[nodiscard]] InstructionProgress
   begin_instruction(InstructionWords words,
@@ -485,7 +474,6 @@ private:
   [[nodiscard]] InstructionProgress begin_owned(std::optional<InstructionWords> captured,
                                                 InstructionPublication publication);
   [[nodiscard]] bool interruptible_captured(InstructionWords words, bool complete) const;
-  friend class Checkpoint;
   struct Impl;
   std::unique_ptr<Impl> impl_;
 };

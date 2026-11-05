@@ -78,27 +78,12 @@ void accepted_input(const Backend backend,
   require(input.fault.kind == FaultKind::none && !input.retired && !core.instruction_outcome() &&
               bus.calls == 1 && bus.accepted == 1 && bus.exact,
           "A real accepted bit alone cannot publish a control-transfer receipt");
-  const auto saved = core.checkpoint();
   bus.events.front().value = level ? 0U : 1U;
-  Bus clone_bus = bus;
-  const auto other = backend == Backend::reference ? Backend::cached : Backend::reference;
-  Core clone(clone_bus, {.backend = other});
-  clone.restore(saved);
-  require(!clone.instruction_outcome(), "Restoring after input preserves the unretired boundary");
   complete(core);
-  complete(clone);
   const auto expected = expected_outcome(level);
-  require(core.registers() == expected_registers && clone.registers() == expected_registers &&
-              core.instruction_outcome() == expected && clone.instruction_outcome() == expected &&
-              bus.calls == 1 && clone_bus.calls == 1 && bus.exact && clone_bus.exact,
-          "Current external changes cannot replace the once-accepted branch input on either owner");
-  const auto retired = core.checkpoint();
-  Bus resumed_bus = bus;
-  Core resumed(resumed_bus, {.backend = other});
-  resumed.restore(retired);
-  require(resumed.instruction_outcome() == expected && resumed.registers() == expected_registers &&
-              resumed_bus.calls == 1,
-          "A fresh stopped owner restores the actual receipt without any new I/O");
+  require(core.registers() == expected_registers && core.instruction_outcome() == expected &&
+              bus.calls == 1 && bus.exact,
+          "Current external changes cannot replace the once-accepted branch input");
 }
 
 void refused_input(const Backend backend,
@@ -108,8 +93,6 @@ void refused_input(const Backend backend,
   Core core(bus, {.backend = backend});
   prepare(core, bus, publication, level);
   bus.events.front().accept = false;
-  const auto saved = core.checkpoint();
-  const auto input_bus = bus;
   const auto failed = core.advance_instruction(pending(core).ticket);
   const Fault expected{
       .kind = FaultKind::io_bit, .space = Space::x, .address = operand, .pc = entry + 1};
@@ -117,21 +100,8 @@ void refused_input(const Backend backend,
               core.progress().instructions == 1 && bus.calls == 1 && bus.accepted == 0 && bus.exact,
           "Refused native input cannot expose either a taken transfer or the previous NOP receipt");
   rejected([&] { static_cast<void>(core.begin_fetch(publication)); });
-  const auto faulted = core.checkpoint();
-  Bus stopped_bus = bus;
-  Core stopped(stopped_bus, {.backend = backend});
-  stopped.restore(faulted);
-  require(!stopped.instruction_outcome() && stopped.fault() == expected && stopped_bus.calls == 1,
-          "A restored fault cannot revive the numerically matching prior instruction count");
-  core.restore(saved);
-  bus = input_bus;
-  bus.events.front().accept = true;
-  require(!core.instruction_outcome() && bus.calls == 0,
-          "Trusted pre-input restore does not fabricate an accepted result");
-  complete(core);
-  require(core.instruction_outcome() == expected_outcome(level) && bus.calls == 1 &&
-              bus.accepted == 1 && bus.exact,
-          "Only a new actual accepted callback permits the recovered native transfer receipt");
+  require(!core.instruction_outcome() && core.fault() == expected && bus.calls == 1,
+          "A fault cannot revive the numerically matching prior instruction count");
 }
 }
 

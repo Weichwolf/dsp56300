@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "dsp56300/checkpoint.hpp"
 #include "dsp56300/core.hpp"
 #include "staged_support.hpp"
 #include "support.hpp"
@@ -33,10 +32,6 @@ struct Fixture {
   InstructionWords input;
   Registers before;
   std::array<Writer, 2> writers{};
-};
-
-struct BackendPair {
-  Backend from, to;
 };
 
 InstructionEffect pcu(const InstructionWords input, const PcuWriteback writer) {
@@ -85,7 +80,6 @@ void finish(Core &core, const Fixture &fixture, const unsigned cut) {
                 (phase == 0 ? fixture.before : fixture.writers.at(phase - 1).computed) &&
             core.progress() == Progress{} && core.fault().kind == FaultKind::none,
         "Each JSR/RTS writer retains its literal intermediate PC, stack and complete observation");
-    rejected([&] { static_cast<void>(core.candidate_checkpoint(action.ticket)); });
     action.effect.pcu_update = {};
     action.computed = {};
     require(!core.advance_instruction(action.ticket).retired &&
@@ -108,28 +102,21 @@ void finish(Core &core, const Fixture &fixture, const unsigned cut) {
           "Original control-transfer identity and FM base cost retire once");
 }
 
-void checkpoints(const BackendPair backend) {
+void control_continuations(const Backend backend) {
   for (const bool returning : {false, true}) {
     const auto fixture = control(returning);
     for (unsigned cut = 0; cut < 3; ++cut) {
       Bus bus;
-      Core original(bus, {.backend = backend.from});
-      Core restored(bus, {.backend = backend.to});
+      Core original(bus, {.backend = backend});
+
       original.set_registers(fixture.before);
       static_cast<void>(original.begin_instruction(fixture.input, policy));
       for (unsigned phase = 0; phase < cut; ++phase) {
         static_cast<void>(original.advance_instruction(pending(original).ticket));
       }
-      const auto stale = pending(original).ticket;
-      const auto saved = original.checkpoint();
-      restored.restore(saved);
-      original.restore(saved);
-      rejected([&] { static_cast<void>(original.advance_instruction(stale)); });
-      rejected([&] { static_cast<void>(restored.advance_instruction(stale)); });
       finish(original, fixture, cut);
-      finish(restored, fixture, cut);
       require(bus.calls == 0,
-              "CPU result planning and restored continuations invent no Io operation");
+              "CPU result planning and actual continuations invent no Io operation");
     }
   }
 }
@@ -187,20 +174,16 @@ void read_boundary(const Backend backend,
   require(core.registers() == visible && bus.calls == 1,
           "The MOVE writer publishes alone without repeating the read");
   core.clear_code_cache();
-  const auto saved = core.checkpoint();
-  Core restored(bus, {.backend = backend});
-  restored.restore(saved);
-  for (Core *machine : {&core, &restored}) {
-    action = pending(*machine);
-    require(action.effect.kind == EffectKind::pcu_update && action.computed == computed,
-            "A checkpoint retains the queued PC writer after host code-cache mutation");
-    static_cast<void>(machine->advance_instruction(action.ticket));
-    staged_test::retire(*machine);
-    require(machine->registers() == computed &&
-                machine->progress() == Progress{.instructions = 1, .estimated_cycles = 1} &&
-                bus.calls == 1,
-            "Original/restored retirement never resamples an accepted input");
-  }
+
+  action = pending(core);
+  require(action.effect.kind == EffectKind::pcu_update && action.computed == computed,
+          "Actual continuation retains the queued PC writer after host code-cache mutation");
+  static_cast<void>(core.advance_instruction(action.ticket));
+  staged_test::retire(core);
+  require(core.registers() == computed &&
+              core.progress() == Progress{.instructions = 1, .estimated_cycles = 1} &&
+              bus.calls == 1,
+          "Actual retirement never resamples an accepted input");
 }
 
 void store_boundary(const Backend backend,
@@ -248,12 +231,9 @@ void store_boundary(const Backend backend,
               action.effect.address == staged_test::data_address && action.effect.value == value &&
               action.computed == computed && core.registers() == visible && bus.calls == 0,
           "Both accepted CPU writers precede the one unchanged real program write");
-  const auto stale = action.ticket;
-  core.restore(core.checkpoint());
-  rejected([&] { static_cast<void>(core.advance_instruction(stale)); });
   const auto result = core.advance_instruction(pending(core).ticket);
   require(bus.calls == 1 && bus.exact,
-          "Restored CPU-prefix ownership performs the program write exactly once");
+          "Actual CPU-prefix ownership performs the program write exactly once");
   if (!accept) {
     require(
         result.fault == Fault{.kind = FaultKind::memory_write,
@@ -274,9 +254,9 @@ void store_boundary(const Backend backend,
           "The source-pop, AGU and actual memory prefix survive once-only native retirement");
 }
 
-void late_fault(const BackendPair backend) {
+void late_fault(const Backend backend) {
   Bus bus;
-  Core original(bus, {.backend = backend.from});
+  Core original(bus, {.backend = backend});
   auto before = staged_test::seed();
   before.a = limited;
   before.sc = stack_entries - 1;
@@ -291,23 +271,19 @@ void late_fault(const BackendPair backend) {
   require(action.effect.kind == EffectKind::unit_update && action.computed == computed &&
               original.fault().kind == FaultKind::none && original.registers() == before,
           "A later stack failure stays behind the real earlier source-limiting publication");
-  const auto saved = original.checkpoint();
-  Core restored(bus, {.backend = backend.to});
-  restored.restore(saved);
+
   auto visible = before;
   visible.sr = flag_s | flag_l;
-  for (Core *machine : {&original, &restored}) {
-    const auto failed = machine->advance_instruction(pending(*machine).ticket);
-    require(
-        failed.fault == Fault{.kind = FaultKind::stack,
-                              .space = Space::program,
-                              .address = boot,
-                              .value = before.sp,
-                              .pc = boot} &&
-            !failed.pending && !failed.retired && machine->registers() == visible &&
-            machine->progress() == Progress{} && bus.calls == 0,
-        "Fault fallback and restore preserve the accepted CPU prefix without fake success or Io");
-  }
+
+  const auto failed = original.advance_instruction(pending(original).ticket);
+  require(failed.fault == Fault{.kind = FaultKind::stack,
+                                .space = Space::program,
+                                .address = boot,
+                                .value = before.sp,
+                                .pc = boot} &&
+              !failed.pending && !failed.retired && original.registers() == visible &&
+              original.progress() == Progress{} && bus.calls == 0,
+          "Fault latching preserve the accepted CPU prefix without fake success or Io");
 }
 
 struct LoopCase {
@@ -391,7 +367,6 @@ void finish_loop_body(Core &core, const LoopFixture &fixture, const unsigned cut
     require(core.registers() == visible && core.progress() == Progress{} &&
                 action.effect == writer.effect && action.computed == writer.computed,
             "Active DO body preserves literal PC, LC, stack-pop and outer-loop publications");
-    rejected([&] { static_cast<void>(core.candidate_checkpoint(action.ticket)); });
     action.computed = {};
     action.effect = {};
     require(!core.advance_instruction(action.ticket).retired,
@@ -412,29 +387,22 @@ void finish_loop_body(Core &core, const LoopFixture &fixture, const unsigned cut
           "Only an actual DO rewind is a transfer; the NOP always retires its literal one cycle");
 }
 
-void loop_restore_case(const BackendPair backend, const LoopFixture &fixture) {
+void loop_continuation_case(const Backend backend, const LoopFixture &fixture) {
   for (unsigned cut = 0; cut <= fixture.count; ++cut) {
     Bus bus;
-    Core original(bus, {.backend = backend.from});
-    Core restored(bus, {.backend = backend.to});
+    Core original(bus, {.backend = backend});
+
     original.set_registers(fixture.before);
     static_cast<void>(original.begin_instruction({.address = boot}, policy));
     for (unsigned phase = 0; phase < cut; ++phase) {
       static_cast<void>(original.advance_instruction(pending(original).ticket));
     }
-    const auto stale = pending(original).ticket;
-    const auto saved = original.checkpoint();
-    restored.restore(saved);
-    original.restore(saved);
-    rejected([&] { static_cast<void>(original.advance_instruction(stale)); });
-    rejected([&] { static_cast<void>(restored.advance_instruction(stale)); });
     finish_loop_body(original, fixture, cut);
-    finish_loop_body(restored, fixture, cut);
-    require(bus.calls == 0, "DO body continuations and all restores invent no I/O");
+    require(bus.calls == 0, "DO body continuations at all cut points invent no I/O");
   }
 }
 
-void loop_continuations(const BackendPair backend) {
+void loop_continuations(const Backend backend) {
   constexpr std::array counts{Word{0}, Word{1}, Word{2}, word_mask};
   for (const auto count : counts) {
     for (const auto stack_pointer : std::array{Word{2}, Word{31}, Word{63}}) {
@@ -446,7 +414,7 @@ void loop_continuations(const BackendPair backend) {
                                             .outer_status = outer_status,
                                             .last = last,
                                             .forever = forever});
-            loop_restore_case(backend, fixture);
+            loop_continuation_case(backend, fixture);
           }
         }
       }
@@ -454,42 +422,39 @@ void loop_continuations(const BackendPair backend) {
   }
 }
 
-void loop_fault(const BackendPair backend, const Word frames) {
+void loop_fault(const Backend backend, const Word frames) {
   auto before = loop_body({.count = 1, .last = true}).before;
   before.sc = frames;
   Bus bus;
-  Core original(bus, {.backend = backend.from});
-  Core restored(bus, {.backend = backend.to});
+  Core original(bus, {.backend = backend});
+
   original.set_registers(before);
   const auto first = original.begin_instruction({.address = boot}, policy);
   require(first.pending && first.fault.kind == FaultKind::none &&
               first.pending->effect.kind == EffectKind::pcu_update &&
               original.registers() == before,
           "A future DO stack underflow stays behind the original held PC writer");
-  const auto saved = original.checkpoint();
-  restored.restore(saved);
-  for (Core *machine : {&original, &restored}) {
-    auto visible = before;
-    ++visible.pc;
-    auto receipt = machine->advance_instruction(pending(*machine).ticket);
-    if (frames != 0) {
-      require(receipt.pending && receipt.fault.kind == FaultKind::none &&
-                  machine->registers() == visible,
-              "The valid first frame retains its own publication before a later failing pop");
-      receipt = machine->advance_instruction(pending(*machine).ticket);
-      --visible.sp;
-      --visible.sc;
-    }
-    require(receipt.fault == Fault{.kind = FaultKind::stack,
-                                   .space = Space::program,
-                                   .address = boot,
-                                   .value = visible.sp,
-                                   .pc = boot} &&
-                !receipt.pending && !receipt.retired && machine->registers() == visible &&
-                machine->progress() == Progress{} && !machine->instruction_outcome() &&
-                bus.calls == 0,
-            "Loop underflow retains the exact accepted prefix and fault, never a private suffix");
+
+  auto visible = before;
+  ++visible.pc;
+  auto receipt = original.advance_instruction(pending(original).ticket);
+  if (frames != 0) {
+    require(receipt.pending && receipt.fault.kind == FaultKind::none &&
+                original.registers() == visible,
+            "The valid first frame retains its own publication before a later failing pop");
+    receipt = original.advance_instruction(pending(original).ticket);
+    --visible.sp;
+    --visible.sc;
   }
+  require(receipt.fault == Fault{.kind = FaultKind::stack,
+                                 .space = Space::program,
+                                 .address = boot,
+                                 .value = visible.sp,
+                                 .pc = boot} &&
+              !receipt.pending && !receipt.retired && original.registers() == visible &&
+              original.progress() == Progress{} && !original.instruction_outcome() &&
+              bus.calls == 0,
+          "Loop underflow retains the exact accepted prefix and fault, never a private suffix");
 }
 
 } // namespace
@@ -506,14 +471,11 @@ int main() {
           }
         }
       }
-      for (const auto to : dsp56300::test::backends) {
-        dsp56300::test::checkpoints({.from = from, .to = to});
-        dsp56300::test::late_fault({.from = from, .to = to});
-        dsp56300::test::loop_continuations({.from = from, .to = to});
-        for (const dsp56300::Word frames : {0U, 1U}) {
-          dsp56300::test::loop_fault({.from = from, .to = to}, frames);
-        }
-      }
+
+      dsp56300::test::control_continuations(from);
+      dsp56300::test::late_fault(from);
+      dsp56300::test::loop_continuations(from);
+      for (const dsp56300::Word frames : {0U, 1U}) { dsp56300::test::loop_fault(from, frames); }
     }
     std::cout << dsp56300::test::checks << " bounded CPU continuation checks passed.\n";
   } catch (const std::exception &error) {

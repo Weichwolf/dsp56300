@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "dsp56300/backend.hpp"
+#include "backend_support.hpp"
 #include "dsp56300/core.hpp"
 #include "support.hpp"
 

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "bfu_logic_model.hpp"
-#include "dsp56300/checkpoint.hpp"
 #include "dsp56300/core.hpp"
 #include "external_run_fixture.hpp"
 #include "native_repeat_fixture.hpp"
@@ -79,35 +78,27 @@ void budgets() {
   }
 }
 
-void mutation_and_restore() {
+void retained_opcode() {
   for (const auto backend : external_run::backends) {
     Bus bus;
     const auto input = external_run::workloads.front();
     bus.program[start] = repeat(four);
     bus.program[body] = input.opcode;
-    Core core(bus);
+    Core core(bus, {.backend = backend});
     core.set_registers(seed(input));
     require(core.run(2).dispatches == 2, "REP setup and first body retire before mutation");
     bus.program[body] = external_run::workloads.back().opcode;
     ++bus.revision;
-    const auto saved = core.checkpoint();
-    Core restored(bus, {.backend = backend});
-    restored.restore(saved);
     bus.visible = false;
-    require(
-        restored.run(3).dispatches == 3 &&
-            restored.registers() == expected(input, {.count = four, .retired = four}),
-        "Fresh cross-backend restore uses the genuine retained opcode despite unknown backing P");
-    if (backend == Backend::jit) {
-      require(restored.jit_statistics().native_alu_instructions == 3 &&
-                  restored.jit_statistics().helper_instructions == 0,
-              "A restored latched REP body resumes natively without backing-code inspection");
-    }
-    bus.visible = true;
-    core.restore(saved);
     require(core.run(3).dispatches == 3 &&
                 core.registers() == expected(input, {.count = four, .retired = four}),
-            "Code invalidation cannot replace a running REP latch");
+            "The actual REP owner retains its opcode despite unknown backing program memory");
+    if (backend == Backend::jit) {
+      require(core.jit_statistics().native_alu_instructions == four &&
+                  core.jit_statistics().helper_instructions == 1,
+              "All retained REP body iterations execute natively after the setup helper");
+    }
+    bus.visible = true;
     core.set_registers(seed(external_run::workloads.back()));
     require(core.run(5).dispatches == 5 &&
                 core.registers() ==
@@ -149,11 +140,9 @@ void memory_prefix(const bool bounded) {
               result.stop == RunStop::external_effect && core.registers() == wanted &&
               core.jit_statistics().native_move_instructions == 2 && bus.reads == 0,
           "A later unknown REP operand preserves the exact native prefix and pre-effect boundary");
-  const auto checkpoint = core.checkpoint();
   const auto again = core.run(RunBudget{.instructions = 1, .cycles = 1});
   require(again.execution.dispatches == 0 && core.registers() == wanted && bus.reads == 0,
           "A repeated failed guard neither consumes a count nor replays the accepted prefix");
-  core.restore(checkpoint);
   bus.data[data_address + 2] = 7;
   bus.data[data_address + 3] = 11;
   bus.known[data_address + 2] = bus.known[data_address + 3] = 1;
@@ -163,10 +152,10 @@ void memory_prefix(const bool bounded) {
   wanted.lc = saved_lc;
   const auto done =
       bounded ? core.run(RunBudget{.instructions = 2, .cycles = 2}).execution : core.run(2);
-  require(
-      done.dispatches == 2 && core.registers() == wanted && bus.reads == 0 &&
-          core.jit_statistics().native_move_instructions == four,
-      "A real owner write repairs knowledge and the retained native body resumes after restore");
+  require(done.dispatches == 2 && core.registers() == wanted && bus.reads == 0 &&
+              core.jit_statistics().native_move_instructions == four,
+          "A real owner write repairs knowledge and the retained native body resumes after the "
+          "memory repair");
 }
 
 void refusal_and_yield(const bool yield) {
@@ -292,7 +281,7 @@ int main() {
   try {
     using namespace dsp56300::test::native_repeat;
     budgets();
-    mutation_and_restore();
+    retained_opcode();
     memory_prefix(false);
     memory_prefix(true);
     refusal_and_yield(false);

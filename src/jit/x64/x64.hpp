@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 
-#include "dsp56300/simd.hpp"
+#include "simd.hpp"
 
 #include <cstddef>
 #include <cstdint>

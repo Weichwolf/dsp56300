@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "dsp56300/backend.hpp"
-#include "dsp56300/checkpoint.hpp"
+#include "backend_support.hpp"
 #include "dsp56300/core.hpp"
 #include "register_model.hpp"
 #include "support.hpp"
@@ -163,13 +162,7 @@ void admission(const Backend backend, const InstructionPublication policy, const
           core.fault().kind == FaultKind::none && core.instruction_fetch().exception_vector &&
           core.instruction_fetch().address == vector,
       "State-only admission wakes WAIT without reading code, acknowledging a device or retiring");
-  const auto snapshot = core.checkpoint();
-  Bus restored_bus;
-  Core restored(restored_bus,
-                {.backend = backend == Backend::reference ? Backend::jit : Backend::reference});
-  restored.restore(snapshot);
   complete_vector(core, bus, policy, base);
-  complete_vector(restored, restored_bus, policy, base);
 }
 
 template <class Exception, class Action> void rejects(Core &core, Bus &bus, Action action) {

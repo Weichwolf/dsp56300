@@ -88,16 +88,6 @@ void same_target(const Backend backend) {
                                         .address = address,
                                         .opcode = opcode,
                                         .control_transfer = truth({.code = code, .ccr = ccr})};
-      constexpr unsigned snapshot_stride = 64;
-      if (ccr % snapshot_stride == 0) {
-        const auto before = core.checkpoint();
-        Bus clone_bus;
-        Core clone(clone_bus, {.backend = backend});
-        clone.restore(before);
-        complete(clone);
-        require(clone.instruction_outcome() == expected && clone_bus.calls == 0,
-                "A restored pending computation retains the actual native control-flow decision");
-      }
       complete(core);
       auto expected_registers = initial;
       ++expected_registers.pc;
@@ -105,12 +95,6 @@ void same_target(const Backend backend) {
           core.registers() == expected_registers && core.instruction_outcome() == expected &&
               core.progress().instructions == count + 1 && bus.calls == 0,
           "Same-address Jcc distinguishes actual taken control flow despite identical PC values");
-      if (ccr % snapshot_stride == 0) {
-        const auto receipt = core.checkpoint();
-        core.restore(receipt);
-        require(core.instruction_outcome() == expected,
-                "A stopped actual retirement receipt survives its trusted checkpoint");
-      }
     }
   }
 }
@@ -156,12 +140,6 @@ void speculative_candidate(const Backend backend) {
   require(!published.retired && pending(core).effect.kind == EffectKind::retire &&
               !core.instruction_outcome(),
           "Published PC alone does not establish actual instruction retirement");
-  const auto candidate = core.candidate_checkpoint(pending(core).ticket);
-  Bus speculative_bus;
-  Core speculative(speculative_bus, {.backend = backend});
-  speculative.restore(candidate);
-  require(!speculative.instruction_outcome(),
-          "A speculative successor is not a receipt for an actually retired instruction");
   complete(core);
   const auto receipt = core.instruction_outcome();
   require(receipt && receipt->control_transfer, "The actual retirement supplies its own receipt");
@@ -252,7 +230,7 @@ int main() {
       atomic_invalidation(backend);
       loop_redirects(backend);
     }
-    std::cout << "12288 native control-flow outcomes, publication policies and receipt checkpoints "
+    std::cout << "12288 native control-flow outcomes, publication policies and receipt boundaries "
                  "passed.\n";
     return 0;
   } catch (const std::exception &error) {

@@ -40,7 +40,7 @@ bool JitEmitter::saturation_supported(const NativeOp &operation) {
   const auto &decoded = operation.instruction;
   const auto opcode = decoded.opcode;
   const auto kind = opcode & 7U;
-  if (decoded.operation == Operation::immediate_alu) { return kind == 0 || kind == 4; }
+  if (decoded.operation == Operation::immediate_alu) { return kind == 0 || kind == 4 || kind == 5; }
   if (decoded.operation != Operation::parallel) { return false; }
   const auto alu = opcode & byte_mask;
   const auto form = alu & alu_mask;

@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "dsp56300/checkpoint.hpp"
 #include "dsp56300/core.hpp"
 #include "staged_support.hpp"
 #include "support.hpp"
@@ -48,34 +47,19 @@ void memory_boundary(Core &core, const unsigned ordinal) {
   }
 }
 
-struct BackendPair {
-  Backend from, to;
-};
-
-void restore(const BackendPair backend, const unsigned cut) {
+void restore(const Backend backend, const unsigned cut) {
   Bus bus;
   bus.events = {
       {.kind = EffectKind::bit, .address = io_address, .value = 1, .action = BitAction::clear}};
-  Core original(bus, {.backend = backend.from});
+  Core original(bus, {.backend = backend});
   auto state = seed();
   state.r[0] = io_address;
   original.set_registers(state);
   static_cast<void>(original.begin_instruction({.address = boot, .opcode = memory_clear}, policy));
   for (unsigned ordinal = 0; ordinal < cut; ++ordinal) { memory_boundary(original, ordinal); }
-  const auto saved = original.checkpoint();
-  const auto stale = pending(original);
-  Bus resumed_bus = bus;
-  Core resumed(resumed_bus, {.backend = backend.to});
-  resumed.restore(saved);
-  rejected([&] { static_cast<void>(resumed.advance_instruction(stale.ticket)); });
-  original.restore(saved);
-  rejected([&] { static_cast<void>(original.advance_instruction(stale.ticket)); });
-  for (unsigned ordinal = cut; ordinal < 4; ++ordinal) {
-    memory_boundary(original, ordinal);
-    memory_boundary(resumed, ordinal);
-  }
-  require(bus.calls == 1 && resumed_bus.calls == 1 && bus.exact && resumed_bus.exact,
-          "Every unit checkpoint/backend suffix retains its genuine accepted bit response");
+  for (unsigned ordinal = cut; ordinal < 4; ++ordinal) { memory_boundary(original, ordinal); }
+  require(bus.calls == 1 && bus.exact,
+          "Every actual unit suffix retains its genuine accepted bit response");
 }
 
 void refused_bit(const Backend backend) {
@@ -111,7 +95,6 @@ void late_call_fault(const Backend backend) {
   core.set_registers(state);
   static_cast<void>(
       core.begin_instruction({.address = boot, .opcode = bit_call_a, .extension = target}, policy));
-  const auto saved = core.checkpoint();
   const auto stale = pending(core);
   held(core, state);
   const UnitWriteback result{
@@ -128,15 +111,11 @@ void late_call_fault(const Backend backend) {
                                 .pc = boot} &&
               !core.pending_instruction() && bus.calls == 0,
           "Actual source-limiting flags precede and survive a later PCU stack refusal");
-  core.restore(saved);
   rejected([&] { static_cast<void>(core.advance_instruction(stale.ticket)); });
-  state.sr = 0;
-  held(core, state);
-  const auto restored = pending(core);
   core.reset();
   require(!core.pending_instruction() && core.progress() == Progress{},
-          "Reset cancels the pending native scalar unit");
-  rejected([&] { static_cast<void>(core.advance_instruction(restored.ticket)); });
+          "Reset clears the faulted native scalar unit");
+  rejected([&] { static_cast<void>(core.advance_instruction(stale.ticket)); });
 }
 
 void pop_then_call(const Backend backend) {
@@ -262,9 +241,9 @@ void prior_policies(const Backend backend) {
 
 void boundaries() {
   for (const auto from : backends) {
-    for (const auto to : backends) {
-      for (unsigned cut = 0; cut < 4; ++cut) { restore({.from = from, .to = to}, cut); }
-    }
+
+    for (unsigned cut = 0; cut < 4; ++cut) { restore(from, cut); }
+
     refused_bit(from);
     late_call_fault(from);
     pop_then_call(from);

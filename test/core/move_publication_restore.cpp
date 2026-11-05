@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "dsp56300/checkpoint.hpp"
 #include "dsp56300/core.hpp"
 #include "move_publication_support.hpp"
 #include "register_model.hpp"
@@ -129,35 +128,22 @@ void boundary(Core &core, const unsigned ordinal, const Scenario scenario) {
   }
 }
 
-struct BackendPair {
-  Backend from, to;
-};
-
-void restore_case(const BackendPair selected, const unsigned cut, const Scenario scenario) {
+void restore_case(const Backend selected, const unsigned cut, const Scenario scenario) {
   Bus bus;
   if (scenario == Scenario::pair) {
     bus.events = {{.space = Space::x, .address = data_address, .value = x_value},
                   {.space = Space::y, .address = y_address, .value = y_value}};
   }
-  Core original(bus, {.backend = selected.from});
+  Core original(bus, {.backend = selected});
   start(original, scenario);
   for (unsigned ordinal = 0; ordinal < cut; ++ordinal) { boundary(original, ordinal, scenario); }
-  const auto checkpoint = original.checkpoint();
-  const auto stale = pending(original);
-  Bus resumed_bus = bus;
-  Core resumed(resumed_bus, {.backend = selected.to});
-  resumed.restore(checkpoint);
-  rejected([&] { static_cast<void>(resumed.advance_instruction(stale.ticket)); });
-  original.restore(checkpoint);
-  rejected([&] { static_cast<void>(original.advance_instruction(stale.ticket)); });
   const auto steps = scenario == Scenario::pair ? 7U : 3U;
   for (unsigned ordinal = cut; ordinal < steps; ++ordinal) {
     boundary(original, ordinal, scenario);
-    boundary(resumed, ordinal, scenario);
   }
   const auto calls = scenario == Scenario::pair ? 2U : 0U;
-  require(bus.calls == calls && resumed_bus.calls == calls && bus.exact && resumed_bus.exact,
-          "Every restored native suffix consumes each external response only once");
+  require(bus.calls == calls && bus.exact,
+          "Every actual native suffix consumes each external response only once");
 }
 
 void explicit_r_alias(const Backend backend) {
@@ -220,11 +206,8 @@ void restores() {
   for (const auto scenario : {Scenario::pair, Scenario::flags, Scenario::stack}) {
     const auto steps = scenario == Scenario::pair ? 7U : 3U;
     for (const auto from : backends) {
-      for (const auto to : backends) {
-        for (unsigned cut = 0; cut < steps; ++cut) {
-          restore_case({.from = from, .to = to}, cut, scenario);
-        }
-      }
+
+      for (unsigned cut = 0; cut < steps; ++cut) { restore_case(from, cut, scenario); }
     }
   }
   for (const auto backend : backends) {

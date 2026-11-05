@@ -428,10 +428,9 @@ std::vector<std::uint8_t> JitEmitter::generate_body(const std::span<const Native
     loop_pc_ = operations.front().pc;
   }
   packed_retirement_ = admit_packed_retirement(operations);
-  constexpr std::size_t maximum_coalesced_operations = 256;
-  static_assert(maximum_coalesced_operations <=
-                static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max() /
-                                         std::numeric_limits<std::uint8_t>::max()));
+  // Accumulated base cycles must fit the signed immediate used by native accounting.
+  constexpr auto maximum_coalesced_operations = static_cast<std::size_t>(
+      std::numeric_limits<std::int32_t>::max() / std::numeric_limits<std::uint8_t>::max());
   coalesced_accounting_ = region_mode_ == RegionMode::guarded && packed_retirement_ &&
                           operations.size() <= maximum_coalesced_operations;
   loop_window_ = coalesced_accounting_ && region_.loop && window_mode_ == LoopWindowMode::automatic;

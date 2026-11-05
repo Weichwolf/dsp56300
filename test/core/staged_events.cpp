@@ -38,16 +38,14 @@ void rejected_second(const Backend backend, const bool read_first) {
               core.progress() == Progress{} && bus.calls == 2 && bus.accepted == 1 && bus.exact &&
               bus.y_written == 0,
           "A rejected second effect reports its exact context without retiring or undoing I/O");
-  const auto quarantined = core.checkpoint();
   rejected([&] { static_cast<void>(core.advance_instruction(first.ticket)); });
   rejected([&] { static_cast<void>(core.advance_instruction(second.ticket)); });
   rejected([&] { static_cast<void>(core.begin_instruction({.address = boot, .opcode = opcode})); });
-  core.restore(quarantined);
   rejected([&] { static_cast<void>(core.advance_instruction(second.ticket)); });
   require(core.fault() == failed.fault && core.registers() == initial &&
               core.progress() == Progress{} && !core.pending_instruction() && bus.calls == 2 &&
               bus.accepted == 1 && bus.x_written == (read_first ? 0U : 1U) && bus.y_written == 0,
-          "Fault restoration and stale owners never replay or roll back accepted external effects");
+          "Fault latching and stale owners never replay or roll back accepted external effects");
 }
 
 void reset_case(const Backend backend, const bool accepted) {
@@ -77,21 +75,14 @@ void reset_case(const Backend backend, const bool accepted) {
     require(bus.calls == 1, "CPU reset cancels continuation without repeating a device action");
     return;
   }
-  const auto after_action = core.checkpoint();
-  const auto completion = pending(core);
   auto expected = initial;
   ++expected.pc;
   retire(core);
   require(core.registers() == expected &&
               core.progress() == Progress{.instructions = 1, .estimated_cycles = reset_cycles},
           "Actual RESET retirement preserves the CPU and its independently specified base cost");
-  core.restore(after_action);
-  rejected([&] { static_cast<void>(core.advance_instruction(completion.ticket)); });
-  retire(core);
-  require(core.registers() == expected &&
-              core.progress() == Progress{.instructions = 1, .estimated_cycles = reset_cycles} &&
-              bus.calls == 1 && bus.accepted == 1,
-          "Restoring after RESET acknowledgement rebinds retirement without another callback");
+  require(bus.calls == 1 && bus.accepted == 1,
+          "Actual RESET retirement does not repeat the accepted peripheral callback");
 }
 } // namespace
 
