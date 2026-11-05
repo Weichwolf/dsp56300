@@ -43,8 +43,13 @@ blocks end at architectural control-flow boundaries. Combine connected blocks
 into regions with native backedges; a function may span many basic blocks.
 An indirect branch, unavailable code, I/O or an event boundary may require an exit.
 No fixed 64/256-instruction cap, execution-budget-sized compilation or arbitrary
-function-size promise determines translation boundaries. Discover reachable code
-lazily rather than translating every byte of an image as if it were instructions.
+function-size promise determines translation boundaries. At load time, eagerly
+walk statically reachable paths from consumer-supplied code roots such as reset
+and interrupt entries, and link known direct targets before execution. Code and
+data may share an image; never linearly decode every byte as executable code.
+Unknown indirect targets are resolved and translated on first use, then retained.
+The same compiler serves eager preparation and runtime discovery; neither path
+introduces a second execution engine or claims to know all indirect destinations.
 
 The IR represents register reads/writes, exact arithmetic, flag effects, memory
 effects and control flow. Analyze liveness across loop backedges to a fixed point.
