@@ -1,0 +1,14 @@
+[
+  {
+    "title": "DSP56300 Family Manual, Revision 5",
+    "source": "https://www.nxp.com/docs/en/reference-manual/DSP56300FM.pdf",
+    "scope": "Instruction set, fixed-point arithmetic, addressing, execution control and programming model",
+    "redistributed": false
+  },
+  {
+    "title": "DSP56303 User Manual",
+    "source": "https://www.nxp.com/docs/en/reference-manual/DSP56303UM.pdf",
+    "scope": "Architecture integration reference; derivative peripherals belong to consumers",
+    "redistributed": false
+  }
+]

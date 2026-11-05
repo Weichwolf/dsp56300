@@ -1,3 +1,5 @@
+# Objective
+
 Build an independent, maximally efficient DSP56300 emulator library for x86-64,
 optimized for all usual DSP56300 applications and supporting one DSP instance
 running arbitrary programs with the complete ISA.
@@ -107,9 +109,10 @@ Do not hide or relabel those gaps or discard their architectural/fault behavior.
 
 Current development priority: use the fastest optimized Release build for
 functional firmware experiments and performance work. Until the integrating
-firmware runs in real time, run focused Release correctness/native-path checks
-and defer extensive sanitizer matrices and broad regression campaigns. Retain
-strict compiler diagnostics and record the deferred validation scope.
+firmware runs in real time, suspend execution tests except optimized startup/
+throughput probes capped at 10 host seconds. Fail unless playable; never
+automatically retry or extend. Keep strict compilation, formatting and static
+analysis active; qualification remains incomplete until execution checks resume.
 
 Public setup follows Core(Memory, Io*, Options): explicit typed borrowed views,
 named unified/separate/partition/external layouts and owned MemoryArena views.

@@ -1,58 +1,48 @@
-# Scope and objective
+# dsp56300
 
-- Speak German with the user. Write code, comments, documentation and commits in English.
-- Build only an independent DSP56300 emulator library for general applications.
-- Optimize for all usual DSP56300 application domains, including audio,
-  image/video, communications, measurement and control. Check performance
-  tradeoffs across independently authored workloads from multiple domains.
-- Preserve the complete user objective in doc/objective.txt and audit doc/coverage.txt against it.
-- Keep neighboring application and firmware repositories read-only. Do not copy
-  board emulation, firmware or application programs here.
-- Implement the DSP independently. No dependency on dsp56kEmu in build, API, tests or runtime.
-- Keep CPU/JIT entry points in src/core.cpp and src/jit.cpp, with implementation
-  helpers in src/core/ and src/jit/. Host memory lives in src/core/memory.cpp.
-- Original code is GPL-3.0-only; preserve dependency and reused-source notices.
-- Manufacturer programs, manual copies, source extracts and private analysis stay in ignored doc/local/ or build/.
+- Build an independent, general DSP56300 native JIT library for audio, image/video,
+  communications, measurement and control. Complete ISA and exact fixed-point,
+  flags, AGU, parallel transfers, loops and interrupts remain open. See OBJECTIVE.md.
+- Keep board clocks, derivative peripherals and application firmware in consumers.
+  No foreign DSP execution dependency; use independently authored test programs.
+- Use Core(Memory, Io*, Options), typed memory and explicit ownership, aliases,
+  invalidation, checkpoints and event limits. The core has one execution owner.
+- Automatically choose the fastest qualified host path. Fix slow instruction and
+  transfer helpers here; JIT fallback gaps remain visible until native lowering
+  preserves all effects and precise exits. I/O callbacks are separate from ISA
+  interpretation. Do not add a hardware virtualization backend.
+- Keep core/JIT entry points in src/core.cpp and src/jit.cpp, helpers in src/core/
+  and src/jit/, native emission in src/jit/x64/, memory in src/core/memory.cpp.
+- Publish reviewed increments only to configured origin/main. Keep neighboring
+  application sources read-only; coordinate core revisions with consumer pins.
 
-# Implementation and validation
+## Working rules
 
-- Use C++23, CMake/Ninja and LLVM 19 with strict warning, hardening, clang-format
-  and clang-tidy policies. Keep functions at most 120 lines.
-- Instrument project code and native dependencies with ASan/UBSan in strict builds.
-- Do not weaken checks or add NOLINT markers to suppress findings. Analyze upstream separately.
-- Verify architectural state, fixed-point precision, transfer boundaries, flags, AGU,
-  loops and interrupt behavior. Specialized paths require explicit guards and
-  correct side exits; keep reference execution available for diagnosis.
-- Use reproducible single-instance benchmarks with independently authored DSP
-  programs covering audio, image/video and communications patterns. Do not use
-  manufacturer or application firmware in tests or benchmarks.
-  Distinguish arithmetic experiments, emulator execution and whole-device performance.
-- Keep host memory and event/I/O contracts explicit. Do not silently fabricate peripheral results.
-- Fix slow DSP helpers and similar performance bottlenecks immediately in this
-  library, at their source.
-- Audit every general instruction/transfer helper and interpreter fallback in
-  JIT execution. Legal instructions must ultimately execute natively in JIT
-  mode, including dynamic addressing, numerical modes and loop boundaries.
-  Device I/O callbacks are separate from instruction interpretation. Preserve
-  correct execution while closing gaps; remaining fallbacks are incomplete
-  native coverage, never a completed JIT implementation.
-- Use small state/dataflow tables for optimization design. Choose host register
-  placement per region/pattern; retain complete checkpoints and guarded fallback.
-- Share correctness fixtures with the bench CMake target and support all or
-  selected fixture sets. Keep measurement scope and skipped case counts explicit.
-- Use core concepts to compare implementations in one build. Parameterize host
-  SIMD lane width separately from vector width; keep DSP precision exact and
-  dispatch only to implemented, host-supported instruction sets.
-- The user canceled the hardware virtualization path. Build and optimize direct
-  native JIT execution; do not add a KVM/VMX backend, tests or permissions setup.
-- Keep local account names out of tracked instructions, code and documentation.
-- Do not run fuzz tests unless the user explicitly requests them.
-- Use the fastest optimized Release build for functional experiments and
-  performance measurements. Run sanitizers separately as quality gates;
-  never use instrumented throughput as normal execution performance.
-- Until the current firmware integration runs in real time, prioritize focused
-  Release correctness/path checks and runtime progress. Defer extensive
-  sanitizer matrices and broad regression campaigns until that milestone.
-  Keep compiler diagnostics and existing checks intact; record deferred scope.
-- Commit verified increments and push reviewed source commits to the configured
-  origin/main (Weichwolf/dsp56300). Do not publish reference assets or backup branches.
+- Speak German with the user; write code, comments, documentation and commits in English.
+- Prefer simple native execution, direct memory and large bounded runs. Keep device
+  effects and event boundaries explicit; avoid per-clock work and unnecessary copies.
+  Telemetry is runtime-selectable and off by default; keep its work out of hot paths.
+- Use C++23, LLVM 19 and CMake/Ninja. Keep strict compiler/linker flags, warnings
+  as errors, clang-format, clang-tidy with zero findings and functions <=120 lines.
+  Never weaken checks or hide findings with suppressions or diagnostic baselines.
+- Release is the performance build. Preserve ASan/UBSan for project code and native
+  dependencies, and separate TSan for concurrent code; preserve dependency notices.
+- Until the instrument reaches real time, suspend component, functional, regression
+  and diagnostic execution tests. Only short optimized startup/throughput probes
+  may establish that milestone: stop after at most 10 host seconds, fail unless
+  playable, and never extend or automatically repeat a failed probe. Compilation,
+  formatting and static analysis remain active. Run fuzzing only on explicit request.
+- Afterwards validate affected behavior against independent expectations; avoid
+  duplicate or full-suite runs after small changes. Report gaps and measured scope.
+- Keep doc/ for one target architecture and important primary references only.
+  Requirements belong in OBJECTIVE.md and test/; build metadata belongs in cmake/.
+  No activity diaries or historical result manifests. Issue communication belongs
+  in private Weichwolf/blofeld-src, with concrete consolidated problems only.
+- Keep firmware, samples, manuals, disassemblies and private analysis untracked.
+  Preserve source URLs, sizes and hashes in reference manifests; never publish assets.
+  Local reference inputs live under ignored build/local/; run artifacts belong
+  under ignored build/. Preserve inputs when cleaning generated files.
+- Original code is GPL-3.0-only; add matching SPDX identifiers to new source.
+- Commit reviewed, verified increments; push only to the configured project remote
+  on main. Never publish backup branches or use --all/--mirror. Coordinate core
+  revisions with consumer dependency pins; preserve unrelated work.

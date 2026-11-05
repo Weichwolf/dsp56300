@@ -1,7 +1,0 @@
-Captured pure control publication
-
-The NOP/JMP single-writer optimization is included in the general bounded CPU
-continuation mechanism described in cpu-continuations.txt. The ordinary executor
-still produces each actual writer and native hidden retirement; the two owned
-publication boundaries and their observation/checkpoint contracts are unchanged.
-The qualified 94d4a30 microbenchmark figures describe that historical binary.
