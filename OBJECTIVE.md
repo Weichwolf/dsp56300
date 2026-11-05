@@ -91,7 +91,7 @@ Current user requirements
 - Keep neighboring application/firmware repositories read-only. Preserve
   GPL-3.0-only licensing and source/dependency attribution. Keep manufacturer
   reference copies and private analysis outside the tracked source tree.
-- Do not run fuzz tests without an explicit user request. Commit verified
+- Commit verified
   increments and push reviewed source commits to the configured origin/main
   (Weichwolf/dsp56300), as explicitly authorized by the user. Do not publish
   reference assets or backup branches.

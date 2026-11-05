@@ -55,7 +55,7 @@
 - Until the instrument reaches real time, suspend long Blofeld firmware runs.
   Startup/throughput probes stop after at most 10 host seconds and fail unless
   playable; never extend or automatically repeat a failed probe. Keep compilation,
-  formatting and static analysis active. Run fuzzing only on explicit request.
+  formatting and static analysis active.
 - Keep doc/ for one target architecture and important primary references only.
   Requirements belong in OBJECTIVE.md and test/; build metadata belongs in cmake/.
   No activity diaries or historical result manifests. Issue communication belongs

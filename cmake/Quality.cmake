@@ -2,7 +2,6 @@
 # Strict project checks; third-party source keeps its own warning policy.
 set(DSP56300_SANITIZER "address-undefined" CACHE STRING "none, address-undefined, or thread")
 set_property(CACHE DSP56300_SANITIZER PROPERTY STRINGS none address-undefined thread)
-option(DSP56300_FUZZING "Build offline libFuzzer targets" OFF)
 
 include("${CMAKE_CURRENT_LIST_DIR}/Hardening.cmake")
 add_library(dsp56300_quality INTERFACE)
@@ -31,10 +30,4 @@ if(DEFINED dsp56300_sanitizers)
   target_compile_options(dsp56300_quality INTERFACE
     "-fsanitize=${dsp56300_sanitizers}" -fno-sanitize-recover=all -g)
   target_link_options(dsp56300_quality INTERFACE "-fsanitize=${dsp56300_sanitizers}")
-endif()
-if(DSP56300_FUZZING)
-  if(NOT DSP56300_SANITIZER STREQUAL "address-undefined")
-    message(FATAL_ERROR "Fuzzing requires address-undefined sanitizers")
-  endif()
-  target_compile_options(dsp56300_quality INTERFACE -fsanitize=fuzzer-no-link)
 endif()
