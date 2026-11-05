@@ -25,7 +25,6 @@ target_link_libraries(your_app PRIVATE dsp56300::core)
 
 ```cpp
 #include <dsp56300/core.hpp>
-#include <dsp56300/isa.hpp>
 #include <dsp56300/memory.hpp>
 
 #include <algorithm>
@@ -33,7 +32,7 @@ target_link_libraries(your_app PRIVATE dsp56300::core)
 
 int main() {
   std::array<dsp56300::Word, 4096> ram{};
-  constexpr auto program = dsp56300::isa::program(dsp56300::isa::nop, dsp56300::isa::stop);
+  constexpr std::array<dsp56300::Word, 2> program{0x000000, 0x000087}; // NOP; STOP
   std::ranges::copy(program, ram.begin());
   dsp56300::Core core(dsp56300::Memory::unified(ram));
   const auto result = core.run();

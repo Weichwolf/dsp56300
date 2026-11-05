@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
-#include "dsp56300/instruction.hpp"
 #include "fixture_memory.hpp"
+#include "instruction_decoder.hpp"
 #include "support.hpp"
 #include "unit_fixture_support.hpp"
 

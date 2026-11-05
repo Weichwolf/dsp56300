@@ -51,7 +51,7 @@ target_compile_features(dsp56300_core PUBLIC cxx_std_23)
 target_link_libraries(dsp56300_core PUBLIC dsp56300_quality)
 target_compile_options(dsp56300_core PUBLIC $<$<CONFIG:Release>:-march=native>)
 target_link_options(dsp56300_core PUBLIC -fuse-ld=lld)
-target_include_directories(dsp56300_core PRIVATE src/core src/jit src/jit/x64)
+target_include_directories(dsp56300_core PRIVATE src src/core src/jit src/jit/x64)
 
 file(GLOB_RECURSE DSP56300_OWN_FILES CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp"
@@ -863,7 +863,7 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   foreach(core_test_target IN LISTS core_test_targets)
     get_target_property(core_test_sources ${core_test_target} SOURCES)
     if(core_test_sources MATCHES "test/")
-      target_include_directories(${core_test_target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/test/support")
+      target_include_directories(${core_test_target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/test/support" "${CMAKE_CURRENT_SOURCE_DIR}/src")
     endif()
   endforeach()
 endif()

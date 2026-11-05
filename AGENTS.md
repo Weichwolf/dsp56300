@@ -16,6 +16,8 @@
 - Publish reviewed increments only to configured origin/main. Keep neighboring
   application sources read-only; coordinate core revisions with consumer pins.
 
+- Expose only core.hpp and memory.hpp under include/. Keep ISA encodings in
+  test/support/isa.hpp and production decoding/transfer helpers private; production code must not include test headers.
 - Keep the same minimal public Core/Memory/Io/Options API shape in both cores.
   Core owns its state; optional read-only state inspection is outside normal use.
   Remove checkpoint/restore APIs and their implementation completely. Preserve

@@ -22,7 +22,8 @@ consumer: borrowed memory, peripherals, events and virtual time
 
 ## Public contract and ownership
 
-The target public surface consists of core.hpp, isa.hpp and memory.hpp. Core owns
+The public surface consists of core.hpp and memory.hpp. ISA encodings live in
+test/support/isa.hpp; production decoding/transfer helpers stay private. Core owns
 all architectural state and translations. Optional read-only state inspection is
 available at execution-owner boundaries; it does not copy state on every step.
 There are no checkpoint, restore, pipeline-ticket or backend-selection APIs.

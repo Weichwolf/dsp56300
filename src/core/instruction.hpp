@@ -2,7 +2,7 @@
 #pragma once
 
 #include "dsp56300/core.hpp"
-#include "dsp56300/instruction.hpp"
+#include "instruction_decoder.hpp"
 
 #include <cstdint>
 

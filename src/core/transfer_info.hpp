@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 #include "dsp56300/core.hpp"
-#include "dsp56300/instruction.hpp"
-#include "dsp56300/transfers.hpp"
+#include "instruction_decoder.hpp"
+#include "transfers.hpp"
 
 namespace dsp56300::detail::transfer_info {
 struct EffectiveEncoding {

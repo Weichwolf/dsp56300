@@ -2,7 +2,7 @@
 #include "transfer_info.hpp"
 
 #include "dsp56300/core.hpp"
-#include "dsp56300/transfers.hpp"
+#include "transfers.hpp"
 
 #include <cstddef>
 #include <cstdint>
