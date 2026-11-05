@@ -1,43 +1,43 @@
 # Target architecture
 
-This is the intended design, not a claim of complete ISA or performance coverage.
+The library executes the DSP56300 ISA through native JIT code. This design is the
+implementation target, not a claim that the current migration is complete.
 
 ```text
 consumer: memory + peripheral state + virtual time + event arbitration
                             |
                   Core(Memory, Io*, Options)
                             |
-           bounded run -> native region cache -> native code
-                            |                        |
-                  precise side exit          direct RAM access
-                            |                        |
-                 fault / event / budget      explicit I/O callback
+               ISA frontend -> host-JIT concept -> native code
+                                   |                    |
+                        x86/SSE/AVX today        direct RAM access
+                        future ARM/NEON          explicit I/O effects
 ```
 
-The consumer owns memory and all device behavior. The DSP56300 core owns guest
-registers, instruction semantics, native code and continuation state. One thread
-owns each core; callers synchronize external events outside its mutable state.
+The public headers are core.hpp, isa.hpp and memory.hpp. Both libraries expose
+the same minimal Core API. ISA-specific register layouts, address units and
+peripheral contracts account for their differences; internal JIT mechanics do not.
+Core owns its complete state. Normal consumers need no state management; optional
+read-only state access occurs at safe owner boundaries and adds no work otherwise.
+Opaque checkpoint handles and staged effect tickets are outside the normal API.
 
-Memory uses 24-bit P/X/Y words and 56-bit accumulators. Typed views make storage bounds,
-aliases and lifetimes explicit. Ordinary RAM accesses use direct native loads and
-stores; device accesses retain exactly-once effects. Program mutations invalidate
-all affected native regions, including aliased storage.
+Only JIT execution belongs in production. Host emitters satisfy one host concept;
+there is no interpreter/reference/cached backend selector. Native specialization
+must preserve all ISA effects and precise exits. Unknown operations and accesses
+fail with operation, address and PC. The general ISA extends beyond Blofeld needs.
 
-Compile regions on demand into writable memory, then execute from read/execute
-pages. Chain valid regions and keep live guest values in host registers. Guards
-cover numerical modes, addresses, code versions and admissible event budgets.
-Every exit materializes the architectural state required by its observer. Failed
-guards must preserve the original operation, ordering and fault context.
+Memory uses 24-bit P/X/Y words and 56-bit accumulators. Typed borrowed views preserve bounds,
+permissions, knownness, aliases and owner lifetimes. Harvard spaces are logical
+views over ordinary host RAM. Program mutation invalidates affected translations.
+One execution owner controls each core; external events use bounded communication.
 
-The ordinary entry selects the fastest qualified native path. Incomplete lowering
-remains an explicit implementation gap. Callbacks implement device effects,
-not guest instruction interpretation. Diagnostics are optional and must not force
-per-instruction snapshots in normal execution.
+The consumer owns peripheral clocks and arbitration. Native runs stop at valid
+event, interrupt, fault or sleep boundaries; internal grants preserve deadlines
+and bounded response. A due event is handled before executing an instruction
+beyond its boundary. Caller-visible instruction counts are optional test control,
+not a substitute for event handling. Physical buses and pipeline phases are not
+implementation goals. ISA-visible cache, loop and interrupt semantics remain.
 
-Runs stop at meaningful event, fault or budget boundaries. Consumers own clocks,
-interrupt arbitration, pacing and inter-core queues. Checkpoints pair complete CPU
-continuations with matching consumer-owned memory and peripheral state. No host
-synthesizer, board simulator or physical wire model belongs in this library.
-
-Instruction expectations and complete qualification requirements belong in test/.
-Primary architecture references are listed in references.json.
+Strict compilation, static analysis and independently expected ISA/state tests
+qualify changes. Core tests remain active before instrument real-time operation;
+fuzzing runs only on explicit request. Primary references are in references.json.

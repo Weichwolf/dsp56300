@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -448,7 +449,8 @@ public:
   // Exact guest-instruction budget on every backend, including each REP iteration.
   // Translated blocks never exceed the budget; a short tail can use the interpreter.
   // Faults require reset. CPU state after a failed dispatch is not committed evidence.
-  [[nodiscard]] RunResult run(std::uint32_t instruction_budget);
+  [[nodiscard]] RunResult
+  run(std::uint32_t instruction_budget = std::numeric_limits<std::uint32_t>::max());
   // Execute a completed CPU-only prefix within both bounds. Return before any
   // unproven external effect/control transition, with actual next PC/base cost.
   // Unknown code is an explicit boundary; this query never invents a fetch.

@@ -2,6 +2,7 @@
 #include "architecture.hpp"
 #include "core_impl.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/isa.hpp"
 #include "rounding.hpp"
 
 #include <array>
@@ -21,19 +22,19 @@ constexpr unsigned multiply_shift = padding_bits + 1;
 constexpr unsigned operation_mask = 0xf7;
 
 enum AluCode : std::uint8_t {
-  op_clear = 0x13,
-  op_round = 0x11,
-  op_abs = 0x26,
-  op_negate = 0x36,
-  op_asr = 0x22,
-  op_asl = 0x32,
-  op_not = 0x17,
-  op_tfr_x0 = 0x41,
-  op_tfr_y0 = 0x51,
-  op_tfr_x1 = 0x61,
-  op_tfr_y1 = 0x71,
-  op_max = 0x1d,
-  op_maxm = 0x15,
+  op_clear = static_cast<std::uint8_t>(isa::Opcode::clr_a),
+  op_round = static_cast<std::uint8_t>(isa::Opcode::rnd_a),
+  op_abs = static_cast<std::uint8_t>(isa::Opcode::abs_a),
+  op_negate = static_cast<std::uint8_t>(isa::Opcode::neg_a),
+  op_asr = static_cast<std::uint8_t>(isa::Opcode::asr_a),
+  op_asl = static_cast<std::uint8_t>(isa::Opcode::asl_a),
+  op_not = static_cast<std::uint8_t>(isa::Opcode::not_a),
+  op_tfr_x0 = static_cast<std::uint8_t>(isa::Opcode::tfr_x0_a),
+  op_tfr_y0 = static_cast<std::uint8_t>(isa::Opcode::tfr_y0_a),
+  op_tfr_x1 = static_cast<std::uint8_t>(isa::Opcode::tfr_x1_a),
+  op_tfr_y1 = static_cast<std::uint8_t>(isa::Opcode::tfr_y1_a),
+  op_max = static_cast<std::uint8_t>(isa::Opcode::max),
+  op_maxm = static_cast<std::uint8_t>(isa::Opcode::maxm),
 };
 
 bool signed_overflow(const std::uint64_t left,

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "dsp56300/core.hpp"
+#include "dsp56300/isa.hpp"
 #include "dsp56300/memory.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <exception>
@@ -16,6 +18,25 @@ using namespace dsp56300;
 
 void require(const bool condition, const std::string_view message) {
   if (!condition) { throw std::runtime_error(std::string(message)); }
+}
+
+void default_run() {
+  constexpr std::array<Word, 1> expected_nop{0};
+  constexpr std::array<Word, 1> expected_stop{0x87};
+  static_assert(isa::nop == expected_nop && isa::stop == expected_stop);
+  constexpr auto program = isa::program(isa::nop, isa::stop);
+  constexpr std::size_t memory_words = 64;
+  std::array<Word, memory_words> backing{};
+  std::ranges::copy(program, backing.begin());
+  const auto expected_memory = backing;
+  Core core(Memory::unified(backing));
+  auto expected = core.registers();
+  expected.pc = program.size();
+  const auto result = core.run();
+  require(result.dispatches == 2 && result.fault.kind == FaultKind::none &&
+              result.state == ProcessingState::stopped && core.registers() == expected &&
+              backing == expected_memory && core.backend() == Backend::jit,
+          "Default native run stops at guest STOP with exact PC, registers and RAM");
 }
 
 void partition() {
@@ -162,6 +183,7 @@ void validation() {
 
 int main() {
   try {
+    default_run();
     partition();
     unified();
     external();

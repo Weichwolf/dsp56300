@@ -6,7 +6,7 @@
 - Keep board clocks, derivative peripherals and application firmware in consumers.
   No foreign DSP execution dependency; use independently authored test programs.
 - Use Core(Memory, Io*, Options), typed memory and explicit ownership, aliases,
-  invalidation, checkpoints and event limits. The core has one execution owner.
+  invalidation and event limits. The core has one execution owner.
 - Automatically choose the fastest qualified host path. Fix slow instruction and
   transfer helpers here; JIT fallback gaps remain visible until native lowering
   preserves all effects and precise exits. I/O callbacks are separate from ISA
@@ -15,6 +15,13 @@
   and src/jit/, native emission in src/jit/x64/, memory in src/core/memory.cpp.
 - Publish reviewed increments only to configured origin/main. Keep neighboring
   application sources read-only; coordinate core revisions with consumer pins.
+
+- Keep the same minimal public Core/Memory/Io/Options API shape in both cores.
+  Core owns its state; optional read-only state inspection is outside normal use.
+  Expose no pipeline tickets or opaque checkpoint machinery in the normal API.
+- Production execution is JIT-only. Future x86/SSE/AVX and ARM/NEON host emitters
+  implement the same host concept. Remove interpreter/reference/cached backend
+  selection; preserve independent ISA tests and all implemented instructions.
 
 ## Working rules
 
@@ -27,13 +34,14 @@
   Never weaken checks or hide findings with suppressions or diagnostic baselines.
 - Release is the performance build. Preserve ASan/UBSan for project code and native
   dependencies, and separate TSan for concurrent code; preserve dependency notices.
-- Until the instrument reaches real time, suspend component, functional, regression
-  and diagnostic execution tests. Only short optimized startup/throughput probes
-  may establish that milestone: stop after at most 10 host seconds, fail unless
-  playable, and never extend or automatically repeat a failed probe. Compilation,
-  formatting and static analysis remain active. Run fuzzing only on explicit request.
-- Afterwards validate affected behavior against independent expectations; avoid
-  duplicate or full-suite runs after small changes. Report gaps and measured scope.
+- Run affected cpu12/dsp56300 correctness tests for core changes, including
+  independent instruction/state expectations and appropriate sanitizer coverage.
+  Core tests are not subject to the instrument's real-time milestone restriction.
+  Avoid duplicate or full-suite runs after small changes; report gaps and scope.
+- Until the instrument reaches real time, suspend long Blofeld firmware runs.
+  Startup/throughput probes stop after at most 10 host seconds and fail unless
+  playable; never extend or automatically repeat a failed probe. Keep compilation,
+  formatting and static analysis active. Run fuzzing only on explicit request.
 - Keep doc/ for one target architecture and important primary references only.
   Requirements belong in OBJECTIVE.md and test/; build metadata belongs in cmake/.
   No activity diaries or historical result manifests. Issue communication belongs

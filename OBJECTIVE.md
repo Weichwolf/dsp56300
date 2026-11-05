@@ -18,8 +18,8 @@ Current user requirements
   automatically receive the fastest correctly supported execution path on the
   current host, including native JIT execution. Callers must not need to know
   private backend details or accidentally select a diagnostic interpreter by
-  using the normal memory/I/O interface. Explicit reference execution remains
-  available for independent tests and diagnosis. Extend native execution to
+  using the normal memory/I/O interface. Keep only JIT production execution;
+  tests use independently authored expectations. Extend native execution to
   external memory and ordinary bounded event/I/O contracts; a fast isolated
   buffer benchmark is insufficient when real consumers take a slow path.
   Qualify actual native/helper execution and sustained consumer throughput.
@@ -71,16 +71,17 @@ Current user requirements
 - Consumers use ordinary headers, owned/shared memory, events and synchronous
   I/O. Keep ownership, bounds, aliases, host mutation and invalidation explicit.
   Derivative clocks, peripherals and board/device behavior belong to consumers.
-  Provide complete opaque CPU continuations, controlled instruction capture and
-  externally owned bus effects. Separate native computation from publication,
-  preserving original operands, early AGU/MOVE visibility and retirement order.
-  A functional single-instruction interface does not replace the required
-  overlapping instruction/event/timing model.
+  Keep complete readable state owned by Core, with optional inspection at safe
+  boundaries. The normal consumer does not manage CPU state. Instruction and
+  memory effects preserve ISA ordering; physical pipeline phases and electrical
+  wiring are not implementation goals. Retire staged effect-ticket and opaque
+  checkpoint APIs as their consumers migrate to normal native execution.
 - Use C++23, LLVM 19, CMake/Ninja, strict warnings, hardening, clang-format/tidy,
   and nonrecovering ASan/UBSan with native dependencies instrumented in strict
   builds. Keep functions at most 120 lines and do not suppress/weaken checks.
-  Use core concepts for portable compile-time interface contracts and compare
-  reference/cached/JIT implementations in the same fixture build. Parameterize
+  Use one portable host-JIT concept for x86/SSE/AVX and future ARM/NEON emitters.
+  Keep the public API aligned with cpu12; expose no production backend selector.
+  Parameterize
   host SIMD lane width separately from vector width; validate combinations and
   retain exact DSP precision and runtime host-ISA admission.
 - Keep entry points in src/core.cpp and src/jit.cpp; helpers in src/core/ and
@@ -108,13 +109,22 @@ coverage while native replacements are implemented and independently verified.
 Do not hide or relabel those gaps or discard their architectural/fault behavior.
 
 Current development priority: use the fastest optimized Release build for
-functional firmware experiments and performance work. Until the integrating
-firmware runs in real time, suspend execution tests except optimized startup/
-throughput probes capped at 10 host seconds. Fail unless playable; never
-automatically retry or extend. Keep strict compilation, formatting and static
-analysis active; qualification remains incomplete until execution checks resume.
+functional firmware experiments and performance work. Run affected core correctness
+tests, including independent expectations and
+appropriate sanitizer coverage, before publishing source changes. Core tests
+remain active before the integrating instrument reaches real time. Keep strict
+compilation, formatting and static analysis; never weaken checks.
 
 Public setup follows Core(Memory, Io*, Options): explicit typed borrowed views,
 named unified/separate/partition/external layouts and owned MemoryArena views.
 Keep native architectural units, physical aliases and owner lifetimes explicit.
 No general virtual memory manager belongs in ordinary direct-RAM execution.
+
+Public API agreement
+
+CPU12 and DSP56300 expose the same small outward Core API; ISA and peripheral
+contracts supply architecture-specific types. Core owns its full readable state;
+normal consumers need no state or checkpoint management. Optional state access
+must not add work to the execution path. Only JIT execution belongs in production;
+future host architectures provide new implementations of the host-JIT concept.
+Preserve every implemented instruction, including operations unused by Blofeld.
