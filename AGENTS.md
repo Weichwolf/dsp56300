@@ -30,6 +30,13 @@
   Keep generated code immutable and retained for the entire Core lifetime; no
   eviction/recompilation. The consumer creates a new Core for a new program.
 
+## Performance priority
+
+- Before further integration or optimization in blofeld-emu, bring both cores
+  close to matched host-ASM throughput on representative warm workloads. Use the
+  same inputs, relevant ISA semantics and verified outputs; trivial-only cases
+  or weak host baselines do not establish this gate. Report every shortfall.
+
 ## Working rules
 
 - Speak German with the user; write code, comments, documentation and commits in English.

@@ -129,3 +129,11 @@ normal consumers need no state or checkpoint management. Optional state access
 must not add work to the execution path. Only JIT execution belongs in production;
 future host architectures provide new implementations of the host-JIT concept.
 Preserve every implemented instruction, including operations unused by Blofeld.
+
+Before further emulator integration or optimization, both CPU12 and DSP56300
+must approach matched host-ASM throughput on representative warmed workloads.
+The complete instrument objective remains unchanged. Optimize native blocks,
+loops, register/flag liveness and code layout in the cores, validate equivalent
+results and report per-workload JIT/host percentages. The current small CPU12
+fixtures are far below this target; their passing correctness tests do not
+satisfy the performance gate.
