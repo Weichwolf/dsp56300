@@ -166,4 +166,33 @@ implemented instructions and the independent tests that establish their meaning.
 FIR, biquad, FFT and nonlinear kernels must exercise transfers and address updates
 as well as arithmetic; a fast isolated MAC is insufficient gate evidence.
 
+Before changing a lowering, draw the live values and step through a complete
+iteration, its backedge and its exits. A candidate allocation for a scalar MAC
+loop is below; these are roles, not permanent assignments for all DSP registers.
+
+```text
+host GPRs:   [ A:56 ] [ B:56 ] [ old X0 ] [ old Y0 ] [ product:64 ]
+             [ live AGU addresses ] [ memory bases ] [ loop progress ]
+host SIMD:   [ other live packed words / parallel-transfer old values ]
+metadata:    guest PC, dead values, deferred flag expressions
+```
+
+For an admitted ordinary-RAM loop, trace a fractional MAC with parallel loads of
+the next X0/Y0. With logical integer values A=10, X0=2 and Y0=3, the current MAC
+produces A=22; parallel loads of 5 and 7 supply the *next* MAC, producing A=92.
+The multiply must consume the old operands before their locations are reused.
+Keep A across the backedge; load only the next samples and coefficients. Account
+for the implementation's accumulator padding and exact fractional scaling when
+turning this logical trace into host instructions. Saturation, rounding, sticky
+status and precise fault ordering still apply wherever their effects are live.
+
+Compare that trace with the emitted native instructions. A hot operand should
+remain where its consuming instruction needs it throughout its live range:
+packing it in SIMD and extracting it for every scalar multiply may cost more
+than keeping it in a GPR. Preserve useful packing; remove transfers only after
+checking register pressure, parallel reads and measured throughput. At joins,
+reconcile the incoming locations; at observable exits publish the live state.
+Use this method for shifts, butterfly pairs and branches as well as MACs, then
+check independent results before accepting a performance improvement.
+
 Primary references are listed in references.json.
