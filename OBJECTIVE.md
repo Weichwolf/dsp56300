@@ -137,3 +137,12 @@ loops, register/flag liveness and code layout in the cores, validate equivalent
 results and report per-workload JIT/host percentages. The current small CPU12
 fixtures are far below this target; their passing correctness tests do not
 satisfy the performance gate.
+
+Sequence: optimize CPU12 first to >=80% of matched optimized host-ASM throughput
+on each representative warm fixture, then optimize and simplify DSP56300 to the
+same per-fixture threshold. Until both pass, defer further emulator integration.
+Use minimal focused validation during slow-core iteration and broaden it as
+performance improves. Keep code small, with complexity justified by correctness
+or measured speed. The subsequent complete Blofeld instrument must sustain >=4x
+offline real-time throughput on this host under representative high load while
+retaining correct guest time and bounded live latency.

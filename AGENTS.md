@@ -37,6 +37,16 @@
   same inputs, relevant ISA semantics and verified outputs; trivial-only cases
   or weak host baselines do not establish this gate. Report every shortfall.
 
+- Optimize cpu12 first until every representative warm fixture reaches at least
+  80% of matched optimized host ASM; then optimize and simplify dsp56300 to the
+  same threshold. Emulator integration stays deferred until both pass.
+- While throughput is low, favor short optimized experiments and focused result
+  checks. Increase validation breadth with performance progress; preserve strict
+  check definitions and independent ISA coverage.
+- Keep only code needed for correct behavior or demonstrated performance. Remove
+  unnecessary DSP implementation/API during its optimization stage, preserving
+  implemented ISA and the independent tests required to qualify it.
+
 ## Working rules
 
 - Speak German with the user; write code, comments, documentation and commits in English.
