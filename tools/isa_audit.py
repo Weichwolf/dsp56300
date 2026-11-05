@@ -9,7 +9,7 @@ import sys
 
 
 def audit(root: Path, require_complete: bool) -> int:
-    path = root / "test/isa-coverage.tsv"
+    path = root / "test/isa/coverage.tsv"
     with path.open(encoding="utf-8", newline="") as source:
         rows = list(csv.DictReader(source, delimiter="\t"))
     expected_columns = {"id", "manual_page", "status", "implementation", "tests", "remaining"}
