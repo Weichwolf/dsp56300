@@ -409,6 +409,7 @@ enum class Opcode : std::uint32_t {
   max = 0x20001d,
   maxm = 0x200015,
   merge_register = 0x0c1b80,
+  move_address_update = 0x204000,
   move_displacement_long = 0x0a7080,
   move_displacement_short = 0x020080,
   move_immediate_x0 = 0x240000,

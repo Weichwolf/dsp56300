@@ -9,8 +9,10 @@
 #include "x64.hpp"
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cstddef>
+#include <cstdint>
 #include <stdexcept>
 #include <vector>
 
@@ -19,13 +21,86 @@ namespace {
 using x64::Branch;
 using x64::Reg;
 using x64::Width;
-constexpr unsigned op_add = 0x01, op_sub = 0x29, op_xor = 0x31, op_and = 0x21, op_test = 0x85;
+constexpr unsigned op_add = 0x01, op_sub = 0x29, op_xor = 0x31, op_and = 0x21, op_test = 0x85,
+                   op_or = 0x09;
 constexpr unsigned op_cmp = 0x39, move_above_equal = 0x43;
 constexpr unsigned op_return = 0xc3;
-constexpr unsigned group_add = 0, group_and = 4, group_sub = 5, group_cmp = 7;
+constexpr unsigned group_add = 0, group_or = 1, group_and = 4, group_sub = 5, group_xor = 6,
+                   group_cmp = 7;
 constexpr auto r_offset = offsetof(Cpu, reg) + offsetof(Registers, r);
 constexpr auto n_offset = offsetof(Cpu, reg) + offsetof(Registers, n);
 constexpr auto m_offset = offsetof(Cpu, reg) + offsetof(Registers, m);
+
+void reverse_prefix(x64::Code &code, const bool subtract, const x64::RegisterPair registers) {
+  const auto address = registers.source;
+  const auto next = registers.destination;
+  // EAX is the raw 24-bit operand. Prefix carry/borrow travels from MSB to LSB.
+  code.mov({.destination = Reg::dx, .source = address}, Width::dword);
+  code.binary(op_xor, {.destination = Reg::dx, .source = Reg::ax}, Width::dword);
+  code.mov({.destination = Reg::r9, .source = address}, Width::dword);
+  if (subtract) { code.immediate(group_xor, Reg::r9, word_mask, Width::dword); }
+  code.binary(op_and, {.destination = Reg::r9, .source = Reg::ax}, Width::dword);
+  code.mov({.destination = Reg::ax, .source = Reg::dx}, Width::dword);
+  if (subtract) { code.immediate(group_xor, Reg::ax, word_mask, Width::dword); }
+  constexpr unsigned right = 5;
+  for (unsigned distance = 1; distance < word_bits; distance *= 2) {
+    code.mov({.destination = Reg::r10, .source = Reg::r9}, Width::dword);
+    code.shift(right, Reg::r10, distance, Width::dword);
+    code.binary(op_and, {.destination = Reg::r10, .source = Reg::ax}, Width::dword);
+    code.binary(op_or, {.destination = Reg::r9, .source = Reg::r10}, Width::dword);
+    code.mov({.destination = Reg::r10, .source = Reg::ax}, Width::dword);
+    code.shift(right, Reg::r10, distance, Width::dword);
+    code.binary(op_and, {.destination = Reg::ax, .source = Reg::r10}, Width::dword);
+  }
+  code.shift(right, Reg::r9, 1, Width::dword);
+  code.mov({.destination = next, .source = Reg::dx}, Width::dword);
+  code.binary(op_xor, {.destination = next, .source = Reg::r9}, Width::dword);
+}
+
+void reverse_address(x64::Code &code, const NativeMove &move) {
+  const auto address = move.space == Space::x ? Reg::cx : Reg::r8;
+  const auto next = move.space == Space::x ? Reg::si : Reg::di;
+  const auto &form = move.address;
+  const bool subtract = form.mode == 0 || form.mode == 2 || form.mode == 7;
+  code.load(address, Reg::r12, r_offset + (form.index * sizeof(Word)), Width::dword);
+  code.mov({.destination = next, .source = address}, Width::dword);
+  if (form.mode < 2 || form.mode == 5) {
+    code.load(Reg::ax, Reg::r12, n_offset + (form.index * sizeof(Word)), Width::dword);
+    code.immediate(group_and, Reg::ax, word_mask, Width::dword);
+  } else {
+    code.constant(Reg::ax, 1);
+  }
+  x64::Label done;
+  x64::Label general;
+  code.binary(op_test, {.destination = Reg::ax, .source = Reg::ax}, Width::dword);
+  code.jump_if(Branch::equal, done);
+  code.mov({.destination = Reg::r9, .source = Reg::ax}, Width::dword);
+  code.immediate(group_sub, Reg::r9, 1, Width::dword);
+  code.binary(op_test, {.destination = Reg::r9, .source = Reg::ax}, Width::dword);
+  code.jump_if(Branch::not_equal, general);
+  // A one-bit operand toggles through the highest carry/borrow stop below it.
+  code.mov({.destination = Reg::r11, .source = Reg::ax}, Width::dword);
+  constexpr unsigned left = 4;
+  code.shift(left, Reg::r11, 1, Width::dword);
+  code.mov({.destination = Reg::r10, .source = Reg::r11}, Width::dword);
+  code.immediate(group_sub, Reg::r10, 1, Width::dword);
+  code.mov({.destination = Reg::r9, .source = address}, Width::dword);
+  if (!subtract) { code.immediate(group_xor, Reg::r9, word_mask, Width::dword); }
+  code.binary(op_and, {.destination = Reg::r9, .source = Reg::r10}, Width::dword);
+  code.immediate(group_or, Reg::r9, 1, Width::dword);
+  constexpr std::array<std::uint8_t, 4> scan_stop{0x45, 0x0f, 0xbd, 0xc9};
+  code.raw(scan_stop); // BSR R9D,R9D; forced LSB makes it nonzero.
+  code.binary(op_xor, {.destination = Reg::r10, .source = Reg::r10}, Width::dword);
+  constexpr std::array<std::uint8_t, 4> set_stop{0x45, 0x0f, 0xab, 0xca};
+  code.raw(set_stop); // BTS R10D,R9D: no variable-CL clobber.
+  code.binary(op_sub, {.destination = Reg::r11, .source = Reg::r10}, Width::dword);
+  code.binary(op_xor, {.destination = next, .source = Reg::r11}, Width::dword);
+  code.jump(done);
+  code.bind(general);
+  reverse_prefix(code, subtract, {.destination = next, .source = address});
+  code.bind(done);
+  code.immediate(group_and, next, word_mask, Width::dword);
+}
 
 }
 
@@ -43,13 +118,20 @@ void JitEmitter::address_update(const NativeOp &operation) {
   const NativeMove update{.address = {.mode = (opcode >> 11) & 3, .index = (opcode >> 8) & 7}};
   const auto offset = update.address.index * sizeof(Word);
   x64::Label slow;
+  x64::Label reverse;
   x64::Label done;
   code_.load(Reg::ax, Reg::r12, m_offset + offset, Width::dword);
   code_.immediate(group_and, Reg::ax, modifier_mask, Width::dword);
   code_.immediate(group_cmp, Reg::ax, modifier_mask, Width::dword);
-  code_.jump_if(Branch::not_equal, slow);
+  code_.jump_if(Branch::not_equal, reverse);
   move_delta(update);
   code_.immediate(group_and, Reg::si, word_mask, Width::dword);
+  code_.store(Reg::r12, r_offset + offset, Reg::si, Width::dword);
+  code_.jump(done);
+  code_.bind(reverse);
+  code_.immediate(group_cmp, Reg::ax, 0, Width::dword);
+  code_.jump_if(Branch::not_equal, slow);
+  reverse_address(code_, update);
   code_.store(Reg::r12, r_offset + offset, Reg::si, Width::dword);
   code_.jump(done);
   code_.bind(slow);
@@ -160,7 +242,13 @@ void JitEmitter::emit_ring_guards() {
       code_.jump(guard.resume);
       code_.bind(non_linear);
     }
-    // Ordinary modulo/reverse fallback needs neither a call nor R/N loads.
+    x64::Label modulo;
+    code_.immediate(group_cmp, Reg::ax, 0, Width::dword);
+    code_.jump_if(Branch::not_equal, modulo);
+    reverse_address(code_, guard.move);
+    code_.jump(guard.resume);
+    code_.bind(modulo);
+    // Ordinary modulo fallback needs neither a call nor R/N loads.
     code_.immediate(group_cmp, Reg::ax, multiple_wrap_bit - 1, Width::dword);
     code_.jump_if(Branch::below_equal, guard.slow);
     const auto matches = [&guard](const auto &candidate) {
