@@ -57,6 +57,7 @@ struct Machine {
 struct Input {
   Word mode = 0, left = 0, right = 0, flags = 0;
   std::size_t seed = 0;
+  bool complement_y = false;
 };
 
 Registers initial(const Input input) {
@@ -67,10 +68,25 @@ Registers initial(const Input input) {
   result.b = raw.at((input.seed + 1) % raw.size());
   result.x = input.left | (std::uint64_t{input.right} << word_bits);
   result.y = input.right | (std::uint64_t{input.left} << word_bits);
+  if (input.complement_y) {
+    result.y = (input.left ^ word_mask) | (std::uint64_t{input.right} << word_bits);
+  }
   return result;
 }
 
+void register_transfer(Registers &state, const Registers &old, const isa::Opcode opcode) {
+  if (opcode == move_register_x0_y0) {
+    state.y = (old.y & ~std::uint64_t{word_mask}) | (old.x & word_mask);
+  } else if (opcode == move_register_x0_a_add_a_b || opcode == move_register_x0_b_add_b_a) {
+    const auto word = static_cast<Word>(old.x) & word_mask;
+    const auto value = signed24(word) * (std::int64_t{1} << word_bits);
+    auto &destination = opcode == move_register_x0_a_add_a_b ? state.a : state.b;
+    destination = static_cast<std::uint64_t>(value) & accumulator_mask;
+  }
+}
+
 void arithmetic(Registers &state, const Registers &old, const isa::Opcode opcode) {
+  register_transfer(state, old, opcode);
   if (opcode == asr_a || opcode == asr_b) {
     const bool destination_b = opcode == asr_b;
     shift_model::apply(state, old, {.source_b = destination_b, .destination_b = destination_b});
@@ -118,7 +134,10 @@ void check(Machine &machine,
           "cold/warm prefix including compare and branch costs");
 }
 
-void numeric_mode(Machine &machine, const std::span<const isa::Opcode> body, const Word mode) {
+void numeric_mode(Machine &machine,
+                  const std::span<const isa::Opcode> body,
+                  const Word mode,
+                  const bool complement_y) {
   const auto count = static_cast<Word>(body.size() + 1);
   for (std::size_t left = 0; left < words.size(); ++left) {
     for (std::size_t right = 0; right < words.size(); ++right) {
@@ -127,7 +146,8 @@ void numeric_mode(Machine &machine, const std::span<const isa::Opcode> body, con
                                     .left = words[left],
                                     .right = words[right],
                                     .flags = flags,
-                                    .seed = left + right});
+                                    .seed = left + right,
+                                    .complement_y = complement_y});
         check(machine, body, state, count);
         for (Word prefix = 0; prefix <= count; ++prefix) { check(machine, body, state, prefix); }
       }
@@ -135,12 +155,72 @@ void numeric_mode(Machine &machine, const std::span<const isa::Opcode> body, con
   }
 }
 
-void matrix(const std::span<const isa::Opcode> body) {
+void matrix(const std::span<const isa::Opcode> body, const bool complement_y = false) {
   Machine machine(body);
   for (const auto mode : modes) {
-    numeric_mode(machine, body, mode);
-    numeric_mode(machine, body, mode | saturation_model::mode);
+    numeric_mode(machine, body, mode, complement_y);
+    numeric_mode(machine, body, mode | saturation_model::mode, complement_y);
   }
+}
+
+struct PairInput {
+  bool subtract = false, high_first = false, y_first = false, b_first = false;
+};
+
+std::array<isa::Opcode, 8> pair_program(const PairInput input) {
+  constexpr std::array sums{tfr_x0_a, add_x1_a, tfr_y0_b, add_y1_b, asr_a, asr_b, rnd_a, rnd_b};
+  constexpr std::array differences{
+      tfr_x0_a, sub_x1_a, tfr_y0_b, sub_y1_b, asr_a, asr_b, rnd_a, rnd_b};
+  constexpr unsigned destination_shift = 3;
+  constexpr unsigned bank_shift = 4;
+  constexpr unsigned half_shift = 5;
+  auto result = input.subtract ? differences : sums;
+  const auto destination = Word{input.b_first} << destination_shift;
+  const auto sources = (Word{input.y_first} << bank_shift) | (Word{input.high_first} << half_shift);
+  for (std::size_t index = 0; index < result.size(); ++index) {
+    const auto word = static_cast<Word>(result[index]);
+    result[index] = static_cast<isa::Opcode>(word ^ destination ^ (index < 4 ? sources : 0));
+  }
+  return result;
+}
+
+void pair_reuse() {
+  const auto first = pair_program({});
+  const auto last =
+      pair_program({.subtract = true, .high_first = true, .y_first = true, .b_first = true});
+  for (const auto middle :
+       {nop, move_register_x0_a_add_a_b, move_register_x0_b_add_b_a, move_register_x0_y0}) {
+    std::vector<isa::Opcode> body(first.begin(), first.end());
+    body.push_back(middle);
+    body.insert(body.end(), last.begin(), last.end());
+    matrix(body, true);
+  }
+}
+
+void paired_words() {
+  for (const bool subtract : {false, true}) {
+    for (const bool high_first : {false, true}) {
+      for (const bool y_first : {false, true}) {
+        for (const bool b_first : {false, true}) {
+          matrix(pair_program({.subtract = subtract,
+                               .high_first = high_first,
+                               .y_first = y_first,
+                               .b_first = b_first}),
+                 true);
+        }
+      }
+    }
+  }
+  auto product = pair_program({});
+  product[0] = mpyr_x0_y1_a;
+  matrix(product, true);
+  auto mixed = pair_program({});
+  mixed[3] = sub_y1_b;
+  matrix(mixed, true);
+  auto reversed = pair_program({.subtract = true});
+  reversed[2] = tfr_y1_b;
+  reversed[3] = sub_y0_b;
+  matrix(reversed, true);
 }
 } // namespace
 } // namespace dsp56300::test
@@ -148,6 +228,8 @@ void matrix(const std::span<const isa::Opcode> body) {
 int main() {
   try {
     using namespace dsp56300::test;
+    paired_words();
+    pair_reuse();
     matrix(averages);
     matrix(comparison);
     matrix(overflow);
