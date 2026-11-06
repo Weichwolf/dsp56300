@@ -2,6 +2,7 @@
 // Independent raw-width selection/status and register/bus sequence expectations.
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
 #include "selection_model.hpp"
@@ -451,7 +452,7 @@ void interactions(Cases &cases, const std::span<const Alu> inputs) {
       item.fault = {
           .kind = FaultKind::unsupported_mode, .address = start, .value = mode, .pc = start};
       item.name = "Selection/status remaining numerical modes are explicit unsupported boundaries";
-      if (mode == 0x100000U && alu.kind == Kind::complement) {
+      if (mode == 0x100000U) {
         item.expected = item.initial;
         selection_model::apply(item.expected, item.initial, alu);
         ++item.expected.pc;
@@ -459,7 +460,7 @@ void interactions(Cases &cases, const std::span<const Alu> inputs) {
         item.progress = {.instructions = 1, .estimated_cycles = 1};
         item.interruptible = true;
         item.fault = {};
-        item.name = "NOT uses the qualified BFU arithmetic-saturation bypass";
+        item.name = "Selection/status operations accept the qualified arithmetic-saturation mode";
       }
       cases.push_back(std::move(item));
     }

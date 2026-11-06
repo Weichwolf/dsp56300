@@ -2,8 +2,10 @@
 // Independent LSB-first adder circuit and raw-coordinate normalization model.
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
+#include "saturation_model.hpp"
 #include "support.hpp"
 
 #include <array>
@@ -126,6 +128,9 @@ void divide_model(Registers &state, const Input input) {
   state.sr &= ~(flag_c | flag_v);
   if (!result.back()) { state.sr |= flag_c; }
   if (old.back() != shifted.back()) { state.sr |= flag_v | flag_l; }
+  const auto limited = saturation_model::apply(destination, {.status = state.sr});
+  destination = limited.value;
+  if (limited.limited) { state.sr |= flag_v | flag_l; }
 }
 
 Word result_flags(const Registers &state, const bool destination_b) {
@@ -155,8 +160,11 @@ void normalize_model(Registers &state, const Input input) {
   } else if (left) {
     destination = (original * 2) % (std::uint64_t{1} << accumulator_bits);
   }
+  const bool overflowed = left && (original >= sign56) != (destination >= sign56);
+  const auto limited = saturation_model::apply(destination, {.status = state.sr});
+  destination = limited.value;
   Word flags = result_flags(state, input.destination_b);
-  if (left && (original >= sign56) != (destination >= sign56)) { flags |= flag_v | flag_l; }
+  if (overflowed || limited.limited) { flags |= flag_v | flag_l; }
   state.sr = (state.sr & ~arithmetic_flags) | flags;
   if (right || left) {
     const auto address_bits = (state.sr & compatibility) != 0 ? 16U : word_bits;
@@ -447,6 +455,24 @@ void sequence_prefixes(Cases &cases) {
   }
 }
 
+void saturation_cases(Cases &cases) {
+  for (const auto kind : {Kind::divide, Kind::normalize}) {
+    for (const bool destination_b : {false, true}) {
+      for (const auto value : values) {
+        for (const Word flags : {0U, status_byte, flag_e | flag_c, flag_u | flag_l}) {
+          for (const auto scaling : modes) {
+            cases.push_back(single({.kind = kind,
+                                    .value = value,
+                                    .source = sign24,
+                                    .status = saturation_model::mode | scaling | flags,
+                                    .destination_b = destination_b}));
+          }
+        }
+      }
+    }
+  }
+}
+
 void faults(Cases &cases) {
   for (const auto kind : {Kind::divide, Kind::normalize}) {
     for (const Word mode : {0x2000U, 0x4000U, 0x20000U, 0x100000U, mode_up | mode_down}) {
@@ -465,15 +491,14 @@ void faults(Cases &cases) {
                     .value = mode,
                     .pc = start};
       item.name = "DIV/NORM unimplemented numeric mode is explicit";
-      if (kind == Kind::normalize && (mode == 0x100000U || mode == compatibility)) {
-        // No shift retains the value/Rn and refreshes flags, without SM limiting.
-        normalize_model(item.expected, input);
+      if (mode == saturation_model::mode || (kind == Kind::normalize && mode == compatibility)) {
+        model(item.expected, input);
         ++item.expected.pc;
         item.dispatches = 1;
-        item.progress = {.instructions = 1, .estimated_cycles = 5};
+        item.progress = {.instructions = 1, .estimated_cycles = kind == Kind::divide ? 1U : 5U};
         item.interruptible = true;
         item.fault = {};
-        item.name = "NORM SM/SC non-shift refreshes flags without changing data or exponent";
+        item.name = "DIV/NORM qualified SM or SC mode preserves architectural semantics";
       }
       cases.push_back(std::move(item));
     }
@@ -493,6 +518,7 @@ int main(const int argc, const char *const *const argv) {
     dsp56300::test::control_flag_cases(cases);
     dsp56300::test::interactions(cases);
     dsp56300::test::sequence_prefixes(cases);
+    dsp56300::test::saturation_cases(cases);
     dsp56300::test::faults(cases);
     const auto count = cases.size();
     dsp56300::test::write_fixture(argv[1], std::move(cases));
