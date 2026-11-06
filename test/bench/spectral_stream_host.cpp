@@ -2,7 +2,7 @@
 // Optimized numerical window/FFT/power reference, never an emulator backend.
 #include "binary_fixture.hpp"
 #include "dsp56300/memory.hpp"
-#include "fft_native.hpp"
+#include "fft_host.hpp"
 #include "fft_program.hpp"
 #include "fixture_memory.hpp"
 #include "spectral_stream_program.hpp"
@@ -26,10 +26,10 @@ public:
       : memory_(initial_memory(item)),
         total_(item.initial.n[7]),
         rm_((item.initial.sr & mode_rm) != 0),
-        plan_(fft::native::make_plan(
+        plan_(fft::host::make_plan(
             {.real = std::span<const Word>(memory_[1]).subspan(fft::twiddle_base, size / 2),
              .imaginary = std::span<const Word>(memory_[2]).subspan(fft::twiddle_base, size / 2)})),
-        pool_(1, avx2) {
+        avx2_(avx2) {
     require(item.before.front().words == program().code.words && total_ > 0 &&
                 total_ <= stream_hops && (item.initial.sr & (mode_up | mode_down)) == 0,
             "Native spectrum requires the authored bounded ordinary-scaling stream");
@@ -60,11 +60,11 @@ private:
     for (Word index = 0; index < size; ++index) {
       const auto weight = signed24(memory_[1][window_base + index]);
       data_.real[index] = host_math::rounded(
-          signed24(memory_[1][cursor + index]) * weight, fft::native::fractional_bits, rm_);
+          signed24(memory_[1][cursor + index]) * weight, fft::host::fractional_bits, rm_);
       data_.imaginary[index] = host_math::rounded(
-          signed24(memory_[2][cursor + index]) * weight, fft::native::fractional_bits, rm_);
+          signed24(memory_[2][cursor + index]) * weight, fft::host::fractional_bits, rm_);
     }
-    pool_.run(data_, plan_, rm_);
+    fft::host::transform(data_, plan_, rm_, avx2_);
     auto power_cursor = memory_[1][power_cursor_address];
     for (Word index = 0; index < size; ++index) {
       memory_[1][fft::data_base + index] = static_cast<Word>(data_.real[index]) & word_mask;
@@ -84,9 +84,9 @@ private:
   FixtureMemory memory_;
   Word total_, step_ = 0;
   bool rm_;
-  std::vector<fft::native::Stage> plan_;
-  fft::native::Pool pool_;
-  fft::native::Data data_;
+  std::vector<fft::host::Stage> plan_;
+  bool avx2_;
+  fft::host::Data data_;
 };
 
 double measure(const BinaryCase &item, const bool avx2) {
@@ -103,7 +103,8 @@ double measure(const BinaryCase &item, const bool avx2) {
 HostStreamTimes measure_spectral_host(const BinaryCase &item) {
   require(item.initial.n[7] == stream_hops, "Native spectrum timing covers two input seconds");
   HostStreamTimes result{.scalar_seconds = measure(item, false),
-                         .scope = "fixed-point-algorithm-and-memory"};
+                         .scope = "fixed-point-algorithm-and-memory",
+                         .implementation = "compiler-scalar-and-avx2-vector-expressions"};
   if (__builtin_cpu_supports("avx2")) { result.avx2_seconds = measure(item, true); }
   return result;
 }

@@ -124,7 +124,9 @@ HostStreamTimes measure_numeric_host(const std::string_view name, const BinaryCa
   host.run(iir_stream::sample_rate);
   const auto elapsed = std::chrono::duration<double>(Clock::now() - begin).count();
   host.verify(item);
-  return {.scalar_seconds = elapsed, .scope = "fixed-point-algorithm-and-memory"};
+  return {.scalar_seconds = elapsed,
+          .scope = "fixed-point-algorithm-and-memory",
+          .implementation = "cpp-with-inline-mac-asm"};
 }
 
 void verify_numeric_host(const std::string_view name, const std::vector<BinaryCase> &cases) {

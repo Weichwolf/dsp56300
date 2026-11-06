@@ -238,9 +238,11 @@ bool run(const BinaryCase &item, const Engine engine, const Workload spec) {
   const auto fastest = host.avx2_seconds > 0 ? std::min(host.scalar_seconds, host.avx2_seconds)
                                              : host.scalar_seconds;
   std::cout << "  host_scalar_s=" << host.scalar_seconds << " host_avx2_s=" << host.avx2_seconds
+            << " jit_to_scalar_host_percent=" << 100.0 * host.scalar_seconds / result.wall
             << " jit_to_host_percent=" << 100.0 * fastest / result.wall << " jit_target_70="
             << (fastest >= host_target_fraction * result.wall ? "PASS" : "FAIL")
-            << " host_comparison=" << host.scope << " host_memory=PASS\n";
+            << " host_comparison=" << host.scope << " host_implementation=" << host.implementation
+            << " host_memory=PASS\n";
   return report(result, engine, spec);
 }
 

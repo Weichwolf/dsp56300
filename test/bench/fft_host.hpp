@@ -1,23 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Native algorithm experiment, not an emulator backend or a program recognizer.
+// Single-thread FFT reference for the paired JIT/host stream comparison.
 #pragma once
 #include "dsp56300/memory.hpp"
-#include "fft_program.hpp"
 #include "support.hpp"
 
 #include <algorithm>
-#include <barrier>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <span>
-#include <stdexcept>
-#include <thread>
 #include <utility>
 #include <vector>
 
-namespace dsp56300::test::fft::native {
+namespace dsp56300::test::fft::host {
 inline constexpr unsigned fractional_bits = 23, rounding_half_bits = 1, lane_count = 4;
 inline constexpr std::int64_t scale = std::int64_t{1} << fractional_bits;
 
@@ -205,79 +201,19 @@ avx2_work(Job &job, const std::size_t begin, const std::size_t end) noexcept {
 
 using Work = void (*)(Job &, std::size_t, std::size_t) noexcept;
 
-class Pool {
-public:
-  Pool(const unsigned workers, const bool avx2)
-      : workers_(validated_workers(workers)),
-        work_(avx2 ? avx2_work : scalar_work),
-        barrier_(static_cast<std::ptrdiff_t>(workers_)) {
-    threads_.reserve(workers_ - 1);
-    try {
-      for (unsigned index = 1; index < workers_; ++index) {
-        threads_.emplace_back([this, index] {
-          while (true) {
-            barrier_.arrive_and_wait();
-            if (finished_) { return; }
-            execute(index);
-            barrier_.arrive_and_wait();
-          }
-        });
-      }
-    } catch (...) {
-      finished_ = true;
-      for (auto missing = threads_.size() + 1; missing < workers_; ++missing) {
-        barrier_.arrive_and_drop();
-      }
-      barrier_.arrive_and_wait();
-      threads_.clear();
-      throw;
-    }
+inline void
+transform(Data &data, const std::span<const Stage> plan, const bool rm, const bool avx2) {
+  const Work work = avx2 ? avx2_work : scalar_work;
+  for (const auto &stage : plan) {
+    Job job{.data = &data, .stage = &stage, .rm = rm};
+    work(job, 0, data.real.size() / 2);
   }
-
-  ~Pool() {
-    if (workers_ > 1) {
-      finished_ = true;
-      barrier_.arrive_and_wait();
-      threads_.clear();
-    }
+  const auto size = data.real.size();
+  for (std::size_t index = 0; index < size; ++index) {
+    const auto reverse = __builtin_bitreverse32(static_cast<Word>(index)) >>
+                         (32 - static_cast<unsigned>(std::countr_zero(size)));
+    data.output_real[index] = data.real[reverse];
+    data.output_imaginary[index] = data.imaginary[reverse];
   }
-
-  Pool(const Pool &) = delete;
-  Pool &operator=(const Pool &) = delete;
-
-  void run(Data &data, const std::vector<Stage> &plan, const bool rm) {
-    for (const auto &stage : plan) {
-      job_ = {.data = &data, .stage = &stage, .rm = rm};
-      if (workers_ > 1) { barrier_.arrive_and_wait(); }
-      execute(0);
-      if (workers_ > 1) { barrier_.arrive_and_wait(); }
-    }
-    const auto size = data.real.size();
-    for (std::size_t index = 0; index < size; ++index) {
-      const auto reverse = __builtin_bitreverse32(static_cast<Word>(index)) >>
-                           (32 - static_cast<unsigned>(std::countr_zero(size)));
-      data.output_real[index] = data.real[reverse];
-      data.output_imaginary[index] = data.imaginary[reverse];
-    }
-  }
-
-private:
-  static unsigned validated_workers(const unsigned count) {
-    constexpr unsigned maximum = 64;
-    if (count == 0 || count > maximum) { throw std::invalid_argument("Workers must be in [1,64]"); }
-    return count;
-  }
-
-  void execute(const unsigned index) noexcept {
-    const auto count = job_.data->real.size() / 2;
-    work_(job_, count * index / workers_, count * (index + 1) / workers_);
-  }
-
-  unsigned workers_;
-  Work work_;
-  std::barrier<> barrier_;
-  Job job_;
-  bool finished_ = false;
-  std::vector<std::jthread> threads_;
-};
-} // namespace dsp56300::test::fft::native
+}
+} // namespace dsp56300::test::fft::host

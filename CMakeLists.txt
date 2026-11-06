@@ -442,19 +442,13 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   add_executable(dsp56300_generate_bit_fields test/isa/generate_bit_fields.cpp)
   target_link_libraries(dsp56300_generate_bit_fields PRIVATE dsp56300_fixture_format)
 
-  foreach(archive bit-access bit-branches control-bytes address-calculations)
-
-  endforeach()
-  foreach(archive loops loop-control return-state return-sequences exception-state exception-sequences debug-state debug-sequences processing-state processing-sequences)
-
-  endforeach()
   add_executable(dsp56300_fixture_test test/isa/fixture_test.cpp)
   target_link_libraries(dsp56300_fixture_test PRIVATE dsp56300::core dsp56300_fixture_format)
   add_executable(dsp56300_fixture_bench test/bench/fixture_bench.cpp)
   add_executable(dsp56300_continuous_bench test/bench/continuous_bench.cpp
     test/bench/fir_stream_host.cpp test/bench/fir_host.cpp test/bench/fir_host_avx2.cpp
     test/bench/numeric_stream_host.cpp test/bench/spectral_stream_host.cpp)
-  target_link_libraries(dsp56300_continuous_bench PRIVATE dsp56300::core dsp56300_fixture_format Threads::Threads)
+  target_link_libraries(dsp56300_continuous_bench PRIVATE dsp56300::core dsp56300_fixture_format)
   add_test(NAME fir-stream-host-reference COMMAND dsp56300_continuous_bench --verify-fir-host
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/fir-stream-check.d56")
   foreach(name iir nonlinear spectral)
@@ -512,11 +506,6 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
     "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/fir.d56"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/test/support/reproduce_fixture.cmake")
   target_link_libraries(dsp56300_fixture_bench PRIVATE dsp56300::core dsp56300_fixture_format)
-  find_package(Threads REQUIRED)
-  add_executable(dsp56300_fft_native_bench test/bench/fft_native_bench.cpp)
-  target_link_libraries(dsp56300_fft_native_bench PRIVATE dsp56300_fixture_format Threads::Threads)
-  add_test(NAME fft-native-algorithm COMMAND dsp56300_fft_native_bench --verify
-    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/fft.d56")
   add_test(NAME arithmetic-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/arithmetic.d56")
   add_test(NAME condition-fixtures COMMAND dsp56300_fixture_test
