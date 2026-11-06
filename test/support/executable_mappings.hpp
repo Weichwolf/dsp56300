@@ -17,7 +17,7 @@ struct ExecutableRange {
   bool operator==(const ExecutableRange &) const = default;
 };
 
-inline std::vector<ExecutableRange> anonymous_executable_mappings() {
+inline std::vector<ExecutableRange> jit_executable_mappings() {
   std::ifstream maps("/proc/self/maps");
   require(maps.good(), "The native retention test reads actual Linux executable mappings");
   std::vector<ExecutableRange> mappings;
@@ -32,8 +32,8 @@ inline std::vector<ExecutableRange> anonymous_executable_mappings() {
     require(static_cast<bool>(fields >> range >> permissions >> offset >> device >> inode),
             "A kernel mapping has its required fields");
     std::getline(fields, label);
-    if (permissions != "r-xp" || inode != 0 ||
-        label.find_first_not_of(" \t") != std::string::npos) {
+    if (permissions != "r-xs" || inode == 0 ||
+        label.find("/memfd:dsp56300-jit (deleted)") == std::string::npos) {
       continue;
     }
     const auto dash = range.find('-');
@@ -52,9 +52,9 @@ inline std::vector<ExecutableRange> anonymous_executable_mappings() {
   return mappings;
 }
 
-inline std::uint64_t anonymous_executable_bytes() {
+inline std::uint64_t jit_executable_bytes() {
   std::uint64_t bytes = 0;
-  for (const auto range : anonymous_executable_mappings()) { bytes += range.last - range.first; }
+  for (const auto range : jit_executable_mappings()) { bytes += range.last - range.first; }
   return bytes;
 }
 } // namespace dsp56300::test

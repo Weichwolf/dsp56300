@@ -6,7 +6,8 @@
 #include <vector>
 
 namespace dsp56300::detail {
-// Published images and their entry addresses remain valid until destruction.
+// Append-only dual mappings: published bytes and entry addresses remain valid
+// until destruction. Only private storage is writable; callers receive RX addresses.
 class ExecutableArena {
 public:
   ExecutableArena();

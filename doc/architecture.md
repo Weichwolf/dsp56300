@@ -70,6 +70,12 @@ for every instruction or loop iteration. Mutable link data is separate from
 immutable machine code. Preserve the register convention across linked regions.
 Place connected hot regions together and move fault/diagnostic paths out of line.
 Align deliberately; measure code expansion and instruction-cache behavior.
+On x86 Linux, append completed images to shared physical storage through private
+RW aliases and expose separate RX aliases. Published byte spans are never reused
+or modified; later appends may fill unused space in the same segment. Count actual
+published code bytes separately from reserved RX pages; the writable alias does
+not duplicate physical code storage. Test publication, immutability and mapping
+permissions from outside the core without hot-path counters.
 
 Keep translations in memory. A persistent disk cache is a last resort only if
 measured first-use latency remains unacceptable after optimizing compilation.

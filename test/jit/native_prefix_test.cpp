@@ -19,7 +19,7 @@
 
 namespace dsp56300::test {
 namespace {
-constexpr Word length = 64, blocks = 32;
+constexpr Word length = 64, blocks = 1024;
 constexpr Word jump = isa::opcode<isa::Opcode::jmp_absolute_short>()[0];
 constexpr std::size_t words = 4096;
 constexpr std::uint64_t former_cache_bytes = std::uint64_t{8} * 1024 * 1024;
@@ -174,7 +174,7 @@ Word numeric_mode(const unsigned context) {
 }
 
 void retained_storage() {
-  const auto original_mappings = anonymous_executable_bytes();
+  const auto original_mappings = jit_executable_bytes();
   const auto initial_publications = codegen::publications();
   {
     Machine machine;
@@ -191,15 +191,20 @@ void retained_storage() {
         nop_prefix(machine, input, program);
         entries.push_back(input);
       }
-      if (anonymous_executable_bytes() - original_mappings > former_cache_bytes) { break; }
+      if (codegen::publications().bytes - initial_publications.bytes > former_cache_bytes) {
+        break;
+      }
     }
-    require(anonymous_executable_bytes() - original_mappings > former_cache_bytes,
+    require(codegen::publications().bytes - initial_publications.bytes > former_cache_bytes,
             "Actual retained complete-block code crosses the former eight-MiB capacity threshold");
     captured_repeat_entries(machine);
     const auto warm = codegen::publications();
-    require(anonymous_executable_bytes() ==
-                original_mappings + (warm.bytes - initial_publications.bytes),
-            "Executable accounting matches real anonymous read/execute mappings");
+    const auto reserved = jit_executable_bytes() - original_mappings;
+    const auto used = warm.bytes - initial_publications.bytes;
+    require(reserved >= used && reserved - used < used / 8,
+            "Actual compact executable arenas cover published code with less than 12.5% slack");
+    std::cout << "retained_images=" << warm.count - initial_publications.count
+              << " published_bytes=" << used << " reserved_rx_bytes=" << reserved << '\n';
     for (unsigned pass = 0; pass < 2; ++pass) {
       for (const auto entry : entries | std::views::reverse) {
         nop_prefix(machine, entry, program);
@@ -208,11 +213,10 @@ void retained_storage() {
                 "Revisiting every earlier complete-block entry allocates and recompiles nothing");
       }
     }
-    require(anonymous_executable_bytes() ==
-                original_mappings + (warm.bytes - initial_publications.bytes),
+    require(jit_executable_bytes() == original_mappings + reserved,
             "Warm reuse retains the exact same executable mapping extent");
   }
-  require(anonymous_executable_bytes() == original_mappings,
+  require(jit_executable_bytes() == original_mappings,
           "Destroying the Core releases all of its actual executable mappings");
 }
 

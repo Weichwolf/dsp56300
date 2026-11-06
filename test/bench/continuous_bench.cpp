@@ -6,6 +6,7 @@
 #include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "executable_mappings.hpp"
 #include "fir_stream_program.hpp"
 #include "fixture_memory.hpp"
 #include "iir_stream_program.hpp"
@@ -125,6 +126,8 @@ struct Measurement {
   double minimum_cold_hardware_factor = std::numeric_limits<double>::max();
   Word missed_blocks = 0, missed_cold_blocks = 0;
   std::uint64_t cold_compiled_entries = 0;
+  std::size_t cold_compiled_bytes = 0;
+  std::uint64_t reserved_rx_bytes = 0;
 };
 
 template <CoreImplementation Implementation>
@@ -150,6 +153,7 @@ Measurement measure(Implementation &core, const Workload spec) {
   const auto progress_before = core.progress();
   result.before = codegen::publications();
   result.cold_compiled_entries = result.before.count - cold_publications.count;
+  result.cold_compiled_bytes = result.before.bytes - cold_publications.bytes;
   const auto cpu_begin = cpu_seconds();
   const auto begin = Clock::now();
   for (Word block = 0; block < spec.blocks; ++block) {
@@ -165,6 +169,7 @@ Measurement measure(Implementation &core, const Workload spec) {
                      .estimated_cycles =
                          core.progress().estimated_cycles - progress_before.estimated_cycles};
   result.after = codegen::publications();
+  result.reserved_rx_bytes = jit_executable_bytes();
   require(result.before == result.after,
           "Warm sustained measurements must not silently include new translations");
   require(result.progress.instructions == std::uint64_t{spec.blocks} * spec.block_budget &&
@@ -203,6 +208,8 @@ bool report(const Measurement &value, const Engine engine, const Workload spec) 
             << " package_deadline=" << (deadline ? "PASS" : "FAIL")
             << " cold_warmup_s=" << value.warmup << '\n'
             << "    cold_compiled_entries=" << value.cold_compiled_entries
+            << " published_code_bytes=" << value.cold_compiled_bytes
+            << " reserved_rx_bytes=" << value.reserved_rx_bytes
             << " measured_compiled_entries=" << value.after.count - value.before.count
             << " full_state=PASS\n";
   return deadline;

@@ -71,10 +71,11 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   add_library(dsp56300_codegen_observer STATIC test/support/codegen_observer.cpp)
   target_include_directories(dsp56300_codegen_observer PUBLIC test/support)
   target_link_libraries(dsp56300_codegen_observer PUBLIC dsp56300_quality)
-  # ASan's weak mprotect interceptor does not force static archive extraction.
-  # Require the observer's wrapper even when a test does not read its counters.
+  # Observe real image publication independently of the arena's mapping strategy.
+  set(dsp56300_append_symbol "_ZN8dsp563006detail15ExecutableArena6appendESt4spanIKhLm18446744073709551615EE")
   target_link_options(dsp56300_codegen_observer INTERFACE
-    -Wl,--wrap=mprotect -Wl,--undefined=__wrap_mprotect)
+    "-Wl,--wrap=${dsp56300_append_symbol}"
+    "-Wl,--undefined=__wrap_${dsp56300_append_symbol}")
   add_executable(dsp56300_public_api_test test/core/public_api_test.cpp)
   target_link_libraries(dsp56300_public_api_test PRIVATE dsp56300::core)
   add_test(NAME public-api COMMAND dsp56300_public_api_test)
@@ -314,6 +315,11 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   add_executable(dsp56300_native_loop_final_test test/jit/native_loop_final_test.cpp)
   target_link_libraries(dsp56300_native_loop_final_test PRIVATE dsp56300::core)
   add_test(NAME native-loop-final-frames COMMAND dsp56300_native_loop_final_test)
+  add_executable(dsp56300_arena_test test/jit/arena_test.cpp)
+  target_link_libraries(dsp56300_arena_test PRIVATE dsp56300::core)
+  target_link_options(dsp56300_arena_test PRIVATE
+    -Wl,--wrap=memfd_create -Wl,--wrap=ftruncate -Wl,--wrap=mmap)
+  add_test(NAME native-arena COMMAND dsp56300_arena_test)
   add_executable(dsp56300_native_code_lifetime_test test/jit/native_code_lifetime_test.cpp)
   target_link_libraries(dsp56300_native_code_lifetime_test PRIVATE dsp56300::core)
   add_test(NAME native-code-lifetime COMMAND dsp56300_native_code_lifetime_test)

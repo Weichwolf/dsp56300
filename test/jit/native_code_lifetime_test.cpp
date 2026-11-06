@@ -43,17 +43,23 @@ struct CodeImage {
 
 std::vector<CodeImage> image() {
   std::vector<CodeImage> result;
-  for (const auto range : anonymous_executable_mappings()) {
-    const auto *const first = std::bit_cast<const std::byte *>(range.first);
-    const auto size = static_cast<std::size_t>(range.last - range.first);
-    result.push_back({.range = range, .bytes = std::vector<std::byte>(first, first + size)});
+  const auto mappings = jit_executable_mappings();
+  for (const auto publication : codegen::published_images()) {
+    const auto first = std::bit_cast<std::uintptr_t>(publication.entry);
+    const auto last = first + publication.bytes;
+    const bool live = std::ranges::any_of(
+        mappings, [&](const auto range) { return range.first <= first && range.last >= last; });
+    require(live, "Every publication of the live Core remains mapped read/execute");
+    const auto bytes = std::as_bytes(std::span(publication.entry, publication.bytes));
+    result.push_back({.range = {.first = first, .last = last},
+                      .bytes = std::vector<std::byte>(bytes.begin(), bytes.end())});
   }
   require(!result.empty(), "A real native translation has executable storage");
   return result;
 }
 
 void preserved(const std::span<const CodeImage> original) {
-  const auto mappings = anonymous_executable_mappings();
+  const auto mappings = jit_executable_mappings();
   for (const auto &part : original) {
     const bool readable = std::ranges::any_of(mappings, [&](const auto range) {
       return range.first <= part.range.first && range.last >= part.range.last;
@@ -158,7 +164,7 @@ void shared_run(Machine &machine, const Word budget) {
 }
 
 void shared_entries() {
-  const auto original_bytes = anonymous_executable_bytes();
+  const auto original_bytes = jit_executable_bytes();
   const auto page = sysconf(_SC_PAGESIZE);
   require(page > 0, "Shared native storage needs the actual system page size");
   const auto initial_publications = codegen::publications();
@@ -169,15 +175,16 @@ void shared_entries() {
   shared_run(machine, 1);
   const auto published = codegen::publications();
   const auto bytes = published.bytes - initial_publications.bytes;
-  require(published.count == initial_publications.count + 1 &&
-              bytes == static_cast<std::uint64_t>(page) &&
-              anonymous_executable_bytes() == original_bytes + bytes,
-          "Two small native entries share one actual read/execute page");
+  const auto reserved = jit_executable_bytes() - original_bytes;
+  require(published.count == initial_publications.count + 1 && bytes > 0 &&
+              bytes <= static_cast<std::uint64_t>(page) && reserved >= bytes &&
+              reserved % static_cast<std::uint64_t>(page) == 0,
+          "Two small native entries share one compact published image inside an RX arena");
   const auto original = image();
   for (const Word budget : {2U, 3U, 4U, 5U, 6U, 7U, 9U, 10U, 11U, 1U}) {
     shared_run(machine, budget);
     require(codegen::publications() == published &&
-                anonymous_executable_bytes() == original_bytes + bytes,
+                jit_executable_bytes() == original_bytes + reserved,
             "Changing entry paths neither maps new pages nor duplicates code");
     preserved(original);
   }
@@ -253,7 +260,7 @@ struct Scenario {
 int main() {
   try {
     using namespace dsp56300::test;
-    const auto original = anonymous_executable_mappings();
+    const auto original = jit_executable_mappings();
     constexpr std::array scenarios{
         Scenario{.name = "reset", .execute = reset},
         Scenario{.name = "program write", .execute = program_write},
@@ -263,9 +270,10 @@ int main() {
         Scenario{.name = "REP versions", .execute = repeat_versions}};
     unsigned failures = 0;
     for (const auto scenario : scenarios) {
+      codegen::track_images();
       try {
         scenario.execute();
-        require(anonymous_executable_mappings() == original,
+        require(jit_executable_mappings() == original,
                 "Core destruction releases every owned executable mapping");
       } catch (const std::exception &error) {
         std::cerr << scenario.name << ": " << error.what() << '\n';
