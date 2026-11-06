@@ -6,7 +6,7 @@
 #include "jit/code.hpp"
 #include "jit/emitter.hpp"
 #include "jit/resident.hpp"
-#include "native_moves.hpp"
+#include "move.hpp"
 
 #include <cstddef>
 #include <cstdint>

@@ -7,7 +7,7 @@
 #include "jit/code.hpp"
 #include "jit/emitter.hpp"
 #include "jit/resident.hpp"
-#include "native_moves.hpp"
+#include "move.hpp"
 #include "region_guards.hpp"
 #include "value_ranges.hpp"
 #include "word_reuse.hpp"

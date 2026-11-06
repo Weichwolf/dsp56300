@@ -38,13 +38,13 @@ add_library(dsp56300_core STATIC
   src/jit/x64/saturation.cpp
   src/jit/x64/loop.cpp
   src/jit/x64/flags.cpp
-  src/jit/native_moves.cpp src/jit/resident_plan.cpp src/jit/dataflow.cpp src/jit/value_ranges.cpp src/jit/word_reuse.cpp src/jit/x64/move.cpp src/jit/x64/memory_windows.cpp
+  src/jit/move.cpp src/jit/resident_plan.cpp src/jit/dataflow.cpp src/jit/value_ranges.cpp src/jit/word_reuse.cpp src/jit/x64/move.cpp src/jit/x64/memory_windows.cpp
   src/jit/x64/resident_emit.cpp
   src/jit/x64/region_guards.cpp src/jit/x64/loop_window.cpp
   src/jit/x64/values.cpp
   src/jit/x64/address.cpp src/jit/x64/registers.cpp src/jit/x64/long_move.cpp
   src/jit/x64/retirement.cpp src/jit/x64/status.cpp
-  src/jit/x64/shifts.cpp src/jit/native_register_moves.cpp src/jit/x64/inputs.cpp
+  src/jit/x64/shifts.cpp src/jit/registers.cpp src/jit/x64/inputs.cpp
   src/jit/mac_batch.cpp src/jit/x64/mac_batch_avx2.cpp src/jit/x64/batch.cpp)
 add_library(dsp56300::core ALIAS dsp56300_core)
 target_include_directories(dsp56300_core PUBLIC include)

@@ -6,7 +6,7 @@
 #include "jit.hpp"
 #include "jit/code.hpp"
 #include "jit/resident.hpp"
-#include "native_moves.hpp"
+#include "move.hpp"
 #include "value_ranges.hpp"
 #include "word_reuse.hpp"
 
@@ -107,7 +107,7 @@ private:
   void move_read_register(x64::Reg value, const NativeMove &move, Word mode);
   void move_write_register(x64::Reg value, unsigned reg);
   void multiply(const BlockInstruction &operation);
-  [[nodiscard]] bool gpr_product(const BlockInstruction &operation);
+  [[nodiscard]] bool gpr_product(const BlockInstruction &operation, x64::Reg result);
   void invalidate_word_reuse(const WordReuseStep &step);
   void product_word(x64::Reg destination,
                     const BlockInstruction &operation,

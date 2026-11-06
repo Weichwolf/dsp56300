@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "fields.hpp"
 #include "instruction.hpp"
-#include "native_moves.hpp"
+#include "move.hpp"
 
 namespace dsp56300::detail {
 namespace {

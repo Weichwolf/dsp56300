@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "move.hpp"
+
 #include "architecture.hpp"
 #include "dsp56300/memory.hpp"
 #include "jit.hpp"
 #include "jit/code.hpp"
 #include "jit/emitter.hpp"
 #include "jit/resident.hpp"
-#include "native_moves.hpp"
 
 #include <cstdint>
 #include <span>

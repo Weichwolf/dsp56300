@@ -4,7 +4,7 @@
 #include "dsp56300/memory.hpp"
 #include "fields.hpp"
 #include "instruction.hpp"
-#include "native_moves.hpp"
+#include "move.hpp"
 
 #include <algorithm>
 #include <array>

@@ -3,7 +3,7 @@
 #include "jit.hpp"
 #include "jit/code.hpp"
 #include "jit/emitter.hpp"
-#include "native_moves.hpp"
+#include "move.hpp"
 #include "word_reuse.hpp"
 
 #include <array>
@@ -63,7 +63,7 @@ void BlockEmitter::product_word(const x64::Reg destination,
   }
 }
 
-bool BlockEmitter::gpr_product(const BlockInstruction &operation) {
+bool BlockEmitter::gpr_product(const BlockInstruction &operation, const x64::Reg result) {
   if (word_selected_ == 0) { return false; }
   const auto inputs = product_operands(operation.instruction);
   const auto word = static_cast<unsigned>(std::countr_zero(word_selected_));
@@ -72,25 +72,25 @@ bool BlockEmitter::gpr_product(const BlockInstruction &operation) {
   const bool valid = (word_valid_ & word_selected_) != 0;
   if (inputs.square) {
     if (valid) {
-      code_.mov({.destination = Reg::ax, .source = Reg::cx});
+      code_.mov({.destination = result, .source = Reg::cx});
     } else {
-      product_word(Reg::ax, operation, word, false);
-      code_.mov({.destination = Reg::cx, .source = Reg::ax});
+      product_word(result, operation, word, false);
+      code_.mov({.destination = Reg::cx, .source = result});
     }
   } else {
     const auto other = inputs.words[0] == word ? inputs.words[1] : inputs.words[0];
     const bool scaled = (other & 1U) == 0;
-    product_word(Reg::ax, operation, other, scaled);
+    product_word(result, operation, other, scaled);
     if (!valid) {
       product_word(Reg::dx, operation, word, false);
       code_.mov({.destination = Reg::cx, .source = Reg::dx});
     }
-    code_.multiply({.destination = Reg::ax, .source = Reg::cx});
-    if (!scaled) { code_.shift(shift_left, Reg::ax, product_shift); }
+    code_.multiply({.destination = result, .source = Reg::cx});
+    if (!scaled) { code_.shift(shift_left, result, product_shift); }
   }
   if (inputs.square) {
-    code_.multiply({.destination = Reg::ax, .source = Reg::cx});
-    code_.shift(shift_left, Reg::ax, product_shift);
+    code_.multiply({.destination = result, .source = Reg::cx});
+    code_.shift(shift_left, result, product_shift);
   }
   word_valid_ |= word_selected_;
   reused_words_ = true;

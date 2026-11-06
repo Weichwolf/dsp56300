@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "native_moves.hpp"
+#include "move.hpp"
 
 #include "architecture.hpp"
 #include "dsp56300/memory.hpp"

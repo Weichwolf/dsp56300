@@ -6,7 +6,7 @@
 #include "instruction.hpp"
 #include "jit.hpp"
 #include "jit/resident.hpp"
-#include "native_moves.hpp"
+#include "move.hpp"
 
 #include <algorithm>
 #include <array>

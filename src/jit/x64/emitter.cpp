@@ -10,7 +10,7 @@
 #include "jit.hpp"
 #include "jit/code.hpp"
 #include "jit/resident.hpp"
-#include "native_moves.hpp"
+#include "move.hpp"
 #include "translation.hpp"
 #include "value_ranges.hpp"
 #include "word_reuse.hpp"
@@ -268,17 +268,20 @@ void BlockEmitter::helper(const JitHelper function, const BlockInstruction &oper
 
 void BlockEmitter::multiply(const BlockInstruction &operation) {
   const auto opcode = operation.instruction.opcode;
-  if (!gpr_product(operation)) {
+  const bool add_old = (opcode & 2U) != 0 && !value_proof_.zero_addend;
+  // A nonzero MAC still needs the old destination while forming its product.
+  const auto result = add_old ? Reg::ax : result_register(operation);
+  if (!gpr_product(operation, result)) {
     const auto operands = product_operands(operation.instruction);
-    product_word(Reg::ax, operation, operands.words[0], operands.scaled);
+    product_word(result, operation, operands.words[0], operands.scaled);
     if (!operands.square) { product_word(Reg::dx, operation, operands.words[1], false); }
-    code_.multiply({.destination = Reg::ax, .source = operands.square ? Reg::ax : Reg::dx});
-    if (!operands.scaled) { code_.shift(shift_left, Reg::ax, product_shift); }
+    code_.multiply({.destination = result, .source = operands.square ? result : Reg::dx});
+    if (!operands.scaled) { code_.shift(shift_left, result, product_shift); }
   }
-  if ((opcode & 4U) != 0) { code_.unary(3, Reg::ax); }
-  if ((opcode & 2U) != 0 && !value_proof_.zero_addend) {
+  if ((opcode & 4U) != 0) { code_.unary(3, result); }
+  if (add_old) {
     value(Reg::dx, (opcode & 8U) != 0 ? 1U : 0U, has_moves(operation));
-    code_.binary(op_add, {.destination = Reg::ax, .source = Reg::dx});
+    code_.binary(op_add, {.destination = result, .source = Reg::dx});
     if (value_proof_.raw_overflow) { code_.set(condition_overflow, Reg::r10); }
   }
   if (!value_proof_.raw_overflow || (opcode & 2U) == 0) {
@@ -286,7 +289,7 @@ void BlockEmitter::multiply(const BlockInstruction &operation) {
       code_.binary(op_xor, {.destination = Reg::r10, .source = Reg::r10}, Width::dword);
     }
   }
-  if ((opcode & 1U) != 0) { round(operation.mode); }
+  if ((opcode & 1U) != 0) { round(operation.mode, result); }
   if ((operation.mode & arithmetic_saturation) != 0 && (opcode & 2U) == 0 &&
       value_proof_.saturation != SaturationProof::none) {
     // Fresh signed24 fractional products, including RND, stay in [-2^47,2^47].
@@ -295,17 +298,17 @@ void BlockEmitter::multiply(const BlockInstruction &operation) {
     constexpr unsigned equal = 0x94;
     constexpr unsigned move_equal = 0x44;
     code_.constant(Reg::r11, boundary);
-    code_.binary(op_cmp, {.destination = Reg::ax, .source = Reg::r11});
+    code_.binary(op_cmp, {.destination = result, .source = Reg::r11});
     code_.set(equal, Reg::r10);
     const auto step = std::uint64_t{1} << ((opcode & 1U) != 0 ? main_shift : padding_bits);
     code_.constant(Reg::r11, boundary - step);
-    code_.move_if(move_equal, {.destination = Reg::ax, .source = Reg::r11});
+    code_.move_if(move_equal, {.destination = result, .source = Reg::r11});
 
   } else {
     saturate(operation.mode, (opcode & 1U) != 0);
   }
-  store_accumulator((opcode & 8U) != 0, Reg::ax);
-  arithmetic_flags(operation.mode);
+  store_accumulator((opcode & 8U) != 0, result);
+  arithmetic_flags(operation.mode, false, result);
 }
 
 void BlockEmitter::round(const Word mode, const Reg result) {
