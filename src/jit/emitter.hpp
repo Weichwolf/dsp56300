@@ -120,10 +120,10 @@ private:
   void logical_flags(x64::Reg word);
   void addition(const BlockInstruction &operation);
   void right_shift(const BlockInstruction &operation);
-  void round(Word mode);
+  void round(Word mode, x64::Reg result = x64::Reg::ax);
   void saturate(Word mode, bool rounded = false);
   void saturate_canonical(bool rounded);
-  void arithmetic_flags(Word mode, bool carry_changed = false);
+  void arithmetic_flags(Word mode, bool carry_changed = false, x64::Reg result = x64::Reg::ax);
   void merge_flag(x64::Reg value, bool &initialized);
   void zero_negative_flags(bool &initialized);
   void normalization_flags(Word mode, bool &initialized);
@@ -135,6 +135,7 @@ private:
   void merge_status(x64::Reg source, Word changed = 0, x64::Reg scratch = x64::Reg::ax);
   [[nodiscard]] std::vector<Word> plan_flags(std::span<const BlockInstruction> operations) const;
   [[nodiscard]] static Word written_flags(const BlockInstruction &operation);
+  [[nodiscard]] x64::Reg result_register(const BlockInstruction &operation) const;
   void input(x64::Reg destination, unsigned selector, bool destination_b, bool latched);
   void value(x64::Reg destination, unsigned index, bool latched);
   void current_value(x64::Reg destination, unsigned index);

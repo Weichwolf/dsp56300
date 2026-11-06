@@ -43,7 +43,8 @@ constexpr Word unsupported_modes = compatibility_mode | multiply_mode | arithmet
 constexpr std::array<std::uint8_t, 2> call_ax{0xff, 0xd0};
 constexpr std::array<std::uint8_t, 3> increment_retired{0x41, 0xff, 0xc7};
 constexpr std::array<std::uint8_t, 4> entry_landing{0xf3, 0x0f, 0x1e, 0xfa};
-constexpr std::array<std::uint8_t, 4> test_round_bit{0x48, 0x0f, 0xba, 0xe0};
+constexpr std::array<std::uint8_t, 3> test_round_prefix{0x48, 0x0f, 0xba};
+constexpr unsigned test_round_register = 0xe0;
 constexpr std::array<std::uint8_t, 14> save_nonvolatile{
     0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57, 0x55, 0x53, 0x48, 0x83, 0xec, 0x08};
 constexpr std::array<std::uint8_t, 15> restore_and_return{
@@ -162,7 +163,8 @@ void BlockEmitter::current_value(const Reg destination, const unsigned index) {
   if (loop_bank_cache_ && index >= accumulator_dirty_.size()) {
     code_.packed_to(destination, index == 2 ? x64::Xmm::x5 : x64::Xmm::x6);
   } else if (index < accumulator_dirty_.size() && accumulator_dirty_.at(index)) {
-    code_.mov({.destination = destination, .source = index == 0 ? Reg::bp : Reg::bx});
+    const auto source = index == 0 ? Reg::bp : Reg::bx;
+    if (destination != source) { code_.mov({.destination = destination, .source = source}); }
   } else {
     code_.load(destination, Reg::r12, offsetof(Cpu, reg) + register_offsets.at(index));
   }
@@ -170,7 +172,8 @@ void BlockEmitter::current_value(const Reg destination, const unsigned index) {
 
 void BlockEmitter::store_accumulator(const bool destination_b, const Reg source) {
   const auto index = destination_b ? 1U : 0U;
-  code_.mov({.destination = destination_b ? Reg::bx : Reg::bp, .source = source});
+  const auto destination = destination_b ? Reg::bx : Reg::bp;
+  if (destination != source) { code_.mov({.destination = destination, .source = source}); }
   accumulator_dirty_.at(index) = true;
 }
 
@@ -305,7 +308,7 @@ void BlockEmitter::multiply(const BlockInstruction &operation) {
   arithmetic_flags(operation.mode);
 }
 
-void BlockEmitter::round(const Word mode) {
+void BlockEmitter::round(const Word mode, const Reg result) {
   const unsigned cleared =
       main_shift + ((mode & scale_down) != 0 ? 1U : 0U) - ((mode & scale_up) != 0 ? 1U : 0U);
   const auto half = std::uint64_t{1} << (cleared - 1);
@@ -313,21 +316,22 @@ void BlockEmitter::round(const Word mode) {
     constexpr auto maximum_immediate_half = std::uint64_t{1} << 31;
     if (half <= maximum_immediate_half) {
       // SUB of a negative immediate adds the positive half with the same OF.
-      code_.immediate(group_sub, Reg::ax, static_cast<Word>(~(half - 1)));
+      code_.immediate(group_sub, result, static_cast<Word>(~(half - 1)));
     } else {
       code_.constant(Reg::r11, half);
-      code_.binary(op_add, {.destination = Reg::ax, .source = Reg::r11});
+      code_.binary(op_add, {.destination = result, .source = Reg::r11});
     }
   } else {
-    // BT RAX,imm8 supplies the retained LSB to ADC. Since every input has eight
+    // BT result,imm8 supplies the retained LSB to ADC. Since every input has eight
     // zero padding bits, half-1+CF preserves both the rounded value and raw OF.
-    code_.raw(test_round_bit);
+    code_.raw(test_round_prefix);
+    code_.byte(test_round_register | static_cast<unsigned>(result));
     code_.byte(cleared);
     if (half - 1 <= static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max())) {
-      code_.immediate(group_adc, Reg::ax, static_cast<Word>(half - 1));
+      code_.immediate(group_adc, result, static_cast<Word>(half - 1));
     } else {
       code_.constant(Reg::r11, half - 1);
-      code_.binary(op_adc, {.destination = Reg::ax, .source = Reg::r11});
+      code_.binary(op_adc, {.destination = result, .source = Reg::r11});
     }
   }
   if (value_proof_.rounding_overflow) {
@@ -335,8 +339,8 @@ void BlockEmitter::round(const Word mode) {
     // The two opposite signed wraps cancel in the fused rounded result.
     code_.binary(op_xor, {.destination = Reg::r10, .source = Reg::dx}, Width::dword);
   }
-  code_.shift(shift_right, Reg::ax, cleared);
-  code_.shift(shift_left, Reg::ax, cleared);
+  code_.shift(shift_right, result, cleared);
+  code_.shift(shift_left, result, cleared);
 }
 
 void BlockEmitter::native(const BlockInstruction &operation) {
@@ -365,30 +369,31 @@ void BlockEmitter::native(const BlockInstruction &operation) {
     multiply(operation);
     return;
   }
+  const auto result = result_register(operation);
   if (kind == alu_clear) {
-    code_.binary(op_xor, {.destination = Reg::ax, .source = Reg::ax}, Width::dword);
+    code_.binary(op_xor, {.destination = result, .source = result}, Width::dword);
     if (value_proof_.overflow_value()) {
       code_.binary(op_xor, {.destination = Reg::r10, .source = Reg::r10}, Width::dword);
     }
   } else if (kind == alu_round) {
-    value(Reg::ax, destination_b ? 1U : 0U, has_moves(operation));
+    value(result, destination_b ? 1U : 0U, has_moves(operation));
     if (value_proof_.overflow_value()) {
       code_.binary(op_xor, {.destination = Reg::r10, .source = Reg::r10}, Width::dword);
     }
-    round(operation.mode);
+    round(operation.mode, result);
   } else if ((kind & 7U) == 1) {
-    input(Reg::ax, (opcode >> 4) & 7, destination_b, has_moves(operation));
-    store_accumulator(destination_b, Reg::ax);
+    input(result, (opcode >> 4) & 7, destination_b, has_moves(operation));
+    store_accumulator(destination_b, result);
     return;
   } else {
-    value(Reg::ax, destination_b ? 1U : 0U, has_moves(operation));
+    value(result, destination_b ? 1U : 0U, has_moves(operation));
     if (kind == alu_abs) {
-      code_.mov({.destination = Reg::dx, .source = Reg::ax});
+      code_.mov({.destination = Reg::dx, .source = result});
       code_.shift(shift_arithmetic, Reg::dx, host_sign_bit);
-      code_.binary(op_xor, {.destination = Reg::ax, .source = Reg::dx});
-      code_.binary(op_sub, {.destination = Reg::ax, .source = Reg::dx});
+      code_.binary(op_xor, {.destination = result, .source = Reg::dx});
+      code_.binary(op_sub, {.destination = result, .source = Reg::dx});
     } else {
-      code_.unary(3, Reg::ax);
+      code_.unary(3, result);
     }
     if (value_proof_.raw_overflow) {
       code_.set(condition_overflow, Reg::r10);
@@ -397,8 +402,8 @@ void BlockEmitter::native(const BlockInstruction &operation) {
     }
   }
   if (kind != alu_clear) { saturate(operation.mode, kind == alu_round); }
-  store_accumulator(destination_b, Reg::ax);
-  arithmetic_flags(operation.mode);
+  store_accumulator(destination_b, result);
+  arithmetic_flags(operation.mode, false, result);
 }
 
 void BlockEmitter::retire(const BlockInstruction &operation, const bool publish) {

@@ -17,17 +17,18 @@ constexpr unsigned condition_carry = 0x92, op_xor = 0x31;
 
 void BlockEmitter::right_shift(const BlockInstruction &operation) {
   const bool destination_b = (operation.instruction.opcode & 8U) != 0;
-  value(Reg::ax, destination_b ? 1U : 0U, has_moves(operation));
+  const auto result = result_register(operation);
+  value(result, destination_b ? 1U : 0U, has_moves(operation));
   // Shift past padding as well: CF then contains the original DSP bit zero.
   // Restore alignment afterwards, discarding every newly shifted padding bit.
-  code_.shift(arithmetic_right, Reg::ax, padding_bits + 1);
+  code_.shift(arithmetic_right, result, padding_bits + 1);
   if ((live_flags_ & carry) != 0) { code_.set(condition_carry, Reg::dx); }
-  code_.shift(shift_left, Reg::ax, padding_bits);
+  code_.shift(shift_left, result, padding_bits);
   if (value_proof_.overflow_value()) {
     code_.binary(op_xor, {.destination = Reg::r10, .source = Reg::r10}, Width::dword);
   }
-  store_accumulator(destination_b, Reg::ax);
-  arithmetic_flags(operation.mode, true);
+  store_accumulator(destination_b, result);
+  arithmetic_flags(operation.mode, true, result);
 }
 
 // Keep lowering admission separable for local matched performance controls.

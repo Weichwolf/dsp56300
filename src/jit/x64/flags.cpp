@@ -60,6 +60,15 @@ Word BlockEmitter::written_flags(const BlockInstruction &operation) {
   return arithmetic_changed;
 }
 
+x64::Reg BlockEmitter::result_register(const BlockInstruction &operation) const {
+  // Flag computation and limiting use RAX. Without that work, keep the result
+  // in its authoritative accumulator rather than copying it through scratch.
+  if ((live_flags_ & written_flags(operation)) != 0 || value_proof_.overflow_value()) {
+    return Reg::ax;
+  }
+  return (operation.instruction.opcode & 8U) != 0 ? Reg::bx : Reg::bp;
+}
+
 std::vector<Word>
 BlockEmitter::plan_flags(const std::span<const BlockInstruction> operations) const {
   std::vector<Word> result(operations.size(), observed_flags);
@@ -152,7 +161,8 @@ void BlockEmitter::normalization_flags(const Word mode, bool &initialized) {
   }
 }
 
-void BlockEmitter::arithmetic_flags(const Word mode, const bool carry_changed) {
+void BlockEmitter::arithmetic_flags(const Word mode, const bool carry_changed, const Reg result) {
+  if (result != Reg::ax) { return; }
   bool initialized = false;
   zero_negative_flags(initialized);
   normalization_flags(mode, initialized);

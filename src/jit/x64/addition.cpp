@@ -41,7 +41,8 @@ void BlockEmitter::addition(const BlockInstruction &operation) {
   const bool compare = kind == 5 && !with_carry;
   const bool subtract = kind == 4 || kind == 5;
   const bool destination_b = (opcode & 8U) != 0;
-  value(Reg::ax, destination_b ? 1U : 0U, has_moves(operation));
+  const auto result = compare ? Reg::ax : result_register(operation);
+  value(result, destination_b ? 1U : 0U, has_moves(operation));
   if (immediate) {
     const auto operand = decoded.words == 2 ? decoded.extension : (opcode >> 8) & six_bit_mask;
     code_.constant(Reg::dx, aligned_word(operand));
@@ -55,11 +56,11 @@ void BlockEmitter::addition(const BlockInstruction &operation) {
     code_.immediate(group_and, Reg::r11, byte_mask, Width::dword);
     // C=1 fills eight padding bits, then ADC/SBB adds the ninth bit. Thus the
     // carry acts at DSP bit zero while x64 OF/CF describe the full operation.
-    code_.binary(op_or, {.destination = subtract ? Reg::dx : Reg::ax, .source = Reg::r11});
+    code_.binary(op_or, {.destination = subtract ? Reg::dx : result, .source = Reg::r11});
     code_.shift(shift_right, Reg::r11, 1, Width::dword); // CF = original guest C.
-    code_.binary(subtract ? op_sbb : op_adc, {.destination = Reg::ax, .source = Reg::dx});
+    code_.binary(subtract ? op_sbb : op_adc, {.destination = result, .source = Reg::dx});
   } else {
-    code_.binary(subtract ? op_sub : op_add, {.destination = Reg::ax, .source = Reg::dx});
+    code_.binary(subtract ? op_sub : op_add, {.destination = result, .source = Reg::dx});
   }
   if (value_proof_.raw_overflow) { code_.set(condition_overflow, Reg::r10); }
   if ((live_flags_ & carry) != 0) { code_.set(condition_below, Reg::dx); }
@@ -67,8 +68,8 @@ void BlockEmitter::addition(const BlockInstruction &operation) {
     code_.binary(op_xor, {.destination = Reg::r10, .source = Reg::r10}, Width::dword);
   }
   saturate(operation.mode);
-  if (!compare) { store_accumulator(destination_b, Reg::ax); }
-  arithmetic_flags(operation.mode, true);
+  if (!compare) { store_accumulator(destination_b, result); }
+  arithmetic_flags(operation.mode, true, result);
 }
 
 } // namespace dsp56300::detail
