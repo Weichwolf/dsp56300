@@ -34,7 +34,7 @@ constexpr auto pc_offset = offsetof(Cpu, reg) + offsetof(Registers, pc);
 constexpr std::array register_offsets{
     offsetof(Registers, a), offsetof(Registers, b), offsetof(Registers, x), offsetof(Registers, y)};
 constexpr unsigned op_add = 0x01, op_sub = 0x29, op_xor = 0x31, op_cmp = 0x39;
-constexpr unsigned group_and = 4, group_cmp = 7;
+constexpr unsigned group_add = 0, group_and = 4, group_cmp = 7;
 constexpr unsigned shift_left = 4, shift_right = 5, shift_arithmetic = 7;
 constexpr unsigned condition_overflow = 0x90;
 constexpr unsigned low_word_shift = 40, high_word_shift = 16, aligned_shift = 8;
@@ -64,6 +64,36 @@ enum AluByte : std::uint8_t {
 constexpr Word if_mask = 0xffe000, if_group = 0x202000;
 static_assert(std::is_standard_layout_v<Cpu> && std::is_standard_layout_v<NativeContext>);
 static_assert(offsetof(Cpu, interrupt_inhibited) == offsetof(Cpu, repeat_completed) + 1);
+
+Word nop_count(const std::span<const NativeOp> operations) {
+  Word count = 0;
+  for (const auto &operation : operations) {
+    if (operation.instruction.operation != Operation::nop || operation.instruction.words != 1 ||
+        operation.instruction.cycles != 1 || at_loop_end(operation) ||
+        operation.pc != ((operations.front().pc + count) & word_mask)) {
+      break;
+    }
+    ++count;
+  }
+  return count;
+}
+
+// EAX is a zero-extended count. XMM0 holds helper-aware packed retirement;
+// helper-free packed retirement derives its exact count from R15 at exit.
+void nop_progress(x64::Code &code, const bool packed) {
+  if (packed) {
+    code.packed_from(x64::Xmm::x2, Reg::ax);
+    code.packed(x64::Packed::unpack_low_qword, x64::Xmm::x2, x64::Xmm::x2);
+    code.packed(x64::Packed::add_qword, x64::Xmm::x0, x64::Xmm::x2);
+    return;
+  }
+  for (const auto offset : {offsetof(Cpu, instructions), offsetof(Cpu, cycles)}) {
+    code.load(Reg::dx, Reg::r12, offset);
+    code.binary(op_add, {.destination = Reg::dx, .source = Reg::ax});
+    code.store(Reg::r12, offset, Reg::dx);
+  }
+}
+
 }
 
 JitEmitter::JitEmitter(const JitRuntime runtime,
@@ -416,6 +446,98 @@ void JitEmitter::repeat_retire(const NativeOp &operation) {
   code_.jump(exits_.at(dirty_accumulators()));
 }
 
+void JitEmitter::budget_guard() {
+  materialize_pending_accounting();
+  code_.load(Reg::ax, Reg::r13, offsetof(NativeContext, budget), Width::dword);
+  code_.binary(op_cmp, {.destination = Reg::r15, .source = Reg::ax}, Width::dword);
+  exit_if(Branch::above_equal);
+}
+
+void JitEmitter::emit_nops(const std::span<const NativeOp> operations, const bool publish) {
+  const auto count = static_cast<Word>(operations.size());
+  if (bounds_ == ExecutionBounds::whole) {
+    if (coalesced_accounting_) {
+      pending_instructions_ += count - 1;
+    } else {
+      code_.immediate(group_add, Reg::r15, count - 1, Width::dword);
+      if (!packed_retirement_ || retirement_helpers_) {
+        code_.constant(Reg::ax, count - 1);
+        nop_progress(code_, packed_retirement_);
+      }
+    }
+    retire(operations.back(), publish);
+    return;
+  }
+  code_.load(Reg::ax, Reg::r13, offsetof(NativeContext, budget), Width::dword);
+  code_.binary(op_sub, {.destination = Reg::ax, .source = Reg::r15}, Width::dword);
+  code_.constant(Reg::dx, count);
+  code_.binary(op_cmp, {.destination = Reg::ax, .source = Reg::dx}, Width::dword);
+  constexpr unsigned move_above = 0x47;
+  code_.move_if(move_above, {.destination = Reg::ax, .source = Reg::dx});
+  code_.mov({.destination = Reg::dx, .source = Reg::ax}, Width::dword);
+  code_.immediate(group_add, Reg::dx, operations.front().pc, Width::dword);
+  code_.immediate(group_and, Reg::dx, word_mask, Width::dword);
+  code_.store(Reg::r12, pc_offset, Reg::dx, Width::dword);
+  code_.store_constant(Reg::r12, offsetof(Cpu, repeat_completed), Width::word, 0);
+  code_.binary(op_add, {.destination = Reg::r15, .source = Reg::ax}, Width::dword);
+  if (!packed_retirement_ || retirement_helpers_) { nop_progress(code_, packed_retirement_); }
+  code_.immediate(group_cmp, Reg::ax, count, Width::dword);
+  exit_if(Branch::not_equal);
+}
+
+void JitEmitter::emit_operations(const std::span<const NativeOp> operations) {
+  const auto flags = plan_flags(operations);
+  const auto effects = word_effects(operations);
+  const auto populations = word_mode_ == WordReuseMode::vectors
+                               ? plan_word_reuse(effects)
+                               : std::vector<Word>(operations.size());
+  const auto selections = word_mode_ == WordReuseMode::automatic
+                              ? plan_gpr_word_reuse(effects)
+                              : std::vector<Word>(operations.size());
+  word_valid_ = 0;
+  NativeValueRanges ranges;
+  for (std::size_t operation_index = 0; operation_index < operations.size(); ++operation_index) {
+    const auto &operation = operations[operation_index];
+    if (bounds_ == ExecutionBounds::precise) { budget_guard(); }
+    const auto nops = !repeat_mode_ ? nop_count(operations.subspan(operation_index)) : 0;
+    if (nops > 1) {
+      const auto last = operation_index + nops - 1;
+      emit_nops(operations.subspan(operation_index, nops), publish_pc(operations, last));
+      operation_index = last;
+      continue;
+    }
+    constexpr Word complete_flags = carry | overflow | zero | negative | unnormalized | extension;
+    live_flags_ = bounds_ == ExecutionBounds::precise ? complete_flags : flags[operation_index];
+    dataflow_ = analyze_dataflow(operation.instruction);
+    const auto &effect = effects[operation_index];
+    if (effect.barrier) { word_valid_ = 0; }
+    word_populate_ = populations[operation_index];
+    word_selected_ = selections[operation_index];
+    prepare_value_proof(operation, ranges);
+    if (lowerable(operation)) {
+      if (is_loop_setup(operation)) {
+        loop_setup(operation);
+        continue;
+      }
+      loop_guard(operation);
+      if (has_moves(operation)) { moves(operation); }
+      invalidate_moved_accumulators();
+      native(operation);
+      retire(operation,
+             bounds_ == ExecutionBounds::precise || publish_pc(operations, operation_index));
+    } else {
+      helper(runtime_.execute, operation);
+      accumulator_dirty_.fill(false);
+      code_.binary(op_test, {.destination = Reg::ax, .source = Reg::ax}, Width::dword);
+      exit_if(Branch::equal);
+      code_.raw(increment_retired);
+      code_.immediate(group_cmp, Reg::ax, 2, Width::dword);
+      exit_if(Branch::not_equal);
+    }
+    invalidate_word_reuse(effect);
+  }
+}
+
 std::vector<std::uint8_t> JitEmitter::generate_body(const std::span<const NativeOp> operations) {
   // Full helpers continue only after checking sequential PC, numeric/loop
   // context, REP state and code validity. The ending itself must be native.
@@ -461,46 +583,7 @@ std::vector<std::uint8_t> JitEmitter::generate_body(const std::span<const Native
   initialize_loop_residency();
   code_.bind(loop_header_);
   if (region_mode_ == RegionMode::guarded) { guard_region_header(); }
-  const auto flags = plan_flags(operations);
-  const auto effects = word_effects(operations);
-  const auto populations = word_mode_ == WordReuseMode::vectors
-                               ? plan_word_reuse(effects)
-                               : std::vector<Word>(operations.size());
-  const auto selections = word_mode_ == WordReuseMode::automatic
-                              ? plan_gpr_word_reuse(effects)
-                              : std::vector<Word>(operations.size());
-  word_valid_ = 0;
-  NativeValueRanges ranges;
-  for (std::size_t operation_index = 0; operation_index < operations.size(); ++operation_index) {
-    const auto &operation = operations[operation_index];
-    live_flags_ = flags[operation_index];
-    dataflow_ = analyze_dataflow(operation.instruction);
-    const auto &effect = effects[operation_index];
-    if (effect.barrier) { word_valid_ = 0; }
-    word_populate_ = populations[operation_index];
-    word_selected_ = selections[operation_index];
-    prepare_value_proof(operation, ranges);
-    if (lowerable(operation)) {
-      if (is_loop_setup(operation)) {
-        loop_setup(operation);
-        continue;
-      }
-      loop_guard(operation);
-      if (has_moves(operation)) { moves(operation); }
-      invalidate_moved_accumulators();
-      native(operation);
-      retire(operation, publish_pc(operations, operation_index));
-    } else {
-      helper(runtime_.execute, operation);
-      accumulator_dirty_.fill(false);
-      code_.binary(op_test, {.destination = Reg::ax, .source = Reg::ax}, Width::dword);
-      exit_if(Branch::equal);
-      code_.raw(increment_retired);
-      code_.immediate(group_cmp, Reg::ax, 2, Width::dword);
-      exit_if(Branch::not_equal);
-    }
-    invalidate_word_reuse(effect);
-  }
+  emit_operations(operations);
   materialize_pending_accounting();
   finish();
   // Keep non-linear checks beyond every return, outside the linear hot path.

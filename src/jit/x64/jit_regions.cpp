@@ -8,6 +8,8 @@
 #include "native_moves.hpp"
 #include "native_region.hpp"
 #include "region_guards.hpp"
+#include "value_ranges.hpp"
+#include "word_reuse.hpp"
 #include "x64.hpp"
 
 #include <algorithm>
@@ -27,7 +29,17 @@ constexpr auto r_offset = offsetof(Cpu, reg) + offsetof(Registers, r);
 constexpr std::array<std::uint8_t, 4> landing{0xf3, 0x0f, 0x1e, 0xfa};
 }
 
-std::vector<std::uint8_t> JitEmitter::generate(const std::span<const NativeOp> operations) {
+std::vector<std::uint8_t> JitEmitter::generate(const std::span<const NativeOp> operations,
+                                               const ExecutionBounds bounds) {
+  bounds_ = bounds;
+  if (bounds == ExecutionBounds::precise) {
+    // Each interior exit needs real flags and ordinary guarded memory effects.
+    region_mode_ = RegionMode::ordinary;
+    residency_mode_ = LoopResidency::disabled;
+    range_mode_ = RangeMode::disabled;
+    word_mode_ = WordReuseMode::disabled;
+    window_mode_ = LoopWindowMode::disabled;
+  }
   if (region_mode_ == RegionMode::automatic) { return generate_selected(operations); }
   if (region_mode_ == RegionMode::guarded) {
     region_ = plan_native_region(operations, runtime_.memory, modifiers_);

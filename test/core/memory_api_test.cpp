@@ -52,10 +52,11 @@ void natural_translation() {
   expected.pc = backing.size();
   const auto before = test::codegen::publications();
   const auto result = core.run();
-  require(result.retired == backing.size() && result.fault.kind == FaultKind::none &&
-              result.state == ExecutionState::stopped && core.registers() == expected &&
-              backing == expected_memory && test::codegen::publications().count == before.count + 1,
-          "Straight-line code beyond 256 instructions reaches STOP in one native translation");
+  require(
+      result.retired == backing.size() && result.fault.kind == FaultKind::none &&
+          result.state == ExecutionState::stopped && core.registers() == expected &&
+          backing == expected_memory && test::codegen::publications().count == before.count + 1,
+      "Straight-line code beyond 256 instructions has one logical block with full/checked paths");
 }
 
 void partition() {

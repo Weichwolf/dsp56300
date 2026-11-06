@@ -252,9 +252,32 @@ void matrix(const Profile profile) {
           "Each trace proves both concrete positive and negative windows");
 }
 
+void body_lengths() {
+  detail::NativeRegion region;
+  region.valid = region.loop = true;
+  // No address changes: isolate the real native body-count admission and division.
+  for (const Word size : {1U, 256U, 257U, 1012U, static_cast<Word>(address_words), 0x40000000U}) {
+    const native::Direct code(proof(region, size));
+    for (const Word budget : {0U, size, (2 * size) - 1, 2 * size, maximum}) {
+      detail::Cpu cpu;
+      cpu.reg = register_model::seed(0);
+      cpu.reg.lc = word_mask;
+      detail::NativeContext context{.runtime = {}, .budget = budget};
+      const auto cpu_bytes = std::as_bytes(std::span(&cpu, 1));
+      const auto context_bytes = std::as_bytes(std::span(&context, 1));
+      const std::vector old_cpu(cpu_bytes.begin(), cpu_bytes.end());
+      const std::vector old_context(context_bytes.begin(), context_bytes.end());
+      const auto iterations = std::min(word_mask - 1, budget / size);
+      require(code.enter(cpu, context) == (iterations >= 2 ? iterations : 0) &&
+                  std::ranges::equal(old_cpu, cpu_bytes) &&
+                  std::ranges::equal(old_context, context_bytes),
+              "Native window division admits exact long-body counts without changing any state");
+    }
+  }
+}
+
 void rejected_ir() {
-  constexpr Word beyond_program_space = static_cast<Word>(address_words) + 1;
-  for (const Word size : {0U, beyond_program_space}) {
+  for (const Word size : {0U, 0x40000001U, 0x80000000U, maximum}) {
     detail::NativeRegion region;
     region.valid = region.loop = true;
     detail::x64::Code code;
@@ -283,6 +306,7 @@ int main() {
     using dsp56300::test::Pattern;
     dsp56300::test::encoding();
     dsp56300::test::rejected_ir();
+    dsp56300::test::body_lengths();
     for (const auto pattern : {Pattern::unit,
                                Pattern::stride,
                                Pattern::mixed,

@@ -61,6 +61,9 @@ This is general compilation, not recognition or replacement of benchmark program
 
 Finish code and relocations before publishing an entry. Retain executable code
 for the entire Core lifetime in compact shared arenas, not a page per instruction.
+Keep a complete-run entry and an entry with exact interior exits in one immutable
+image. Execution grants select an entry without compiling new prefixes. Interior
+exits publish all observable flags, registers and architectural progress.
 Known successors use native branches. Unresolved or indirect successors use a
 cold resolver and retained target slots; never return through a C++ dispatcher
 for every instruction or loop iteration. Mutable link data is separate from

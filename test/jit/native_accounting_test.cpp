@@ -747,7 +747,9 @@ int main() {
                                       .two_word_end = true});
       }
     }
-    for (const std::size_t padding : {244U, 245U}) {
+    constexpr std::size_t nop_padding = 31;
+    dsp56300::test::direct_shape({.loop = true, .padding = nop_padding});
+    for (const std::size_t padding : {244U, 245U, 1000U}) {
       dsp56300::test::direct_shape({.mode = dsp56300::test::saturation_model::mode,
                                     .loop = true,
                                     .maximum_cost = true,

@@ -17,6 +17,8 @@
 #include <vector>
 
 namespace dsp56300::detail {
+enum class ExecutionBounds : unsigned char { whole, precise };
+
 class JitEmitter {
 public:
   JitEmitter(JitRuntime runtime,
@@ -26,7 +28,8 @@ public:
              RangeMode ranges = RangeMode::automatic,
              WordReuseMode words = WordReuseMode::automatic,
              LoopWindowMode window = LoopWindowMode::automatic);
-  [[nodiscard]] std::vector<std::uint8_t> generate(std::span<const NativeOp> operations);
+  [[nodiscard]] std::vector<std::uint8_t> generate(std::span<const NativeOp> operations,
+                                                   ExecutionBounds bounds = ExecutionBounds::whole);
 
   [[nodiscard]] std::vector<std::uint8_t> generate_repeat(const NativeOp &operation);
 
@@ -59,6 +62,9 @@ private:
   [[nodiscard]] bool observable_moves(const NativeOp &operation) const;
   [[nodiscard]] std::vector<std::uint8_t> generate_body(std::span<const NativeOp> operations);
   [[nodiscard]] std::vector<std::uint8_t> generate_selected(std::span<const NativeOp> operations);
+  void emit_nops(std::span<const NativeOp> operations, bool publish);
+  void emit_operations(std::span<const NativeOp> operations);
+  void budget_guard();
   void region_guard(x64::Code &code, x64::Reg cpu, x64::Label &failed) const;
   void region_address(const NativeMove &move);
   [[nodiscard]] static bool is_addition(const NativeOp &operation);
@@ -188,6 +194,7 @@ private:
   std::array<x64::Label, 4> exits_;
   x64::Label loop_header_;
   Word loop_size_ = 0, loop_pc_ = 0;
+  ExecutionBounds bounds_ = ExecutionBounds::whole;
   Word live_flags_ = carry | overflow | zero | negative | unnormalized | extension;
 };
 } // namespace dsp56300::detail

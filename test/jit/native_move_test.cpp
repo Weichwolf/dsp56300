@@ -336,7 +336,7 @@ void ordinary_reuse(Machine &machine, RingInput input) {
     }
   }
   require(codegen::publications().count == published.count + 1,
-          "M/R/N mutations reuse the same compiled PC and its exact runtime admission guard");
+          "M/R/N mutations reuse the same full/checked paths and exact runtime admission guard");
 }
 
 void profiled_modulo() {

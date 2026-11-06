@@ -71,7 +71,7 @@ operations(const std::span<const Step> steps, const Word mode, const Word first,
 void arithmetic(Registers &state, const Step step) {
   auto old = state;
   if (step.immediate) { old.x = step.extension; }
-  sequence_model::alu(state, old, step.immediate ? 0x40U : step.opcode);
+  if (step.opcode != 0) { sequence_model::alu(state, old, step.immediate ? 0x40U : step.opcode); }
   state.pc = (state.pc + words(step)) & word_mask;
 }
 
@@ -111,7 +111,7 @@ std::uint64_t modulo_sum(const std::uint64_t before, const std::uint64_t increme
 
 struct Input {
   Progress progress;
-  Word first = start, target = start, lc = 0, sp = 2, budget = 0;
+  Word first = start, target = start, lc = 0, sp = 2, budget = 0, flags = 0;
 };
 
 void execute_case(const native::Direct &code,
@@ -204,12 +204,112 @@ void counter_lanes() {
         generated(std::span(long_body).first(size), mode, loop);
       }
     }
+    for (const std::size_t size : {2U, 3U, 31U}) { generated(std::vector<Step>(size), mode, true); }
     generated(mixed, mode, false);
     generated(mixed, mode, true);
     generated(std::span(shifts).first(1), mode, false);
     generated(std::span(shifts).first(1), mode, true);
     generated(shifts, mode, false);
     generated(shifts, mode, true);
+  }
+}
+
+struct NopShape {
+  Word mode = 0, first = start;
+  bool mixed = false;
+  detail::ExecutionBounds bounds = detail::ExecutionBounds::whole;
+};
+
+void nop_case(const native::Direct &code,
+              const std::span<const Step> steps,
+              const NopShape shape,
+              const Input input) {
+  auto expected = register_model::seed(shape.mode);
+  expected.sr = shape.mode | input.flags;
+  expected.pc = shape.first;
+  detail::Cpu cpu;
+  cpu.reg = expected;
+  cpu.reg.a <<= detail::padding_bits;
+  cpu.reg.b <<= detail::padding_bits;
+  cpu.instructions = input.progress.instructions;
+  cpu.cycles = input.progress.estimated_cycles;
+  cpu.repeat_completed = cpu.interrupt_inhibited = true;
+  Word count = 0;
+  std::uint64_t cycles = 0;
+  for (const auto step : steps) {
+    if (count == input.budget) { break; }
+    const auto old = expected;
+    if (step.opcode != 0) {
+      auto operands = old;
+      if (step.immediate) { operands.x = step.extension; }
+      sequence_model::alu(expected, operands, step.immediate ? 0x40U : step.opcode);
+    }
+    expected.pc = (old.pc + words(step)) & word_mask;
+    ++count;
+    cycles += words(step);
+  }
+  detail::NativeContext context{.runtime = {}, .budget = input.budget};
+  const auto retired = code.enter(cpu, context);
+  auto actual = cpu.reg;
+  actual.a >>= detail::padding_bits;
+  actual.b >>= detail::padding_bits;
+  require(retired == count && actual == expected &&
+              cpu.instructions == modulo_sum(input.progress.instructions, count) &&
+              cpu.cycles == modulo_sum(input.progress.estimated_cycles, cycles),
+          "Every NOP grant preserves independent complete registers, flags, PC wrap and clocks");
+  require(cpu.repeat_completed == (count == 0) && cpu.interrupt_inhibited == (count == 0) &&
+              cpu.repeat_remaining == 0 && !cpu.repeat_loaded &&
+              cpu.processing == ExecutionState::running && cpu.debug_flags == 0,
+          "Empty NOP grants retain hidden exclusions; every real prefix clears them exactly");
+}
+
+void nop_shape(const NopShape shape) {
+  constexpr Word short_run = 256; // Match the long count's immediate width.
+  constexpr Word long_run = 2048;
+  std::size_t short_bytes = 0;
+  for (const Word nops : {2U, 3U, 31U, short_run, long_run}) {
+    std::vector<Step> steps(nops);
+    if (shape.mixed) {
+      steps.insert(steps.begin(), {mac_a, mac_b});
+      steps.insert(steps.end(), {immediate, round_a});
+    }
+    const auto ops = operations(steps, shape.mode, shape.first, false);
+    detail::JitEmitter emitter({});
+    const auto bytes = emitter.generate(ops, shape.bounds);
+    const native::Direct code(bytes);
+    const auto count = static_cast<Word>(steps.size());
+    const std::array grants{0U,
+                            1U,
+                            2U,
+                            3U,
+                            nops / 2,
+                            nops,
+                            count - 1,
+                            count,
+                            count + 1,
+                            std::numeric_limits<Word>::max()};
+    for (const auto budget : grants) {
+      if (shape.bounds == detail::ExecutionBounds::whole && budget < count) { continue; }
+      for (const auto progress :
+           {Progress{}, Progress{.instructions = maximum - 2, .estimated_cycles = maximum - 1}}) {
+        for (const auto flags : {0U, status_byte}) {
+          nop_case(code, steps, shape, {.progress = progress, .budget = budget, .flags = flags});
+        }
+      }
+    }
+    if (nops == short_run) { short_bytes = bytes.size(); }
+    if (nops == long_run) {
+      require(bytes.size() == short_bytes,
+              "Native NOP-run code size stays constant as the logical body grows");
+    }
+  }
+}
+
+void nop_modes(const Word mode, const bool mixed) {
+  for (const auto first : {start, word_mask - 4}) {
+    for (const auto bounds : {detail::ExecutionBounds::whole, detail::ExecutionBounds::precise}) {
+      nop_shape({.mode = mode, .first = first, .mixed = mixed, .bounds = bounds});
+    }
   }
 }
 
@@ -422,9 +522,23 @@ struct Machine {
   TestCore core;
 };
 
-Expected callback_expectations(Observer &observer, const Registers &initial, const Progress base) {
-  std::array body{
+std::vector<Step> callback_body(const bool whole) {
+  const std::array original{
       mac_a, mac_b, immediate, mac_a, asr_a, io_mac, mac_b, asr_b, io_mac, round_a, mac_b};
+  std::vector<Step> result;
+  for (const auto step : original) {
+    if (whole && step.opcode == io_mac.opcode) { result.insert(result.end(), 2, Step{}); }
+    result.push_back(step);
+  }
+  if (whole) { result.resize(memory_words - start - 1); } // One actual extension word.
+  return result;
+}
+
+Expected callback_expectations(Observer &observer,
+                               const Registers &initial,
+                               const Progress base,
+                               const bool whole) {
+  auto body = callback_body(whole);
   Expected result{.state = initial, .progress = base};
   unsigned access = 0;
   for (std::size_t index = 0; index < body.size(); ++index) {
@@ -439,7 +553,9 @@ Expected callback_expectations(Observer &observer, const Registers &initial, con
       register_model::write(result.state, 4, datum);
     }
     if (step.immediate) { old.x = step.extension; }
-    sequence_model::alu(result.state, old, step.immediate ? 0x40U : step.opcode);
+    if (step.opcode != 0) {
+      sequence_model::alu(result.state, old, step.immediate ? 0x40U : step.opcode);
+    }
     result.state.pc += words(step);
     ++result.retired;
     ++result.progress.instructions;
@@ -452,7 +568,7 @@ Expected callback_expectations(Observer &observer, const Registers &initial, con
 struct CallbackInput {
   Word mode = 0;
   int reject = -1;
-  bool invalidate = false;
+  bool invalidate = false, whole = false;
 };
 
 void callback_case(const CallbackInput input) {
@@ -461,8 +577,7 @@ void callback_case(const CallbackInput input) {
   observer.core = &machine.core;
   observer.reject = input.reject;
   observer.invalidate = input.invalidate;
-  const std::array body{
-      mac_a, mac_b, immediate, mac_a, asr_a, io_mac, mac_b, asr_b, io_mac, round_a, mac_b};
+  const auto body = callback_body(input.whole);
   Word cursor = start;
   for (const auto step : body) {
     machine.core.write(Space::program, cursor++, step.opcode);
@@ -477,8 +592,8 @@ void callback_case(const CallbackInput input) {
           "Warm the complete native RAM path before reusing its I/O slow branches");
   initial.r[0] = port_address;
   machine.core.set_registers(initial);
-  const auto base = machine.core.progress();
-  const auto expected = callback_expectations(observer, initial, base);
+  const auto base = machine.core.state().progress;
+  const auto expected = callback_expectations(observer, initial, base, input.whole);
   observer.patch_pc = observer.expected[0].pc + 1;
   const auto result = machine.core.run(count);
   require(observer.valid &&
@@ -493,7 +608,8 @@ void callback_case(const CallbackInput input) {
                 state.a == stopped.state.a && state.b == stopped.state.b &&
                 state.sr == stopped.state.sr,
             "A rejected slow move retains prior arithmetic/progress and cannot retire its ALU");
-    require(machine.core.run(count).retired == 0 && machine.core.progress() == stopped.progress,
+    require(machine.core.run(count).retired == 0 &&
+                machine.core.state().progress == stopped.progress,
             "Faulted SIMD/helper boundaries cannot replay work or invent retirement");
   } else {
     require(result.fault.kind == FaultKind::none && result.retired == count &&
@@ -512,9 +628,19 @@ int main() {
     dsp56300::test::counter_lanes();
     dsp56300::test::admission_guards();
     for (const auto mode : dsp56300::test::modes) {
+      dsp56300::test::nop_modes(mode, false);
+      dsp56300::test::nop_modes(mode, true);
+    }
+    for (const unsigned position : {13U, 14U, 17U, 20U}) {
+      dsp56300::test::nop_modes(dsp56300::Word{1} << position, false);
+    }
+
+    for (const auto mode : dsp56300::test::modes) {
       for (const int reject : {-1, 0, 1}) {
         for (const bool invalidate : {false, true}) {
           dsp56300::test::callback_case({.mode = mode, .reject = reject, .invalidate = invalidate});
+          dsp56300::test::callback_case(
+              {.mode = mode, .reject = reject, .invalidate = invalidate, .whole = true});
         }
       }
     }

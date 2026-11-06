@@ -194,7 +194,7 @@ void core_reuse(const TestOptions options, const Shape shape) {
     }
   }
   require(codegen::publications().count == published.count + 1,
-          "Warm address updates reuse one guarded block without new executable publications");
+          "Warm address updates reuse the full/checked paths without new executable publications");
 }
 
 struct Step {

@@ -139,10 +139,9 @@ void arithmetic(const std::vector<Step> &body, const Word mode) {
     }
   }
   check_case(jit, cpu, body, initial(body, mode, {.count = word_mask}), size * 3);
-  const auto compiled = size == 1 ? 1U : 2U;
   require(
-      codegen::publications().count == published.count + compiled,
-      "Complete body and one short prefix compile once across LC, frame, SP and budget changes");
+      codegen::publications().count == published.count + 1,
+      "Full and checked paths share one immutable image across LC, frame, SP and grant changes");
 }
 } // namespace
 } // namespace dsp56300::test

@@ -29,7 +29,6 @@ struct Machine {
       : core({.program = p, .x = x, .y = y}, io, options) {}
 
   std::array<Word, memory_words> p{}, x{}, y{};
-  codegen::Publications published = codegen::publications();
   TestCore core;
 };
 
@@ -73,12 +72,14 @@ void warm_case(Machine &machine, Keys &keys, const LoopInput input) {
     expected.sc = 0;
   }
   machine.core.set_registers(initial);
-
+  const auto before = codegen::publications();
   require(machine.core.run(1).retired == 1 && machine.core.registers() == expected,
           "Warm translations distinguish numeric modes, active LF and every LA context");
-  keys.emplace(input.mode, input.active, input.active ? input.end : 0);
-  require(codegen::publications().count == machine.published.count + keys.size(),
-          "LC changes reuse the same actual executable translation");
+  const bool first = keys.emplace(input.mode, input.active, input.active ? input.end : 0).second;
+  const auto after = codegen::publications();
+  const auto entries = first ? 1U : 0U;
+  require(after.count == before.count + entries && (first || after == before),
+          "Each loop context publishes one shared image; LC changes reuse both entry paths");
 }
 
 void warm_contexts(const TestOptions options) {
