@@ -204,4 +204,21 @@ reconcile the incoming locations; at observable exits publish the live state.
 Use this method for shifts, butterfly pairs and branches as well as MACs, then
 check independent results before accepting a performance improvement.
 
+Allocate address induction values by their consumers: paired X/Y transfers may
+benefit from lanes containing R0/R4 and R1/R5 rather than adjacent architectural
+register numbers. Keep reusable step values and prospective offsets alongside
+them when this removes more loads than lane extraction costs. Compute parallel
+addresses from the old state; commit only the selected architectural updates.
+Loop-control facts proved at entry should remain available across backedges.
+
+Direct native branches encode their target displacement and need no target
+register. Retain resolved indirect destinations in link data and allocate a GPR
+only when needed for the jump. Keep predictable conditions as native branches;
+evaluate both alternatives only for cheap, independent, nonfaulting expressions
+where selection costs less than branching. Stores and peripheral calls remain
+on their actual path. Speculative successor decoding may inspect stable program
+views, but must not consume an owned fetch or perform a peripheral read. Keep
+such preparation bounded and separate from architectural execution; measure its
+first-use latency, extra code and contention against ordinary demand compilation.
+
 Primary references are listed in references.json.

@@ -57,6 +57,12 @@ void Code::byte(const std::uint32_t value) {
   bytes_.push_back(static_cast<std::uint8_t>(value));
 }
 
+void Code::align_entry() {
+  constexpr unsigned alignment = 16;
+  constexpr unsigned nop = 0x90;
+  while (bytes_.size() % alignment != 0) { byte(nop); }
+}
+
 void Code::u32(const std::uint32_t value) {
   for (unsigned shift = 0; shift < sizeof(value) * byte_bits; shift += byte_bits) {
     byte((value >> shift) & low_byte_mask);

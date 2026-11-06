@@ -29,7 +29,7 @@ enum class Reg : std::uint8_t {
   r15
 };
 enum class Width : std::uint8_t { byte = 1, word = 2, dword = 4, qword = 8 };
-enum class Xmm : std::uint8_t { x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12 };
+enum class Xmm : std::uint8_t { x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13 };
 enum class Packed : std::uint8_t {
   copy = 0x6f,
   add_qword = 0xd4,
@@ -70,6 +70,7 @@ public:
   void u64(std::uint64_t value);
   void raw(std::initializer_list<std::uint8_t> bytes);
   void raw(std::span<const std::uint8_t> bytes);
+  void align_entry();
   void mov(RegisterPair registers, Width width = Width::qword);
   void constant(Reg destination, std::uint64_t value);
   void load(Reg destination, Reg base, std::size_t offset, Width width = Width::qword);

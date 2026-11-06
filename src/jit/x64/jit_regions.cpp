@@ -74,7 +74,9 @@ JitEmitter::generate_selected(const std::span<const NativeOp> operations) {
   x64::Label fallback;
   selector.raw(landing);
   region_guard(selector, Reg::di, fallback);
+  selector.align_entry();
   selector.raw(guarded);
+  selector.align_entry();
   selector.bind(fallback);
   selector.raw(ordinary);
   return selector.bytes();

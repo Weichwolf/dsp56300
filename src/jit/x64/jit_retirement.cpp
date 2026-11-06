@@ -5,6 +5,7 @@
 #include "jit.hpp"
 #include "jit_emitter.hpp"
 #include "native_moves.hpp"
+#include "native_region.hpp"
 #include "x64.hpp"
 
 #include <cstddef>
@@ -83,7 +84,9 @@ bool JitEmitter::publish_pc(const std::span<const NativeOp> operations,
     return true;
   }
   const auto &next = operations[index + 1];
-  return observable_moves(next) || at_loop_end(next);
+  // A guarded body has no interior loop-end fault: its header proved LC>1.
+  // Publish at the real boundary instead of before its final instruction too.
+  return observable_moves(next) || (region_mode_ != RegionMode::guarded && at_loop_end(next));
 }
 
 // Keep admission separate for independent local performance controls; this

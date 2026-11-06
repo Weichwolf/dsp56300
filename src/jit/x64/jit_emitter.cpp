@@ -613,6 +613,7 @@ std::vector<std::uint8_t> JitEmitter::generate_body(const std::span<const Native
   }
   initialize_loop_window();
   initialize_loop_residency();
+  if (loop_size_ != 0) { code_.align_entry(); }
   code_.bind(loop_header_);
   if (region_mode_ == RegionMode::guarded) { guard_region_header(); }
   emit_operations(operations);
