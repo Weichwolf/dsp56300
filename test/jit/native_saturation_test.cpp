@@ -6,6 +6,7 @@
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
+#include "isa.hpp"
 #include "jit.hpp"
 #include "jit_emitter.hpp"
 #include "native/direct.hpp"
@@ -26,7 +27,7 @@
 
 namespace dsp56300::test {
 namespace {
-constexpr Word sm = saturation_model::mode, lf = Word{1} << 15;
+constexpr Word sm = saturation_model::mode, lf = Word{1} << 15, forever = Word{1} << 16;
 constexpr Word short_mask = 63, alu_destination_mask = 0xf7;
 constexpr unsigned extension_shift = 48;
 constexpr auto maximum = std::numeric_limits<std::uint64_t>::max();
@@ -137,6 +138,24 @@ struct Invocation {
   bool loop = false;
 };
 
+bool admitted_ending(const Registers &state) {
+  return state.lc > 1 || (state.lc == 1 && state.sc >= 2 && (state.sr & forever) == 0);
+}
+
+// DSP56300FM Rev.5, DO: the last pass executes its instruction, then restores
+// the enclosing LA/LC and loop flags from two stack frames without a backedge.
+void complete_loop(Registers &state) {
+  constexpr Word loop_status = lf | forever;
+  const auto saved_status = state.stack.at(state.sp % stack_entries);
+  const auto previous = (state.sp + register_model::pointer_mask) & register_model::pointer_mask;
+  const auto frame = state.stack.at(previous % stack_entries);
+  state.sr = (state.sr & ~loop_status) | (static_cast<Word>(saved_status) & loop_status);
+  state.la = static_cast<Word>(frame >> word_bits) & word_mask;
+  state.lc = static_cast<Word>(frame) & word_mask;
+  state.sp = (previous + register_model::pointer_mask) & register_model::pointer_mask;
+  state.sc -= 2;
+}
+
 void check(const native::Direct &code, const std::span<const Step> steps, const Invocation input) {
   auto expected = input.state;
   Word retired = 0;
@@ -146,15 +165,19 @@ void check(const native::Direct &code, const std::span<const Step> steps, const 
     repeat = false;
     for (std::size_t index = 0; index < steps.size(); ++index) {
       const bool ending = input.loop && index + 1 == steps.size();
-      if (ending && expected.lc <= 1) { break; }
+      if (ending && !admitted_ending(expected)) { break; }
       const auto before = expected.pc;
       model(expected, steps[index]);
       cycles += expected.pc - before;
       ++retired;
       if (ending) {
-        --expected.lc;
-        expected.pc = start;
-        repeat = true;
+        if (expected.lc == 1) {
+          complete_loop(expected);
+        } else {
+          --expected.lc;
+          expected.pc = start;
+          repeat = true;
+        }
       }
     }
   }
@@ -268,14 +291,15 @@ void extension_matrix() {
 }
 
 void sequences() {
-  constexpr std::array<Step, 8> steps{{{.word = 0x200036},
-                                       {.word = 0x200021},
-                                       {.word = 0x2000d3},
-                                       {.word = 0x200019},
-                                       {.word = 0x200034},
-                                       {.word = 0x2000fb},
-                                       {.word = 0x200011},
-                                       {.word = 0x20001b}}};
+  constexpr std::array<Step, 8> steps{
+      {{.word = isa::opcode<isa::Opcode::neg_a>()[0]},
+       {.word = isa::opcode<isa::Opcode::adc_x_a>()[0]},
+       {.word = isa::opcode<isa::Opcode::macr_register_a>()[0] | (5U << 4)},
+       {.word = isa::opcode<isa::Opcode::rnd_b>()[0]},
+       {.word = isa::opcode<isa::Opcode::sub_y_a>()[0]},
+       {.word = isa::opcode<isa::Opcode::macr_register_b>()[0] | (7U << 4)},
+       {.word = isa::opcode<isa::Opcode::rnd_a>()[0]},
+       {.word = isa::opcode<isa::Opcode::clr_b>()[0]}}};
   for (const auto mode : modes) {
     for (const bool loop : {false, true}) {
       const auto ops = operations(steps, {.mode = mode, .loop = loop});
