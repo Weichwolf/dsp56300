@@ -2,12 +2,17 @@
 #include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "isa.hpp"
+#include "native_sequence_model.hpp"
+#include "register_model.hpp"
+#include "saturation_model.hpp"
 #include "support.hpp"
 
 #include <array>
 #include <cstdint>
 #include <exception>
 #include <iostream>
+#include <span>
 
 namespace dsp56300::test {
 namespace {
@@ -25,8 +30,8 @@ struct Input {
 };
 
 Word opcode(const Input input) {
-  constexpr Word mac = 0x2000d2;
-  constexpr Word rnd = 0x200011;
+  constexpr Word mac = isa::opcode<isa::Opcode::mac_register_a>()[0] | (5U << 4);
+  constexpr Word rnd = isa::opcode<isa::Opcode::rnd_a>()[0];
   const auto code = input.kind == Kind::round ? rnd : mac | (input.kind == Kind::fused ? 1U : 0U);
   return code | (input.destination_b ? 8U : 0U);
 }
@@ -90,13 +95,87 @@ void cases() {
     }
   }
 }
+
+struct Boundary {
+  Word mode;
+  std::uint64_t raw;
+  Word count;
+};
+
+struct RoundingMachine {
+  RoundingMachine() : core(Memory::separate({.program = p, .x = x, .y = y})) {}
+
+  void check(const Boundary input) {
+    const auto mode = input.mode;
+    const auto raw = input.raw;
+    const auto count = input.count;
+    auto expected = register_model::seed(mode);
+    expected.pc = 0;
+    expected.sr = mode;
+    expected.a = raw;
+    expected.b = raw ^ accumulator_mask;
+    core.set_registers(expected);
+    const auto before = core.state().progress;
+    for (const auto word : std::span<const Word>(p).first(count)) {
+      const auto old = expected;
+      if ((mode & saturation_model::mode) != 0) {
+        saturation_model::alu(expected, old, word);
+      } else {
+        sequence_model::alu(expected, old, word);
+      }
+      ++expected.pc;
+    }
+    const auto run = core.run(count);
+    require(run.retired == count && run.fault.kind == FaultKind::none && !run.yielded &&
+                run.state == ExecutionState::running && core.registers() == expected &&
+                run.progress == Progress{.instructions = before.instructions + count,
+                                         .estimated_cycles = before.estimated_cycles + count},
+            "Public RND boundaries retain ties, signed wrapping, saturation and complete status");
+    require(p == std::array{isa::opcode<isa::Opcode::rnd_a>()[0],
+                            isa::opcode<isa::Opcode::rnd_b>()[0]} &&
+                x == std::array<Word, 1>{} && y == x,
+            "Rounding leaves all P/X/Y memory intact");
+  }
+
+  std::array<Word, 2> p{isa::opcode<isa::Opcode::rnd_a>()[0], isa::opcode<isa::Opcode::rnd_b>()[0]};
+  std::array<Word, 1> x{}, y{};
+  Core core;
+};
+
+void round_boundaries() {
+  RoundingMachine machine;
+  for (const Word scale : {0U, mode_down, mode_up}) {
+    const unsigned bits = word_bits + (scale == mode_down ? 1U : 0U) - (scale == mode_up ? 1U : 0U);
+    const auto unit = std::int64_t{1} << bits;
+    const auto maximum_whole = static_cast<std::int64_t>(sign56 - 1) / unit;
+    const std::array<std::int64_t, 7> whole_values{
+        -2, -1, 0, 1, 2, -maximum_whole - 1, maximum_whole};
+    for (const Word rounding : {0U, mode_rm}) {
+      for (const Word saturation : {0U, saturation_model::mode}) {
+        for (const Word flags : {0U, flag_c | flag_v, status_byte}) {
+          const auto mode = scale | rounding | saturation | flags;
+          for (const auto whole : whole_values) {
+            for (const auto remainder :
+                 {std::int64_t{0}, (unit / 2) - 1, unit / 2, (unit / 2) + 1, unit - 1}) {
+              const auto raw =
+                  static_cast<std::uint64_t>((whole * unit) + remainder) & accumulator_mask;
+              machine.check({.mode = mode, .raw = raw, .count = 1});
+              machine.check({.mode = mode, .raw = raw, .count = 2});
+            }
+          }
+        }
+      }
+    }
+  }
+}
 }
 }
 
 int main() {
   try {
     dsp56300::test::cases();
-    std::cout << dsp56300::test::checks << " literal rounded-product checks passed\n";
+    dsp56300::test::round_boundaries();
+    std::cout << dsp56300::test::checks << " independent rounded-product checks passed\n";
     return 0;
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';

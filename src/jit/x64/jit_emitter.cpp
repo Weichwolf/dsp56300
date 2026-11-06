@@ -33,8 +33,8 @@ using x64::Width;
 constexpr auto pc_offset = offsetof(Cpu, reg) + offsetof(Registers, pc);
 constexpr std::array register_offsets{
     offsetof(Registers, a), offsetof(Registers, b), offsetof(Registers, x), offsetof(Registers, y)};
-constexpr unsigned op_add = 0x01, op_sub = 0x29, op_xor = 0x31, op_cmp = 0x39;
-constexpr unsigned group_add = 0, group_and = 4, group_cmp = 7;
+constexpr unsigned op_add = 0x01, op_adc = 0x11, op_sub = 0x29, op_xor = 0x31, op_cmp = 0x39;
+constexpr unsigned group_add = 0, group_adc = 2, group_and = 4, group_sub = 5, group_cmp = 7;
 constexpr unsigned shift_left = 4, shift_right = 5, shift_arithmetic = 7;
 constexpr unsigned condition_overflow = 0x90;
 constexpr unsigned low_word_shift = 40, high_word_shift = 16, aligned_shift = 8;
@@ -43,6 +43,7 @@ constexpr Word unsupported_modes = compatibility_mode | multiply_mode | arithmet
 constexpr std::array<std::uint8_t, 2> call_ax{0xff, 0xd0};
 constexpr std::array<std::uint8_t, 3> increment_retired{0x41, 0xff, 0xc7};
 constexpr std::array<std::uint8_t, 4> entry_landing{0xf3, 0x0f, 0x1e, 0xfa};
+constexpr std::array<std::uint8_t, 4> test_round_bit{0x48, 0x0f, 0xba, 0xe0};
 constexpr std::array<std::uint8_t, 14> save_nonvolatile{
     0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57, 0x55, 0x53, 0x48, 0x83, 0xec, 0x08};
 constexpr std::array<std::uint8_t, 15> restore_and_return{
@@ -305,16 +306,26 @@ void JitEmitter::round(const Word mode) {
       main_shift + ((mode & scale_down) != 0 ? 1U : 0U) - ((mode & scale_up) != 0 ? 1U : 0U);
   const auto half = std::uint64_t{1} << (cleared - 1);
   if ((mode & rounding_mode) != 0) {
-    code_.constant(Reg::r11, half);
+    constexpr auto maximum_immediate_half = std::uint64_t{1} << 31;
+    if (half <= maximum_immediate_half) {
+      // SUB of a negative immediate adds the positive half with the same OF.
+      code_.immediate(group_sub, Reg::ax, static_cast<Word>(~(half - 1)));
+    } else {
+      code_.constant(Reg::r11, half);
+      code_.binary(op_add, {.destination = Reg::ax, .source = Reg::r11});
+    }
   } else {
-    code_.mov({.destination = Reg::dx, .source = Reg::ax});
-    code_.shift(shift_right, Reg::dx, cleared);
-    code_.immediate(group_and, Reg::dx, 1, Width::dword);
-    code_.shift(shift_left, Reg::dx, padding_bits);
-    code_.constant(Reg::r11, half - (std::uint64_t{1} << padding_bits));
-    code_.binary(op_add, {.destination = Reg::r11, .source = Reg::dx});
+    // BT RAX,imm8 supplies the retained LSB to ADC. Since every input has eight
+    // zero padding bits, half-1+CF preserves both the rounded value and raw OF.
+    code_.raw(test_round_bit);
+    code_.byte(cleared);
+    if (half - 1 <= static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max())) {
+      code_.immediate(group_adc, Reg::ax, static_cast<Word>(half - 1));
+    } else {
+      code_.constant(Reg::r11, half - 1);
+      code_.binary(op_adc, {.destination = Reg::ax, .source = Reg::r11});
+    }
   }
-  code_.binary(op_add, {.destination = Reg::ax, .source = Reg::r11});
   if (value_proof_.rounding_overflow) {
     code_.set(condition_overflow, Reg::dx);
     // The two opposite signed wraps cancel in the fused rounded result.
@@ -433,7 +444,6 @@ std::vector<std::uint8_t> JitEmitter::generate_repeat(const NativeOp &operation)
 
 void JitEmitter::repeat_retire(const NativeOp &operation) {
   constexpr auto lc = offsetof(Cpu, reg) + offsetof(Registers, lc);
-  constexpr unsigned group_sub = 5;
   code_.store_constant(
       Reg::r12, offsetof(Cpu, repeat_opcode), Width::dword, operation.instruction.opcode);
   code_.store_constant(Reg::r12, offsetof(Cpu, repeat_loaded), Width::byte, 1);
