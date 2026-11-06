@@ -441,8 +441,16 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   add_executable(dsp56300_fixture_test test/isa/fixture_test.cpp)
   target_link_libraries(dsp56300_fixture_test PRIVATE dsp56300::core dsp56300_fixture_format)
   add_executable(dsp56300_fixture_bench test/bench/fixture_bench.cpp)
-  add_executable(dsp56300_continuous_bench test/bench/continuous_bench.cpp)
-  target_link_libraries(dsp56300_continuous_bench PRIVATE dsp56300::core dsp56300_fixture_format)
+  add_executable(dsp56300_continuous_bench test/bench/continuous_bench.cpp
+    test/bench/fir_stream_host.cpp test/bench/fir_host.cpp test/bench/fir_host_avx2.cpp
+    test/bench/numeric_stream_host.cpp test/bench/spectral_stream_host.cpp)
+  target_link_libraries(dsp56300_continuous_bench PRIVATE dsp56300::core dsp56300_fixture_format Threads::Threads)
+  add_test(NAME fir-stream-host-reference COMMAND dsp56300_continuous_bench --verify-fir-host
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/fir-stream-check.d56")
+  foreach(name iir nonlinear spectral)
+    add_test(NAME ${name}-stream-host-reference COMMAND dsp56300_continuous_bench --verify-host
+      ${name} "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/${name}-stream-check.d56")
+  endforeach()
   include(cmake/Bench.cmake)
   add_executable(dsp56300_generate_fir test/isa/generate_fir.cpp)
   target_link_libraries(dsp56300_generate_fir PRIVATE dsp56300_fixture_format)

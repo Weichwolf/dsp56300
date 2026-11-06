@@ -137,11 +137,22 @@ loops, register/flag liveness and code layout in the cores, validate equivalent
 results and report per-workload JIT/host percentages. Passing correctness tests
 alone do not establish the performance gate.
 
-Sequence: optimize CPU12 first to >=70% of matched optimized host-ASM throughput
-on each representative warm fixture, then optimize and simplify DSP56300 to the
-same per-fixture threshold. Until both pass, defer further emulator integration.
-Use minimal focused validation during slow-core iteration and broaden it as
-performance improves. Keep code small, with complexity justified by correctness
-or measured speed. The subsequent complete Blofeld instrument must sustain >=4x
-offline real-time throughput on this host under representative high load while
-retaining correct guest time and bounded live latency.
+Sequence: optimize CPU12 first, then optimize and simplify DSP56300. Target >=70%
+of matched optimized host throughput on each realistic sustained warm scenario;
+short reset/run/inspect microfixtures remain diagnostics and do not establish or
+block that target. Use identical inputs, relevant ISA semantics and independent
+result checks. Report each scenario rather than hiding weak cases in an average.
+
+Provide a `bench` command under the tests that reports assumed hardware throughput
+(target >=1x) and warm JIT/host throughput, with clock/cost assumptions and the
+comparison scope. Cold runtime compilation must also fit actual processing packet
+deadlines: report the worst cold and warm packets, first-use translations and
+missed deadlines separately from average throughput. A cold microkernel time alone
+is not a processing deadline. Add a persistent cache only if measurements justify
+it as necessary to avoid first-use underruns.
+
+Use focused validation during slow-core iteration and broaden it as performance
+improves. Keep code small, with complexity justified by correctness or measured
+speed. Subsequent complete Blofeld integration must sustain >=4x offline real-time
+throughput on this host under representative high load while retaining correct
+guest time and bounded live latency.

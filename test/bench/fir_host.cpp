@@ -115,18 +115,26 @@ bool avx2_supported() noexcept {
   return __builtin_cpu_supports("avx2");
 }
 
-Result execute(const Registers &initial,
-               const std::span<const Word> data,
-               const std::span<const Word> coefficients,
-               const HostIsa host_isa) {
+Word filter(Registers &state,
+            const std::span<const Word> data,
+            const std::span<const Word> coefficients,
+            const HostIsa host_isa) {
   if (data.empty() || data.size() != coefficients.size() || data.size() > word_mask) {
     throw std::invalid_argument("FIR requires equally sized nonempty bounded inputs");
   }
   if (host_isa == HostIsa::avx2 && !avx2_supported()) {
     throw std::invalid_argument("AVX2 host execution requires qualified runtime support");
   }
+  return finish(state, products(data, coefficients, host_isa));
+}
+
+Result execute(const Registers &initial,
+               const std::span<const Word> data,
+               const std::span<const Word> coefficients,
+               const HostIsa host_isa) {
   Result result{.registers = initial};
   auto &state = result.registers;
+  result.output = filter(state, data, coefficients, host_isa);
   const auto frame = initial.sp % stack_entries;
   state.stack[(frame + 1) % stack_entries] = (std::uint64_t{initial.la} << word_bits) | initial.lc;
   state.stack[(frame + 2) % stack_entries] =
@@ -137,7 +145,6 @@ Result execute(const Registers &initial,
   state.r[0] = (initial.r[0] + count) & word_mask;
   state.r[4] = (initial.r[4] + count) & word_mask;
   state.pc = after_program;
-  result.output = finish(state, products(data, coefficients, host_isa));
   return result;
 }
 } // namespace dsp56300::test::fir_host

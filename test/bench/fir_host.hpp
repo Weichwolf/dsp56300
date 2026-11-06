@@ -10,6 +10,12 @@ enum class HostIsa : unsigned char { scalar, avx2 };
 
 [[nodiscard]] bool avx2_supported() noexcept;
 
+// One ordered dot product, convergent rounding, transfer limiting and exact flags.
+[[nodiscard]] Word filter(Registers &state,
+                          std::span<const Word> data,
+                          std::span<const Word> coefficients,
+                          HostIsa host_isa);
+
 struct Result {
   Registers registers;
   Word output = 0;
