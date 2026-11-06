@@ -69,6 +69,8 @@ BlockEmitter::generate_selected(const std::span<const BlockInstruction> operatio
                     range_mode_,
                     word_mode_,
                     window_mode_);
+  // The selector proves admission before entering the generated prologue.
+  fast.entry_admitted_ = true;
   const auto guarded = fast.generate(operations);
   x64::Code selector;
   x64::Label fallback;

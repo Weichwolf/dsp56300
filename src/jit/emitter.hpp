@@ -193,6 +193,7 @@ private:
   bool coalesced_accounting_ = false;
   bool loop_residency_ = false;
   bool loop_bank_cache_ = false;
+  bool entry_admitted_ = false;
   unsigned deferred_growth_shift_ = 0;
   Word pending_instructions_ = 0, pending_extra_cycles_ = 0;
   NativeDataflow dataflow_;
@@ -200,6 +201,7 @@ private:
   std::array<bool, 2> accumulator_dirty_{};
   std::array<x64::Label, 4> exits_;
   x64::Label loop_header_;
+  x64::Label loop_body_;
   Word loop_size_ = 0, loop_pc_ = 0;
   ExecutionBounds bounds_ = ExecutionBounds::whole;
   Word live_flags_ = carry | overflow | zero | negative | unnormalized | extension;

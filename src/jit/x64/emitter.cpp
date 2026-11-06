@@ -632,9 +632,17 @@ BlockEmitter::generate_body(const std::span<const BlockInstruction> operations) 
   }
   initialize_loop_window();
   initialize_loop_residency();
+  // The selector or residency initializer already proved this first body.
+  // Backedges still reach the header unless their retained RAM window suffices.
+  const bool admitted = entry_admitted_ || loop_residency_;
+  if (admitted && loop_size_ != 0) { code_.jump(loop_body_); }
   if (loop_size_ != 0) { code_.align_entry(); }
   code_.bind(loop_header_);
-  if (region_mode_ == RegionMode::guarded) { guard_region_header(); }
+  if (region_mode_ == RegionMode::guarded && (!admitted || loop_size_ != 0)) {
+    guard_region_header();
+  }
+  if (loop_size_ != 0) { code_.align_entry(); }
+  code_.bind(loop_body_);
   emit_operations(operations);
   materialize_pending_accounting();
   finish();

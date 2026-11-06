@@ -589,7 +589,7 @@ void api_prefixes(const TestOptions options, const bool alias) {
   }
 }
 
-void final_memory_fault(const Word mode, const bool alias) {
+void memory_fault(const Word mode, const bool alias, const Word completed) {
   Memory memory{.alias = alias};
   memory.initialize();
   auto expected_memory = memory;
@@ -598,11 +598,11 @@ void final_memory_fault(const Word mode, const bool alias) {
   const Shape shape{.mode = mode, .loop = true, .alias = alias};
   const auto trace = steps(shape);
   core.load(Space::program, start, program(trace));
-  auto expected = initial(shape, {.progress = {}, .r1 = ram_words - 2, .lc = 3});
+  auto expected = initial(shape, {.progress = {}, .r1 = ram_words - completed, .lc = 3});
   core.set_registers(expected);
   Word retired = 0;
   Word cycles = 0;
-  for (unsigned iteration = 0; iteration < 2; ++iteration) {
+  for (Word iteration = 0; iteration < completed; ++iteration) {
     for (const auto step : trace) {
       execute(expected, expected_memory, step);
       ++retired;
@@ -621,7 +621,7 @@ void final_memory_fault(const Word mode, const bool alias) {
   const auto port = trace[failure].ports[0];
   expected.r[port.cursor] = ram_words + 1;
   expected.pc += words(trace[failure]);
-  const auto result = core.run(3 * static_cast<Word>(trace.size()));
+  const auto result = core.run((completed + 1) * static_cast<Word>(trace.size()));
   require(result.retired == retired &&
               result.progress == Progress{.instructions = retired, .estimated_cycles = cycles} &&
               result.fault == Fault{.kind = FaultKind::memory_read,
@@ -630,8 +630,19 @@ void final_memory_fault(const Word mode, const bool alias) {
                                     .pc = fault_pc} &&
               !result.yielded && result.state == ExecutionState::running &&
               core.registers() == expected && memory.data == expected_memory.data,
-          "The final iteration rechecks RAM, preserves its completed prefix and faults before "
+          "Entry and backedge admission preserve the completed prefix and fault before "
           "the rejected load/ALU/frame cleanup");
+}
+
+void memory_faults() {
+  for (const auto mode : modes) {
+    for (const bool alias : {false, true}) {
+      for (const Word completed : {0U, 1U, 2U}) {
+        memory_fault(mode, alias, completed);
+        memory_fault(mode | saturation_model::mode, alias, completed);
+      }
+    }
+  }
 }
 
 void api_loop_case(TestCore &core, Memory &memory, const Shape shape, const Word budget) {
@@ -823,12 +834,7 @@ void callback(const CallbackInput input) {
 int main() {
   try {
     dsp56300::test::direct_matrix();
-    for (const auto mode : dsp56300::test::modes) {
-      for (const bool alias : {false, true}) {
-        dsp56300::test::final_memory_fault(mode, alias);
-        dsp56300::test::final_memory_fault(mode | dsp56300::test::saturation_model::mode, alias);
-      }
-    }
+    dsp56300::test::memory_faults();
     for (const auto mode : dsp56300::test::modes) {
       dsp56300::test::residency_patterns(mode);
       dsp56300::test::residency_patterns(mode | dsp56300::test::saturation_model::mode);

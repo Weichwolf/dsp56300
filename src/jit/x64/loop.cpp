@@ -8,6 +8,7 @@
 #include "jit/code.hpp"
 #include "jit/emitter.hpp"
 #include "jit/resident.hpp"
+#include "region_guards.hpp"
 #include "translation.hpp"
 
 #include <cstddef>
@@ -191,6 +192,18 @@ void BlockEmitter::loop_backedge() {
   // Ordinary headers still require canonical inputs. Closed resident loops
   // initialized both slots before admission and preserve them across this edge.
   if (!loop_residency_) { flush_accumulators(dirty_accumulators()); }
+  if (loop_window_) {
+    x64::Label checked;
+    code_.memory_immediate(group_cmp, Reg::sp, window_flag_offset, Width::byte, 0);
+    code_.jump_if(Branch::equal, checked);
+    code_.memory_immediate(group_cmp, Reg::r12, lc_offset, Width::dword, 1);
+    code_.jump_if(Branch::equal, checked);
+    // Only the admitted body ran: LC remains positive, modes and frames are
+    // unchanged, and the window covers every continuing iteration. The final
+    // iteration must still pass its frame and fresh address checks.
+    code_.jump(loop_body_);
+    code_.bind(checked);
+  }
   code_.jump(loop_header_);
 }
 
@@ -198,7 +211,7 @@ void BlockEmitter::initialize_loop_residency() {
   if (!loop_residency_) { return; }
   // Initial rejection retains the original zero-dirty exit. Subsequent guards
   // can fail after complete iterations and must publish both initialized slots.
-  region_guard(code_, Reg::r12, exits_[0]);
+  if (!entry_admitted_) { region_guard(code_, Reg::r12, exits_[0]); }
   code_.load(Reg::bp, Reg::r12, offsetof(Cpu, reg) + offsetof(Registers, a));
   code_.load(Reg::bx, Reg::r12, offsetof(Cpu, reg) + offsetof(Registers, b));
   if (!retirement_helpers_) {
