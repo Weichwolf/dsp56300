@@ -99,8 +99,8 @@ void BlockEmitter::loop_setup(const BlockInstruction &operation) {
 }
 
 void BlockEmitter::loop_guard(const BlockInstruction &operation) {
-  // A guarded RAM body cannot change LC or the loop stack. Its header already
-  // admitted LC>1, so the final instruction cannot enter a stack-pop path.
+  // A guarded RAM body cannot change LC or the loop stack. Its header admitted
+  // either continuation or a final iteration with two readable frames.
   if (!at_loop_end(operation) || region_mode_ == RegionMode::guarded) { return; }
   materialize_pending_accounting();
   // Preserve the original zero/forever and partial-pop fault paths.
@@ -122,49 +122,47 @@ void BlockEmitter::loop_guard(const BlockInstruction &operation) {
 void BlockEmitter::loop_continue() {
   x64::Label continuing;
   x64::Label complete;
-  if (region_mode_ != RegionMode::guarded) {
-    code_.memory_immediate(group_cmp, Reg::r12, lc_offset, Width::dword, 1);
-    code_.jump_if(Branch::not_equal, continuing);
-    // loop_guard admitted this final instruction only with two readable frames.
-    // Guarded regions still reject LC<=1 before any loop-window shortcut.
-    code_.load(Reg::ax, Reg::r12, la_offset, Width::dword);
-    code_.immediate(group_add, Reg::ax, 1, Width::dword);
-    code_.immediate(group_and, Reg::ax, word_mask, Width::dword);
-    code_.store(Reg::r12, pc_offset, Reg::ax, Width::dword);
-    code_.load(Reg::ax, Reg::r12, sp_offset, Width::dword);
-    code_.immediate(group_and, Reg::ax, stack_entries - 1, Width::dword);
-    code_.shift(shift_left, Reg::ax, 1, Width::dword);
-    code_.load_indexed(
-        Reg::dx, {.base = Reg::r12, .index = Reg::ax, .offset = stack_offset}, Width::qword);
-    constexpr Word loop_status = loop_flag | forever_flag;
-    code_.immediate(group_and, Reg::dx, loop_status, Width::dword);
-    merge_status(Reg::dx, loop_status, Reg::cx);
-    code_.load(Reg::cx, Reg::r12, sp_offset, Width::dword);
-    code_.immediate(group_sub, Reg::cx, 1, Width::dword);
-    code_.mov({.destination = Reg::ax, .source = Reg::cx}, Width::dword);
-    code_.immediate(group_and, Reg::ax, stack_entries - 1, Width::dword);
-    code_.shift(shift_left, Reg::ax, 1, Width::dword);
-    code_.load_indexed(
-        Reg::dx, {.base = Reg::r12, .index = Reg::ax, .offset = stack_offset}, Width::qword);
-    code_.mov({.destination = Reg::ax, .source = Reg::dx}, Width::dword);
-    code_.immediate(group_and, Reg::ax, word_mask, Width::dword);
-    code_.store(Reg::r12, lc_offset, Reg::ax, Width::dword);
-    code_.shift(shift_right, Reg::dx, word_bits);
-    code_.store(Reg::r12, la_offset, Reg::dx, Width::dword);
-    code_.immediate(group_sub, Reg::cx, 1, Width::dword);
-    code_.immediate(group_and, Reg::cx, stack_pointer_mask, Width::dword);
-    code_.store(Reg::r12, sp_offset, Reg::cx, Width::dword);
-    code_.memory_immediate(group_sub, Reg::r12, sc_offset, Width::dword, 2);
-    // Preserve an earlier helper's owner bit, including code invalidation/yield.
-    code_.memory_immediate(group_or,
-                           Reg::r13,
-                           offsetof(NativeContext, boundary),
-                           Width::byte,
-                           static_cast<Word>(NativeBoundary::context));
-    code_.constant(Reg::dx, inactive_loop); // Cannot match a 24-bit loop-start PC.
-    code_.jump(complete);
-    code_.bind(continuing);
-  }
+  code_.memory_immediate(group_cmp, Reg::r12, lc_offset, Width::dword, 1);
+  code_.jump_if(Branch::not_equal, continuing);
+  // The ordinary instruction guard or guarded body header proved both frames
+  // readable and excluded forever-loop handling before any native effect.
+  code_.load(Reg::ax, Reg::r12, la_offset, Width::dword);
+  code_.immediate(group_add, Reg::ax, 1, Width::dword);
+  code_.immediate(group_and, Reg::ax, word_mask, Width::dword);
+  code_.store(Reg::r12, pc_offset, Reg::ax, Width::dword);
+  code_.load(Reg::ax, Reg::r12, sp_offset, Width::dword);
+  code_.immediate(group_and, Reg::ax, stack_entries - 1, Width::dword);
+  code_.shift(shift_left, Reg::ax, 1, Width::dword);
+  code_.load_indexed(
+      Reg::dx, {.base = Reg::r12, .index = Reg::ax, .offset = stack_offset}, Width::qword);
+  constexpr Word loop_status = loop_flag | forever_flag;
+  code_.immediate(group_and, Reg::dx, loop_status, Width::dword);
+  merge_status(Reg::dx, loop_status, Reg::cx);
+  code_.load(Reg::cx, Reg::r12, sp_offset, Width::dword);
+  code_.immediate(group_sub, Reg::cx, 1, Width::dword);
+  code_.mov({.destination = Reg::ax, .source = Reg::cx}, Width::dword);
+  code_.immediate(group_and, Reg::ax, stack_entries - 1, Width::dword);
+  code_.shift(shift_left, Reg::ax, 1, Width::dword);
+  code_.load_indexed(
+      Reg::dx, {.base = Reg::r12, .index = Reg::ax, .offset = stack_offset}, Width::qword);
+  code_.mov({.destination = Reg::ax, .source = Reg::dx}, Width::dword);
+  code_.immediate(group_and, Reg::ax, word_mask, Width::dword);
+  code_.store(Reg::r12, lc_offset, Reg::ax, Width::dword);
+  code_.shift(shift_right, Reg::dx, word_bits);
+  code_.store(Reg::r12, la_offset, Reg::dx, Width::dword);
+  code_.immediate(group_sub, Reg::cx, 1, Width::dword);
+  code_.immediate(group_and, Reg::cx, stack_pointer_mask, Width::dword);
+  code_.store(Reg::r12, sp_offset, Reg::cx, Width::dword);
+  code_.memory_immediate(group_sub, Reg::r12, sc_offset, Width::dword, 2);
+  // Preserve an earlier helper's owner bit, including code invalidation/yield.
+  code_.memory_immediate(group_or,
+                         Reg::r13,
+                         offsetof(NativeContext, boundary),
+                         Width::byte,
+                         static_cast<Word>(NativeBoundary::context));
+  code_.constant(Reg::dx, inactive_loop); // Cannot match a 24-bit loop-start PC.
+  code_.jump(complete);
+  code_.bind(continuing);
   if (loop_residency_ && !retirement_helpers_) {
     code_.packed_to<32>(Reg::dx, x64::Xmm::x13);
   } else {

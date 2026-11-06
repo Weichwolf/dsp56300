@@ -9,6 +9,7 @@
 #include "jit.hpp"
 #include "jit/emitter.hpp"
 #include "jit/resident.hpp"
+#include "loop_frames.hpp"
 #include "native/direct.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
@@ -221,7 +222,7 @@ struct Input {
 };
 
 bool admitted(const Registers &state, const bool loop, const Shape shape, const Memory &memory) {
-  if ((loop && state.lc <= 1) || (state.m[0] & low_modifier) != low_modifier ||
+  if ((loop && !loop_frames::admitted(state)) || (state.m[0] & low_modifier) != low_modifier ||
       (state.m[1] & low_modifier) != low_modifier ||
       (state.m[4] & low_modifier) != (shape == Shape::y_strided ? low_modifier : ring) ||
       (terminal(shape) && (state.m[2] & low_modifier) != low_modifier) ||
@@ -295,6 +296,10 @@ void direct_case(const native::Direct &code,
     for (const auto step : steps) { execute(expected, expected_memory, step); }
     retired += size;
     if (!loop) { break; }
+    if (expected.lc == 1) {
+      loop_frames::complete(expected);
+      break;
+    }
     --expected.lc;
     expected.pc = start;
   }

@@ -42,10 +42,12 @@ enum class Packed : std::uint8_t {
 template <unsigned LaneBits>
 concept ScalarTransferLane = SimdShape<LaneBits, 128> && (LaneBits == 32 || LaneBits == 64);
 enum class Branch : std::uint8_t {
+  below = 0x82,
   above_equal = 0x83,
   equal = 0x84,
   not_equal = 0x85,
-  below_equal = 0x86
+  below_equal = 0x86,
+  above = 0x87
 };
 
 struct RegisterPair {

@@ -84,7 +84,7 @@ bool BlockEmitter::publish_pc(const std::span<const BlockInstruction> operations
     return true;
   }
   const auto &next = operations[index + 1];
-  // A guarded body has no interior loop-end fault: its header proved LC>1.
+  // The guarded header proved a continuing or fault-free final loop iteration.
   // Publish at the real boundary instead of before its final instruction too.
   return observable_moves(next) || (region_mode_ != RegionMode::guarded && at_loop_end(next));
 }

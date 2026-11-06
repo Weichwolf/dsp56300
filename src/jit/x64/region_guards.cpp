@@ -26,6 +26,8 @@ constexpr auto r_offset = offsetof(Cpu, reg) + offsetof(Registers, r);
 constexpr auto n_offset = offsetof(Cpu, reg) + offsetof(Registers, n);
 constexpr auto m_offset = offsetof(Cpu, reg) + offsetof(Registers, m);
 constexpr auto lc_offset = offsetof(Cpu, reg) + offsetof(Registers, lc);
+constexpr auto sc_offset = offsetof(Cpu, reg) + offsetof(Registers, sc);
+constexpr auto sr_offset = offsetof(Cpu, reg) + offsetof(Registers, sr);
 // The emitted admission compares twice the body length with a signed immediate.
 constexpr Word maximum_operations =
     (static_cast<Word>(std::numeric_limits<std::int32_t>::max()) + 1) / 2;
@@ -116,7 +118,15 @@ void emit_region_loop_guard(x64::Code &code,
   if (!region.loop) { return; }
   code.load(Reg::ax, cpu, lc_offset, Width::dword);
   code.immediate(group_cmp, Reg::ax, 1, Width::dword);
-  code.jump_if(Branch::below_equal, failed);
+  code.jump_if(Branch::below, failed);
+  x64::Label continuing;
+  code.jump_if(Branch::above, continuing);
+  code.memory_immediate(group_cmp, cpu, sc_offset, Width::dword, 2);
+  code.jump_if(Branch::below, failed);
+  code.load(Reg::ax, cpu, sr_offset, Width::dword);
+  code.immediate(group_and, Reg::ax, forever_flag, Width::dword);
+  code.jump_if(Branch::not_equal, failed);
+  code.bind(continuing);
 }
 
 void emit_region_address_guards(x64::Code &code,

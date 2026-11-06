@@ -72,8 +72,8 @@ reduce(MacBatchState &state, const MacBatchInput &input, const unsigned count) n
 }
 }
 
-[[gnu::target("avx2")]] void avx2_mac_batch(MacBatchState &state,
-                                            const MacBatchInput &input) noexcept {
+[[gnu::target("avx2"), gnu::aligned(64)]] void avx2_mac_batch(MacBatchState &state,
+                                                              const MacBatchInput &input) noexcept {
   auto current = state;
   const auto streams = input;
   for (std::size_t index = 0; index < streams.x.size();) {

@@ -9,6 +9,7 @@
 #include "jit.hpp"
 #include "jit/emitter.hpp"
 #include "jit/resident.hpp"
+#include "loop_frames.hpp"
 #include "native/direct.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
@@ -163,7 +164,7 @@ void execute(Registers &state, Memory &memory, const Step step) {
 }
 
 bool admitted(const Registers &state, const Shape shape, const Memory &memory) {
-  if (shape.loop && state.lc <= 1) { return false; }
+  if (shape.loop && !loop_frames::admitted(state)) { return false; }
   if (shape.address_mode != 4 &&
       (state.m[shape.index] & low_modifier) != (shape.modifier & low_modifier)) {
     return false;
@@ -242,6 +243,10 @@ void direct_case(const native::Direct &code, Memory &memory, const Shape shape, 
     retired += body_size;
     ++bodies;
     if (!shape.loop) { break; }
+    if (expected.lc == 1) {
+      loop_frames::complete(expected);
+      break;
+    }
     --expected.lc;
     expected.pc = start;
   }

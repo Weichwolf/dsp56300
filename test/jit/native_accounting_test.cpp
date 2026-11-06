@@ -9,6 +9,7 @@
 #include "jit.hpp"
 #include "jit/emitter.hpp"
 #include "jit/resident.hpp"
+#include "loop_frames.hpp"
 #include "native/direct.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
@@ -293,7 +294,8 @@ std::uint64_t wrapping_sum(const std::uint64_t value, const std::uint64_t increm
 struct Input {
   Progress progress;
   Word flags = 0, r1 = 0, lc = 4, sp = 2, target = start, budget = default_budget;
-  bool mismatch = false;
+  Word sc = 2, saved = 0;
+  bool mismatch = false, forever = false;
 };
 
 Registers initial(const Shape shape, const Input input) {
@@ -306,8 +308,11 @@ Registers initial(const Shape shape, const Input input) {
   state.r[1] = input.r1;
   if (input.mismatch) { state.m[1] = 15; }
   state.sp = input.sp;
+  state.sc = input.sc;
+  if (input.forever) { state.sr |= 1U << 16; }
   state.lc = input.lc;
-  state.stack[state.sp % stack_entries] = (std::uint64_t{input.target} << word_bits) | 7;
+  state.stack[state.sp % stack_entries] =
+      (std::uint64_t{input.target} << word_bits) | 7 | input.saved;
   auto next = shape.first;
   for (const auto step : steps(shape)) { next = (next + words(step)) & word_mask; }
   state.la = (next + word_mask) & word_mask;
@@ -329,13 +334,17 @@ void direct_case(const native::Direct &code, Memory &memory, const Shape shape, 
   Word retired = 0;
   std::uint64_t cycles = 0;
   while (input.budget - retired >= trace.size() && expected.r[1] < ram_words &&
-         expected.m[1] == word_mask && (!shape.loop || expected.lc > 1)) {
+         expected.m[1] == word_mask && (!shape.loop || loop_frames::admitted(expected))) {
     for (const auto step : trace) {
       execute(expected, expected_memory, step);
       ++retired;
       cycles += shape.maximum_cost ? std::numeric_limits<std::uint8_t>::max() : words(step);
     }
     if (!shape.loop) { break; }
+    if (expected.lc == 1) {
+      loop_frames::complete(expected);
+      break;
+    }
     --expected.lc;
     expected.pc = input.target;
     if (input.target != shape.first) { break; }
@@ -356,6 +365,37 @@ void direct_case(const native::Direct &code, Memory &memory, const Shape shape, 
           "ports twice");
   require(cpu.repeat_completed == (retired == 0) && cpu.interrupt_inhibited == (retired == 0),
           "Read-only rejection retains exclusion state and successful prefixes clear it");
+}
+
+void final_frames(const native::Direct &code, Memory &memory, const Shape shape) {
+  const auto size = static_cast<Word>(steps(shape).size());
+  for (const Word sp : {0U, 15U, 31U, 63U}) {
+    for (const Word sc : {0U, 1U, 2U, 31U}) {
+      for (const Word saved : {0U, lf, Word{1} << 16, loop_frames::loop_bits}) {
+        for (const bool forever : {false, true}) {
+          direct_case(code,
+                      memory,
+                      shape,
+                      {.progress = progress_seeds[1],
+                       .flags = status_byte,
+                       .lc = 1,
+                       .sp = sp,
+                       .target = shape.first,
+                       .budget = size,
+                       .sc = sc,
+                       .saved = saved,
+                       .forever = forever});
+        }
+      }
+    }
+  }
+  // A whole-call proof may cover every continuing iteration while the final
+  // iteration would leave RAM. That last body must still reject before effects.
+  direct_case(
+      code,
+      memory,
+      shape,
+      {.progress = {}, .r1 = ram_words - 2, .lc = 3, .target = shape.first, .budget = 3 * size});
 }
 
 void exit_cases(const native::Direct &code, Memory &memory, const Shape shape) {
@@ -428,7 +468,10 @@ void direct_shape(const Shape shape) {
                  .target = shape.first,
                  .budget = 3 * static_cast<Word>(ops.size())});
   }
-  if (shape.padding == 0) { exit_cases(code, memory, shape); }
+  if (shape.padding == 0) {
+    exit_cases(code, memory, shape);
+    if (shape.loop) { final_frames(code, memory, shape); }
+  }
 }
 
 void direct_matrix() {
@@ -544,6 +587,51 @@ void api_prefixes(const TestOptions options, const bool alias) {
       }
     }
   }
+}
+
+void final_memory_fault(const Word mode, const bool alias) {
+  Memory memory{.alias = alias};
+  memory.initialize();
+  auto expected_memory = memory;
+  std::array<Word, memory_words> program_memory{};
+  TestCore core({.program = program_memory, .x = memory.bank(false), .y = memory.bank(true)});
+  const Shape shape{.mode = mode, .loop = true, .alias = alias};
+  const auto trace = steps(shape);
+  core.load(Space::program, start, program(trace));
+  auto expected = initial(shape, {.progress = {}, .r1 = ram_words - 2, .lc = 3});
+  core.set_registers(expected);
+  Word retired = 0;
+  Word cycles = 0;
+  for (unsigned iteration = 0; iteration < 2; ++iteration) {
+    for (const auto step : trace) {
+      execute(expected, expected_memory, step);
+      ++retired;
+      cycles += words(step);
+    }
+    --expected.lc;
+    expected.pc = start;
+  }
+  constexpr std::size_t failure = 5;
+  for (const auto step : std::span(trace).first(failure)) {
+    execute(expected, expected_memory, step);
+    ++retired;
+    cycles += words(step);
+  }
+  const auto fault_pc = expected.pc;
+  const auto port = trace[failure].ports[0];
+  expected.r[port.cursor] = ram_words + 1;
+  expected.pc += words(trace[failure]);
+  const auto result = core.run(3 * static_cast<Word>(trace.size()));
+  require(result.retired == retired &&
+              result.progress == Progress{.instructions = retired, .estimated_cycles = cycles} &&
+              result.fault == Fault{.kind = FaultKind::memory_read,
+                                    .space = Space::y,
+                                    .address = ram_words,
+                                    .pc = fault_pc} &&
+              !result.yielded && result.state == ExecutionState::running &&
+              core.registers() == expected && memory.data == expected_memory.data,
+          "The final iteration rechecks RAM, preserves its completed prefix and faults before "
+          "the rejected load/ALU/frame cleanup");
 }
 
 void api_loop_case(TestCore &core, Memory &memory, const Shape shape, const Word budget) {
@@ -735,6 +823,12 @@ void callback(const CallbackInput input) {
 int main() {
   try {
     dsp56300::test::direct_matrix();
+    for (const auto mode : dsp56300::test::modes) {
+      for (const bool alias : {false, true}) {
+        dsp56300::test::final_memory_fault(mode, alias);
+        dsp56300::test::final_memory_fault(mode | dsp56300::test::saturation_model::mode, alias);
+      }
+    }
     for (const auto mode : dsp56300::test::modes) {
       dsp56300::test::residency_patterns(mode);
       dsp56300::test::residency_patterns(mode | dsp56300::test::saturation_model::mode);
