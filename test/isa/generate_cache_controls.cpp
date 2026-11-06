@@ -51,7 +51,7 @@ BinaryCase base(const Form form, const Registers &state) {
   BinaryCase item;
   item.initial = item.expected = state;
   cache_isa_model::apply(item.expected, form);
-  item.interruptible = (state.sr & cache_isa_model::enable) != 0;
+  item.interrupt_ready = (state.sr & cache_isa_model::enable) != 0;
   item.progress.estimated_cycles = cache_isa_model::cycles(form);
   item.before = {{.words = {cache_isa_model::opcode(form)}, .address = start}};
   if (cache_isa_model::words(form) == 2) { item.before.front().words.push_back(form.extra); }
@@ -91,25 +91,25 @@ void long_sequence(Cases &cases, const Form form, const Registers &input) {
   item.progress = {};
   for (Word phase = 0; phase < 7; ++phase) {
     Word cost = 1;
-    item.interruptible = true;
+    item.interrupt_ready = true;
     if (phase == 0) {
       cache_isa_model::apply(item.expected, form);
       cost = cache_isa_model::cycles(form);
-      item.interruptible = enabled;
+      item.interrupt_ready = enabled;
     } else if (!enabled && phase == 1) {
       exception_model::enter(item.expected, resume);
       cost = 3;
     } else if (!enabled && phase == 4) {
       exception_model::leave(item.expected);
       cost = 3;
-      item.interruptible = false;
+      item.interrupt_ready = false;
     } else {
       const auto opcode = sequence_opcode(enabled, phase);
       const auto old = item.expected;
       if (opcode != 0) { sequence_model::alu(item.expected, old, opcode); }
       ++item.expected.pc;
     }
-    item.budget = item.dispatches = phase + 1;
+    item.budget = item.retired = phase + 1;
     item.progress.instructions = item.budget;
     item.progress.estimated_cycles += cost;
     item.name = "Cache control: every long illegal-service/RTI or enabled foreground prefix";
@@ -139,7 +139,7 @@ void repeated(Cases &cases, const Form form, const Registers &input, const Word 
     item.expected = input;
     item.expected.pc = start + 1;
     item.expected.lc = encoded;
-    item.interruptible = false;
+    item.interrupt_ready = false;
     item.progress = {.instructions = budget, .estimated_cycles = 5};
     const Word iterations = std::min(budget - 1, count);
     for (Word iteration = 0; iteration < iterations; ++iteration) {
@@ -150,7 +150,7 @@ void repeated(Cases &cases, const Form form, const Registers &input, const Word 
     if (iterations == count) {
       item.expected.pc = start + 2;
       item.expected.lc = input.lc;
-      item.interruptible = enabled;
+      item.interrupt_ready = enabled;
     }
     item.progress.estimated_cycles += std::uint64_t{iterations} * cache_isa_model::cycles(form);
     if (budget > count + 1) {
@@ -161,9 +161,9 @@ void repeated(Cases &cases, const Form form, const Registers &input, const Word 
         exception_model::enter(item.expected, start + 3);
         item.progress.estimated_cycles += 3;
       }
-      item.interruptible = true;
+      item.interrupt_ready = true;
     }
-    item.budget = item.dispatches = budget;
+    item.budget = item.retired = budget;
     item.name = "REP cache control: repeated EA, LC restoration, deferred/coalesced illegal";
     cases.push_back(std::move(item));
   }
@@ -182,8 +182,8 @@ void repeats(Cases &cases) {
         auto item = base(form, input);
         item.before.front().words.insert(item.before.front().words.begin(), repeat | (4U * 256));
         item.budget = 2;
-        item.dispatches = 1;
-        item.interruptible = false;
+        item.retired = 1;
+        item.interrupt_ready = false;
         item.progress = {.instructions = 1, .estimated_cycles = 5};
         item.fault = {.kind = FaultKind::invalid_instruction,
                       .address = start + 1,

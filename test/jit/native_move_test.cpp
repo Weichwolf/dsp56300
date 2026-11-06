@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "address_model.hpp"
+#include "codegen_observer.hpp"
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "memory_arena.hpp"
@@ -25,11 +27,11 @@ constexpr unsigned xreg_shift = 18;
 constexpr std::array xregs{4U, 5U, 14U, 15U}, yregs{6U, 7U, 14U, 15U};
 
 struct Machine {
-  explicit Machine(Io *io = nullptr, const bool optimize = true)
-      : core({.program = p, .x = x, .y = y}, io, {.backend = Backend::jit, .optimize = optimize}) {}
+  explicit Machine(Io *io = nullptr)
+      : core({.program = p, .x = x, .y = y}, io, {.backend = Backend::jit}) {}
 
   std::array<Word, memory_words> p{}, x{}, y{};
-  Core core;
+  TestCore core;
 };
 
 void changing_modifier() {
@@ -43,11 +45,8 @@ void changing_modifier() {
       state.m[0] = modifier;
       machine.core.write(Space::x, 7, datum);
       machine.core.set_registers(state);
-      const auto before = machine.core.jit_statistics().native_move_instructions;
-      require(machine.core.run(1).dispatches == 1, "Dynamic address guard preserves execution");
-      const bool native = mode == 4 || (modifier & 0xffffU) == 0xffffU || modifier == 0x800fU;
-      require(machine.core.jit_statistics().native_move_instructions == before + (native ? 1U : 0U),
-              "Changing M at a warm PC selects guarded linear/ring or general addressing");
+      require(machine.core.run(1).retired == 1, "Dynamic address guard preserves execution");
+
       auto expected = state;
       expected.pc = start + 1;
       expected.x = datum;
@@ -72,11 +71,10 @@ void rejected_address(const unsigned mode, const bool store, const Word modifier
   const auto address = mode == 5 || mode == 7 ? next : state.r[0];
   auto fault = store ? FaultKind::memory_write : FaultKind::memory_read;
   if (address >= io_begin) { fault = store ? FaultKind::io_write : FaultKind::io_read; }
-  require(result.dispatches == 0 && result.progress == Progress{} && result.fault.kind == fault &&
+  require(result.retired == 0 && result.progress == Progress{} && result.fault.kind == fault &&
               result.fault.address == address && result.fault.pc == start,
           "Out-of-span and predecrement-wrap addresses retain the general fault contract");
-  require(machine.core.jit_statistics().native_move_instructions == 0,
-          "Rejected native address never records a committed native transfer");
+
   require(machine.core.registers().r[0] == (mode == 4 || mode == 5 ? state.r[0] : next),
           "A rejected linear/ring address falls back before any prospective native R commit");
   require(machine.x == std::array<Word, memory_words>{} &&
@@ -119,7 +117,7 @@ struct IoInput {
   bool both_io = false, ring = false, ordinary = false;
 };
 
-void io_case(Core &core, Port &port, const IoInput input) {
+void io_case(TestCore &core, Port &port, const IoInput input) {
   auto state = initial_state();
   constexpr Word ordinary_modifier = 19;
   Word cursor = input.ring ? 15U : 7U;
@@ -130,7 +128,7 @@ void io_case(Core &core, Port &port, const IoInput input) {
   core.write(Space::x, cursor, other_datum);
   core.set_registers(state);
   const auto before = port.reads;
-  require(core.run(1).dispatches == 1, "Paired I/O fallback retires");
+  require(core.run(1).retired == 1, "Paired I/O fallback retires");
   require(port.reads == before + 1 && port.last.pc == start && port.last.address == io_begin &&
               port.last.space == (input.both_io ? Space::x : Space::y),
           "Paired I/O fallback calls each admitted port once and preserves X-only dual-I/O");
@@ -142,14 +140,12 @@ void io_case(Core &core, Port &port, const IoInput input) {
   expected.y = input.both_io ? 0 : datum;
   require(core.registers() == expected,
           "All address guards precede either update, including a ring wrap before failing Y I/O");
-  require(core.jit_statistics().native_move_instructions == 0,
-          "Even full address-space backing cannot bypass the I/O callback");
 }
 
 void io_boundary() {
   const MemoryArena arena;
   Port port;
-  Core core(arena.buffers(), &port, {.backend = Backend::jit});
+  TestCore core(arena.buffers(), &port, {.backend = Backend::jit});
   constexpr Word paired_load_increment = 0xf09800;
   core.write(Space::program, start, paired_load_increment);
   for (const bool both_io : {false, true}) {
@@ -164,7 +160,7 @@ void io_boundary() {
 struct AliasInput {
   unsigned xreg = 0, yreg = 0, directions = 0;
   unsigned xmode = 3, ymode = 3;
-  bool optimize = true, ring = false;
+  bool ring = false;
   Word modifier = high_ring_modifier, cursor = 15;
 };
 
@@ -177,9 +173,7 @@ void aliased_ports(const AliasInput input) {
   auto expected_memory = shared;
   const std::span x{shared.data(), memory_words};
   const std::span y{shared.data() + displacement, memory_words};
-  Core core({.program = p, .x = x, .y = y},
-            nullptr,
-            {.backend = Backend::jit, .optimize = input.optimize});
+  TestCore core({.program = p, .x = x, .y = y}, nullptr, {.backend = Backend::jit});
   const bool xload = (input.directions & 1U) != 0;
   const bool yload = (input.directions & 2U) != 0;
   const Word opcode = 0x800000 | (input.xreg << xreg_shift) | (input.yreg << 16) |
@@ -217,10 +211,8 @@ void aliased_ports(const AliasInput input) {
   }
   expected.pc = start + 1;
   core.set_registers(state);
-  require(core.run(1).dispatches == 1 && core.registers() == expected && shared == expected_memory,
+  require(core.run(1).retired == 1 && core.registers() == expected && shared == expected_memory,
           "Physically aliased X/Y ports capture both old values and commit in X/Y order");
-  require(core.jit_statistics().native_move_instructions == (input.optimize ? 1U : 0U),
-          "Native paired transfer accounts once per instruction and honors optimize=false");
 }
 
 void aliased_variants(const AliasInput input) {
@@ -278,16 +270,13 @@ void ring_case(Machine &machine, const RingInput input) {
     result = (result & ~std::uint64_t{word_mask}) | other_datum;
   }
   machine.core.set_registers(state);
-  const auto native = machine.core.jit_statistics().native_move_instructions;
   const auto progress = machine.core.progress();
   const auto run = machine.core.run(1);
   const auto cost = input.mode == 5 || input.mode == 7 ? 2U : 1U;
-  require(run.dispatches == 1 && run.fault.kind == FaultKind::none &&
+  require(run.retired == 1 && run.fault.kind == FaultKind::none &&
               run.progress == Progress{.instructions = progress.instructions + 1,
                                        .estimated_cycles = progress.estimated_cycles + cost} &&
-              machine.core.registers() == expected && memory == expected_memory &&
-              machine.core.jit_statistics().native_move_instructions ==
-                  native + (input.native ? 1U : 0U),
+              machine.core.registers() == expected && memory == expected_memory,
           "Guarded ring updates and changed-M fallback match independent complete state");
 }
 
@@ -322,6 +311,7 @@ void ring_matrix() {
 }
 
 void ordinary_reuse(Machine &machine, RingInput input) {
+  const auto published = codegen::publications();
   const auto profiled = input.modifier;
   constexpr Word ignored_high = 0xab0000;
   constexpr Word changed_ordinary = 23;
@@ -345,7 +335,7 @@ void ordinary_reuse(Machine &machine, RingInput input) {
       }
     }
   }
-  require(machine.core.jit_statistics().compiled_blocks == 1,
+  require(codegen::publications().count == published.count + 1,
           "M/R/N mutations reuse the same compiled PC and its exact runtime admission guard");
 }
 
@@ -379,15 +369,13 @@ void rejected_ring_modifiers() {
     state.r[0] = 7;
     state.m[0] = ring_modifier;
     machine.core.set_registers(state);
-    require(machine.core.run(2).dispatches == 2 &&
-                machine.core.jit_statistics().native_move_instructions == 2,
+    require(machine.core.run(2).retired == 2,
             "Repeated ring address routines are warm before replacing M with a reserved mask");
     state.m[0] = modifier;
     machine.core.set_registers(state);
     const auto result = machine.core.run(2);
-    require(result.dispatches == 0 && result.fault.kind == FaultKind::unsupported_mode &&
-                result.fault.value == modifier && machine.core.registers().r[0] == state.r[0] &&
-                machine.core.jit_statistics().native_move_instructions == 2,
+    require(result.retired == 0 && result.fault.kind == FaultKind::unsupported_mode &&
+                result.fault.value == modifier && machine.core.registers().r[0] == state.r[0],
             "Invalid multiple-wrap masks fail before any native address commit or transfer");
   }
 }
@@ -426,22 +414,20 @@ void exact_word_access() {
   const GuardedWord x;
   const GuardedWord y;
   std::array<Word, memory_words> p{};
-  Core core({.program = p, .x = x.words(), .y = y.words()}, nullptr, {.backend = Backend::jit});
+  TestCore core({.program = p, .x = x.words(), .y = y.words()}, nullptr, {.backend = Backend::jit});
   // Read/write both address registers, exercising REX.X on the Y-port index R8.
   const std::array program{Word{0xc08000}, Word{0x800000}};
   core.load(Space::program, start, program);
   auto state = initial_state();
   core.set_registers(state);
-  require(core.run(2).dispatches == 2 && core.registers().x == datum &&
-              core.registers().y == datum && x.words()[0] == datum && y.words()[0] == datum,
+  require(core.run(2).retired == 2 && core.registers().x == datum && core.registers().y == datum &&
+              x.words()[0] == datum && y.words()[0] == datum,
           "Native guest word accesses stop exactly at an inaccessible page boundary");
-  require(core.jit_statistics().native_move_instructions == 2,
-          "Guard-page qualification executes emitted RAM accesses");
+
   state.r[4] = 1;
   core.set_registers(state);
-  const auto before = core.jit_statistics().native_move_instructions;
-  require(core.run(1).fault.kind == FaultKind::memory_read &&
-              core.jit_statistics().native_move_instructions == before,
+
+  require(core.run(1).fault.kind == FaultKind::memory_read,
           "A failing Y guard falls back before a native X access or commit");
 }
 
@@ -451,17 +437,17 @@ void raw_word_mask() {
   machine.x[0] = raw;
   machine.core.write(Space::program, start, load_x0 | (4U << 11));
   machine.core.set_registers(initial_state());
-  require(machine.core.run(1).dispatches == 1 && machine.core.registers().x == (raw & word_mask) &&
-              machine.x[0] == raw && machine.core.jit_statistics().native_move_instructions == 1,
+  require(machine.core.run(1).retired == 1 && machine.core.registers().x == (raw & word_mask) &&
+              machine.x[0] == raw,
           "Native reads mask caller-owned raw words without modifying host storage");
 }
 
 void program_alias(const bool y_store) {
   std::array<Word, memory_words> shared{};
   std::array<Word, memory_words> other{};
-  Core core({.program = shared, .x = y_store ? other : shared, .y = y_store ? shared : other},
-            nullptr,
-            {.backend = Backend::jit});
+  TestCore core({.program = shared, .x = y_store ? other : shared, .y = y_store ? shared : other},
+                nullptr,
+                {.backend = Backend::jit});
   const Word opcode = y_store ? 0x808000 : 0xc00000;
   constexpr Word clear_a = 0x200013;
   core.load(Space::program, start, std::array{opcode, clear_a});
@@ -469,11 +455,8 @@ void program_alias(const bool y_store) {
   state.a = 3;
   state.r[y_store ? 4 : 0] = start + 1;
   core.set_registers(state);
-  require(core.run(2).dispatches == 2 && core.registers().a == 3 && shared[start + 1] == 0,
+  require(core.run(2).retired == 2 && core.registers().a == 3 && shared[start + 1] == 0,
           "A paired store through a P alias invalidates its already compiled successor");
-  require(core.jit_statistics().native_move_instructions == 0 &&
-              core.jit_statistics().invalidations == 1,
-          "Either program-alias store port excludes the complete native move pair");
 }
 
 void budgets_and_ram_end() {
@@ -493,9 +476,8 @@ void budgets_and_ram_end() {
   auto expected = state;
   expected.r[0] = memory_words;
   expected.pc = start + static_cast<Word>(program.size());
-  require(machine.core.run(8).dispatches == 8 && machine.core.registers() == expected &&
-              machine.x == expected_memory &&
-              machine.core.jit_statistics().native_move_instructions == 8,
+  require(machine.core.run(8).retired == 8 && machine.core.registers() == expected &&
+              machine.x == expected_memory,
           "Native store blocks include the final valid word with exact retirement");
   machine.x.fill(0);
   machine.core.set_registers(state);
@@ -506,7 +488,7 @@ void budgets_and_ram_end() {
   expected_memory[begin] = datum;
   expected_memory[begin + 1] = datum;
   expected_memory[begin + 2] = datum;
-  require(machine.core.run(0).dispatches == 0 && machine.core.run(3).dispatches == 3 &&
+  require(machine.core.run(0).retired == 0 && machine.core.run(3).retired == 3 &&
               machine.core.registers() == expected && machine.x == expected_memory &&
               machine.core.progress() == Progress{.instructions = 11, .estimated_cycles = 11},
           "A shorter warm-block budget commits only its admitted memory transfers");
@@ -531,14 +513,12 @@ int main() {
     dsp56300::test::program_alias(false);
     dsp56300::test::program_alias(true);
     dsp56300::test::budgets_and_ram_end();
-    for (const bool optimize : {false, true}) {
-      for (const bool ring : {false, true}) {
-        dsp56300::test::aliased_variants({.optimize = optimize, .ring = ring});
-      }
+    {
+      for (const bool ring : {false, true}) { dsp56300::test::aliased_variants({.ring = ring}); }
       constexpr dsp56300::Word ordinary_modifier = 19;
       for (const dsp56300::Word cursor : {3U, ordinary_modifier}) {
         dsp56300::test::aliased_variants(
-            {.optimize = optimize, .ring = true, .modifier = ordinary_modifier, .cursor = cursor});
+            {.ring = true, .modifier = ordinary_modifier, .cursor = cursor});
       }
     }
     dsp56300::test::ring_matrix();

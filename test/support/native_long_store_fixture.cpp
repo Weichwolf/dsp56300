@@ -2,6 +2,7 @@
 #include "native_long_store_fixture.hpp"
 
 #include "bfu_logic_model.hpp"
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "native_sequence_model.hpp"
@@ -121,7 +122,7 @@ Timing workload(const std::string_view domain, const bool long_store, const unsi
   }
   std::array<Word, words> x{};
   std::array<Word, words> y{};
-  Core cpu({.program = program, .x = x, .y = y}, nullptr, {.backend = Backend::jit});
+  TestCore cpu({.program = program, .x = x, .y = y}, nullptr, {.backend = Backend::jit});
   Timing result;
   for (unsigned sample = 0; sample <= repetitions * intervals; ++sample) {
     auto state = seed(input);
@@ -150,20 +151,17 @@ Timing workload(const std::string_view domain, const bool long_store, const unsi
     auto expected_y = y;
     expected_x.at(address) = data[0];
     expected_y.at(address) = data[1];
-    const auto before = cpu.jit_statistics();
+
     const auto start = std::chrono::steady_clock::now();
     const auto run = cpu.run(program.size());
     const auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - start);
-    require(run.dispatches == program.size() && run.fault.kind == FaultKind::none &&
+    require(run.retired == program.size() && run.fault.kind == FaultKind::none &&
                 cpu.registers() == state && x == expected_x && y == expected_y,
             "Shared long-store domain workload checks independently modeled full state and RAM");
-    const auto after = cpu.jit_statistics();
+
     if (sample == 0) { continue; }
     result.seconds += elapsed.count();
-    result.instructions += run.dispatches;
-    result.native += after.native_alu_instructions - before.native_alu_instructions;
-    result.moves += after.native_move_instructions - before.native_move_instructions;
-    result.helpers += after.helper_instructions - before.helper_instructions;
+    result.instructions += run.retired;
   }
   return result;
 }

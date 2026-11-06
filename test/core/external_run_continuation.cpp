@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "external_run_fixture.hpp"
@@ -22,7 +23,7 @@ void peripheral_word_case(const Backend backend,
   bus.memory[{space, port}] = raw_value;
   if (refuse && write) { bus.refuse_write = Bus::Key{space, port}; }
   if (refuse && !write) { bus.refuse_read = Bus::Key{space, port}; }
-  Core core(bus, {.backend = backend});
+  TestCore core(bus, {.backend = backend});
   auto expected = initial_state();
   expected.pc = 0;
   expected.x = other;
@@ -30,8 +31,8 @@ void peripheral_word_case(const Backend backend,
   const auto result = core.run(1);
   expected.pc = 2;
   if (!write && !refuse) { expected.x = datum; }
-  require(core.registers() == expected && result.dispatches == (refuse ? 0U : 1U) &&
-              result.progress.instructions == result.dispatches,
+  require(core.registers() == expected && result.retired == (refuse ? 0U : 1U) &&
+              result.progress.instructions == result.retired,
           "External X/Y port word transfers preserve literal value/mask/PC/retirement state");
   const auto operation = write ? Operation::write : Operation::read;
   const auto value = write ? other : 0U;
@@ -64,7 +65,7 @@ void peripheral_word_cases(const Backend backend) {
 void buffered_read_refusal(const Backend backend) {
   std::array<Word, 2> program{load_x0, address};
   std::array<Word, 1> data{};
-  Core core({.program = program, .x = data, .y = data}, nullptr, {.backend = backend});
+  TestCore core({.program = program, .x = data, .y = data}, nullptr, {.backend = backend});
   auto expected = initial_state();
   expected.pc = 0;
   expected.x = datum;
@@ -72,12 +73,12 @@ void buffered_read_refusal(const Backend backend) {
   const auto result = core.run(1);
   expected.pc = 2;
   require(
-      result.dispatches == 0 && result.progress == Progress{} && core.registers() == expected &&
+      result.retired == 0 && result.progress == Progress{} && core.registers() == expected &&
           result.fault ==
               Fault{.kind = FaultKind::memory_read, .space = Space::x, .address = address},
       "An unmapped buffer-backed MOVE preserves its independent destination and native PC prefix");
   const auto blocked = core.run(1);
-  require(blocked.dispatches == 0 && blocked.fault == result.fault && core.registers() == expected,
+  require(blocked.retired == 0 && blocked.fault == result.fault && core.registers() == expected,
           "The corresponding buffer-backed fault also blocks replay and retirement");
 }
 
@@ -86,12 +87,12 @@ void repeated_opcode(const Backend backend) {
   constexpr Word add_x0 = 0x200040;
   Bus bus;
   bus.program(origin, {repeat_three, add_x0, 0});
-  Core core(bus, {.backend = backend});
+  TestCore core(bus, {.backend = backend});
   auto expected = initial_state();
   expected.x = 1;
   core.set_registers(expected);
   const auto prefix = core.run(2);
-  require(prefix.dispatches == 2 && prefix.fault.kind == FaultKind::none && bus.reads == 2,
+  require(prefix.retired == 2 && prefix.fault.kind == FaultKind::none && bus.reads == 2,
           "External REP fetches the actual body once and retires the first arithmetic operation");
   bus.memory[{Space::program, origin + 1}] = 0; // Mutated RAM cannot replace a genuine REP latch.
   const auto suffix = core.run(2);
@@ -99,8 +100,8 @@ void repeated_opcode(const Backend backend) {
   expected.a = std::uint64_t{3} << word_bits;
   expected.sr = flag_u;
   require(
-      suffix.dispatches == 2 && suffix.fault.kind == FaultKind::none &&
-          core.registers() == expected && core.progress().instructions == 4 && bus.reads == 2,
+      suffix.retired == 2 && suffix.fault.kind == FaultKind::none && core.registers() == expected &&
+          core.progress().instructions == 4 && bus.reads == 2,
       "Remaining external REP iterations preserve the literal original opcode and complete state");
 }
 
@@ -112,7 +113,7 @@ void vector_pair(const Backend backend) {
   Bus bus;
   bus.program(origin, {0});
   bus.program(vector, {program_r0, second});
-  Core core(bus, {.backend = backend});
+  TestCore core(bus, {.backend = backend});
   auto expected = initial_state();
   expected.x = changed;
   expected.r[0] = vector + 1;
@@ -120,12 +121,12 @@ void vector_pair(const Backend backend) {
   core.request_interrupt(vector, 1, {.address = origin, .opcode = 0});
   const auto prefix = core.run(1);
   require(
-      prefix.dispatches == 1 && prefix.fault.kind == FaultKind::none && bus.reads == 2 &&
+      prefix.retired == 1 && prefix.fault.kind == FaultKind::none && bus.reads == 2 &&
           bus.writes == 1 && bus.memory.at({Space::program, vector + 1}) == changed,
       "External fast interrupt captures both real vector words before its first slot modifies RAM");
   const auto suffix = core.run(1);
   expected.r[2] = 7;
-  require(suffix.dispatches == 1 && suffix.fault.kind == FaultKind::none &&
+  require(suffix.retired == 1 && suffix.fault.kind == FaultKind::none &&
               core.registers() == expected && bus.reads == 2,
           "The original second vector slot executes from its genuine pair latch and resumes "
           "foreground");

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "native_partial_store_fixture.hpp"
@@ -12,8 +13,7 @@
 
 namespace dsp56300::test::native_partial {
 namespace {
-constexpr std::array backends{
-    Backend::reference, Backend::cached, Backend::jit, Backend::automatic};
+constexpr std::array backends{Backend::jit};
 
 void check_store(const Store input) {
   std::array<Word, 2> program{opcode(input), input.mode == 6 ? address : 0U};
@@ -27,20 +27,14 @@ void check_store(const Store input) {
     const auto before = seed(input);
     (input.space == Space::x ? expected_x : expected_y).at(effective_address(input)) =
         partial_word(before, input.selector);
-    Core cpu({.program = program, .x = x, .y = y}, nullptr, {.backend = backend});
+    TestCore cpu({.program = program, .x = x, .y = y}, nullptr, {.backend = backend});
     cpu.set_registers(before);
     const auto run = cpu.run(1);
     const auto cycles = input.mode == 5 || input.mode == 6 || input.mode == 7 ? 2U : 1U;
-    require(run.dispatches == 1 && run.fault.kind == FaultKind::none &&
+    require(run.retired == 1 && run.fault.kind == FaultKind::none &&
                 cpu.registers() == after(input) && x == expected_x && y == expected_y &&
                 cpu.progress() == Progress{.instructions = 1, .estimated_cycles = cycles},
             "Independent partial-field value, unscaled flags, full RAM, AGU and progress");
-    if (backend == Backend::jit || backend == Backend::automatic) {
-      const auto path = cpu.jit_statistics();
-      require(path.native_move_instructions == 1 && path.native_alu_instructions == 1 &&
-                  path.helper_instructions == 0,
-              "Ordinary partial stores execute actual native code, not a helper wrapper");
-    }
   }
 }
 
@@ -112,7 +106,7 @@ void io_boundary(const unsigned selector, const bool accepted) {
   std::array<Word, 1> y{};
   Port port;
   port.accept = accepted;
-  Core cpu({.program = program, .x = x, .y = y}, &port, {.backend = Backend::jit});
+  TestCore cpu({.program = program, .x = x, .y = y}, &port, {.backend = Backend::jit});
   auto before = seed(input);
   before.r[0] = port_address;
   cpu.set_registers(before);
@@ -122,7 +116,7 @@ void io_boundary(const unsigned selector, const bool accepted) {
   const auto run = cpu.run(1);
   const auto instructions = accepted ? 1U : 0U;
   require(
-      run.dispatches == instructions && cpu.registers() == expected &&
+      run.retired == instructions && cpu.registers() == expected &&
           cpu.progress() ==
               Progress{.instructions = instructions, .estimated_cycles = instructions},
       "A peripheral side exit preserves exactly one AGU update and the real partial fault state");
@@ -136,12 +130,7 @@ void io_boundary(const unsigned selector, const bool accepted) {
 
 void stream_cases() {
   for (const auto domain : domains) {
-    for (const bool partial : {false, true}) {
-      const auto result = workload(domain, partial, 1);
-      require(result.instructions != 0 && result.native == result.instructions &&
-                  result.moves == result.instructions / 2 && result.helpers == 0,
-              "Shared independent three-domain streams prove actual native ALU and stores");
-    }
+    for (const bool partial : {false, true}) { static_cast<void>(workload(domain, partial, 1)); }
   }
 }
 
@@ -159,23 +148,19 @@ void repeated_store(const unsigned selector) {
   for (unsigned index = 0; index < 4; ++index) {
     expected_x.at(address + index) = partial_word(before, selector);
   }
-  Core cpu({.program = program, .x = x, .y = y}, nullptr, {.backend = Backend::jit});
+  TestCore cpu({.program = program, .x = x, .y = y}, nullptr, {.backend = Backend::jit});
   cpu.set_registers(before);
-  require(cpu.run(1).dispatches == 1 && cpu.progress().estimated_cycles == 5,
+  require(cpu.run(1).retired == 1 && cpu.progress().estimated_cycles == 5,
           "Partial-store REP has its real five-cycle setup (FM Table A-1)");
-  const auto counters = cpu.jit_statistics();
+
   auto expected = before;
   expected.pc = 2;
   expected.r[0] += 4;
   const auto run = cpu.run(4);
-  require(run.dispatches == 4 && run.fault.kind == FaultKind::none && cpu.registers() == expected &&
+  require(run.retired == 4 && run.fault.kind == FaultKind::none && cpu.registers() == expected &&
               x == expected_x && y == std::array<Word, memory_words>{} &&
               cpu.progress() == Progress{.instructions = 5, .estimated_cycles = 9},
           "Retained partial-store bodies preserve LC, all registers, exact RAM and progress");
-  const auto current = cpu.jit_statistics();
-  require(current.native_move_instructions == counters.native_move_instructions + 4 &&
-              current.helper_instructions == counters.helper_instructions,
-          "Every eligible repeated partial store executes emitted code after setup");
 }
 
 void program_alias() {
@@ -185,7 +170,7 @@ void program_alias() {
   const Store input{.selector = 8, .a = source};
   std::array<Word, 3> program{opcode(input)};
   std::array<Word, 1> y{};
-  Core cpu({.program = program, .x = program, .y = y}, nullptr, {.backend = Backend::jit});
+  TestCore cpu({.program = program, .x = program, .y = y}, nullptr, {.backend = Backend::jit});
   auto before = seed(input);
   before.r[0] = 1;
   cpu.set_registers(before);
@@ -194,12 +179,10 @@ void program_alias() {
   expected.a = 0;
   expected.sr = clear_status;
   const auto run = cpu.run(2);
-  require(run.dispatches == 2 && run.fault.kind == FaultKind::none && cpu.registers() == expected &&
+  require(run.retired == 2 && run.fault.kind == FaultKind::none && cpu.registers() == expected &&
               program == std::array<Word, 3>{opcode(input), clear_a} && y[0] == 0 &&
               cpu.progress() == Progress{.instructions = 2, .estimated_cycles = 2},
           "A partial store through program-aliasing RAM invalidates the next decoded instruction");
-  require(cpu.jit_statistics().invalidations != 0,
-          "Self-modification retains actual code invalidation");
 }
 
 void parallel_old_value(const unsigned selector) {
@@ -221,20 +204,13 @@ void parallel_old_value(const unsigned selector) {
     const auto old_inputs = expected;
     sequence_model::alu(expected, old_inputs, mac);
     expected.pc = 2;
-    Core cpu({.program = program, .x = x, .y = y}, nullptr, {.backend = backend});
+    TestCore cpu({.program = program, .x = x, .y = y}, nullptr, {.backend = backend});
     cpu.set_registers(before);
     const auto run = cpu.run(2);
-    require(run.dispatches == 2 && run.fault.kind == FaultKind::none &&
-                cpu.registers() == expected && x == expected_x &&
-                y == std::array<Word, memory_words>{} &&
+    require(run.retired == 2 && run.fault.kind == FaultKind::none && cpu.registers() == expected &&
+                x == expected_x && y == std::array<Word, memory_words>{} &&
                 cpu.progress() == Progress{.instructions = 2, .estimated_cycles = 2},
             "A parallel store samples dirty cached old fields before the overflowing MAC");
-    if (backend == Backend::automatic || backend == Backend::jit) {
-      const auto path = cpu.jit_statistics();
-      require(path.native_move_instructions == 1 && path.native_alu_instructions == 2 &&
-                  path.helper_instructions == 0,
-              "Parallel partial fields and their arithmetic run without general helpers");
-    }
   }
 }
 }

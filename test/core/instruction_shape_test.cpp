@@ -17,7 +17,7 @@ struct Expected {
   bool repeatable;
 };
 
-// Independently encoded ISA forms; no assembler, device program or Core instance.
+// Independently encoded ISA forms; no assembler, device program or TestCore instance.
 constexpr std::array cases{
     Expected{.opcode = 0x000000, .kind = InstructionKind::nop, .words = 1, .repeatable = true},
     Expected{.opcode = 0x200040, .kind = InstructionKind::parallel, .words = 1, .repeatable = true},

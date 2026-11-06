@@ -67,8 +67,6 @@ static_assert(offsetof(Cpu, interrupt_inhibited) == offsetof(Cpu, repeat_complet
 }
 
 JitEmitter::JitEmitter(const JitRuntime runtime,
-                       const bool optimize,
-                       const BatchBackend batch,
                        const std::array<Word, agu_registers> modifiers,
                        const RegionMode region,
                        const LoopResidency residency,
@@ -77,8 +75,6 @@ JitEmitter::JitEmitter(const JitRuntime runtime,
                        const LoopWindowMode window)
     : runtime_(runtime),
       modifiers_(modifiers),
-      optimize_(optimize),
-      batch_backend_(batch),
       region_mode_(region),
       residency_mode_(residency),
       range_mode_(ranges),
@@ -96,8 +92,7 @@ bool JitEmitter::observable_moves(const NativeOp &operation) const {
          !plan_address_immediate(operation.instruction).valid();
 }
 
-bool JitEmitter::lowerable(const NativeOp &operation) const {
-  if (!optimize_) { return false; }
+bool JitEmitter::lowerable(const NativeOp &operation) {
   const auto &decoded = operation.instruction;
   if (at_loop_end(operation) && (operation.mode & compatibility_mode) != 0) { return false; }
   if (decoded.operation == Operation::nop) { return true; }

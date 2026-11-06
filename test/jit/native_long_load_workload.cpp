@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "native_long_load_fixture.hpp"
@@ -49,24 +50,21 @@ Timing workload(const std::string_view domain, const bool use_long, const unsign
     expected_alu(expected, old, alu);
     ++expected.pc;
   }
-  Core cpu({.program = program, .x = x, .y = y}, nullptr, {.backend = Backend::jit});
+  TestCore cpu({.program = program, .x = x, .y = y}, nullptr, {.backend = Backend::jit});
   Timing result;
   for (unsigned sample = 0; sample <= repetitions * intervals; ++sample) {
     cpu.set_registers(seed(input));
-    const auto old = cpu.jit_statistics();
+
     const auto before = std::chrono::steady_clock::now();
     const auto actual = cpu.run(static_cast<std::uint32_t>(program.size()));
     const auto after = std::chrono::steady_clock::now();
-    require(actual.dispatches == program.size() && actual.fault.kind == FaultKind::none &&
+    require(actual.retired == program.size() && actual.fault.kind == FaultKind::none &&
                 cpu.registers() == expected,
             "Shared long-load workload checks complete independent architectural state");
     if (sample == 0) { continue; }
     result.seconds += std::chrono::duration<double>(after - before).count();
-    const auto current = cpu.jit_statistics();
-    result.instructions += actual.dispatches;
-    result.native += current.native_alu_instructions - old.native_alu_instructions;
-    result.moves += current.native_move_instructions - old.native_move_instructions;
-    result.helpers += current.helper_instructions - old.helper_instructions;
+
+    result.instructions += actual.retired;
   }
   return result;
 }

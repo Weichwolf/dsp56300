@@ -32,7 +32,7 @@ std::vector<std::uint8_t> JitEmitter::generate(const std::span<const NativeOp> o
   if (region_mode_ == RegionMode::guarded) {
     region_ = plan_native_region(operations, runtime_.memory, modifiers_);
     if (!region_.valid ||
-        !std::ranges::all_of(operations, [this](const auto &op) { return lowerable(op); })) {
+        !std::ranges::all_of(operations, [](const auto &op) { return lowerable(op); })) {
       throw std::logic_error("Unproved native region");
     }
   }
@@ -51,8 +51,6 @@ JitEmitter::generate_selected(const std::span<const NativeOp> operations) {
   region_ = plan_native_region(operations, runtime_.memory, modifiers_);
   if (!region_.valid) { return ordinary; }
   JitEmitter fast(runtime_,
-                  optimize_,
-                  batch_backend_,
                   modifiers_,
                   RegionMode::guarded,
                   residency_mode_,

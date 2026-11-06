@@ -154,9 +154,9 @@ template <FixtureArchive Archive>
 void processing(Archive &archive, BinaryCase &item, const std::uint32_t version) {
   auto state = static_cast<std::uint32_t>(item.state);
   const auto maximum_state =
-      version == debugging_version ? ProcessingState::debugging : ProcessingState::stopped;
+      version == debugging_version ? ExecutionState::debugging : ExecutionState::stopped;
   archive.count(state, static_cast<std::uint32_t>(maximum_state));
-  item.state = static_cast<ProcessingState>(state);
+  item.state = static_cast<ExecutionState>(state);
   auto count = static_cast<std::uint32_t>(item.reset_actions.size());
   archive.count(count, maximum_reset_actions);
   item.reset_actions.resize(count);
@@ -181,7 +181,7 @@ template <FixtureArchive Archive> void debugging(Archive &archive, BinaryCase &i
 template <FixtureArchive Archive>
 void test_case(Archive &archive, BinaryCase &item, const std::uint32_t version) {
   if (version == legacy_version &&
-      (item.state != ProcessingState::running || !item.reset_actions.empty())) {
+      (item.state != ExecutionState::running || !item.reset_actions.empty())) {
     throw std::runtime_error("Processing expectations require fixture version 2");
   }
   if (version < debugging_version && (item.debug_interrupt_mode || item.debug != DebugStatus{})) {
@@ -195,7 +195,7 @@ void test_case(Archive &archive, BinaryCase &item, const std::uint32_t version) 
     }
   }
   archive.scalar(item.budget);
-  archive.scalar(item.dispatches);
+  archive.scalar(item.retired);
   archive.scalar(item.progress.instructions);
   archive.scalar(item.progress.estimated_cycles);
   auto kind = static_cast<std::uint32_t>(item.fault.kind);
@@ -213,9 +213,9 @@ void test_case(Archive &archive, BinaryCase &item, const std::uint32_t version) 
   archive.scalar(item.fault.address);
   archive.scalar(item.fault.value);
   archive.scalar(item.fault.pc);
-  std::uint32_t interruptible = item.interruptible ? 1U : 0U;
-  archive.count(interruptible, 1);
-  item.interruptible = interruptible != 0;
+  std::uint32_t interrupt_ready = item.interrupt_ready ? 1U : 0U;
+  archive.count(interrupt_ready, 1);
+  item.interrupt_ready = interrupt_ready != 0;
   if (version >= processing_version) { processing(archive, item, version); }
   if (version == debugging_version) { debugging(archive, item); }
   registers(archive, item.initial);

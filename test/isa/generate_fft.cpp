@@ -142,7 +142,7 @@ BinaryCase fixture(const Configuration config, Witness &witness) {
   item.expected.pc = start + static_cast<Word>(program.words.size());
   item.expected.sr = model.status;
   item.progress = program.progress;
-  item.dispatches = item.budget = static_cast<Word>(program.progress.instructions);
+  item.retired = item.budget = static_cast<Word>(program.progress.instructions);
   item.before.push_back({.words = program.words, .address = start});
   memory(item, input, model);
   return item;

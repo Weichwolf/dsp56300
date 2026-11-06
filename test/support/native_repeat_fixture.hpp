@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 #include "bfu_logic_model.hpp"
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "external_run_fixture.hpp"
@@ -31,7 +32,7 @@ public:
   std::uint64_t revision = 0;
   unsigned program_reads = 0, reads = 0, writes = 0;
   bool grant = true, visible = true, yield = false;
-  Core *owner = nullptr;
+  TestCore *owner = nullptr;
 
   [[nodiscard]] std::optional<Word> inspect_program(const Word address) const noexcept override {
     return visible && address < program.size() ? std::optional(program[address]) : std::nullopt;

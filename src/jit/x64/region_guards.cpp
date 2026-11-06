@@ -24,7 +24,6 @@ constexpr auto r_offset = offsetof(Cpu, reg) + offsetof(Registers, r);
 constexpr auto n_offset = offsetof(Cpu, reg) + offsetof(Registers, n);
 constexpr auto m_offset = offsetof(Cpu, reg) + offsetof(Registers, m);
 constexpr auto lc_offset = offsetof(Cpu, reg) + offsetof(Registers, lc);
-constexpr Word maximum_operations = 256;
 
 void modifier_guard(x64::Code &code,
                     const Reg cpu,
@@ -129,7 +128,7 @@ void emit_region_window(x64::Code &code,
                         const NativeRegion &region,
                         const Word operations,
                         x64::Label &failed) {
-  if (!region.valid || !region.loop || operations == 0 || operations > maximum_operations) {
+  if (!region.valid || !region.loop || operations == 0 || operations > address_words) {
     throw std::logic_error("Unproved loop window");
   }
   code.load(Reg::cx, Reg::r12, lc_offset, Width::dword);

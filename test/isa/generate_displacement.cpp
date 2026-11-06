@@ -212,8 +212,8 @@ void repeated(Cases &cases, const Input input) {
     const bool completed = budget == count + 1;
     item.expected.pc = start + (completed ? 2U : 1U);
     item.expected.lc = completed ? item.initial.lc : count + 1 - budget;
-    item.interruptible = completed;
-    item.budget = item.dispatches = budget;
+    item.interrupt_ready = completed;
+    item.budget = item.retired = budget;
     item.progress = {.instructions = budget, .estimated_cycles = 5 + (2 * (budget - 1))};
     item.name = "REP short displaced MOVE preserves address source and uses current data";
     cases.push_back(std::move(item));
@@ -280,7 +280,7 @@ void sequences(Cases &cases, const Input input) {
     const Word move_cycles = input.long_form ? 3U : 2U;
     item.progress.estimated_cycles += displaced ? move_cycles : 1U;
     ++item.budget;
-    item.dispatches = item.budget;
+    item.retired = item.budget;
     item.progress.instructions = item.budget;
     cases.push_back(item);
     if (words == 2) { ++index; }
@@ -311,9 +311,9 @@ void interactions(Cases &cases, const bool long_form) {
 }
 
 void reject(Cases &cases, BinaryCase item, const FaultKind kind, const Word value) {
-  item.dispatches = 0;
+  item.retired = 0;
   item.progress = {};
-  item.interruptible = false;
+  item.interrupt_ready = false;
   item.fault = {.kind = kind, .address = start, .value = value, .pc = start};
   item.name = "Displaced MOVE explicit invalid/unsupported/fetch boundary";
   cases.push_back(std::move(item));
@@ -360,9 +360,9 @@ void faults(Cases &cases, const bool long_form) {
   multiword.before.front().words.insert(multiword.before.front().words.begin(),
                                         repeat_base | (2U << 8));
   multiword.budget = 3;
-  multiword.dispatches = 1;
+  multiword.retired = 1;
   multiword.progress = {.instructions = 1, .estimated_cycles = 5};
-  multiword.interruptible = false;
+  multiword.interrupt_ready = false;
   multiword.fault = {.kind = FaultKind::invalid_instruction,
                      .address = start + 1,
                      .value = invalid,

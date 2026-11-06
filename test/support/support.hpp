@@ -25,16 +25,6 @@ inline constexpr Word mode_rm = Word{1} << 21;
 inline constexpr Word status_byte = 0xff;
 inline std::size_t checks = 0;
 
-constexpr std::string_view backend_name(const Backend backend) {
-  switch (backend) {
-    case Backend::automatic: return "automatic";
-    case Backend::reference: return "reference";
-    case Backend::cached: return "cached";
-    case Backend::jit: return "jit";
-    default: return "invalid";
-  }
-}
-
 inline void require(const bool condition, const std::string_view message) {
   ++checks;
   if (!condition) { throw std::runtime_error(std::string(message)); }

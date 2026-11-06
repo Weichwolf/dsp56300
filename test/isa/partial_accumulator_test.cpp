@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "support.hpp"
@@ -127,12 +128,12 @@ Registers expected(const Registers &before, const Encoding input) {
   return result;
 }
 
-void check(Core &core, const Encoding input, const Registers &state) {
+void check(TestCore &core, const Encoding input, const Registers &state) {
   ++cases;
   core.set_registers(state);
   const auto before = core.progress();
   const auto run = core.run(1);
-  require(run.dispatches == 1 && run.fault.kind == FaultKind::none,
+  require(run.retired == 1 && run.fault.kind == FaultKind::none,
           "A legal parallel partial-word operation retires without a fault");
   const auto wanted = expected(state, input);
   if (core.registers() != wanted) {
@@ -146,7 +147,7 @@ void check(Core &core, const Encoding input, const Registers &state) {
           "A partial-word instruction changes retirement exactly once");
 }
 
-void values(Core &core, const Encoding input) {
+void values(TestCore &core, const Encoding input) {
   constexpr std::array mains{Word{0}, Word{1}, Word{0x7fffff}, sign24, word_mask, Word{0x13579b}};
   constexpr std::array payloads{Word{0}, Word{0x2468ac}, word_mask};
   for (const auto main : mains) {
@@ -170,18 +171,13 @@ void values(Core &core, const Encoding input) {
 
 struct Configuration {
   Backend backend;
-  bool optimize;
 };
 
 void backend(const Configuration configuration) {
   std::array<Word, 16> p{};
   std::array<Word, 16> x{};
   std::array<Word, 16> y{};
-  Core core({.program = p, .x = x, .y = y},
-            nullptr,
-            {.backend = configuration.backend,
-             .instructions_per_block = 1,
-             .optimize = configuration.optimize});
+  TestCore core({.program = p, .x = x, .y = y}, nullptr, {.backend = configuration.backend});
   for (const auto operation : operations) {
     for (const bool b : {false, true}) {
       for (const auto part : parts) {
@@ -205,7 +201,7 @@ void literal() {
   std::array<Word, 16> x{};
   std::array<Word, 16> y{};
   p[1] = opcode;
-  Core core({.program = p, .x = x, .y = y});
+  TestCore core({.program = p, .x = x, .y = y});
   auto state = initial_state();
   state.pc = 1;
   state.b = old_b;
@@ -218,7 +214,7 @@ void literal() {
   const auto run = core.run(1);
   state.pc = 2;
   state.b = new_b;
-  require(run.dispatches == 1 && run.fault.kind == FaultKind::none && core.registers() == state,
+  require(run.retired == 1 && run.fault.kind == FaultKind::none && core.registers() == state,
           "Literal EOR X0,B / Y0->B0 red input retains its independently expected full state");
 }
 } // namespace
@@ -227,11 +223,7 @@ void literal() {
 int main() {
   try {
     using namespace dsp56300;
-    constexpr std::array configurations{
-        test::Configuration{.backend = Backend::reference, .optimize = true},
-        test::Configuration{.backend = Backend::cached, .optimize = true},
-        test::Configuration{.backend = Backend::jit, .optimize = false},
-        test::Configuration{.backend = Backend::jit, .optimize = true}};
+    constexpr std::array configurations{test::Configuration{.backend = Backend::jit}};
     test::literal();
     for (const auto configuration : configurations) { test::backend(configuration); }
     std::cout << test::checks << " partial accumulator assertions passed across " << test::cases

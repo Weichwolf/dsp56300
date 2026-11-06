@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "support.hpp"
@@ -53,7 +54,7 @@ class Port final : public Io {
 public:
   explicit Port(const Event expected) : expected_(expected) {}
 
-  Core *core = nullptr;
+  TestCore *core = nullptr;
   unsigned calls = 0;
   bool valid = true, mutate = false, reentry_rejected = false;
   Event expected_;
@@ -96,7 +97,7 @@ struct Machine {
   }
 
   std::array<Word, memory_words> p{}, x{}, y{};
-  Core core;
+  TestCore core;
 };
 
 struct PortCase {
@@ -138,7 +139,7 @@ void port_case(const Backend backend, const PortCase &input) {
   } else {
     state.sr = (state.sr & ~flag_c) | (input.previous ? flag_c : 0U);
   }
-  require(result.dispatches == 1 && result.fault.kind == FaultKind::none &&
+  require(result.retired == 1 && result.fault.kind == FaultKind::none &&
               result.progress == Progress{.instructions = 1, .estimated_cycles = cycles} &&
               machine.core.registers() == state && io.valid && io.calls == 1,
           "Bit I/O uses one correctly addressed action callback and complete architectural state");
@@ -185,7 +186,7 @@ void effective_port(const Backend backend) {
   state.pc = start + 1;
   state.r[0] = low_begin + 1;
   state.sr = flag_c;
-  require(result.dispatches == 1 && result.fault.kind == FaultKind::none &&
+  require(result.retired == 1 && result.fault.kind == FaultKind::none &&
               machine.core.registers() == state && io.valid && io.calls == 1,
           "A direct EA reaching I/O uses the atomic callback and performs its update once");
 }
@@ -196,7 +197,7 @@ void rejected_port(const Backend backend) {
   constexpr Word change_port = 0x0b8017;
   machine.core.write(Space::program, start, change_port);
   const auto result = machine.core.run(1);
-  require(result.dispatches == 0 && result.progress == Progress{} &&
+  require(result.retired == 0 && result.progress == Progress{} &&
               result.fault == Fault{.kind = FaultKind::io_bit,
                                     .space = Space::x,
                                     .address = high_begin,
@@ -204,7 +205,7 @@ void rejected_port(const Backend backend) {
                                     .pc = start} &&
               io.valid && io.calls == 1,
           "Rejected bit I/O reports exact context without retiring");
-  require(machine.core.run(1).dispatches == 0 && io.calls == 1,
+  require(machine.core.run(1).retired == 0 && io.calls == 1,
           "Faulted bit I/O does not invoke the host again");
 }
 
@@ -217,7 +218,7 @@ void invalid_bit(const Backend backend) {
   state.r[0] = low_begin;
   machine.core.set_registers(state);
   const auto result = machine.core.run(1);
-  require(result.dispatches == 0 && result.fault.kind == FaultKind::invalid_instruction &&
+  require(result.retired == 0 && result.fault.kind == FaultKind::invalid_instruction &&
               result.fault.value == invalid && io.calls == 0 &&
               machine.core.registers().r[0] == low_begin,
           "An invalid bit number faults before an address update or host callback");
@@ -238,7 +239,7 @@ void invalidation(const Backend backend) {
   const auto result = machine.core.run(2);
   state.pc = start + 2;
   require(
-      result.dispatches == 2 && result.fault.kind == FaultKind::none &&
+      result.retired == 2 && result.fault.kind == FaultKind::none &&
           machine.core.registers() == state && io.valid && io.calls == 1 && io.reentry_rejected,
       "Bit callbacks may change P but cannot reenter execution; stale successors are discarded");
 }
@@ -257,7 +258,7 @@ void mode_change(const Backend backend) {
   state.pc = start + 2;
   state.a = std::uint64_t{1} << word_bits;
   state.sr = mode_rm | flag_u | flag_c;
-  require(result.dispatches == 2 && result.fault.kind == FaultKind::none &&
+  require(result.retired == 2 && result.fault.kind == FaultKind::none &&
               machine.core.registers() == state,
           "BSET SR preserves C and exits a block before arithmetic in the changed mode");
 }
@@ -266,8 +267,7 @@ void mode_change(const Backend backend) {
 
 int main() {
   try {
-    for (const auto backend :
-         {dsp56300::Backend::reference, dsp56300::Backend::cached, dsp56300::Backend::jit}) {
+    for (const auto backend : {dsp56300::Backend::jit}) {
       for (dsp56300::Word index = 0; index < 64; ++index) {
         dsp56300::test::addressed_ports(backend, index);
       }

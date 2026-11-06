@@ -71,7 +71,6 @@ void JitEmitter::register_move(const NativeRegisterMove &move, const Word mode) 
   capture_inputs();
   move_read_register(Reg::si, {.address = {}, .reg = move.source}, mode);
   move_write_register(Reg::si, move.destination);
-  count_move();
 }
 
 void JitEmitter::move_guards(const NativeMoves &moves, x64::Label &slow) {
@@ -98,7 +97,6 @@ void JitEmitter::move_values(const NativeMoves &moves, const Word mode) {
   } else {
     for (const auto &move : transfers) { move_commit(move); }
   }
-  count_move();
 }
 
 void JitEmitter::moves(const NativeOp &operation) {

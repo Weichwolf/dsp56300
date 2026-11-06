@@ -24,8 +24,10 @@ consumer: borrowed memory, peripherals, events and virtual time
 
 The public surface consists of core.hpp and memory.hpp. ISA encodings live in
 test/support/isa.hpp; production decoding/transfer helpers stay private. Core owns
-all architectural state and translations. Optional read-only state inspection is
-available at execution-owner boundaries; it does not copy state on every step.
+all architectural state and translations. Both cores use `run()`, `step()`,
+`state()`, `registers()` and `set_registers()`. DSP state inspection converts
+internal padded accumulators only when requested; ordinary execution does not
+copy an inspection snapshot.
 There are no checkpoint, restore, pipeline-ticket or backend-selection APIs.
 Production execution is JIT-only. Unsupported operations fail visibly with PC,
 operation, address and context; an interpreter or instruction helper is not a
@@ -65,6 +67,10 @@ for every instruction or loop iteration. Mutable link data is separate from
 immutable machine code. Preserve the register convention across linked regions.
 Place connected hot regions together and move fault/diagnostic paths out of line.
 Align deliberately; measure code expansion and instruction-cache behavior.
+
+Keep translations in memory. A persistent disk cache is a last resort only if
+measured first-use latency remains unacceptable after optimizing compilation.
+Avoid serialization, cache keys and compatibility machinery without that evidence.
 
 ## Warm path: keep values in host registers
 

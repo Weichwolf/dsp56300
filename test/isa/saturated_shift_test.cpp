@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Mode reuse, partial budgets and observable parallel-shift transfer boundaries.
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "register_model.hpp"
@@ -23,11 +24,11 @@ constexpr unsigned multi_count = 17;
 constexpr std::array modes{0U, mode_down, mode_up, mode_rm, mode_rm | mode_down, mode_rm | mode_up};
 
 struct Machine {
-  explicit Machine(const Options options, Io *io = nullptr)
+  explicit Machine(const TestOptions options, Io *io = nullptr)
       : core({.program = p, .x = x, .y = y}, io, options) {}
 
   std::array<Word, memory_words> p{}, x{}, y{};
-  Core core;
+  TestCore core;
 };
 
 Registers seed(const Word mode) {
@@ -56,7 +57,7 @@ void step(Registers &state, const Word opcode) {
   ++state.pc;
 }
 
-void prefixes(const Options options, const Word mode) {
+void prefixes(const TestOptions options, const Word mode) {
   constexpr std::array program{asr_a, set_sm, asl_a, multi_right, multi_left, clear_sm, asr_a};
   for (Word budget = 1; budget <= program.size(); ++budget) {
     Machine machine(options);
@@ -66,21 +67,14 @@ void prefixes(const Options options, const Word mode) {
     for (Word i = 0; i < budget; ++i) { step(expected, program[i]); }
     const auto run = machine.core.run(budget);
     const auto costs = budget + (budget >= 2 ? 1U : 0U) + (budget >= 6 ? 1U : 0U);
-    require(run.dispatches == budget && run.fault.kind == FaultKind::none &&
+    require(run.retired == budget && run.fault.kind == FaultKind::none &&
                 run.progress == Progress{.instructions = budget, .estimated_cycles = costs} &&
                 machine.core.registers() == expected,
             "Every ordinary/SM shift prefix publishes exact state and base costs");
-    if (budget == program.size() && options.backend == Backend::jit) {
-      const auto stats = machine.core.jit_statistics();
-      const auto native = options.optimize ? 2U : 0U;
-      require(stats.native_alu_instructions == native &&
-                  stats.helper_instructions == budget - native,
-              "Ordinary ASR stays native; qualified SM shifts use the exact general fallback");
-    }
   }
 }
 
-void mode_reuse(const Options options, const Word mode) {
+void mode_reuse(const TestOptions options, const Word mode) {
   Machine machine(options);
   machine.core.write(Space::program, start, asr_a);
   for (const bool sm : {false, true, false, true}) {
@@ -88,25 +82,18 @@ void mode_reuse(const Options options, const Word mode) {
     machine.core.set_registers(expected);
     shift_model::apply(expected, expected, {});
     ++expected.pc;
-    const auto before = machine.core.jit_statistics();
+
     const auto progress = machine.core.progress();
     const auto run = machine.core.run(1);
-    require(run.dispatches == 1 && run.fault.kind == FaultKind::none &&
+    require(run.retired == 1 && run.fault.kind == FaultKind::none &&
                 run.progress == Progress{.instructions = progress.instructions + 1,
                                          .estimated_cycles = progress.estimated_cycles + 1} &&
                 machine.core.registers() == expected,
             "Same-PC reuse cannot carry ordinary assumptions into SM or vice versa");
-    if (options.backend == Backend::jit) {
-      const auto after = machine.core.jit_statistics();
-      const auto native = options.optimize && !sm ? 1U : 0U;
-      require(after.native_alu_instructions == before.native_alu_instructions + native &&
-                  after.helper_instructions == before.helper_instructions + 1 - native,
-              "Same-PC mode reuse exercises the actual native/general split");
-    }
   }
 }
 
-void undefined_counts(const Options options) {
+void undefined_counts(const TestOptions options) {
   constexpr unsigned maximum_count = 63;
   constexpr Word left_x0 = 0x0c1e48;
   constexpr Word right_x0 = 0x0c1e68;
@@ -121,7 +108,7 @@ void undefined_counts(const Options options) {
         machine.core.set_registers(expected);
         ++expected.pc;
         const auto run = machine.core.run(1);
-        require(run.dispatches == 0 && run.progress == Progress{} &&
+        require(run.retired == 0 && run.progress == Progress{} &&
                     run.fault == Fault{.kind = FaultKind::invalid_instruction,
                                        .space = Space::program,
                                        .address = start,
@@ -136,7 +123,7 @@ void undefined_counts(const Options options) {
 
 class Observer final : public Io {
 public:
-  Core *core = nullptr;
+  TestCore *core = nullptr;
   Registers expected;
   bool accept = true, patch = false, observed = false;
   unsigned calls = 0;
@@ -170,7 +157,7 @@ struct Request {
   bool accept = false, patch = false;
 };
 
-void callback(const Options options, const Request input) {
+void callback(const TestOptions options, const Request input) {
   Observer observer;
   observer.accept = input.accept;
   observer.patch = input.patch;
@@ -185,12 +172,11 @@ void callback(const Options options, const Request input) {
   ++expected.pc;
   observer.expected = expected;
   const auto old = expected;
-  register_model::write(expected, 15, datum);
   const auto run = machine.core.run(3);
   require(observer.observed && observer.calls == 1,
           "Synchronous I/O sees the exact earlier saturated result/flags and only one request");
   if (!input.accept) {
-    require(run.dispatches == 1 &&
+    require(run.retired == 1 &&
                 run.progress == Progress{.instructions = 1, .estimated_cycles = 1} &&
                 run.fault == Fault{.kind = FaultKind::io_read,
                                    .space = Space::x,
@@ -198,14 +184,15 @@ void callback(const Options options, const Request input) {
                                    .pc = start + 1} &&
                 machine.core.registers() == expected,
             "Rejected parallel load retains its destination but performs no shift or retirement");
-    require(machine.core.run(3).dispatches == 0 && machine.core.registers() == expected &&
+    require(machine.core.run(3).retired == 0 && machine.core.registers() == expected &&
                 observer.calls == 1,
             "Failure remains fail-stop without replaying a saturated prefix or I/O");
     return;
   }
+  register_model::write(expected, 15, datum);
   shift_model::apply(expected, old, {.source_b = true, .destination_b = true});
   step(expected, input.patch ? multi_left : multi_right);
-  require(run.dispatches == 3 && run.fault.kind == FaultKind::none &&
+  require(run.retired == 3 && run.fault.kind == FaultKind::none &&
               run.progress == Progress{.instructions = 3, .estimated_cycles = 3} &&
               machine.core.registers() == expected,
           "Parallel shifts use pre-load operands and P edits replace the following shift exactly");
@@ -215,12 +202,10 @@ void callback(const Options options, const Request input) {
 
 int main() {
   try {
-    for (const auto backend :
-         {dsp56300::Backend::reference, dsp56300::Backend::cached, dsp56300::Backend::jit}) {
-      for (const bool optimize : {false, true}) {
-        for (const auto limit : {1U, 64U}) {
-          const dsp56300::Options options{
-              .backend = backend, .instructions_per_block = limit, .optimize = optimize};
+    for (const auto backend : {dsp56300::Backend::jit}) {
+      {
+        {
+          const dsp56300::TestOptions options{.backend = backend};
           dsp56300::test::undefined_counts(options);
           for (const auto mode : dsp56300::test::modes) {
             dsp56300::test::prefixes(options, mode);

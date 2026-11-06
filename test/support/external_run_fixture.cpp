@@ -2,6 +2,8 @@
 #include "external_run_fixture.hpp"
 
 #include "bfu_logic_model.hpp"
+#include "codegen_observer.hpp"
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "native_sequence_model.hpp"
@@ -88,12 +90,12 @@ void Bus::program(const Word first, const std::initializer_list<Word> words) {
 
 namespace {
 
-void execute_synchronous(Core &core, const unsigned count, const bool single_step) {
+void execute_synchronous(TestCore &core, const unsigned count, const bool single_step) {
   const auto calls = single_step ? count : 1U;
   for (unsigned index = 0; index < calls; ++index) {
     const auto budget = single_step ? 1U : count;
     const auto result = core.run(budget);
-    require(result.fault.kind == FaultKind::none && result.dispatches == budget,
+    require(result.fault.kind == FaultKind::none && result.retired == budget,
             "The authored synchronous workload retires its complete real instruction budget");
   }
 }
@@ -119,7 +121,8 @@ Timing workload(const Workload input, const Backend backend, const bool single_s
   for (unsigned index = 0; index < count; ++index) {
     bus.memory[{Space::program, origin + index}] = input.opcode;
   }
-  Core core(bus, {.backend = backend});
+  const auto published = codegen::publications();
+  TestCore core(bus, {.backend = backend});
   auto initial = initial_state();
   initial.x = input.x;
   initial.y = input.y;
@@ -135,8 +138,8 @@ Timing workload(const Workload input, const Backend backend, const bool single_s
       "Independent raw56 arithmetic/bit expectations include every register, flag and retirement");
   require(bus.reads == count && bus.writes == 0 && bus.bits == 0 && bus.resets == 0,
           "Each uncached opcode has one real P read and no fabricated data/peripheral operations");
-  require(core.jit_statistics().compiled_blocks == 0,
-          "External memory execution makes no native-JIT claim");
+  require(codegen::publications() == published,
+          "An uninspectable program publishes no native code");
   return {.seconds = seconds, .instructions = count, .reads = bus.reads};
 }
 
@@ -144,7 +147,7 @@ Timing captured_workload(const Workload input, const Backend backend, const bool
   constexpr unsigned count = 4096;
   Bus bus;
   bus.record = false;
-  Core core(bus, {.backend = backend});
+  TestCore core(bus, {.backend = backend});
   auto initial = initial_state();
   initial.sr = cache_enabled ? ce : 0U;
   initial.x = input.x;
@@ -153,8 +156,7 @@ Timing captured_workload(const Workload input, const Backend backend, const bool
   const auto expected = expected_workload(initial, input, count);
   const auto begin = std::chrono::steady_clock::now();
   for (unsigned index = 0; index < count; ++index) {
-    require(core.run_instruction({.address = origin + index, .opcode = input.opcode}).dispatches ==
-                1,
+    require(core.run_instruction({.address = origin + index, .opcode = input.opcode}).retired == 1,
             "The supplied real opcode retires once without a program fetch");
   }
   const auto seconds =

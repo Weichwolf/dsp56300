@@ -13,7 +13,7 @@ namespace dsp56300 {
 using namespace detail;
 
 ProgramCache &Core::Impl::program_cache() {
-  if (!icache) { icache = std::make_unique<ProgramCache>(options.cache_sector_words); }
+  if (!icache) { icache = std::make_unique<ProgramCache>(buffers.cache.sector_words); }
   return *icache;
 }
 
@@ -34,11 +34,11 @@ Word Core::Impl::fetch_program(const Word address) {
           ? program_cache().fetch(address,
                                   address_words,
                                   (cpu.reg.omr & burst_enable) != 0,
-                                  options.cacheable_end,
+                                  buffers.cache.end,
                                   read,
                                   this)
           : program_cache().fetch(
-                address, buffers.program, (cpu.reg.omr & burst_enable) != 0, options.cacheable_end);
+                address, buffers.program, (cpu.reg.omr & burst_enable) != 0, buffers.cache.end);
   if (!value) {
     fail(FaultKind::memory_read, Space::program, address);
     return 0;

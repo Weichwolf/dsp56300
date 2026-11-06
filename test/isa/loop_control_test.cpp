@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "register_model.hpp"
@@ -28,7 +29,7 @@ class CountIo final : public Io {
 public:
   explicit CountIo(const Request request) : request_(request) {}
 
-  void attach(Core &core) { core_ = &core; }
+  void attach(TestCore &core) { core_ = &core; }
 
   [[nodiscard]] bool observed() const { return observed_; }
 
@@ -71,7 +72,7 @@ public:
 
 private:
   Request request_;
-  Core *core_ = nullptr;
+  TestCore *core_ = nullptr;
   bool observed_ = false;
   unsigned calls_ = 0;
 };
@@ -81,7 +82,7 @@ struct Machine {
       : core({.program = p, .x = x, .y = y}, io, {.backend = backend}) {}
 
   std::array<Word, memory_words> p{}, x{}, y{};
-  Core core;
+  TestCore core;
 };
 
 void port_count(const Backend backend, const Request request) {
@@ -110,7 +111,7 @@ void port_count(const Backend backend, const Request request) {
   require(io.calls() == 1 && io.observed(),
           "Loop count reads one real host response at the specified EA/first-push boundary");
   if (!request.accept) {
-    require(entry.dispatches == 0 && entry.progress == Progress{} &&
+    require(entry.retired == 0 && entry.progress == Progress{} &&
                 entry.fault == Fault{.kind = FaultKind::io_read,
                                      .space = request.space,
                                      .address = request.port,
@@ -118,14 +119,14 @@ void port_count(const Backend backend, const Request request) {
             "Rejected count response cannot retire or fabricate a count");
     return;
   }
-  require(entry.dispatches == 1 && entry.fault.kind == FaultKind::none &&
+  require(entry.retired == 1 && entry.fault.kind == FaultKind::none &&
               machine.core.registers().lc == source_count &&
-              machine.core.interruptible() != request.repeat,
+              machine.core.interrupt_ready() != request.repeat,
           "Loop count response is masked to 24 bits with correct REP interrupt exclusion");
   if (request.replace) {
     const auto next = machine.core.run(1);
     require(
-        next.dispatches == 1 && next.fault.kind == FaultKind::none && io.calls() == 1,
+        next.retired == 1 && next.fault.kind == FaultKind::none && io.calls() == 1,
         "Count callback can invalidate the fetched block's successor before its first execution");
   }
 }
@@ -155,12 +156,12 @@ void sequential_repeats(const Backend backend) {
   machine.core.set_registers(state);
   for (unsigned part = 0; part < 4; ++part) {
     const auto header = machine.core.run(1);
-    require(header.dispatches == 1 && header.fault.kind == FaultKind::none &&
-                !machine.core.interruptible(),
+    require(header.retired == 1 && header.fault.kind == FaultKind::none &&
+                !machine.core.interrupt_ready(),
             "Every REP form starts an uninterruptible interval");
     const auto body = machine.core.run(part == 0 ? 1U : 2U);
     require(body.fault.kind == FaultKind::none && machine.core.registers().lc == state.lc &&
-                machine.core.interruptible() == (part == 3),
+                machine.core.interrupt_ready() == (part == 3),
             "Consecutive immediate/register/short/EA REP excludes IRQs until the whole chain ends");
   }
 }
@@ -192,7 +193,7 @@ void warm_endings(const Backend backend) {
         const auto before = machine.core.progress();
         const auto result = machine.core.run(budget);
         require(
-            result.dispatches == budget && result.fault.kind == FaultKind::none &&
+            result.retired == budget && result.fault.kind == FaultKind::none &&
                 machine.core.registers() == expected &&
                 result.progress.instructions - before.instructions == budget &&
                 result.progress.estimated_cycles - before.estimated_cycles == budget,
@@ -206,8 +207,7 @@ void warm_endings(const Backend backend) {
 
 int main() {
   try {
-    for (const auto backend :
-         {dsp56300::Backend::reference, dsp56300::Backend::cached, dsp56300::Backend::jit}) {
+    for (const auto backend : {dsp56300::Backend::jit}) {
       dsp56300::test::ports(backend);
       dsp56300::test::sequential_repeats(backend);
       dsp56300::test::warm_endings(backend);

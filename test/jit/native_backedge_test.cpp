@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "architecture.hpp"
+#include "codegen_observer.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "jit.hpp"
@@ -111,8 +112,9 @@ void arithmetic(const std::vector<Step> &body, const Word mode) {
     if (step.immediate) { program.at(cursor++) = immediate; }
   }
   detail::Cpu cpu;
-  detail::Jit jit(cpu, program, {.backend = Backend::jit}, {});
+  detail::Jit jit(cpu, program, {});
   const auto size = static_cast<Word>(body.size());
+  const auto published = codegen::publications();
   // Prime a complete body, then reuse it across LC, SP, frame and budget changes.
   cpu.reg = initial(body, mode, {.count = 3});
   cpu.reg.a <<= detail::padding_bits;
@@ -139,7 +141,7 @@ void arithmetic(const std::vector<Step> &body, const Word mode) {
   check_case(jit, cpu, body, initial(body, mode, {.count = word_mask}), size * 3);
   const auto compiled = size == 1 ? 1U : 2U;
   require(
-      jit.statistics().compiled_blocks == compiled,
+      codegen::publications().count == published.count + compiled,
       "Complete body and one short prefix compile once across LC, frame, SP and budget changes");
 }
 } // namespace

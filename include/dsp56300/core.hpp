@@ -16,15 +16,8 @@ inline constexpr std::uint64_t accumulator_mask = 0x00ffffffffffffff;
 inline constexpr std::size_t agu_registers = 8;
 inline constexpr std::size_t stack_entries = 16;
 
-enum class Backend : std::uint8_t { cached, reference, jit, automatic };
-enum class BatchBackend : std::uint8_t { automatic, disabled, scalar, avx2 };
-enum class ProcessingState : std::uint8_t { running, waiting, stopped, debugging };
+enum class ExecutionState : std::uint8_t { running, waiting, stopped, debugging };
 
-// Qualified IME/SWO view, not a complete OnCE register or JTAG implementation.
-struct DebugStatus {
-  bool interrupt_mode = false, software_occurrence = false;
-  bool operator==(const DebugStatus &) const = default;
-};
 enum class BitAction : std::uint8_t { test, clear, set, change };
 enum class FaultKind : std::uint8_t {
   none,
@@ -67,55 +60,22 @@ struct Fault {
 };
 
 struct RunResult {
-  // Legacy name: the number of retired guest instructions, on every backend.
-  std::uint32_t dispatches = 0;
+  // Number of retired guest instructions.
+  std::uint32_t retired = 0;
   // Sleeping returns early without a fault; further run calls retire nothing.
-  ProcessingState state = ProcessingState::running;
+  ExecutionState state = ExecutionState::running;
   Progress progress;
   Fault fault;
   bool yielded = false;
 };
 
-struct RunBudget {
-  std::uint32_t instructions = 0;
-  std::uint64_t cycles = 0;
-};
-
-enum class RunStop : std::uint8_t {
-  instruction_budget,
-  cycle_budget,
-  external_effect,
-  unknown_code,
-  control_event,
-  state,
-  yielded,
-  fault
-};
-
-struct Options {
-  Backend backend = Backend::automatic;
-  // Zero follows control flow and available code; nonzero limits test partitions.
-  // A native hardware-loop backedge can repeat the body within the run budget.
-  Word instructions_per_block = 0;
-  // False keeps generated blocks but executes every operation through the helpers.
-  bool optimize = true;
-  // Half-open external P interval eligible for the architectural instruction cache.
-  // Empty by default: the embedder must declare its derivative's external map.
-  Word cacheable_begin = address_words, cacheable_end = address_words;
-  // Eight sectors, each 128 (1K total) or 256 (2K total) DSP words.
-  unsigned cache_sector_words = 128;
-  // Guarded native MAC-loop batches. Unavailable AVX2 uses the scalar kernel.
-  BatchBackend batch_backend = BatchBackend::automatic;
-};
-
-struct JitStatistics {
-  std::uint64_t compiled_blocks = 0, native_alu_instructions = 0, helper_instructions = 0;
-  // Successful transfers completed by native lowering or a compiled batch.
-  // This overlaps native_alu_instructions, which also includes move-only retirement.
-  std::uint64_t native_move_instructions = 0;
-  std::uint64_t executable_bytes = 0, invalidations = 0;
-  // Compiled bulk execution, included in native_alu_instructions/native moves.
-  std::uint64_t batch_instructions = 0, avx2_instructions = 0, batch_calls = 0;
+// Read-only snapshot. DSP accumulators are converted from native JIT coordinates
+// only when requested; inspection adds no work to ordinary execution.
+struct State {
+  Registers registers;
+  Fault failure;
+  ExecutionState execution = ExecutionState::running;
+  Progress progress;
 };
 
 // No derivative peripherals are implemented by this CPU library. False means a
@@ -124,11 +84,6 @@ struct JitStatistics {
 // must not reenter run/reset/register initialization/interrupt admission.
 class Io {
 public:
-  Io() = default;
-  Io(const Io &) = default;
-  Io &operator=(const Io &) = default;
-  Io(Io &&) = default;
-  Io &operator=(Io &&) = default;
   virtual ~Io() = default;
 
   // Guest RESET preserves CPU state. Accept only after resetting derivative
@@ -162,18 +117,6 @@ struct InstructionWords {
   std::optional<Word> extension = std::nullopt;
 };
 
-struct BoundedRunResult {
-  RunResult execution;
-  std::uint64_t cycles = 0;
-  RunStop stop = RunStop::instruction_budget;
-  Word pc = 0;
-  std::optional<Word> next_cycles;
-  // Snapshot of genuinely known code at the stopped boundary. An owner may
-  // latch this instruction before clocks/events advance, retaining original
-  // semantics if code changes during the in-flight reservation.
-  std::optional<InstructionWords> next;
-};
-
 struct InstructionFetch {
   Word address = 0;
   std::optional<Word> latched_opcode;
@@ -185,49 +128,33 @@ struct InstructionFetch {
 // The public header deliberately exposes no native dependency types.
 class Core {
 public:
-  explicit Core(Memory memory, Io *io = nullptr, Options options = {});
-  // Raw-view compatibility entry; new integrations use Memory explicitly.
-  explicit Core(Buffers buffers, Io *io = nullptr, Options options = {});
-  // External memory owner supplies every real P/X/Y/peripheral transfer.
-  // A pure known code view enables ordinary native execution. Architectural
-  // instruction-cache state remains separate from translated code.
-  explicit Core(Io &bus, Options options = {});
+  explicit Core(Memory memory = Memory::external(), Io *io = nullptr);
   ~Core();
   Core(const Core &) = delete;
   Core &operator=(const Core &) = delete;
-  Core(Core &&) = delete;
-  Core &operator=(Core &&) = delete;
   void reset();
+  [[nodiscard]] State state() const;
+  // Explicit host programming; ordinary data may be accessed through borrowed memory.
+  void load(Space space, Word address, std::span<const Word> words);
+  [[nodiscard]] RunResult step();
   [[nodiscard]] Registers registers() const;
   // Changes visible registers, not hidden execution continuation. Use after reset
   // for initialization; hidden continuation remains owned by Core.
   void set_registers(const Registers &state);
   [[nodiscard]] InstructionFetch instruction_fetch() const;
-  [[nodiscard]] bool interruptible(InstructionWords words) const;
+  [[nodiscard]] bool interrupt_ready(InstructionWords words) const;
   // Eligibility needs only the captured opcode; this query performs no fetch.
-  [[nodiscard]] bool interruptible_opcode(InstructionWords words) const;
+  [[nodiscard]] bool interrupt_ready_opcode(InstructionWords words) const;
   // Capture an admitted request without fetching a vector or acknowledging a device.
   void request_interrupt(Word vector, unsigned level, InstructionWords foreground);
   // Admit from actual CPU state without requiring a foreground snapshot. No
   // fetch/vector execution occurs; unresolved completed-REP eligibility stays explicit.
   void request_interrupt(Word vector, unsigned level);
-  [[nodiscard]] Progress progress() const noexcept;
-  [[nodiscard]] Fault fault() const noexcept;
-  // Native ALU instructions may still use an instrumented parallel-move helper.
-  [[nodiscard]] JitStatistics jit_statistics() const noexcept;
-  [[nodiscard]] Backend backend() const noexcept;
-  [[nodiscard]] Word read(Space space, Word address) const;
-  void write(Space space, Word address, Word value);
-  void load(Space space, Word address, std::span<const Word> words);
-  // Exact guest-instruction budget on every backend, including each REP iteration.
-  // Translated blocks never exceed the budget; a short tail can use the interpreter.
+  // Exact guest-instruction budget, including each REP iteration.
+  // Translated code respects the exact execution boundary.
   // Faults require reset. CPU state after a failed dispatch is not committed evidence.
   [[nodiscard]] RunResult
   run(std::uint32_t instruction_budget = std::numeric_limits<std::uint32_t>::max());
-  // Execute a completed CPU-only prefix within both bounds. Return before any
-  // unproven external effect/control transition, with actual next PC/base cost.
-  // Unknown code is an explicit boundary; this query never invents a fetch.
-  [[nodiscard]] BoundedRunResult run(RunBudget budget);
   // Execute exactly the captured ordinary instruction through this CPU/JIT,
   // including synchronous real Io. The caller owns its external clock delay.
   // Refuses pending vector/debug/cache fetch ownership and mismatched PC/latch.
@@ -236,25 +163,21 @@ public:
   // A synchronous Io callback can return this run after actual instruction
   // retirement. Guest state and compiled code survive; no cross-thread mutation.
   void request_yield() noexcept;
-  [[nodiscard]] ProcessingState processing_state() const noexcept;
-  [[nodiscard]] DebugStatus debug_status() const noexcept;
-  // Configure the functional OnCE interrupt-mode selection at stopped execution.
-  void set_debug_interrupt_mode(bool enabled);
-  // Complete a host DE/JTAG debug request; required clock stabilization is host-owned.
-  void request_debug();
-  void resume_from_debug();
   // Complete host-modeled IRQA wake/clock stabilization from STOP. The host then
   // admits its highest pending interrupt, or runs the next foreground instruction.
   // This does not wake WAIT; use an admitted interrupt, reset or the debug interface.
   void resume_from_stop();
-  [[nodiscard]] bool interruptible() const;
+  [[nodiscard]] bool interrupt_ready() const;
   // Host-admitted vector/priority at a stopped boundary, not an on-chip IRQ controller.
   // The kernel verifies mask/REP constraints. Derivative arbitration stays with the host.
   void interrupt(Word vector, unsigned level);
-  void clear_code_cache();
 
 private:
-  [[nodiscard]] bool interruptible_captured(InstructionWords words, bool complete) const;
+  [[nodiscard]] Progress progress() const noexcept;
+  [[nodiscard]] Fault fault() const noexcept;
+  [[nodiscard]] ExecutionState processing_state() const noexcept;
+  void clear_code_cache();
+  [[nodiscard]] bool interrupt_ready_captured(InstructionWords words, bool complete) const;
   struct Impl;
   std::unique_ptr<Impl> impl_;
 };

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "backend_support.hpp"
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "isa.hpp"
 #include "register_model.hpp"
 #include "support.hpp"
 
@@ -20,10 +22,9 @@ constexpr Word vector = 0x54, foreground = 0x100;
 constexpr Word wait_opcode = 0x86, stop_opcode = 0x87, repeat_two = 0x0602a0;
 constexpr Word move_seven = 0x320700, move_nine = 0x320900;
 constexpr unsigned level_shift = 8, maximum_level = 3;
-constexpr std::array backends{
-    Backend::reference, Backend::cached, Backend::jit, Backend::automatic};
+constexpr std::array backends{Backend::jit};
 
-static_assert(CoreImplementation<BackendCore<Backend::automatic>>);
+static_assert(CoreImplementation<TestCore>);
 
 class Bus final : public Io {
 public:
@@ -33,7 +34,7 @@ public:
   mutable std::size_t inspections = 0;
   std::optional<Word> next;
   std::uint64_t revision = 0;
-  Core *owner = nullptr;
+  TestCore *owner = nullptr;
   bool reentry_rejected = false;
 
   std::optional<Word> inspect_program(const Word address) const noexcept override {
@@ -84,13 +85,13 @@ Registers initial() {
   return result;
 }
 
-void captured(Core &core, const Word opcode) {
+void captured(TestCore &core, const Word opcode) {
   const auto result = core.run_instruction({.address = core.registers().pc, .opcode = opcode});
-  require(result.dispatches == 1 && result.fault.kind == FaultKind::none,
+  require(result.retired == 1 && result.fault.kind == FaultKind::none,
           "Captured native instruction reaches its actual retirement boundary");
 }
 
-void prepare(Core &core, const bool waiting) {
+void prepare(TestCore &core, const bool waiting) {
   auto state = initial();
   if (waiting) { --state.pc; }
   core.set_registers(state);
@@ -99,14 +100,14 @@ void prepare(Core &core, const bool waiting) {
               core.progress() ==
                   (waiting ? Progress{.instructions = 1, .estimated_cycles = 10} : Progress{}) &&
               core.processing_state() ==
-                  (waiting ? ProcessingState::waiting : ProcessingState::running),
+                  (waiting ? ExecutionState::waiting : ExecutionState::running),
           "Real WAIT retires ten base cycles and preserves the full foreground state");
 }
 
-void complete_vector(Core &core, Bus &bus, const Progress base) {
+void complete_vector(TestCore &core, Bus &bus, const Progress base) {
   const auto reads = bus.reads;
   bus.owner = &core;
-  require(core.run(1).dispatches == 1, "A real vector instruction retires once");
+  require(core.run(1).retired == 1, "A real vector instruction retires once");
   require(bus.reads == reads + 2 && bus.addresses[reads] == vector &&
               bus.addresses[reads + 1] == vector + 1 && bus.pcs[reads] == vector &&
               bus.pcs[reads + 1] == vector && core.registers() == initial() &&
@@ -116,7 +117,7 @@ void complete_vector(Core &core, Bus &bus, const Progress base) {
           "The first real vector fetch accepts both words once, rejects reentry and retires NOP");
   bus.owner = nullptr;
   bus.words[1] = move_nine;
-  require(core.run(1).dispatches == 1, "A real vector instruction retires once");
+  require(core.run(1).retired == 1, "A real vector instruction retires once");
   auto expected = initial();
   expected.r[2] = 7;
   require(core.registers() == expected && bus.reads == reads + 2 &&
@@ -125,7 +126,7 @@ void complete_vector(Core &core, Bus &bus, const Progress base) {
               !core.instruction_fetch().exception_vector,
           "The accepted second vector word survives RAM mutation and resumes the exact foreground");
   const auto refused = core.run(1);
-  require(refused.dispatches == 0 && refused.fault.kind == FaultKind::memory_read &&
+  require(refused.retired == 0 && refused.fault.kind == FaultKind::memory_read &&
               refused.fault.space == Space::program && refused.fault.address == foreground &&
               refused.fault.pc == foreground && bus.reads == reads + 3 &&
               core.progress() == Progress{.instructions = base.instructions + 2,
@@ -135,21 +136,21 @@ void complete_vector(Core &core, Bus &bus, const Progress base) {
 
 void admission(const Backend backend, const bool waiting) {
   Bus bus;
-  Core core(bus, {.backend = backend});
+  TestCore core(bus, {.backend = backend});
   prepare(core, waiting);
   const auto base = core.progress();
   const auto inspections = bus.inspections;
   core.request_interrupt(vector, 0);
   require(
       bus.reads == 0 && bus.inspections == inspections && core.registers() == initial() &&
-          core.progress() == base && core.processing_state() == ProcessingState::running &&
+          core.progress() == base && core.processing_state() == ExecutionState::running &&
           core.fault().kind == FaultKind::none && core.instruction_fetch().exception_vector &&
           core.instruction_fetch().address == vector,
       "State-only admission wakes WAIT without reading code, acknowledging a device or retiring");
   complete_vector(core, bus, base);
 }
 
-template <class Exception, class Action> void rejects(Core &core, Bus &bus, Action action) {
+template <class Exception, class Action> void rejects(TestCore &core, Bus &bus, Action action) {
   const auto registers = core.registers();
   const auto progress = core.progress();
   const auto state = core.processing_state();
@@ -171,7 +172,7 @@ void priorities(const Backend backend) {
   for (unsigned mask = 0; mask <= maximum_level; ++mask) {
     for (unsigned level = 0; level <= maximum_level + 1; ++level) {
       Bus bus;
-      Core core(bus, {.backend = backend});
+      TestCore core(bus, {.backend = backend});
       auto state = initial();
       state.sr |= mask << level_shift;
       core.set_registers(state);
@@ -189,7 +190,7 @@ void priorities(const Backend backend) {
 
 void exclusions(const Backend backend) {
   Bus bus;
-  Core core(bus, {.backend = backend});
+  TestCore core(bus, {.backend = backend});
   prepare(core, false);
   for (const auto address : {vector + 1, word_mask + 1}) {
     rejects<std::invalid_argument>(core, bus, [&] { core.request_interrupt(address, 0); });
@@ -202,7 +203,7 @@ void exclusions(const Backend backend) {
   rejects<std::invalid_argument>(core, bus, [&] { core.request_interrupt(vector, 0); });
   core.reset();
   core.set_registers(initial());
-  core.request_debug();
+  captured(core, isa::debug[0]);
   rejects<std::invalid_argument>(core, bus, [&] { core.request_interrupt(vector, 0); });
   core.reset();
   core.set_registers(initial());
@@ -212,7 +213,7 @@ void exclusions(const Backend backend) {
 
 void repeat_tail(const Backend backend) {
   Bus bus;
-  Core core(bus, {.backend = backend});
+  TestCore core(bus, {.backend = backend});
   auto state = initial();
   state.pc -= 2;
   core.set_registers(state);
@@ -237,7 +238,7 @@ void repeat_tail(const Backend backend) {
 
 void synchronous(const Backend backend) {
   Bus bus;
-  Core core(bus, {.backend = backend});
+  TestCore core(bus, {.backend = backend});
   core.set_registers(initial());
   core.interrupt(vector, 0);
   auto expected = initial();
@@ -248,7 +249,7 @@ void synchronous(const Backend backend) {
           !core.instruction_fetch().exception_vector,
       "The existing synchronous API still fetches and executes the full fast vector immediately");
   Bus typed_bus;
-  BackendCore<Backend::automatic> typed(typed_bus);
+  TestCore typed(typed_bus);
   typed.set_registers(initial());
   typed.request_interrupt(vector, 0);
   require(typed_bus.reads == 0 && typed.progress() == Progress{} &&

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "bfu_logic_model.hpp"
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "external_run_fixture.hpp"
@@ -30,7 +31,7 @@ public:
   std::uint64_t revision = 0;
   unsigned program_reads = 0, data_reads = 0, writes = 0;
   bool yield = false, grant = true;
-  Core *owner = nullptr;
+  TestCore *owner = nullptr;
 
   [[nodiscard]] std::optional<Word> inspect_program(const Word address) const noexcept override {
     return address < program.size() ? std::optional(program[address]) : std::nullopt;
@@ -91,15 +92,18 @@ void arithmetic(Registers &state, const Word opcode) {
   }
 }
 
-void domain(const dsp56300::test::external_run::Workload workload,
-            const Word bound,
-            const bool bounded,
-            const unsigned instruction_budget,
-            const unsigned cycle_budget) {
+struct DomainInput {
+  Word bound = 0;
+  unsigned instructions = 0;
+};
+
+void domain(const dsp56300::test::external_run::Workload workload, const DomainInput input) {
+  const auto bound = input.bound;
+  const auto instruction_budget = input.instructions;
   Bus bus;
   for (unsigned index = 0; index < 3; ++index) { bus.program[start + index] = workload.opcode; }
   bus.program[start + 3] = jump;
-  Core cpu(bus, {.cacheable_begin = bound, .cacheable_end = bound});
+  TestCore cpu(bus, {.cacheable_begin = bound, .cacheable_end = bound});
   auto state = initial();
   state.x = workload.x;
   state.y = workload.y;
@@ -110,7 +114,6 @@ void domain(const dsp56300::test::external_run::Workload workload,
   while (retired < instruction_budget) {
     const bool branch = expected.pc == start + 3;
     const auto cost = branch ? 3U : 1U;
-    if (bounded && cost > cycle_budget - cycles) { break; }
     if (branch) {
       expected.pc = start;
     } else {
@@ -120,21 +123,12 @@ void domain(const dsp56300::test::external_run::Workload workload,
     ++retired;
     cycles += cost;
   }
-  RunResult result;
-  if (bounded) {
-    const auto actual =
-        cpu.run(RunBudget{.instructions = instruction_budget, .cycles = cycle_budget});
-    result = actual.execution;
-    require(actual.cycles == cycles, "Bounded CE execution retains exact independent cycle limits");
-  } else {
-    result = cpu.run(instruction_budget);
-  }
-  require(result.dispatches == retired && cpu.registers() == expected &&
+  const auto result = cpu.run(instruction_budget);
+  require(result.retired == retired && cpu.registers() == expected &&
               cpu.progress() == Progress{.instructions = retired, .estimated_cycles = cycles} &&
               result.fault.kind == FaultKind::none,
           "CE retains independent full arithmetic state, flags, PC and exact budgets");
-  require(bus.program_reads == 0 && cpu.jit_statistics().native_alu_instructions == retired &&
-              cpu.jit_statistics().helper_instructions == 0,
+  require(bus.program_reads == 0,
           "An empty cache interval cannot disable native execution solely because CE is set");
 }
 
@@ -142,16 +136,13 @@ void domains() {
   for (const auto workload : dsp56300::test::external_run::workloads) {
     for (const auto bound : empty_bounds) {
       for (unsigned instructions = 0; instructions <= 4; ++instructions) {
-        domain(workload, bound, false, instructions, 0);
-        for (unsigned cycles = 0; cycles <= 6; ++cycles) {
-          domain(workload, bound, true, instructions, cycles);
-        }
+        domain(workload, {.bound = bound, .instructions = instructions});
       }
     }
   }
 }
 
-void native_memory(const Word bound, const bool bounded) {
+void native_memory(const Word bound) {
   Bus bus;
   bus.program[start] = load_x;
   bus.program[start + 1] = data_address;
@@ -159,19 +150,16 @@ void native_memory(const Word bound, const bool bounded) {
   bus.program[start + 3] = data_address + 1;
   bus.data[data_address] = datum;
   bus.known[data_address] = 1;
-  Core cpu(bus, {.cacheable_begin = bound, .cacheable_end = bound});
+  TestCore cpu(bus, {.cacheable_begin = bound, .cacheable_end = bound});
   cpu.set_registers(initial());
-  const auto result =
-      bounded ? cpu.run(RunBudget{.instructions = 2, .cycles = 4}).execution : cpu.run(2);
+  const auto result = cpu.run(2);
   auto expected = initial();
   expected.x = datum;
   expected.pc += 4;
-  require(result.dispatches == 2 && cpu.registers() == expected &&
+  require(result.retired == 2 && cpu.registers() == expected &&
               cpu.progress() == Progress{.instructions = 2, .estimated_cycles = 4} &&
               bus.data[data_address + 1] == datum && bus.known[data_address + 1] == 1 &&
-              bus.program_reads == 0 && bus.data_reads == 0 && bus.writes == 0 &&
-              cpu.jit_statistics().native_move_instructions == 2 &&
-              cpu.jit_statistics().helper_instructions == 0,
+              bus.program_reads == 0 && bus.data_reads == 0 && bus.writes == 0,
           "CE with an empty interval retains genuine native RAM and matching knowledge bytes");
 }
 
@@ -179,14 +167,14 @@ void empty_code_mutation(const Word bound) {
   Bus bus;
   bus.program[start] = immediate_x;
   bus.program[start + 1] = datum;
-  Core cpu(bus, {.cacheable_begin = bound, .cacheable_end = bound});
+  TestCore cpu(bus, {.cacheable_begin = bound, .cacheable_end = bound});
   cpu.set_registers(initial());
-  require(cpu.run(1).dispatches == 1 && cpu.registers().x == datum,
+  require(cpu.run(1).retired == 1 && cpu.registers().x == datum,
           "The first CE instruction reads its actual uncached immediate");
   bus.program[start + 1] = changed;
   ++bus.revision;
   cpu.set_registers(initial());
-  require(cpu.run(1).dispatches == 1 && cpu.registers().x == changed && cpu.registers().sr == ce &&
+  require(cpu.run(1).retired == 1 && cpu.registers().x == changed && cpu.registers().sr == ce &&
               bus.program_reads == 0,
           "The empty cache interval cannot retain a stale immediate after real code mutation");
 }
@@ -195,21 +183,17 @@ void active_cache() {
   Bus bus;
   bus.program[start] = immediate_x;
   bus.program[start + 1] = datum;
-  Core cpu(bus, {.cacheable_begin = start, .cacheable_end = start + 16});
+  TestCore cpu(bus, {.cacheable_begin = start, .cacheable_end = start + 16});
   cpu.set_registers(initial());
-  const auto boundary = cpu.run(RunBudget{.instructions = 1, .cycles = 2});
-  require(boundary.execution.dispatches == 0 && boundary.stop == RunStop::control_event &&
-              cpu.registers() == initial() && bus.program_reads == 0,
-          "A genuinely configured active cache retains its pre-fetch control boundary");
-  require(cpu.run(1).dispatches == 1 && cpu.registers().x == datum && bus.program_reads > 0,
+  require(cpu.run(1).retired == 1 && cpu.registers().x == datum && bus.program_reads > 0,
           "Real cache population still performs the actual owned program reads");
   const auto reads = bus.program_reads;
   bus.program[start + 1] = changed;
   ++bus.revision;
   cpu.set_registers(initial());
   require(
-      cpu.run(1).dispatches == 1 && cpu.registers().x == datum && cpu.registers().sr == ce &&
-          bus.program_reads == reads && cpu.jit_statistics().native_alu_instructions == 0,
+      cpu.run(1).retired == 1 && cpu.registers().x == datum && cpu.registers().sr == ce &&
+          bus.program_reads == reads,
       "The actual nonempty cache preserves old instruction data and genuine cache-hit behavior");
 }
 
@@ -222,14 +206,10 @@ void fallback_refusal() {
   // Withhold X grants by using a different ungranted data bank's encoding.
   constexpr Word read_y = 0x4cf000;
   bus.program[start] = read_y;
-  Core cpu(bus);
+  TestCore cpu(bus);
   cpu.set_registers(initial());
-  const auto before = cpu.run(RunBudget{.instructions = 1, .cycles = 2});
-  require(before.execution.dispatches == 0 && before.stop == RunStop::external_effect &&
-              cpu.registers() == initial() && bus.data_reads == 0,
-          "An ungranted CE data operand remains a real pre-effect owner boundary");
   const auto refused = cpu.run(1);
-  require(refused.dispatches == 0 && refused.fault.kind == FaultKind::memory_read &&
+  require(refused.retired == 0 && refused.fault.kind == FaultKind::memory_read &&
               refused.fault.space == Space::y && refused.fault.address == data_address &&
               refused.fault.pc == start && bus.data_reads == 1,
           "Ungrantable native operands still reach the genuine precise read refusal");
@@ -243,20 +223,20 @@ void fallback_yield() {
   bus.known[data_address] = 1;
   bus.grant = false;
   bus.yield = true;
-  Core cpu(bus);
+  TestCore cpu(bus);
   bus.owner = &cpu;
   cpu.set_registers(initial());
   const auto result = cpu.run(2);
   auto expected = initial();
   expected.x = datum;
   expected.pc += 2;
-  require(result.dispatches == 1 && result.yielded && result.fault.kind == FaultKind::none &&
+  require(result.retired == 1 && result.yielded && result.fault.kind == FaultKind::none &&
               cpu.registers() == expected && bus.data_reads == 1 && bus.program_reads == 0 &&
               cpu.progress() == Progress{.instructions = 1, .estimated_cycles = 2},
           "A genuine fallback callback can yield after its CE instruction without overrunning");
   ++expected.pc;
   const auto resumed = cpu.run(1);
-  require(resumed.dispatches == 1 && !resumed.yielded && cpu.registers() == expected &&
+  require(resumed.retired == 1 && !resumed.yielded && cpu.registers() == expected &&
               bus.data_reads == 1 &&
               cpu.progress() == Progress{.instructions = 2, .estimated_cycles = 3},
           "Resume executes the actual following NOP without replaying the completed read");
@@ -267,7 +247,7 @@ int main() {
   try {
     domains();
     for (const auto bound : empty_bounds) {
-      for (const bool bounded : {false, true}) { native_memory(bound, bounded); }
+      native_memory(bound);
       empty_code_mutation(bound);
     }
     active_cache();

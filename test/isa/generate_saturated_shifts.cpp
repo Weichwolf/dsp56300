@@ -174,7 +174,7 @@ void repetitions(Cases &cases, const Word mode) {
       item.before = {
           {.words = {repeat_three, register_opcode({.left = left}, selector)}, .address = start}};
       item.budget = 4;
-      item.dispatches = 4;
+      item.retired = 4;
       item.progress = {.instructions = 4, .estimated_cycles = 8};
       item.name = "SM REP reevaluates old count aliases; BFU shifts bypass arithmetic saturation";
       cases.push_back(std::move(item));

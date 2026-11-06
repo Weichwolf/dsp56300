@@ -350,9 +350,9 @@ void repeated(Cases &cases, const Input input) {
     const bool completed = budget == count + 1;
     item.expected.pc = start + (completed ? 2U : 1U);
     item.expected.lc = completed ? item.initial.lc : count + 1 - budget;
-    item.budget = item.dispatches = budget;
+    item.budget = item.retired = budget;
     item.progress = {.instructions = budget, .estimated_cycles = 5 + budget - 1};
-    item.interruptible = completed;
+    item.interrupt_ready = completed;
     item.name = "REP selection/status uses current accumulators and current parallel addresses";
     cases.push_back(std::move(item));
   }
@@ -419,7 +419,7 @@ void sequence(Cases &cases, const Input input) {
     item.expected.pc += length;
     item.progress.estimated_cycles += length;
     ++item.budget;
-    item.dispatches = item.budget;
+    item.retired = item.budget;
     item.progress.instructions = item.budget;
     item.name =
         "Native/selection-status helper/native Carry and accumulator consumers: every prefix";
@@ -446,9 +446,9 @@ void interactions(Cases &cases, const std::span<const Alu> inputs) {
     for (const Word mode : {0x2000U, 0x4000U, 0x20000U, 0x100000U, mode_down | mode_up}) {
       auto item = single({.alu = alu});
       item.initial.sr = mode;
-      item.dispatches = 0;
+      item.retired = 0;
       item.progress = {};
-      item.interruptible = false;
+      item.interrupt_ready = false;
       item.fault = {
           .kind = FaultKind::unsupported_mode, .address = start, .value = mode, .pc = start};
       item.name = "Selection/status remaining numerical modes are explicit unsupported boundaries";
@@ -456,9 +456,9 @@ void interactions(Cases &cases, const std::span<const Alu> inputs) {
         item.expected = item.initial;
         selection_model::apply(item.expected, item.initial, alu);
         ++item.expected.pc;
-        item.dispatches = 1;
+        item.retired = 1;
         item.progress = {.instructions = 1, .estimated_cycles = 1};
-        item.interruptible = true;
+        item.interrupt_ready = true;
         item.fault = {};
         item.name = "Selection/status operations accept the qualified arithmetic-saturation mode";
       }

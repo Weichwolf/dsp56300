@@ -18,11 +18,8 @@ constexpr std::array<std::uint8_t, 2> call_ax{0xff, 0xd0};
 }
 
 void JitEmitter::batch_entry(const std::span<const NativeOp> operations) {
-  if (!packed_retirement_ || !retirement_helpers_ || batch_backend_ == BatchBackend::disabled ||
-      operations.size() != 1) {
-    return;
-  }
-  const auto call = compile_mac_batch(operations.front(), batch_backend_);
+  if (!packed_retirement_ || !retirement_helpers_ || operations.size() != 1) { return; }
+  const auto call = compile_mac_batch(operations.front());
   if (!call) { return; }
   mac_batches_ = true;
   using x64::Branch;

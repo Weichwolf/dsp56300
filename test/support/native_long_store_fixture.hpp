@@ -37,7 +37,7 @@ inline constexpr std::array domains{std::string_view{"audio-mac"},
 
 struct Timing {
   double seconds = 0;
-  std::uint64_t instructions = 0, native = 0, moves = 0, helpers = 0;
+  std::uint64_t instructions = 0;
 };
 
 [[nodiscard]] Timing workload(std::string_view domain, bool long_store, unsigned repetitions);

@@ -200,7 +200,7 @@ BinaryCase fixture(const Input input, const std::optional<Word> requested = std:
   const auto total = 1 + (input.samples * static_cast<Word>(steps.size()));
   item.budget = requested.value_or(total);
   if (item.budget > total) { throw std::logic_error("An IIR prefix cannot run beyond completion"); }
-  item.dispatches = item.budget;
+  item.retired = item.budget;
   item.progress = {.instructions = item.budget,
                    .estimated_cycles = item.budget == 0 ? 0U : item.budget + 4};
   item.name = "Original causal biquad samples=" + std::to_string(input.samples) +

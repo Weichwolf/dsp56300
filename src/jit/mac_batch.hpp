@@ -19,11 +19,6 @@ inline constexpr unsigned mac_batch_width = SimdLayout<64, 256>::lanes;
 inline constexpr unsigned mac_reduction_width = mac_batch_width * mac_batch_width;
 inline constexpr unsigned mac_wide_reduction = mac_reduction_width * mac_batch_width;
 
-constexpr BatchBackend select_mac_batch(const BatchBackend requested, const bool avx2) noexcept {
-  if (requested == BatchBackend::disabled) { return BatchBackend::disabled; }
-  return requested != BatchBackend::scalar && avx2 ? BatchBackend::avx2 : BatchBackend::scalar;
-}
-
 struct MacBatchPlan {
   std::array<unsigned, 2> indices{};
   bool destination_b = false, subtract = false;
@@ -50,8 +45,7 @@ struct MacBatchState {
 };
 
 [[nodiscard]] std::optional<MacBatchPlan> plan_mac_batch(const NativeOp &operation);
-[[nodiscard]] std::optional<MacBatchCall> compile_mac_batch(const NativeOp &operation,
-                                                            BatchBackend backend);
+[[nodiscard]] std::optional<MacBatchCall> compile_mac_batch(const NativeOp &operation);
 
 namespace mac_batch_math {
 inline constexpr std::int64_t sign = std::int64_t{1} << (accumulator_bits - 1);
@@ -109,7 +103,6 @@ inline void consume_mac_products(MacBatchState &state,
   state.accumulator = mac_batch_math::wrap(fourth);
 }
 
-void scalar_mac_batch(MacBatchState &state, const MacBatchInput &input) noexcept;
 void avx2_mac_batch(MacBatchState &state, const MacBatchInput &input) noexcept;
 [[nodiscard]] bool avx2_mac_available() noexcept;
 } // namespace dsp56300::detail

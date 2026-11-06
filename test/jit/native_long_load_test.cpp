@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "native_long_load_fixture.hpp"
@@ -16,8 +17,7 @@ namespace {
 void check_load(const Input input) {
   constexpr Word sentinel_x = 0x123456;
   constexpr Word sentinel_y = 0x654321;
-  for (const auto backend :
-       {Backend::reference, Backend::cached, Backend::jit, Backend::automatic}) {
+  for (const auto backend : {Backend::jit}) {
     std::array<Word, 2> program{opcode(input), input.mode == 6 ? address : 0U};
     std::array<Word, words> x{};
     std::array<Word, words> y{};
@@ -29,21 +29,15 @@ void check_load(const Input input) {
     const auto before_y = y;
     auto expected = seed(input);
     expected_load(expected, input);
-    Core cpu({.program = program, .x = x, .y = y}, nullptr, {.backend = backend});
+    TestCore cpu({.program = program, .x = x, .y = y}, nullptr, {.backend = backend});
     cpu.set_registers(seed(input));
     const auto result = cpu.run(1);
     const auto cycles =
         !input.short_address && (input.mode == 5 || input.mode == 6 || input.mode == 7) ? 2U : 1U;
-    require(result.dispatches == 1 && result.fault.kind == FaultKind::none &&
+    require(result.retired == 1 && result.fault.kind == FaultKind::none &&
                 cpu.registers() == expected && x == before_x && y == before_y &&
                 cpu.progress() == Progress{.instructions = 1, .estimated_cycles = cycles},
             "Independent long destinations, sign/extension, unchanged flags/RAM and sole AGU");
-    if (backend == Backend::jit || backend == Backend::automatic) {
-      const auto path = cpu.jit_statistics();
-      require(path.native_move_instructions == 1 && path.native_alu_instructions == 1 &&
-                  path.helper_instructions == 0,
-              "Eligible long loads execute emitted transfers without a general helper");
-    }
   }
 }
 
@@ -90,7 +84,7 @@ void parallel_inputs() {
       old = expected;
       sequence_model::alu(expected, old, add);
       ++expected.pc;
-      Core cpu({.program = program, .x = x, .y = y}, nullptr, {.backend = Backend::jit});
+      TestCore cpu({.program = program, .x = x, .y = y}, nullptr, {.backend = Backend::jit});
       cpu.set_registers(seed(input));
       const auto result = cpu.run(3);
       if (cpu.registers() != expected) {
@@ -101,13 +95,9 @@ void parallel_inputs() {
                   << " actual a=" << actual.a << " b=" << actual.b << " x=" << actual.x
                   << " y=" << actual.y << " sr=" << actual.sr << " pc=" << actual.pc << '\n';
       }
-      require(result.dispatches == 3 && result.fault.kind == FaultKind::none &&
+      require(result.retired == 3 && result.fault.kind == FaultKind::none &&
                   cpu.registers() == expected,
               "Long loads preserve dirty old ALU inputs and publish real destinations afterward");
-      require(cpu.jit_statistics().native_move_instructions == 1 &&
-                  cpu.jit_statistics().native_alu_instructions == 3 &&
-                  cpu.jit_statistics().helper_instructions == 0,
-              "Parallel long load and surrounding ALU remain native");
     }
   }
 }
@@ -137,13 +127,11 @@ void partial_range_invalidation() {
     old = expected;
     saturation_model::alu(expected, old, add_zero);
     ++expected.pc;
-    Core cpu({.program = program, .x = x, .y = y}, nullptr, {.backend = Backend::jit});
+    TestCore cpu({.program = program, .x = x, .y = y}, nullptr, {.backend = Backend::jit});
     cpu.set_registers(before);
     const auto actual = cpu.run(3);
-    require(actual.dispatches == 3 && actual.fault.kind == FaultKind::none &&
-                cpu.registers() == expected && cpu.jit_statistics().native_move_instructions == 1 &&
-                cpu.jit_statistics().native_alu_instructions == 3 &&
-                cpu.jit_statistics().helper_instructions == 0,
+    require(actual.retired == 3 && actual.fault.kind == FaultKind::none &&
+                cpu.registers() == expected,
             "A10/B10 load invalidates narrow proofs before actual subsequent SM saturation");
   }
 }

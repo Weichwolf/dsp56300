@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "memory_arena.hpp"
@@ -82,7 +83,7 @@ public:
     return false;
   }
 
-  Core *core = nullptr;
+  TestCore *core = nullptr;
   Registers expected;
   Progress progress;
   move_model::Output output;
@@ -170,7 +171,8 @@ Fault expected_fault(const Observer &io) {
           .pc = io.pc};
 }
 
-void port_case(Core &core, Observer &io, const Form form, const Word port, const unsigned fail_at) {
+void port_case(
+    TestCore &core, Observer &io, const Form form, const Word port, const unsigned fail_at) {
   core.reset();
   auto state = initial(port);
   core.set_registers(state);
@@ -186,20 +188,20 @@ void port_case(Core &core, Observer &io, const Form form, const Word port, const
   require(io.valid && io.calls == expected_calls && core.registers() == expected,
           "Long/mixed I/O observes ordered old sources, canonical state and successful-only "
           "destinations");
-  require(result.fault == expected_fault(io) && result.dispatches == (fail_at == 0 ? 1U : 0U) &&
+  require(result.fault == expected_fault(io) && result.retired == (fail_at == 0 ? 1U : 0U) &&
               result.progress ==
                   (fail_at == 0 ? Progress{.instructions = 1, .estimated_cycles = 1} : Progress{}),
           "Long/mixed I/O failure has exact half/fault/retirement accounting");
   if (fail_at != 0) {
     require(
-        core.run(2).dispatches == 0 && core.registers() == expected && io.calls == fail_at,
+        core.run(2).retired == 0 && core.registers() == expected && io.calls == fail_at,
         "Rejected long/mixed I/O never executes the later half or replays the stopped instruction");
   }
   require(core.read(io.first_space, port) == 0,
           "Caller RAM spanning the entire DSP address range cannot bypass I/O callbacks");
 }
 
-void extension_wrap(Core &core, Form form) {
+void extension_wrap(TestCore &core, Form form) {
   if (form.kind == Kind::mixed_two) { return; }
   core.reset();
   form.mode = 6;
@@ -224,7 +226,7 @@ void extension_wrap(Core &core, Form form) {
     ++expected.pc;
   }
   const auto result = core.run(3);
-  require(result.dispatches == 3 && result.fault.kind == FaultKind::none &&
+  require(result.retired == 3 && result.fault.kind == FaultKind::none &&
               result.progress == Progress{.instructions = 3, .estimated_cycles = 4} &&
               core.registers() == expected,
           "Long/mixed P extensions wrap at 24 bits and resume exact native arithmetic");
@@ -241,7 +243,7 @@ void extension_wrap(Core &core, Form form) {
 void ports(const Backend backend) {
   const MemoryArena arena;
   Observer io;
-  Core core(arena.buffers(), &io, {.backend = backend});
+  TestCore core(arena.buffers(), &io, {.backend = backend});
   io.core = &core;
   for (const auto form : forms()) {
     core.write(Space::program, start, move_model::opcode(form));
@@ -259,7 +261,7 @@ void native_boundary(const Backend backend, const Word alu, const Form form, con
   std::array<Word, memory_words> x{};
   std::array<Word, memory_words> y{};
   Observer io;
-  Core core({.program = p, .x = x, .y = y}, &io, {.backend = backend});
+  TestCore core({.program = p, .x = x, .y = y}, &io, {.backend = backend});
   io.core = &core;
   const std::array program{mac_a, mac_b, move_model::opcode(form, alu), Word{0}};
   core.load(Space::program, start, program);
@@ -289,17 +291,9 @@ void native_boundary(const Backend backend, const Word alu, const Form form, con
   }
   const auto result = core.run(4);
   require(io.valid && core.registers() == expected && result.fault == expected_fault(io) &&
-              result.dispatches == (accept ? 4U : 2U),
+              result.retired == (accept ? 4U : 2U),
           "Dirty native A/B materialize before long/mixed callbacks; changed successors consume "
           "new data");
-  if (backend == Backend::jit) {
-    const bool emitted_nop = form.kind == Kind::long_word && !form.load && alu == 0;
-    const auto native = accept ? 3U + (alu != 0 || emitted_nop ? 1U : 0U) : 2U;
-    require(core.jit_statistics().native_alu_instructions == native &&
-                core.jit_statistics().native_move_instructions == 0,
-            "Native arithmetic/NOP retirement surrounds genuine I/O callbacks, with no native "
-            "RAM transfer claimed for a peripheral side exit");
-  }
 }
 
 void memory_failure(const Backend backend, const Form form, const bool second) {
@@ -308,9 +302,9 @@ void memory_failure(const Backend backend, const Form form, const bool second) {
   std::array<Word, memory_words> y{};
   const auto xsize = !second && !form.y ? 1U : memory_words;
   const auto ysize = second || form.y ? 1U : memory_words;
-  Core core({.program = p, .x = std::span(x).first(xsize), .y = std::span(y).first(ysize)},
-            nullptr,
-            {.backend = backend});
+  TestCore core({.program = p, .x = std::span(x).first(xsize), .y = std::span(y).first(ysize)},
+                nullptr,
+                {.backend = backend});
   auto state = initial(location);
   core.write(Space::program, start, move_model::opcode(form));
   core.set_registers(state);
@@ -323,7 +317,7 @@ void memory_failure(const Backend backend, const Form form, const bool second) {
   const auto failed_space = second || form.y ? Space::y : Space::x;
   const bool load = form.kind != Kind::mixed_two && form.load;
   const auto value = second ? output.second : output.first;
-  require(result.dispatches == 0 && result.progress == Progress{} &&
+  require(result.retired == 0 && result.progress == Progress{} &&
               result.fault == Fault{.kind = load ? FaultKind::memory_read : FaultKind::memory_write,
                                     .space = failed_space,
                                     .address = location,
@@ -343,7 +337,7 @@ void program_alias(const Backend backend, const Form form) {
   constexpr Word clear = 0x200013;
   const auto pair = (std::uint64_t{clear} << word_bits) | negate;
   std::array<Word, memory_words> p{};
-  Core core({.program = p, .x = p, .y = p}, nullptr, {.backend = backend});
+  TestCore core({.program = p, .x = p, .y = p}, nullptr, {.backend = backend});
   auto state = initial(start + 1);
   state.x = (std::uint64_t{negate} << word_bits) | negate;
   state.y = state.x;
@@ -374,21 +368,16 @@ void program_alias(const Backend backend, const Form form) {
   }
   const auto result = core.run(3);
   require(
-      result.dispatches == 3 && result.fault.kind == FaultKind::none &&
-          core.registers() == expected && core.read(Space::program, start + 1) == negate,
+      result.retired == 3 && result.fault.kind == FaultKind::none && core.registers() == expected &&
+          core.read(Space::program, start + 1) == negate,
       "Long/mixed guest stores invalidate P aliases; the second long half wins a shared X/Y word");
-  if (backend == Backend::jit) {
-    require(core.jit_statistics().native_alu_instructions >= 2,
-            "The alias witness executes the replacement and its consumer as native arithmetic");
-  }
 }
 } // namespace
 } // namespace dsp56300::test
 
 int main() {
   try {
-    for (const auto backend :
-         {dsp56300::Backend::reference, dsp56300::Backend::cached, dsp56300::Backend::jit}) {
+    for (const auto backend : {dsp56300::Backend::jit}) {
       dsp56300::test::ports(backend);
       for (const auto form : dsp56300::test::forms()) {
         for (const dsp56300::Word alu : {0U, 0x45U}) {

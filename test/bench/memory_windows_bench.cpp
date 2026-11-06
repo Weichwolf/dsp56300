@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "external_run_fixture.hpp"
@@ -20,37 +21,35 @@ constexpr double million = 1000000.0;
 
 void measure(const external_run::Workload input, const bool mapped) {
   window_workload::Memory memory(input, mapped);
-  Core core(memory);
+  TestCore core(memory);
   const auto initial = window_workload::initial(input, instructions);
   const auto expected = window_workload::expected(input, instructions);
   core.set_registers(initial);
-  require(core.run(window_workload::body).dispatches == window_workload::body,
+  require(core.run(window_workload::body).retired == window_workload::body,
           "Warm the genuine generated memory body before measuring");
   for (unsigned sample = 0; sample < samples; ++sample) {
     core.set_registers(initial);
     const auto prior = core.progress();
-    const auto stats = core.jit_statistics();
+
     const auto reads = memory.reads;
     const auto begin = std::chrono::steady_clock::now();
     const auto result = core.run(instructions);
     const auto seconds =
         std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count();
-    const auto after = core.jit_statistics();
+
     const auto callbacks = memory.reads - reads;
-    const auto native_moves = after.native_move_instructions - stats.native_move_instructions;
-    require(result.dispatches == instructions && result.fault.kind == FaultKind::none &&
-                core.registers() == expected && core.backend() == Backend::jit &&
+
+    require(result.retired == instructions && result.fault.kind == FaultKind::none &&
+                core.registers() == expected &&
                 result.progress ==
                     Progress{.instructions = prior.instructions + instructions,
                              .estimated_cycles = prior.estimated_cycles + instructions} &&
-                callbacks == (mapped ? 0U : instructions) &&
-                native_moves == (mapped ? instructions : 0U) &&
-                after.helper_instructions == stats.helper_instructions,
+                callbacks == (mapped ? 0U : instructions),
             "Measured native memory kernels match independent full-state arithmetic and actual "
             "callback counts");
     std::cout << input.name << " mapped=" << mapped << " sample=" << sample
               << " instructions=" << instructions << " callbacks=" << callbacks
-              << " native-moves=" << native_moves
+
               << " seconds=" << std::setprecision(std::numeric_limits<double>::max_digits10)
               << seconds << " guest-mips=" << (instructions / seconds) / million << '\n';
   }

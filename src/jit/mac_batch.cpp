@@ -47,11 +47,9 @@ bool overlaps_cpu(const Cpu &cpu, const Word *const words, const Word count) noe
       (context.runtime.cacheable_program && (reg.sr & cache_enable) != 0) ||
       (reg.sr & numeric_mode_mask) != operation.mode || reg.lc <= mac_batch_width ||
       reg.lc > word_mask || cpu.repeat_remaining != 0 ||
-      cpu.processing != ProcessingState::running ||
+      cpu.processing != ExecutionState::running ||
       (cpu.debug_flags & debug_interrupt_pending) != 0 ||
-      (context.exit_requested != nullptr && *context.exit_requested) ||
-      context.native_moves == nullptr || context.batch_instructions == nullptr ||
-      context.avx2_instructions == nullptr || context.batch_calls == nullptr) {
+      (context.exit_requested != nullptr && *context.exit_requested)) {
     return 0;
   }
   const auto frame = reg.stack[reg.sp & (stack_entries - 1)];
@@ -77,12 +75,8 @@ bool overlaps_cpu(const Cpu &cpu, const Word *const words, const Word count) noe
   return whole;
 }
 
-[[gnu::always_inline]] inline void commit(Cpu &cpu,
-                                          NativeContext &context,
-                                          const MacBatchPlan plan,
-                                          const MacBatchState state,
-                                          const Word count,
-                                          const bool vector) noexcept {
+[[gnu::always_inline]] inline void
+commit(Cpu &cpu, const MacBatchPlan plan, const MacBatchState state, const Word count) noexcept {
   auto &reg = cpu.reg;
   const auto aligned = (static_cast<std::uint64_t>(state.accumulator) & accumulator_mask)
                        << padding_bits;
@@ -105,10 +99,6 @@ bool overlaps_cpu(const Cpu &cpu, const Word *const words, const Word count) noe
   cpu.interrupt_inhibited = false;
   cpu.instructions = wrapped_add(cpu.instructions, count);
   cpu.cycles = wrapped_add(cpu.cycles, count);
-  *context.native_moves = wrapped_add(*context.native_moves, count);
-  *context.batch_instructions = wrapped_add(*context.batch_instructions, count);
-  *context.batch_calls = wrapped_add(*context.batch_calls, 1);
-  if (vector) { *context.avx2_instructions = wrapped_add(*context.avx2_instructions, count); }
 }
 }
 
@@ -137,7 +127,6 @@ std::optional<MacBatchPlan> plan_mac_batch(const NativeOp &operation) {
 }
 
 namespace {
-template <bool Vector>
 Word execute_mac_batch(Cpu &cpu,
                        NativeContext &context,
                        const NativeOp &operation,
@@ -159,25 +148,16 @@ Word execute_mac_batch(Cpu &cpu,
                       .x = static_cast<Word>(reg.x) & word_mask,
                       .y = static_cast<Word>(reg.y) & word_mask,
                       .limited = (reg.sr & limit) != 0};
-  if constexpr (Vector) {
-    avx2_mac_batch(state, input);
-  } else {
-    scalar_mac_batch(state, input);
-  }
-  commit(cpu, context, plan, state, count, Vector);
+  avx2_mac_batch(state, input);
+  commit(cpu, plan, state, count);
   return count;
 }
 }
 
-std::optional<MacBatchCall> compile_mac_batch(const NativeOp &operation,
-                                              const BatchBackend backend) {
-  if (backend == BatchBackend::disabled) { return std::nullopt; }
+std::optional<MacBatchCall> compile_mac_batch(const NativeOp &operation) {
   const auto plan = plan_mac_batch(operation);
   if (!plan) { return std::nullopt; }
-  const auto selected =
-      select_mac_batch(backend, backend != BatchBackend::scalar && avx2_mac_available());
-  return MacBatchCall{.entry = selected == BatchBackend::avx2 ? &execute_mac_batch<true>
-                                                              : &execute_mac_batch<false>,
+  return MacBatchCall{.entry = &execute_mac_batch,
                       .operands = plan->indices[0] | (plan->indices[1] << y_index_shift) |
                                   (plan->destination_b ? destination_bit : 0) |
                                   (plan->subtract ? subtract_bit : 0)};

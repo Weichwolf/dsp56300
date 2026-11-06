@@ -137,9 +137,9 @@ void fault_cases(Cases &cases) {
         item.initial = register_model::seed(0);
         item.initial.m[index] = modifier | fault_high;
         item.expected = item.initial;
-        item.dispatches = 0;
+        item.retired = 0;
         item.progress = {};
-        item.interruptible = false;
+        item.interrupt_ready = false;
         item.fault = {
             .kind = FaultKind::unsupported_mode, .address = start, .value = modifier, .pc = start};
         item.before.push_back(
@@ -177,7 +177,7 @@ void modifier_sequences(Cases &cases) {
       item.expected.r[index] =
           updated({.modifier = modifier, .cursor = cursor, .offset = 1, .mode = 1, .index = index});
     }
-    item.budget = item.dispatches = static_cast<Word>(4 * replacements.size());
+    item.budget = item.retired = static_cast<Word>(4 * replacements.size());
     item.progress = {.instructions = item.budget, .estimated_cycles = program.size()};
     item.expected.pc = start + static_cast<Word>(program.size());
     item.before.push_back({.words = std::move(program), .address = start});
@@ -204,7 +204,7 @@ void repeat_sequences(Cases &cases) {
                                           .mode = 1,
                                           .index = index});
       }
-      item.budget = item.dispatches = repeat_count + 1;
+      item.budget = item.retired = repeat_count + 1;
       item.progress = {.instructions = repeat_count + 1, .estimated_cycles = repeat_count + 5};
       item.expected.pc = start + 2;
       item.before.push_back(
@@ -238,7 +238,7 @@ void reverse_loops(Cases &cases) {
       item.expected.stack[first] = (std::uint64_t{item.initial.la} << word_bits) | item.initial.lc;
       item.expected.stack[second] = (std::uint64_t{start + 2} << word_bits) | item.initial.sr;
       item.expected.pc = start + 3;
-      item.budget = item.dispatches = count + 1;
+      item.budget = item.retired = count + 1;
       item.progress = {.instructions = count + 1, .estimated_cycles = count + 5};
       item.before = {{.words = {do_count, start + 2, update_opcode | (subtract ? 0U : 0x800U)},
                       .address = start}};

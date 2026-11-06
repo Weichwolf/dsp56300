@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "codegen_observer.hpp"
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "memory_arena.hpp"
@@ -23,11 +25,12 @@ constexpr std::array modes{0U, mode_down, mode_up, mode_rm, mode_rm | mode_down,
 constexpr std::array ends{0U, start, start + 1, start + 2, word_mask};
 
 struct Machine {
-  explicit Machine(const Options options, Io *io = nullptr)
+  explicit Machine(const TestOptions options, Io *io = nullptr)
       : core({.program = p, .x = x, .y = y}, io, options) {}
 
   std::array<Word, memory_words> p{}, x{}, y{};
-  Core core;
+  codegen::Publications published = codegen::publications();
+  TestCore core;
 };
 
 Registers seeded(const Word mode) {
@@ -52,7 +55,7 @@ struct LoopInput {
   bool active = false;
 };
 
-void warm_case(Machine &machine, const Options options, Keys &keys, const LoopInput input) {
+void warm_case(Machine &machine, Keys &keys, const LoopInput input) {
   auto initial = seeded(input.mode | (input.active ? loop_flag : 0));
   initial.la = input.end;
   initial.lc = input.count;
@@ -70,20 +73,15 @@ void warm_case(Machine &machine, const Options options, Keys &keys, const LoopIn
     expected.sc = 0;
   }
   machine.core.set_registers(initial);
-  const auto before = machine.core.jit_statistics();
-  require(machine.core.run(1).dispatches == 1 && machine.core.registers() == expected,
+
+  require(machine.core.run(1).retired == 1 && machine.core.registers() == expected,
           "Warm translations distinguish numeric modes, active LF and every LA context");
-  if (options.backend == Backend::jit && options.optimize) {
-    const bool native = !ending || input.count > 1;
-    const auto after = machine.core.jit_statistics();
-    require(after.native_alu_instructions == before.native_alu_instructions + (native ? 1U : 0U),
-            "LC above one uses native endings; zero/one use the general continuation/cleanup");
-    keys.emplace(input.mode, input.active, input.active ? input.end : 0);
-    require(after.compiled_blocks == keys.size(), "LC changes reuse the same guarded translation");
-  }
+  keys.emplace(input.mode, input.active, input.active ? input.end : 0);
+  require(codegen::publications().count == machine.published.count + keys.size(),
+          "LC changes reuse the same actual executable translation");
 }
 
-void warm_contexts(const Options options) {
+void warm_contexts(const TestOptions options) {
   Machine machine(options);
   machine.core.write(Space::program, start, mac_a);
   Keys keys;
@@ -91,15 +89,14 @@ void warm_contexts(const Options options) {
     for (const bool active : {false, true}) {
       for (const auto end : ends) {
         for (const Word count : {0U, 1U, 3U}) {
-          warm_case(
-              machine, options, keys, {.mode = mode, .end = end, .count = count, .active = active});
+          warm_case(machine, keys, {.mode = mode, .end = end, .count = count, .active = active});
         }
       }
     }
   }
 }
 
-void stack_slots(const Options options) {
+void stack_slots(const TestOptions options) {
   Machine machine(options);
   machine.core.write(Space::program, start, mac_a);
   for (Word pointer = 0; pointer < 64; ++pointer) {
@@ -115,12 +112,12 @@ void stack_slots(const Options options) {
     expected.pc = destination;
     expected.lc = 1;
     machine.core.set_registers(initial);
-    require(machine.core.run(1).dispatches == 1 && machine.core.registers() == expected,
+    require(machine.core.run(1).retired == 1 && machine.core.registers() == expected,
             "Continuing loops read the current eight-byte frame for all SP wrap positions");
   }
 }
 
-void guest_changes(const Options options, const unsigned kind) {
+void guest_changes(const TestOptions options, const unsigned kind) {
   constexpr Word write_la = 0x04c4be;
   constexpr Word write_sr = 0x04c4b9;
   constexpr Word write_lc = 0x04c4bf;
@@ -145,13 +142,13 @@ void guest_changes(const Options options, const unsigned kind) {
   if (kind != 2) { --expected.lc; }
   model(expected, mac_b);
   machine.core.set_registers(initial);
-  require(machine.core.run(3).dispatches == 3 && machine.core.registers() == expected,
+  require(machine.core.run(3).retired == 3 && machine.core.registers() == expected,
           "Guest changes to LA/LF exit stale plans; LC/SP remain dynamically observed");
 }
 
 class Writer final : public Io {
 public:
-  Core *core = nullptr;
+  TestCore *core = nullptr;
   bool observed = false;
   Word expected_count = 2;
 
@@ -180,7 +177,7 @@ public:
   static constexpr Word port = 0xffff80, clear_a = 0x200013;
 };
 
-void callback_change(const Options options, const Word count) {
+void callback_change(const TestOptions options, const Word count) {
   Writer writer;
   Machine machine(options, &writer);
   writer.core = &machine.core;
@@ -205,12 +202,12 @@ void callback_change(const Options options, const Word count) {
   expected.sp = 0;
   expected.sc = 0;
   machine.core.set_registers(initial);
-  require(machine.core.run(count).dispatches == count && writer.observed &&
+  require(machine.core.run(count).retired == count && writer.observed &&
               machine.core.registers() == expected,
           "A loop-ending callback completes its fetched instruction before modified code executes");
 }
 
-void invalid_modes(const Options options) {
+void invalid_modes(const TestOptions options) {
   constexpr std::array unsupported{0x2000U, 0x4000U, 0x20000U, 0x100000U, mode_up | mode_down};
   for (const auto mode : unsupported) {
     Machine machine(options);
@@ -219,7 +216,7 @@ void invalid_modes(const Options options) {
     initial.la = start + 1;
     initial.lc = 3;
     machine.core.set_registers(initial);
-    require(machine.core.run(1).dispatches == 1, "Prime a valid numeric/loop translation");
+    require(machine.core.run(1).retired == 1, "Prime a valid numeric/loop translation");
     initial.sr |= mode;
     machine.core.set_registers(initial);
     const auto result = machine.core.run(1);
@@ -227,21 +224,21 @@ void invalid_modes(const Options options) {
       auto expected = initial;
       saturation_model::alu(expected, initial, mac_a);
       ++expected.pc;
-      require(result.dispatches == 1 && result.fault.kind == FaultKind::none &&
+      require(result.retired == 1 && result.fault.kind == FaultKind::none &&
                   result.progress == Progress{.instructions = 2, .estimated_cycles = 2} &&
                   machine.core.registers() == expected,
               "Changed SM loop context executes qualified saturation semantics exactly");
       continue;
     }
-    require(result.dispatches == 0 && result.progress.instructions == 1 &&
+    require(result.retired == 0 && result.progress.instructions == 1 &&
                 result.fault.kind == FaultKind::unsupported_mode,
             "No compressed-key collision can reuse valid native code for an unsupported mode");
   }
 }
 
-void high_addresses(const Options options) {
+void high_addresses(const TestOptions options) {
   const MemoryArena arena;
-  Core core(arena.buffers(), nullptr, options);
+  TestCore core(arena.buffers(), nullptr, options);
   constexpr std::array addresses{0U, start, 0x7fffffU, 0xfffffeU, word_mask};
   for (const auto address : addresses) {
     core.write(Space::program, address, mac_a);
@@ -255,7 +252,7 @@ void high_addresses(const Options options) {
     expected.pc = word_mask;
     expected.lc = 1;
     core.set_registers(initial);
-    require(core.run(1).dispatches == 1 && core.registers() == expected,
+    require(core.run(1).retired == 1 && core.registers() == expected,
             "Loop keys, ending words and saved PCs preserve address " + std::to_string(address) +
                 " on " + std::string(backend_name(options.backend)));
   }
@@ -275,12 +272,12 @@ void high_addresses(const Options options) {
   expected.lc = 1;
   core.set_registers(initial);
   const auto before = core.progress();
-  require(core.run(1).dispatches == 1 && core.registers() == expected &&
+  require(core.run(1).retired == 1 && core.registers() == expected &&
               core.progress().estimated_cycles == before.estimated_cycles + 2,
           "A wrapped two-word instruction can end a loop at its extension word");
 }
 
-void ending_fault(const Options options) {
+void ending_fault(const TestOptions options) {
   Machine machine(options);
   constexpr Word load_x_negate_a = 0x44e036;
   machine.core.write(Space::program, start, load_x_negate_a);
@@ -290,7 +287,7 @@ void ending_fault(const Options options) {
   initial.r[0] = memory_words;
   machine.core.set_registers(initial);
   const auto result = machine.core.run(1);
-  require(result.dispatches == 0 && result.progress == Progress{} &&
+  require(result.retired == 0 && result.progress == Progress{} &&
               result.fault.kind == FaultKind::memory_read && result.fault.pc == start,
           "A failing transfer at a continuing loop ending does not retire its ALU");
   const auto actual = machine.core.registers();
@@ -299,7 +296,7 @@ void ending_fault(const Options options) {
           "A loop-ending transfer fault cannot decrement LC or read/pop a continuation frame");
 }
 
-void fault_after_iterations(const Options options) {
+void fault_after_iterations(const TestOptions options) {
   Machine machine(options);
   constexpr Word load_x_postincrement_negate_a = 0x44d836;
   machine.core.write(Space::program, start, load_x_postincrement_negate_a);
@@ -313,7 +310,7 @@ void fault_after_iterations(const Options options) {
   initial.stack[2] = std::uint64_t{start} << word_bits;
   machine.core.set_registers(initial);
   const auto result = machine.core.run(4);
-  require(result.dispatches == 2 &&
+  require(result.retired == 2 &&
               result.progress == Progress{.instructions = 2, .estimated_cycles = 2} &&
               result.fault.kind == FaultKind::memory_read && result.fault.pc == start &&
               result.fault.address == memory_words,
@@ -324,7 +321,7 @@ void fault_after_iterations(const Options options) {
           "A later fault materializes previous iterations without advancing the failing ending");
 }
 
-void bounded_lc_reload(const Options options) {
+void bounded_lc_reload(const TestOptions options) {
   constexpr Word write_lc = 0x04c4bf;
   constexpr std::array program{write_lc, mac_a};
   Machine machine(options);
@@ -350,7 +347,7 @@ void bounded_lc_reload(const Options options) {
       machine.core.set_registers(initial);
       const auto before = machine.core.progress();
       const auto result = machine.core.run(budget);
-      require(result.dispatches == budget && result.fault.kind == FaultKind::none &&
+      require(result.retired == budget && result.fault.kind == FaultKind::none &&
                   machine.core.registers() == expected &&
                   result.progress.instructions - before.instructions == budget &&
                   result.progress.estimated_cycles - before.estimated_cycles == budget,
@@ -363,10 +360,9 @@ void bounded_lc_reload(const Options options) {
 
 int main() {
   try {
-    for (const auto backend :
-         {dsp56300::Backend::reference, dsp56300::Backend::cached, dsp56300::Backend::jit}) {
-      for (const bool optimize : {false, true}) {
-        const dsp56300::Options options{.backend = backend, .optimize = optimize};
+    for (const auto backend : {dsp56300::Backend::jit}) {
+      {
+        const dsp56300::TestOptions options{.backend = backend};
         dsp56300::test::warm_contexts(options);
         dsp56300::test::stack_slots(options);
         for (unsigned kind = 0; kind < 5; ++kind) { dsp56300::test::guest_changes(options, kind); }

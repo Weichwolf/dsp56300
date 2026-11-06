@@ -155,8 +155,8 @@ BinaryCase repeated(const Registers &initial, const Input input, const Word budg
   const bool completed = budget == 4;
   item.expected.pc = start + (completed ? 2U : 1U);
   item.expected.lc = completed ? item.initial.lc : 4 - budget;
-  item.budget = item.dispatches = budget;
-  item.interruptible = completed;
+  item.budget = item.retired = budget;
+  item.interrupt_ready = completed;
   item.progress = {.instructions = budget,
                    .estimated_cycles = 5 + ((budget - 1) * normalization_model::cycles(input))};
   item.before = {{.words = {repeat_three, normalization_model::opcode(input)}, .address = start}};

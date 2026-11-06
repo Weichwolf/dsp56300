@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "external_run_fixture.hpp"
@@ -73,10 +74,10 @@ std::array<Event, flow_event_count> flow_events() {
 
 void successful_flow(const Backend backend) {
   auto bus = flow_bus();
-  Core core(bus, {.backend = backend});
+  TestCore core(bus, {.backend = backend});
   core.set_registers(initial_state());
   const auto zero = core.run(0);
-  require(zero.dispatches == 0 && zero.progress == Progress{} && bus.events.empty(),
+  require(zero.retired == 0 && zero.progress == Progress{} && bus.events.empty(),
           "A zero external instruction budget performs no logical bus operation");
   const auto result = core.run(flow_instructions);
   auto expected = initial_state();
@@ -84,7 +85,7 @@ void successful_flow(const Backend backend) {
   expected.x = 1;
   expected.sr = flag_c;
   const auto events = flow_events();
-  require(result.dispatches == flow_instructions && result.fault.kind == FaultKind::none &&
+  require(result.retired == flow_instructions && result.fault.kind == FaultKind::none &&
               core.registers() == expected && result.progress.instructions == flow_instructions,
           "Native P/X/Y/peripheral/bit/RESET instructions publish independent complete state");
   require(std::ranges::equal(bus.events, events) && bus.reads == 15 && bus.writes == 3 &&
@@ -122,7 +123,7 @@ void refused_flow(const Backend backend, const std::size_t rejected) {
     case Operation::reset: bus.refuse_reset = true; break;
     default: throw std::runtime_error("Unknown authored external-Io rejection");
   }
-  Core core(bus, {.backend = backend});
+  TestCore core(bus, {.backend = backend});
   core.set_registers(initial_state());
   const auto result = core.run(flow_instructions);
   const auto *const position = std::ranges::find(pcs, event.pc);
@@ -136,7 +137,7 @@ void refused_flow(const Backend backend, const std::size_t rejected) {
   constexpr std::array<Word, flow_instructions> previous_x{0, datum, datum, other, other, 1, 1, 1};
   expected.x = previous_x.at(completed);
   expected.sr = completed >= 7 ? flag_c : 0U;
-  require(result.dispatches == completed && result.progress.instructions == completed &&
+  require(result.retired == completed && result.progress.instructions == completed &&
               core.registers() == expected,
           std::string("A refused opcode/extension/data/bit/reset operation has literal nonretiring "
                       "CPU prefix state, event=") +
@@ -148,9 +149,8 @@ void refused_flow(const Backend backend, const std::size_t rejected) {
   require(std::ranges::equal(bus.events, std::span(events).first(rejected + 1)),
           "A real refusal preserves the accepted physical prefix and prevents all later callbacks");
   const auto stopped = core.run(flow_instructions);
-  require(stopped.dispatches == 0 && stopped.fault == result.fault &&
-              core.registers() == expected && core.progress() == result.progress &&
-              bus.events.size() == rejected + 1,
+  require(stopped.retired == 0 && stopped.fault == result.fault && core.registers() == expected &&
+              core.progress() == result.progress && bus.events.size() == rejected + 1,
           "A faulted owner remains blocked without replay, retirement or additional bus effects");
 }
 }

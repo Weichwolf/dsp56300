@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Public-Core normalization boundaries with independent raw-bit expectations.
+// Public-TestCore normalization boundaries with independent raw-bit expectations.
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "register_model.hpp"
@@ -23,11 +24,11 @@ constexpr std::array modes{0U, mode_down, mode_up, mode_rm, mode_rm | mode_down,
 constexpr Input first{.selector = 3}, replacement{.selector = 5};
 
 struct Machine {
-  explicit Machine(const Options options, Io *io = nullptr)
+  explicit Machine(const TestOptions options, Io *io = nullptr)
       : core({.program = p, .x = x, .y = y}, io, options) {}
 
   std::array<Word, memory_words> p{}, x{}, y{};
-  Core core;
+  TestCore core;
 };
 
 Registers seed(const Word mode) {
@@ -52,7 +53,7 @@ void normalize(Registers &state, const Input input) {
   ++state.pc;
 }
 
-void prefixes(const Options options, const Word mode) {
+void prefixes(const TestOptions options, const Word mode) {
   constexpr Input iterative{.kind = Kind::iteration, .selector = 7, .destination_b = true};
   const std::array program{add_a,
                            normalization_model::opcode(first),
@@ -72,22 +73,15 @@ void prefixes(const Options options, const Word mode) {
       }
     }
     const auto run = machine.core.run(budget);
-    require(run.dispatches == budget && run.fault.kind == FaultKind::none &&
+    require(run.retired == budget && run.fault.kind == FaultKind::none &&
                 run.progress == Progress{.instructions = budget,
                                          .estimated_cycles = budget + (budget >= 4 ? 4U : 0U)} &&
                 machine.core.registers() == expected,
             "Every native/SM normalization prefix publishes exact state, flags and costs");
-    if (budget == program.size() && options.backend == Backend::jit) {
-      const auto stats = machine.core.jit_statistics();
-      const auto native = options.optimize ? 3U : 0U;
-      require(stats.native_alu_instructions == native &&
-                  stats.helper_instructions == budget - native,
-              "Qualified SM normalization remains general between actual native arithmetic");
-    }
   }
 }
 
-void mode_reuse(const Options options, const Word mode) {
+void mode_reuse(const TestOptions options, const Word mode) {
   for (const auto kind : {Kind::iteration, Kind::fast}) {
     Machine machine(options);
     const Input input{.kind = kind, .selector = 2};
@@ -100,7 +94,7 @@ void mode_reuse(const Options options, const Word mode) {
       normalize(expected, input);
       const auto previous = machine.core.progress();
       const auto run = machine.core.run(1);
-      require(run.dispatches == 1 && run.fault.kind == FaultKind::none &&
+      require(run.retired == 1 && run.fault.kind == FaultKind::none &&
                   run.progress ==
                       Progress{.instructions = previous.instructions + 1,
                                .estimated_cycles = previous.estimated_cycles +
@@ -111,7 +105,7 @@ void mode_reuse(const Options options, const Word mode) {
   }
 }
 
-void compatibility_step(const Options options, const Word mode, const Input input) {
+void compatibility_step(const TestOptions options, const Word mode, const Input input) {
   constexpr Word compatibility = Word{1} << 13;
 
   struct Sample {
@@ -138,7 +132,7 @@ void compatibility_step(const Options options, const Word mode, const Input inpu
       normalize(expected, input);
       const auto before = machine.core.progress();
       const auto run = machine.core.run(1);
-      require(run.dispatches == 1 && run.fault.kind == FaultKind::none &&
+      require(run.retired == 1 && run.fault.kind == FaultKind::none &&
                   run.progress == Progress{.instructions = before.instructions + 1,
                                            .estimated_cycles = before.estimated_cycles + 5} &&
                   machine.core.registers() == expected,
@@ -147,7 +141,7 @@ void compatibility_step(const Options options, const Word mode, const Input inpu
   }
 }
 
-void compatibility_steps(const Options options, const Word mode) {
+void compatibility_steps(const TestOptions options, const Word mode) {
   for (unsigned selector = 0; selector < agu_registers; ++selector) {
     for (const bool destination_b : {false, true}) {
       compatibility_step(
@@ -158,7 +152,7 @@ void compatibility_steps(const Options options, const Word mode) {
   }
 }
 
-void bfu_forms(const Options options, const Word mode) {
+void bfu_forms(const TestOptions options, const Word mode) {
   struct Form {
     Word opcode;
     bool fast = false, saturate = false;
@@ -187,7 +181,7 @@ void bfu_forms(const Options options, const Word mode) {
         }
         const auto before = machine.core.progress();
         const auto run = machine.core.run(1);
-        require(run.dispatches == 1 && run.fault.kind == FaultKind::none &&
+        require(run.retired == 1 && run.fault.kind == FaultKind::none &&
                     run.progress == Progress{.instructions = before.instructions + 1,
                                              .estimated_cycles = before.estimated_cycles + 1} &&
                     machine.core.registers() == expected,
@@ -197,7 +191,7 @@ void bfu_forms(const Options options, const Word mode) {
   }
 }
 
-void invalid_inputs(const Options options) {
+void invalid_inputs(const TestOptions options) {
   constexpr std::array counts{-8388608, -56, 57, 8388607};
   for (unsigned selector = 0; selector < normalization_model::sources.size(); ++selector) {
     for (const bool destination_b : {false, true}) {
@@ -212,7 +206,7 @@ void invalid_inputs(const Options options) {
         machine.core.set_registers(expected);
         ++expected.pc;
         const auto run = machine.core.run(1);
-        require(run.dispatches == 0 && run.progress == Progress{} &&
+        require(run.retired == 0 && run.progress == Progress{} &&
                     run.fault == Fault{.kind = FaultKind::unsupported_mode,
                                        .space = Space::program,
                                        .address = start,
@@ -225,7 +219,7 @@ void invalid_inputs(const Options options) {
   }
 }
 
-void unqualified_modes(const Options options) {
+void unqualified_modes(const TestOptions options) {
   constexpr Word divide = 0x018040;
   constexpr std::array unsupported{0x2000U, 0x4000U, 0x20000U, mode_up | mode_down};
   for (const auto kind : {Kind::iteration, Kind::fast}) {
@@ -239,7 +233,7 @@ void unqualified_modes(const Options options) {
         normalization_model::apply(expected, input);
         ++expected.pc;
         const auto run = machine.core.run(1);
-        require(run.dispatches == 1 && run.fault.kind == FaultKind::none &&
+        require(run.retired == 1 && run.fault.kind == FaultKind::none &&
                     run.progress == Progress{.instructions = 1, .estimated_cycles = 5} &&
                     machine.core.registers() == expected,
                 "Non-shift NORM qualifies SM/SC with limiting and an unchanged exponent");
@@ -247,7 +241,7 @@ void unqualified_modes(const Options options) {
       }
       ++expected.pc;
       const auto run = machine.core.run(1);
-      require(run.dispatches == 0 && run.progress == Progress{} &&
+      require(run.retired == 0 && run.progress == Progress{} &&
                   run.fault == Fault{.kind = FaultKind::unsupported_mode,
                                      .space = Space::program,
                                      .address = start,
@@ -266,14 +260,14 @@ void unqualified_modes(const Options options) {
   // Raw DIV: 2*(+2^47)+1-(1*2^24) exceeds the positive SM rail.
   expected.a = saturation_model::positive;
   expected.sr |= flag_v;
-  require(run.dispatches == 1 && run.fault.kind == FaultKind::none &&
+  require(run.retired == 1 && run.fault.kind == FaultKind::none &&
               machine.core.registers() == expected,
           "Original rejected DIV now checks SM data limiting, raw quotient Carry and V/L");
 }
 
 class Observer final : public Io {
 public:
-  Core *core = nullptr;
+  TestCore *core = nullptr;
   Registers expected;
   bool accept = true, patch = false, observed = false;
   unsigned calls = 0;
@@ -309,7 +303,7 @@ struct Request {
   bool accept = false, patch = false;
 };
 
-void callback(const Options options, const Request input) {
+void callback(const TestOptions options, const Request input) {
   Observer observer;
   observer.accept = input.accept;
   observer.patch = input.patch;
@@ -329,19 +323,19 @@ void callback(const Options options, const Request input) {
   if (!input.accept) {
     const auto actual = machine.core.registers();
     if (actual != expected || run.fault.kind != FaultKind::io_read || run.fault.pc != start + 1 ||
-        run.fault.address != port || run.fault.value != 0 || run.dispatches != 1) {
+        run.fault.address != port || run.fault.value != 0 || run.retired != 1) {
       std::cerr << "CALLBACK backend=" << static_cast<unsigned>(options.backend)
-                << " optimize=" << options.optimize << " mode=" << input.mode << std::hex
-                << " actual-pc=" << actual.pc << " expected-pc=" << expected.pc
-                << " actual-sr=" << actual.sr << " expected-sr=" << expected.sr
-                << " actual-a=" << actual.a << " expected-a=" << expected.a
-                << " actual-b=" << actual.b << " expected-b=" << expected.b
-                << " actual-r0=" << actual.r[0] << " expected-r0=" << expected.r[0]
+                << " mode=" << input.mode << std::hex << " actual-pc=" << actual.pc
+                << " expected-pc=" << expected.pc << " actual-sr=" << actual.sr
+                << " expected-sr=" << expected.sr << " actual-a=" << actual.a
+                << " expected-a=" << expected.a << " actual-b=" << actual.b
+                << " expected-b=" << expected.b << " actual-r0=" << actual.r[0]
+                << " expected-r0=" << expected.r[0]
                 << " fault-kind=" << static_cast<unsigned>(run.fault.kind)
                 << " fault-address=" << run.fault.address << " fault-pc=" << run.fault.pc
                 << " fault-value=" << run.fault.value << std::dec << '\n';
     }
-    require(run.dispatches == 1 &&
+    require(run.retired == 1 &&
                 run.progress == Progress{.instructions = 1, .estimated_cycles = 1} &&
                 run.fault == Fault{.kind = FaultKind::io_read,
                                    .space = Space::x,
@@ -349,7 +343,7 @@ void callback(const Options options, const Request input) {
                                    .pc = start + 1} &&
                 machine.core.registers() == expected,
             "Rejected load preserves partial transfer effects without executing normalization");
-    require(machine.core.run(3).dispatches == 0 && machine.core.registers() == expected &&
+    require(machine.core.run(3).retired == 0 && machine.core.registers() == expected &&
                 observer.calls == 1,
             "Fault retry never replays the earlier saturated prefix or I/O");
     return;
@@ -357,7 +351,7 @@ void callback(const Options options, const Request input) {
   // A declined read publishes no destination data; only an accepted load owns datum.
   register_model::write(expected, 15, datum);
   normalize(expected, input.patch ? replacement : first);
-  require(run.dispatches == 3 && run.fault.kind == FaultKind::none &&
+  require(run.retired == 3 && run.fault.kind == FaultKind::none &&
               run.progress == Progress{.instructions = 3, .estimated_cycles = 3} &&
               machine.core.registers() == expected,
           "Accepted I/O and P edits select the new normalization with exact earlier state");
@@ -367,12 +361,10 @@ void callback(const Options options, const Request input) {
 
 int main() {
   try {
-    for (const auto backend :
-         {dsp56300::Backend::reference, dsp56300::Backend::cached, dsp56300::Backend::jit}) {
-      for (const bool optimize : {false, true}) {
-        for (const auto limit : {1U, 64U}) {
-          const dsp56300::Options options{
-              .backend = backend, .instructions_per_block = limit, .optimize = optimize};
+    for (const auto backend : {dsp56300::Backend::jit}) {
+      {
+        {
+          const dsp56300::TestOptions options{.backend = backend};
           dsp56300::test::invalid_inputs(options);
           dsp56300::test::unqualified_modes(options);
           for (const auto mode : dsp56300::test::modes) {

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "memory_arena.hpp"
@@ -19,14 +20,8 @@ namespace {
 constexpr Word paired_mac = 0xf098d2, loop = Word{1} << 15;
 constexpr Word port = 0xffff80, datum = 0xfedcba, count = 129;
 constexpr std::array modes{0U, mode_down, mode_up, mode_rm, mode_rm | mode_down, mode_rm | mode_up};
-constexpr std::array options{
-    Options{.backend = Backend::reference},
-    Options{.backend = Backend::cached},
-    Options{.backend = Backend::jit, .batch_backend = BatchBackend::disabled},
-    Options{.backend = Backend::jit, .batch_backend = BatchBackend::scalar},
-    Options{.backend = Backend::jit, .batch_backend = BatchBackend::avx2},
-    Options{.backend = Backend::jit, .batch_backend = BatchBackend::automatic},
-    Options{.backend = Backend::jit, .optimize = false, .batch_backend = BatchBackend::avx2}};
+constexpr std::array options{TestOptions{.backend = Backend::jit}};
+
 constexpr std::array<Word, 7> xdata{1, sign24, sign24 - 1, 0, 3, word_mask, 7};
 constexpr std::array<Word, 8> ydata{word_mask, 1, sign24, 9, sign24 - 1, 0, 11, datum};
 
@@ -65,7 +60,7 @@ Registers prefix(Registers state, const std::span<const Word> x, const std::span
 
 class Observer final : public Io {
 public:
-  Core *core = nullptr;
+  TestCore *core = nullptr;
   Registers expected;
   bool accept = true, invalidate = false, matched = true;
   unsigned reads = 0;
@@ -97,7 +92,7 @@ public:
 };
 
 struct Input {
-  Options options;
+  TestOptions options;
   Word mode = 0;
   unsigned action = 0;
   Word completed = 7;
@@ -112,7 +107,7 @@ void io_boundary(const Input input) {
   Observer observer;
   observer.accept = input.action != 2;
   observer.invalidate = input.action == 1;
-  Core core(arena.buffers(), &observer, input.options);
+  TestCore core(arena.buffers(), &observer, input.options);
   observer.core = &core;
   observer.completed = input.completed;
   core.write(Space::program, start, paired_mac);
@@ -133,7 +128,7 @@ void io_boundary(const Input input) {
       "The first I/O beyond a batch sees exact canonical flags, counters, addresses and registers");
   if (!observer.accept) {
     require(
-        result.dispatches == input.completed &&
+        result.retired == input.completed &&
             result.progress ==
                 Progress{.instructions = input.completed, .estimated_cycles = input.completed} &&
             result.fault.kind == FaultKind::io_read && result.fault.address == port &&
@@ -142,23 +137,17 @@ void io_boundary(const Input input) {
         "A rejected first I/O retains the completed batch/scalar prefix without retiring its ALU");
   } else {
     step(expected, {.x = datum, .y = y.back()});
-    require(result.dispatches == input.completed + 1 && result.fault.kind == FaultKind::none &&
+    require(result.retired == input.completed + 1 && result.fault.kind == FaultKind::none &&
                 core.registers() == expected,
             "A successful first I/O resumes its original prefetched MAC and old operands");
     if (observer.invalidate) {
       const auto next = core.run(1);
       --expected.lc;
-      require(next.dispatches == 1 && next.fault.kind == FaultKind::none &&
+      require(next.retired == 1 && next.fault.kind == FaultKind::none &&
                   core.registers() == expected,
               "I/O P mutation takes effect at the next instruction without replaying a batch");
     }
   }
-  const bool batches = input.options.backend == Backend::jit && input.options.optimize &&
-                       input.options.batch_backend != BatchBackend::disabled;
-  require(
-      core.jit_statistics().batch_instructions ==
-          (batches ? input.completed - (input.completed % 4) : 0U),
-      "The I/O witness includes the complete admitted compiled prefix and an exact scalar tail");
 }
 
 void fault_boundary(const Input input) {
@@ -166,7 +155,7 @@ void fault_boundary(const Input input) {
   std::vector<Word> x(input.completed);
   for (std::size_t index = 0; index < x.size(); ++index) { x[index] = xdata[index % xdata.size()]; }
   auto y = x;
-  Core core({.program = p, .x = x, .y = y}, nullptr, input.options);
+  TestCore core({.program = p, .x = x, .y = y}, nullptr, input.options);
   core.write(Space::program, start, paired_mac);
   auto state = initial(input.mode);
   if (input.completed > xdata.size()) { state.a = 0; }
@@ -177,7 +166,7 @@ void fault_boundary(const Input input) {
   core.set_registers(state);
   const auto result = core.run(input.completed + 3);
   require(
-      result.dispatches == input.completed &&
+      result.retired == input.completed &&
           result.progress ==
               Progress{.instructions = input.completed, .estimated_cycles = input.completed} &&
           result.fault.kind == FaultKind::memory_read && result.fault.space == Space::x &&
@@ -193,20 +182,20 @@ void changed_frame(const Input input) {
   std::array<Word, memory_words> p{};
   std::array<Word, 64> x{};
   std::array<Word, 64> y{};
-  Core core({.program = p, .x = x, .y = y}, nullptr, input.options);
+  TestCore core({.program = p, .x = x, .y = y}, nullptr, input.options);
   core.write(Space::program, start, paired_mac);
   auto state = initial(input.mode);
   core.set_registers(state);
-  require(core.run(16).dispatches == 16, "Warm a real batched loop before changing its frame");
+  require(core.run(16).retired == 16, "Warm a real batched loop before changing its frame");
   state.stack[2] = std::uint64_t{start + 1} << word_bits;
   auto expected = state;
   step(expected, {.x = 0, .y = 0});
   expected.pc = start + 8;
   core.set_registers(state);
-  const auto before = core.jit_statistics().batch_instructions;
+
   const auto result = core.run(8);
-  require(result.dispatches == 8 && result.fault.kind == FaultKind::none &&
-              core.registers() == expected && core.jit_statistics().batch_instructions == before,
+  require(result.retired == 8 && result.fault.kind == FaultKind::none &&
+              core.registers() == expected,
           "A changed saved start rejects cached batching and follows the new frame after one MAC");
 }
 
@@ -214,7 +203,7 @@ void zero_counter(const Input input) {
   std::array<Word, memory_words> p{};
   auto x = ydata;
   auto y = ydata;
-  Core core({.program = p, .x = x, .y = y}, nullptr, input.options);
+  TestCore core({.program = p, .x = x, .y = y}, nullptr, input.options);
   core.write(Space::program, start, paired_mac);
   auto state = initial(input.mode);
   state.lc = 0;
@@ -224,7 +213,7 @@ void zero_counter(const Input input) {
   }
   core.set_registers(state);
   const auto result = core.run(static_cast<Word>(x.size()));
-  require(result.dispatches == x.size() && result.fault.kind == FaultKind::none &&
+  require(result.retired == x.size() && result.fault.kind == FaultKind::none &&
               core.registers() == expected,
           "A zero LC uses authoritative scalar wrap before an eligible batch resumes");
 }
@@ -232,7 +221,7 @@ void zero_counter(const Input input) {
 void program_alias(const Input input) {
   std::array<Word, memory_words> p{};
   auto y = ydata;
-  Core core({.program = p, .x = p, .y = y}, nullptr, input.options);
+  TestCore core({.program = p, .x = p, .y = y}, nullptr, input.options);
   constexpr Word base = start - 2;
   core.load(Space::x, base, ydata);
   core.write(Space::program, start, paired_mac);
@@ -245,9 +234,8 @@ void program_alias(const Input input) {
   }
   core.set_registers(state);
   const auto result = core.run(static_cast<Word>(y.size()));
-  require(result.dispatches == y.size() && result.fault.kind == FaultKind::none &&
-              core.registers() == expected && p == original &&
-              core.jit_statistics().invalidations == 0,
+  require(result.retired == y.size() && result.fault.kind == FaultKind::none &&
+              core.registers() == expected && p == original,
           "Read-only X/P aliases retain program words and exact pipelined MAC input order");
 }
 } // namespace

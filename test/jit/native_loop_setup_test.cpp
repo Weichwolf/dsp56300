@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Independent stack-coordinate and control models, including partial failures.
 #include "architecture.hpp"
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
@@ -211,7 +212,7 @@ void direct_case(const native::Direct &code, const Shape shape, const Input inpu
 
 void direct_shape(const Shape shape) {
   const auto ops = operations(shape);
-  detail::JitEmitter emitter({.execute = forbidden, .moves = forbidden, .memory = {}}, true);
+  detail::JitEmitter emitter({.execute = forbidden, .moves = forbidden, .memory = {}});
   const native::Direct code(emitter.generate(ops));
   require(!emitter.packed_retirement() && !emitter.cached_status(),
           "DO setup retains conservative full-state accounting before its guarded helper exit");
@@ -258,14 +259,14 @@ void direct_matrix() {
 }
 
 struct Machine {
-  explicit Machine(const Options options, Io *io = nullptr)
+  explicit Machine(const TestOptions options, Io *io = nullptr)
       : core({.program = p, .x = x, .y = y}, io, options) {}
 
   std::array<Word, memory_words> p{}, x{}, y{};
-  Core core;
+  TestCore core;
 };
 
-void core_case(Machine &machine, const Options options, const Shape shape, const Input input) {
+void core_case(Machine &machine, const TestOptions options, const Shape shape, const Input input) {
   const auto initial = seed(shape, input);
   auto expected = initial;
   prefix(expected, shape);
@@ -274,9 +275,9 @@ void core_case(Machine &machine, const Options options, const Shape shape, const
   const Word retired = before + (failure == Failure::none ? 1U : 0U);
   machine.core.set_registers(initial);
   const auto base = machine.core.progress();
-  const auto statistics = machine.core.jit_statistics();
+
   const auto run = machine.core.run(before + 1);
-  require(run.dispatches == retired && machine.core.registers() == expected &&
+  require(run.retired == retired && machine.core.registers() == expected &&
               run.progress == Progress{.instructions = base.instructions + retired,
                                        .estimated_cycles = base.estimated_cycles + before +
                                                            (failure == Failure::none ? 5U : 0U)},
@@ -297,25 +298,18 @@ void core_case(Machine &machine, const Options options, const Shape shape, const
                                .pc = setup_pc(shape)},
             "First/second push and mode failures retain the precise general fault");
   } else {
-    require(run.fault.kind == FaultKind::none && machine.core.interruptible(),
+    require(run.fault.kind == FaultKind::none && machine.core.interrupt_ready(),
             "A successful setup leaves an ordinary interrupt-admission boundary");
   }
-  if (options.backend == Backend::jit && options.optimize) {
-    const auto after = machine.core.jit_statistics();
-    const auto native = before + (fast_shape(shape) && input.sc < native_capacity ? 1U : 0U);
-    require(after.native_alu_instructions == statistics.native_alu_instructions + native &&
-                after.native_move_instructions == statistics.native_move_instructions,
-            "Actual native control execution and guarded fallback are explicitly witnessed");
-  }
   if (failure != Failure::none) {
-    require(machine.core.run(1).dispatches == 0 && machine.core.registers() == expected &&
+    require(machine.core.run(1).retired == 0 && machine.core.registers() == expected &&
                 machine.core.progress() == run.progress,
             "Faults remain fail-stop until reset; no partial frame can execute again");
     machine.core.reset();
   }
 }
 
-void core_shape(const Options options, const Shape shape) {
+void core_shape(const TestOptions options, const Shape shape) {
   Machine machine(options);
   std::vector<Word> words;
   if (shape.prefix) { words = {mac_a, mac_b}; }
@@ -329,7 +323,7 @@ void core_shape(const Options options, const Shape shape) {
   }
 }
 
-void core_matrix(const Options options) {
+void core_matrix(const TestOptions options) {
   for (const bool relative : {false, true}) {
     for (const Word count : {0U, 1U, 2U, 256U, 4095U}) {
       for (const auto mode : modes) {
@@ -361,7 +355,7 @@ void encoding_probe() {
 
 class Observer final : public Io {
 public:
-  Core *core = nullptr;
+  TestCore *core = nullptr;
   Registers expected;
   Progress progress;
   Word pc = 0, patch_pc = 0, patch_value = 0;
@@ -393,7 +387,7 @@ public:
 };
 
 struct Callback {
-  Options options;
+  TestOptions options;
   bool relative = false, accept = true, invalidate = false, ending = false;
 };
 
@@ -426,7 +420,7 @@ void callback(const Callback input) {
   initial.r[0] = 7;
   machine.x[7] = datum;
   machine.core.set_registers(initial);
-  require(machine.core.run(5).dispatches == 5 && observer.calls == 0,
+  require(machine.core.run(5).retired == 5 && observer.calls == 0,
           "Warm both setup blocks and the RAM path before reusing callback/cleanup paths");
   initial.r[0] = port;
   machine.core.set_registers(initial);
@@ -445,7 +439,7 @@ void callback(const Callback input) {
   require(observer.observed && observer.calls == 1,
           "Callbacks see exact flags/frames/dirty A/B and both counters after native loop setup");
   if (!input.accept) {
-    require(result.dispatches == 3 && result.progress == observer.progress &&
+    require(result.retired == 3 && result.progress == observer.progress &&
                 result.fault.kind == FaultKind::io_read &&
                 machine.core.registers() == observer.expected,
             "Rejected I/O preserves the complete post-setup checkpoint and cannot retire");
@@ -458,14 +452,14 @@ void callback(const Callback input) {
   finish(expected, io_pc);
   if (input.invalidate) { next.extension = observer.patch_value; }
   require(setup(expected, next) == Failure::none, "Independent successor loop frame fits");
-  require(result.dispatches == 5 && result.fault.kind == FaultKind::none &&
+  require(result.retired == 5 && result.fault.kind == FaultKind::none &&
               machine.core.registers() == expected &&
               result.progress == Progress{.instructions = base.instructions + 5,
                                           .estimated_cycles = base.estimated_cycles + 13},
           "Nested/cleaned-up setup and successor extension invalidation preserve full state");
 }
 
-void partitions(const Options options) {
+void partitions(const TestOptions options) {
   Machine machine(options);
   constexpr Word last = start + 5;
   const Shape shape{.extension = last, .prefix = true};
@@ -489,14 +483,14 @@ void partitions(const Options options) {
       ++retired;
     }
     const auto run = machine.core.run(budget);
-    require(run.dispatches == budget && run.fault.kind == FaultKind::none &&
+    require(run.retired == budget && run.fault.kind == FaultKind::none &&
                 machine.core.registers() == expected &&
                 run.progress == Progress{.instructions = retired, .estimated_cycles = cycles},
             "Zero/partial budgets continue through setup, both iterations and final restoration");
   }
 }
 
-void interrupt_boundary(const Options options) {
+void interrupt_boundary(const TestOptions options) {
   Machine machine(options);
   const Shape shape{.extension = start + 3};
   const std::array words{opcode(2, false), shape.extension, mac_a, mac_b};
@@ -506,24 +500,24 @@ void interrupt_boundary(const Options options) {
   auto expected = seed(shape, {.flags = status_byte, .loops = fv});
   machine.core.set_registers(expected);
   require(setup(expected, shape) == Failure::none, "Independent interrupted setup creates frames");
-  require(machine.core.run(1).dispatches == 1 && machine.core.registers() == expected &&
-              machine.core.interruptible(),
+  require(machine.core.run(1).retired == 1 && machine.core.registers() == expected &&
+              machine.core.interrupt_ready(),
           "The host may admit an interrupt at the completed native setup checkpoint");
   machine.core.interrupt(vector, 1);
   const Progress interrupted{.instructions = 3, .estimated_cycles = 7};
   require(machine.core.fault().kind == FaultKind::none && machine.core.registers() == expected &&
-              machine.core.progress() == interrupted && !machine.core.interruptible(),
+              machine.core.progress() == interrupted && !machine.core.interrupt_ready(),
           "A fast vector preserves loop frames and resumes with its required exclusion");
-  require(machine.core.run(0).dispatches == 0 && machine.core.registers() == expected &&
-              machine.core.progress() == interrupted && !machine.core.interruptible(),
+  require(machine.core.run(0).retired == 0 && machine.core.registers() == expected &&
+              machine.core.progress() == interrupted && !machine.core.interrupt_ready(),
           "A zero budget after eager host-admitted service cannot release its exclusion");
   arithmetic(expected, mac_a);
-  require(machine.core.run(1).dispatches == 1 && machine.core.registers() == expected &&
-              machine.core.interruptible(),
+  require(machine.core.run(1).retired == 1 && machine.core.registers() == expected &&
+              machine.core.interrupt_ready(),
           "Native foreground arithmetic resumes from the loop's exact saved continuation");
 }
 
-void mutations(const Options options) {
+void mutations(const TestOptions options) {
   Machine machine(options);
   constexpr Word last = start + 10;
   const Shape first{.extension = last, .prefix = true};
@@ -542,7 +536,7 @@ void mutations(const Options options) {
       require(setup(expected, shape) == Failure::none, "Modified loop-count models fit the stack");
       const auto base = machine.core.progress();
       const auto run = machine.core.run(3);
-      require(run.dispatches == 3 && run.fault.kind == FaultKind::none &&
+      require(run.retired == 3 && run.fault.kind == FaultKind::none &&
                   machine.core.registers() == expected &&
                   run.progress == Progress{.instructions = base.instructions + 3,
                                            .estimated_cycles = base.estimated_cycles + 7},
@@ -557,12 +551,9 @@ int main() {
   try {
     dsp56300::test::encoding_probe();
     dsp56300::test::direct_matrix();
-    for (const auto backend :
-         {dsp56300::Backend::reference, dsp56300::Backend::cached, dsp56300::Backend::jit}) {
+    for (const auto backend : {dsp56300::Backend::jit}) {
       dsp56300::test::core_matrix({.backend = backend});
-      for (const dsp56300::Word limit : {1U, 2U, 4U, 64U}) {
-        dsp56300::test::partitions({.backend = backend, .instructions_per_block = limit});
-      }
+      dsp56300::test::partitions({.backend = backend});
       dsp56300::test::interrupt_boundary({.backend = backend});
       dsp56300::test::mutations({.backend = backend});
       for (const bool relative : {false, true}) {
@@ -579,7 +570,7 @@ int main() {
         }
       }
     }
-    dsp56300::test::core_matrix({.backend = dsp56300::Backend::jit, .optimize = false});
+    dsp56300::test::core_matrix({.backend = dsp56300::Backend::jit});
     std::cout << dsp56300::test::checks << " independent native loop-setup checks passed\n";
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';

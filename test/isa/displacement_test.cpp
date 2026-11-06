@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "address_model.hpp"
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "memory_arena.hpp"
@@ -68,7 +69,7 @@ public:
     return false;
   }
 
-  Core *core = nullptr;
+  TestCore *core = nullptr;
   Registers expected;
   Progress progress;
   Space space = Space::x;
@@ -98,7 +99,7 @@ private:
   }
 };
 
-void port_case(Core &core, Observer &io, const Form form, const Word port, const bool accept) {
+void port_case(TestCore &core, Observer &io, const Form form, const Word port, const bool accept) {
   core.reset();
   auto state = register_model::seed(0);
   state.x = payload;
@@ -136,13 +137,13 @@ void port_case(Core &core, Observer &io, const Form form, const Word port, const
                                      .address = port,
                                      .value = form.load ? 0U : io.value,
                                      .pc = start};
-  require(result.dispatches == (accept ? 1U : 0U) && result.fault == fault &&
+  require(result.retired == (accept ? 1U : 0U) && result.fault == fault &&
               result.progress ==
                   (accept ? Progress{.instructions = 1, .estimated_cycles = cost} : Progress{}),
           "Accepted/rejected displaced I/O has exact fault and retirement accounting");
   require(core.read(io.space, port) == 0, "Full-span backing cannot bypass I/O routing");
   if (!accept) {
-    require(core.run(2).dispatches == 0 && io.calls == 1 && core.registers() == expected,
+    require(core.run(2).retired == 0 && io.calls == 1 && core.registers() == expected,
             "Failed I/O remains stopped without replaying reads, writes or source-stack pops");
   }
 }
@@ -150,7 +151,7 @@ void port_case(Core &core, Observer &io, const Form form, const Word port, const
 void ports(const Backend backend) {
   const MemoryArena arena;
   Observer io;
-  Core core(arena.buffers(), &io, {.backend = backend});
+  TestCore core(arena.buffers(), &io, {.backend = backend});
   io.core = &core;
   for (const bool long_form : {false, true}) {
     for (const bool y : {false, true}) {
@@ -173,7 +174,7 @@ void callback_invalidation(const Backend backend, const bool long_form) {
   std::array<Word, memory_words> x{};
   std::array<Word, memory_words> y{};
   Observer io;
-  Core core({.program = p, .x = x, .y = y}, &io, {.backend = backend});
+  TestCore core({.program = p, .x = x, .y = y}, &io, {.backend = backend});
   io.core = &core;
   auto state = register_model::seed(0);
   state.r[0] = io_begin;
@@ -202,14 +203,10 @@ void callback_invalidation(const Backend backend, const bool long_form) {
   expected.pc = next + 1;
   const auto result = core.run(4);
   require(
-      result.dispatches == 4 && result.fault.kind == FaultKind::none &&
+      result.retired == 4 && result.fault.kind == FaultKind::none &&
           result.progress == Progress{.instructions = 4, .estimated_cycles = long_form ? 6U : 5U} &&
           core.registers() == expected && io.calls == 1 && io.valid,
       "Displaced I/O materializes dirty native A/B, rejects reentry and invalidates its successor");
-  if (backend == Backend::jit) {
-    require(core.jit_statistics().native_alu_instructions >= 3,
-            "The observer sequence includes actual native arithmetic around the general MOVE");
-  }
 }
 
 void extension_cache(const Backend backend, const bool y) {
@@ -217,11 +214,11 @@ void extension_cache(const Backend backend, const bool y) {
   std::array<Word, memory_words * 2> x{};
   std::array<Word, memory_words * 2> other{};
   const std::span shared{p.data() + alias_offset, p.size() - alias_offset};
-  Core core({.program = p,
-             .x = y ? std::span<Word>{x} : shared,
-             .y = y ? shared : std::span<Word>{other}},
-            nullptr,
-            {.backend = backend});
+  TestCore core({.program = p,
+                 .x = y ? std::span<Word>{x} : shared,
+                 .y = y ? shared : std::span<Word>{other}},
+                nullptr,
+                {.backend = backend});
   const auto space = y ? Space::y : Space::x;
   core.write(
       Space::program, extension_pc, instruction({.reg = y ? 6U : 4U, .long_form = true, .y = y}));
@@ -237,7 +234,7 @@ void extension_cache(const Backend backend, const bool y) {
     auto expected = initial;
     expected.pc += 2;
     (y ? expected.y : expected.x) = payload - offset;
-    require(core.run(1).dispatches == 1 && core.registers() == expected,
+    require(core.run(1).retired == 1 && core.registers() == expected,
             "Warm displaced-MOVE extension changes invalidate the preceding decode page through "
             "X/Y aliases");
   }
@@ -247,11 +244,11 @@ void program_store(const Backend backend, const Form form) {
   std::array<Word, memory_words> p{};
   std::array<Word, memory_words> other{};
   const std::span shared{p.data() + alias_offset, p.size() - alias_offset};
-  Core core({.program = p,
-             .x = form.y ? std::span<Word>{other} : shared,
-             .y = form.y ? shared : std::span<Word>{other}},
-            nullptr,
-            {.backend = backend});
+  TestCore core({.program = p,
+                 .x = form.y ? std::span<Word>{other} : shared,
+                 .y = form.y ? shared : std::span<Word>{other}},
+                nullptr,
+                {.backend = backend});
   auto initial = register_model::seed(0);
   const Word next = start + word_count(form);
   initial.x = negate;
@@ -263,7 +260,7 @@ void program_store(const Backend backend, const Form form) {
   auto expected = initial;
   sequence_model::alu(expected, initial, negate);
   expected.pc = next + 1;
-  require(core.run(2).dispatches == 2 && core.registers() == expected && p[next] == negate,
+  require(core.run(2).retired == 2 && core.registers() == expected && p[next] == negate,
           "A displaced X/Y store that aliases P discards the planned successor before execution");
 }
 
@@ -271,7 +268,7 @@ void span_and_stack(const Backend backend, const Form form) {
   std::array<Word, memory_words> p{};
   std::array<Word, memory_words> x{};
   std::array<Word, memory_words> y{};
-  Core core({.program = p, .x = x, .y = y}, nullptr, {.backend = backend});
+  TestCore core({.program = p, .x = x, .y = y}, nullptr, {.backend = backend});
   auto initial = register_model::seed(0);
   initial.r[0] = memory_words;
   initial.x = payload;
@@ -281,7 +278,7 @@ void span_and_stack(const Backend backend, const Form form) {
   auto expected = initial;
   expected.pc += word_count(form);
   const auto result = core.run(1);
-  require(result.dispatches == 0 && result.progress == Progress{} &&
+  require(result.retired == 0 && result.progress == Progress{} &&
               result.fault.kind == (form.load ? FaultKind::memory_read : FaultKind::memory_write) &&
               result.fault.address == memory_words && core.registers() == expected,
           "Failed displaced memory transfer preserves all data/AGU fields and retires nothing");
@@ -296,7 +293,7 @@ void span_and_stack(const Backend backend, const Form form) {
   core.set_registers(initial);
   expected = initial;
   expected.pc += 2;
-  require(core.run(1).dispatches == 0 && core.fault().kind == FaultKind::stack &&
+  require(core.run(1).retired == 0 && core.fault().kind == FaultKind::stack &&
               core.registers() == expected && x[0] == 0 && y[0] == 0,
           "Long displacement SSH underflow/overflow preserves the stack and avoids a store after "
           "failed pop");
@@ -306,7 +303,7 @@ void numeric_modes(const Backend backend) {
   std::array<Word, memory_words> p{};
   std::array<Word, memory_words> x{};
   std::array<Word, memory_words> y{};
-  Core core({.program = p, .x = x, .y = y}, nullptr, {.backend = backend});
+  TestCore core({.program = p, .x = x, .y = y}, nullptr, {.backend = backend});
   const std::array program{mac_a,
                            mac_b,
                            instruction({.reg = register_model::reg_sr, .long_form = true}),
@@ -334,7 +331,7 @@ void numeric_modes(const Backend backend) {
       const auto before = core.progress();
       const auto result = core.run(4);
       require(
-          result.dispatches == 4 && result.fault.kind == FaultKind::none &&
+          result.retired == 4 && result.fault.kind == FaultKind::none &&
               result.progress == Progress{.instructions = before.instructions + 4,
                                           .estimated_cycles = before.estimated_cycles + 6} &&
               core.registers() == expected,
@@ -347,7 +344,7 @@ void modifier_changes(const Backend backend) {
   std::array<Word, memory_words> p{};
   std::array<Word, memory_words> x{};
   std::array<Word, memory_words> y{};
-  Core core({.program = p, .x = x, .y = y}, nullptr, {.backend = backend});
+  TestCore core({.program = p, .x = x, .y = y}, nullptr, {.backend = backend});
   const std::array program{
       instruction({.reg = 32, .long_form = true}) | (1U << 8), Word{0}, load_x0_increment};
   core.load(Space::program, start, program);
@@ -364,16 +361,11 @@ void modifier_changes(const Backend backend) {
         address_model::updated({.modifier = modifier, .cursor = initial.r[0], .mode = 3});
     register_model::write(expected, 4, payload);
     expected.pc = start + static_cast<Word>(program.size());
-    const auto before = core.jit_statistics().native_move_instructions;
+
     const auto result = core.run(2);
-    require(result.dispatches == 2 && result.fault.kind == FaultKind::none &&
+    require(result.retired == 2 && result.fault.kind == FaultKind::none &&
                 core.registers() == expected,
             "Guest long-MOVE M writes are visible to the following warm native AGU guard");
-    if (backend == Backend::jit) {
-      require(
-          core.jit_statistics().native_move_instructions == before + (modifier == 0 ? 0U : 1U),
-          "Guest M replacement selects actual native linear/ring transfers or reverse fallback");
-    }
   }
 }
 } // namespace
@@ -381,8 +373,7 @@ void modifier_changes(const Backend backend) {
 
 int main() {
   try {
-    for (const auto backend :
-         {dsp56300::Backend::reference, dsp56300::Backend::cached, dsp56300::Backend::jit}) {
+    for (const auto backend : {dsp56300::Backend::jit}) {
       dsp56300::test::ports(backend);
       dsp56300::test::numeric_modes(backend);
       dsp56300::test::modifier_changes(backend);

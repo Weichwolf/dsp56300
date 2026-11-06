@@ -221,8 +221,8 @@ void repeated(Cases &cases, const Input input) {
     const bool completed = iterations == count;
     item.expected.pc = start + (completed ? 2U : 1U);
     item.expected.lc = completed ? item.initial.lc : count - iterations;
-    item.interruptible = completed;
-    item.budget = item.dispatches = budget;
+    item.interrupt_ready = completed;
+    item.budget = item.retired = budget;
     item.progress = {.instructions = budget, .estimated_cycles = 5 + (cycles(input) * iterations)};
     item.name = "REP VSL partial prefixes use current R once and preserve accumulator/CCR";
     cases.push_back(std::move(item));
@@ -327,7 +327,7 @@ void sequence(Cases &cases, const Input input) {
     }
     ++item.expected.pc;
     ++item.budget;
-    item.dispatches = item.budget;
+    item.retired = item.budget;
     item.progress = {.instructions = item.budget, .estimated_cycles = item.budget};
     cases.push_back(item);
   }
@@ -350,9 +350,9 @@ void sequences(Cases &cases) {
 }
 
 void reject(Cases &cases, BinaryCase item, const FaultKind kind, const Word value) {
-  item.dispatches = 0;
+  item.retired = 0;
   item.progress = {};
-  item.interruptible = false;
+  item.interrupt_ready = false;
   item.fault = {.kind = kind, .address = start, .value = value, .pc = start};
   cases.push_back(std::move(item));
 }
@@ -385,9 +385,9 @@ void faults(Cases &cases) {
   multiword.before.front().words.insert(multiword.before.front().words.begin(),
                                         repeat_base | (2U << 8));
   multiword.budget = 3;
-  multiword.dispatches = 1;
+  multiword.retired = 1;
   multiword.progress = {.instructions = 1, .estimated_cycles = 5};
-  multiword.interruptible = false;
+  multiword.interrupt_ready = false;
   multiword.fault = {.kind = FaultKind::invalid_instruction,
                      .address = start + 1,
                      .value = vsl_base | (6U << 11),

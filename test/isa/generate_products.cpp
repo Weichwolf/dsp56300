@@ -417,7 +417,7 @@ BinaryCase repeated(const Input input) {
   item.before.front().words.insert(item.before.front().words.begin(), repeat_base | (count << 8));
   for (Word iteration = 1; iteration < count; ++iteration) { model(item.expected, input); }
   item.expected.pc = start + 2;
-  item.budget = item.dispatches = count + 1;
+  item.budget = item.retired = count + 1;
   item.progress = {.instructions = count + 1, .estimated_cycles = count + 5};
   item.name += "; REP reuses sources and current accumulator";
   return item;
@@ -478,9 +478,9 @@ BinaryCase rejected(const Input input, const FaultKind kind, const Word value) {
   std::vector<Word> program{opcode(input)};
   if (input.family == Family::immediate) { program.push_back(input.coefficient); }
   item.before = {{.words = std::move(program), .address = start}};
-  item.dispatches = 0;
+  item.retired = 0;
   item.progress = {};
-  item.interruptible = false;
+  item.interrupt_ready = false;
   item.fault = {
       .kind = kind, .space = Space::program, .address = start, .value = value, .pc = start};
   item.name = "Explicit product undefined-field/unimplemented-mode boundary";
@@ -495,9 +495,9 @@ void faults(Cases &cases, Input input) {
       model(item.expected, input);
       item.expected.pc += static_cast<Word>(item.before.front().words.size());
       item.fault = {};
-      item.dispatches = 1;
+      item.retired = 1;
       item.progress = {.instructions = 1, .estimated_cycles = item.before.front().words.size()};
-      item.interruptible = true;
+      item.interrupt_ready = true;
       item.name = "Qualified SM product/bypass on the former unsupported stimulus";
     }
     cases.push_back(std::move(item));
@@ -548,14 +548,14 @@ void sequence_prefixes(Cases &cases) {
         model(item.expected, step);
         item.expected.pc += step.family == Family::immediate ? 2U : 1U;
         ++item.budget;
-        item.dispatches = item.budget;
+        item.retired = item.budget;
         item.progress = {.instructions = item.budget, .estimated_cycles = item.expected.pc - start};
         cases.push_back(item);
         const auto old = item.expected;
         sequence_model::alu(item.expected, old, add_b_a);
         ++item.expected.pc;
         ++item.budget;
-        item.dispatches = item.budget;
+        item.retired = item.budget;
         item.progress = {.instructions = item.budget, .estimated_cycles = item.expected.pc - start};
         cases.push_back(item);
       }
@@ -585,7 +585,7 @@ void extension_boundaries(Cases &cases) {
           repeat.before.front().words.insert(repeat.before.front().words.begin(),
                                              repeat_base | (2U << 8));
           repeat.budget = 2;
-          repeat.dispatches = 1;
+          repeat.retired = 1;
           repeat.progress = {.instructions = 1, .estimated_cycles = 5};
           repeat.fault.address = repeat.fault.pc = start + 1;
           cases.push_back(std::move(repeat));

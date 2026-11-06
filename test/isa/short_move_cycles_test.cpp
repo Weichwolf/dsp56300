@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "support.hpp"
@@ -50,9 +51,9 @@ struct Image final : Io {
   }
 };
 
-Core make_core(Image &image, const bool external, const Backend backend) {
-  if (external) { return Core(image, {.backend = backend}); }
-  return Core(
+TestCore make_core(Image &image, const bool external, const Backend backend) {
+  if (external) { return TestCore(image, {.backend = backend}); }
+  return TestCore(
       {.program = image.program, .x = image.x, .y = image.y}, nullptr, {.backend = backend});
 }
 
@@ -74,8 +75,11 @@ Registers setup(Image &image, const Case item) {
   return initial;
 }
 
-void verify(
-    const Core &cpu, const Image &image, Registers initial, const Case item, const bool external) {
+void verify(const TestCore &cpu,
+            const Image &image,
+            Registers initial,
+            const Case item,
+            const bool external) {
   std::array<Word, short_words> expected_x{};
   std::array<Word, short_words> expected_y{};
   expected_x.fill(xword);
@@ -106,7 +110,7 @@ void ordinary(const Case item, const Backend backend, const bool external) {
   auto cpu = make_core(image, external, backend);
   cpu.set_registers(initial);
   const auto result = cpu.run(1);
-  require(result.dispatches == 1, "One actual short MOVE dispatches");
+  require(result.retired == 1, "One actual short MOVE dispatches");
   verify(cpu, image, initial, item, external);
 }
 
@@ -118,7 +122,7 @@ int main() {
   using namespace dsp56300::test;
   try {
 
-    for (const auto backend : {Backend::reference, Backend::cached, Backend::jit}) {
+    for (const auto backend : {Backend::jit}) {
       for (const auto space : {Space::x, Space::y}) {
         for (Word address = 0; address < short_words; ++address) {
           for (const bool load : {false, true}) {

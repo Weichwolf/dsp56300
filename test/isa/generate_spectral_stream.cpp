@@ -81,7 +81,7 @@ void setup(BinaryCase &item, const Input input, const Program &code, const Input
   item.memory_words = {
       2048, input_base + (channels * input_stride), input_base + (channels * input_stride)};
   item.budget = 1 + static_cast<Word>(input.hops * code.hop_progress.instructions);
-  item.dispatches = item.budget;
+  item.retired = item.budget;
   item.progress = {.instructions = item.budget,
                    .estimated_cycles = 5 + (input.hops * code.hop_progress.estimated_cycles)};
   item.before = {

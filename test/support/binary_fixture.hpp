@@ -11,6 +11,11 @@
 #include <vector>
 
 namespace dsp56300::test {
+struct DebugStatus {
+  bool interrupt_mode = false, software_occurrence = false;
+  bool operator==(const DebugStatus &) const = default;
+};
+
 struct MemoryBlock {
   std::vector<Word> words;
   Word address = 0;
@@ -33,9 +38,9 @@ struct BinaryCase {
   std::vector<ResetAction> reset_actions;
   std::string name;
   std::array<Word, 3> memory_words{1024, 1024, 1024};
-  Word budget = 1, dispatches = 1;
-  bool interruptible = true;
-  ProcessingState state = ProcessingState::running;
+  Word budget = 1, retired = 1;
+  bool interrupt_ready = true;
+  ExecutionState state = ExecutionState::running;
   bool debug_interrupt_mode = false;
   DebugStatus debug;
 };

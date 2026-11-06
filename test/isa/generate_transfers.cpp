@@ -232,9 +232,9 @@ void fault_case(Cases &cases, FaultCase input) {
   item.initial.sc = 0;
   item.initial.sp = 0;
   item.expected = item.initial;
-  item.dispatches = 0;
+  item.retired = 0;
   item.progress = {};
-  item.interruptible = false;
+  item.interrupt_ready = false;
   item.fault = input.fault;
   item.fault.pc = start;
   if (item.fault.kind == FaultKind::invalid_instruction) {

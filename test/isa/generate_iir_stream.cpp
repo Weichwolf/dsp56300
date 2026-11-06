@@ -135,7 +135,7 @@ void setup(BinaryCase &item, const Input input, const Program &code) {
   item.initial.n[7] = frames;
   item.memory_words = {1024, input_base + input_words + 1, 1024};
   item.budget = 1 + (frames * frame_instructions);
-  item.dispatches = item.budget;
+  item.retired = item.budget;
   item.progress = {.instructions = item.budget,
                    .estimated_cycles = 5 + (std::uint64_t{frames} * frame_cycles)};
   item.before = {

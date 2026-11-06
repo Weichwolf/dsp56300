@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "register_model.hpp"
@@ -77,7 +78,7 @@ struct Machine {
   }
 
   std::array<Word, memory_words> p{}, x{}, y{};
-  Core core;
+  TestCore core;
 };
 
 struct PortCase {
@@ -112,7 +113,7 @@ void register_port(const Backend backend, const PortCase input) {
   const auto result = machine.core.run(1);
   ++state.pc;
   state.x = (high_word << word_bits) | payload;
-  require(result.dispatches == 1 && result.fault.kind == FaultKind::none &&
+  require(result.retired == 1 && result.fault.kind == FaultKind::none &&
               result.progress == Progress{.instructions = 1, .estimated_cycles = 1} &&
               machine.core.registers() == state && io.complete(),
           "MOVEP maps every X/Y high/low port and preserves full state");
@@ -145,7 +146,7 @@ void saturated_register_port(const SaturatedPort input) {
   machine.p[start] = opcode;
   machine.core.set_registers(initial);
   const auto result = machine.core.run(1);
-  require(result.dispatches == 1 && result.fault.kind == FaultKind::none &&
+  require(result.retired == 1 && result.fault.kind == FaultKind::none &&
               result.progress == Progress{.instructions = 1, .estimated_cycles = 1} &&
               machine.core.registers() == expected && io.complete(),
           "SM MOVEP A/B uses ordinary bus scaling/limiting and exactly one X/Y I/O event");
@@ -201,7 +202,7 @@ void vector_base_register(const Backend backend) {
     expected.vba = ((bank + low) / byte_values) * byte_values;
     expected.y |= expected.vba;
     expected.pc += program.size();
-    require(result.dispatches == 2 && result.fault.kind == FaultKind::none &&
+    require(result.retired == 2 && result.fault.kind == FaultKind::none &&
                 machine.core.progress().instructions == 2 && machine.core.registers() == expected,
             "VBA ignores every written low byte and native MOVEC reads the aligned bank");
   }
@@ -244,7 +245,7 @@ void memory_port(const Backend backend, const MemoryCase input) {
   const auto result = machine.core.run(1);
   state.pc += static_cast<Word>(program.size());
   if (!input.immediate) { ++state.r[0]; }
-  require(result.dispatches == 1 && result.fault.kind == FaultKind::none && io.complete() &&
+  require(result.retired == 1 && result.fault.kind == FaultKind::none && io.complete() &&
               result.progress == Progress{.instructions = 1, .estimated_cycles = input.cycles} &&
               machine.core.registers() == state,
           "MOVEP memory/immediate directions retain EA updates and base costs");
@@ -290,9 +291,9 @@ void fast_memory_port(const Backend backend, const MemoryCase input, const Word 
   }
   if (!input.immediate) { ++state.r[0]; }
   const auto cycles = input.cycles + (input.immediate ? 0U : 1U);
-  require(result.dispatches == count && result.fault.kind == FaultKind::none && io.complete() &&
+  require(result.retired == count && result.fault.kind == FaultKind::none && io.complete() &&
               result.progress == Progress{.instructions = count, .estimated_cycles = cycles} &&
-              machine.core.registers() == state && !machine.core.interruptible(),
+              machine.core.registers() == state && !machine.core.interrupt_ready(),
           "Fast MOVEP retains foreground PC, stack, flags, real I/O and manual base costs");
   if (!input.immediate) {
     require(machine.core.read(input.memory_space, ram_address) == payload,
@@ -300,8 +301,8 @@ void fast_memory_port(const Backend backend, const MemoryCase input, const Word 
   }
   ++state.pc;
   const auto resumed = machine.core.run(1);
-  require(resumed.dispatches == 1 && resumed.fault.kind == FaultKind::none &&
-              machine.core.registers() == state && machine.core.interruptible() && io.complete(),
+  require(resumed.retired == 1 && resumed.fault.kind == FaultKind::none &&
+              machine.core.registers() == state && machine.core.interrupt_ready() && io.complete(),
           "Fast MOVEP resumes the foreground without an RTI or repeated peripheral effect");
 }
 
@@ -349,15 +350,11 @@ void self_modify(const Backend backend, const bool peripheral) {
   machine.core.set_registers(state);
   const auto result = machine.core.run(2);
   state.pc = start + 2;
-  require(result.dispatches == 2 && result.fault.kind == FaultKind::none &&
+  require(result.retired == 2 && result.fault.kind == FaultKind::none &&
               machine.core.registers() == state &&
               machine.core.read(Space::program, start + 1) == 0,
           "Guest MOVEM/MOVEP P writes replace a planned native successor");
   if (peripheral) { require(io.complete(), "Peripheral-to-P transfer consumes exactly one event"); }
-  if (backend == Backend::jit) {
-    require(machine.core.jit_statistics().invalidations == 1,
-            "Guest program changes invalidate executing blocks after return");
-  }
 }
 
 void mode_change(const Backend backend) {
@@ -374,7 +371,7 @@ void mode_change(const Backend backend) {
   state.pc = start + 2;
   state.a = std::uint64_t{1} << word_bits;
   state.sr = mode_rm | flag_u;
-  require(result.dispatches == 2 && result.fault.kind == FaultKind::none &&
+  require(result.retired == 2 && result.fault.kind == FaultKind::none &&
               machine.core.registers() == state,
           "Guest MOVEC SR changes exit a block before mode-specialized arithmetic");
 }
@@ -393,9 +390,9 @@ void repeat_port(const Backend backend) {
   machine.core.set_registers(state);
   const auto result = machine.core.run(4);
   state.pc = start + 2;
-  require(result.dispatches == 4 && result.fault.kind == FaultKind::none && io.complete() &&
+  require(result.retired == 4 && result.fault.kind == FaultKind::none && io.complete() &&
               result.progress == Progress{.instructions = 4, .estimated_cycles = 8} &&
-              machine.core.registers() == state && machine.core.interruptible(),
+              machine.core.registers() == state && machine.core.interrupt_ready(),
           "REP repeats a single-word MOVEP, restores LC and admits interrupts afterward");
 }
 } // namespace
@@ -403,8 +400,7 @@ void repeat_port(const Backend backend) {
 
 int main() {
   try {
-    for (const auto backend :
-         {dsp56300::Backend::reference, dsp56300::Backend::cached, dsp56300::Backend::jit}) {
+    for (const auto backend : {dsp56300::Backend::jit}) {
       dsp56300::test::vector_base_register(backend);
       dsp56300::test::register_ports(backend);
       dsp56300::test::memory_ports(backend);

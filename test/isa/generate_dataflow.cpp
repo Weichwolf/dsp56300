@@ -75,7 +75,7 @@ BinaryCase sequence(const Input input) {
   }
   const std::vector program{mac_a, mac_b, input.prefix | input.alu, add_b_a, add_a_b};
   item.budget = static_cast<Word>(program.size());
-  item.dispatches = item.budget;
+  item.retired = item.budget;
   item.progress = {.instructions = item.budget, .estimated_cycles = item.budget};
   item.expected.pc = start + item.budget;
   item.before = {{.words = program, .address = start},

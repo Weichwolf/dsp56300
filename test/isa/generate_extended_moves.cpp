@@ -324,10 +324,10 @@ void repeated(Cases &cases, const Form form) {
     const bool completed = budget == count + 1;
     item.expected.pc = start + (completed ? 2U : 1U);
     item.expected.lc = completed ? item.initial.lc : count + 1 - budget;
-    item.budget = item.dispatches = budget;
+    item.budget = item.retired = budget;
     item.progress = {.instructions = budget,
                      .estimated_cycles = 5 + ((budget - 1) * move_model::cycles(form))};
-    item.interruptible = completed;
+    item.interrupt_ready = completed;
     item.name = "Extended MOVE REP current operands/AGU and exact partial budget";
     cases.push_back(std::move(item));
   }
@@ -388,7 +388,7 @@ void sequence(Cases &cases, const Form form) {
     }
     item.expected.pc += transfer ? move_model::words(form) : 1U;
     item.progress.estimated_cycles += transfer ? move_model::cycles(form) : 1U;
-    item.dispatches = ++item.budget;
+    item.retired = ++item.budget;
     item.progress.instructions = item.budget;
     item.name = "Native/extended-MOVE/native Carry and rounding: every prefix";
     cases.push_back(item);
@@ -418,8 +418,8 @@ void unsupported_modes(Cases &cases, const std::span<const Form> forms) {
       item.expected.pc += move_model::words(form);
       item.after.clear();
       item.progress = {};
-      item.dispatches = 0;
-      item.interruptible = false;
+      item.retired = 0;
+      item.interrupt_ready = false;
       item.fault = {
           .kind = FaultKind::unsupported_mode, .address = start, .value = mode, .pc = start};
       item.name = "Extended MOVE unsupported numeric modes are explicit library diagnostics";
@@ -439,8 +439,8 @@ void missing_extension(Cases &cases, const std::span<const Form> forms) {
     item.expected = item.initial;
     item.after.clear();
     item.progress = {};
-    item.dispatches = 0;
-    item.interruptible = false;
+    item.retired = 0;
+    item.interrupt_ready = false;
     item.fault = {.kind = FaultKind::memory_read, .address = start + 1, .pc = start};
     item.name = "Extended MOVE missing P extension performs no data/AGU/flag effects";
     cases.push_back(std::move(item));
@@ -461,9 +461,9 @@ void invalid_mixed_variants(Cases &cases, Form form) {
       item.after.assign(item.before.begin() + 1, item.before.end());
       item.after.push_back({.words = {0}, .space = Space::x});
       item.after.push_back({.words = {0}, .space = Space::y});
-      item.dispatches = 0;
+      item.retired = 0;
       item.progress = {};
-      item.interruptible = false;
+      item.interrupt_ready = false;
       item.fault = {.kind = FaultKind::invalid_instruction,
                     .address = start,
                     .value = form.index,
@@ -510,9 +510,9 @@ void invalid_class_two(Cases &cases) {
         item.expected = item.initial;
         ++item.expected.pc;
         item.after.assign(item.before.begin() + 1, item.before.end());
-        item.dispatches = 0;
+        item.retired = 0;
         item.progress = {};
-        item.interruptible = false;
+        item.interrupt_ready = false;
         item.fault = {.kind = FaultKind::invalid_instruction,
                       .address = start,
                       .value = move_model::opcode(form),
@@ -534,8 +534,8 @@ void invalid_long(Cases &cases) {
         item.expected = item.initial;
         item.expected.pc += 2;
         item.progress = {};
-        item.dispatches = 0;
-        item.interruptible = false;
+        item.retired = 0;
+        item.interrupt_ready = false;
         item.fault = {
             .kind = FaultKind::invalid_instruction, .address = start, .value = index, .pc = start};
         item.after.push_back({.words = {0}, .space = Space::x});

@@ -33,9 +33,9 @@ inline Word cycles(const Kind kind) {
   return kind == Kind::reset ? 7U : 10U;
 }
 
-inline ProcessingState state(const Kind kind) {
-  if (kind == Kind::reset) { return ProcessingState::running; }
-  return kind == Kind::wait ? ProcessingState::waiting : ProcessingState::stopped;
+inline ExecutionState state(const Kind kind) {
+  if (kind == Kind::reset) { return ExecutionState::running; }
+  return kind == Kind::wait ? ExecutionState::waiting : ExecutionState::stopped;
 }
 
 inline Registers seed(const Word status) {

@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "backend_support.hpp"
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
@@ -55,64 +54,44 @@ private:
   bool matched_ = true;
 };
 
-template <CoreImplementation Implementation>
-void check(const BinaryCase &item, const Backend backend) {
+void check(const BinaryCase &item) {
   auto memory = initial_memory(item);
   auto expected = memory;
   patch(expected, item.after);
   ResetScript script(item.reset_actions);
-  Implementation core({.program = memory[0], .x = memory[1], .y = memory[2]},
-                      item.reset_actions.empty() ? nullptr : &script,
-                      {.backend = backend});
-  core.set_debug_interrupt_mode(item.debug_interrupt_mode);
+  Core core(Memory::separate({.program = memory[0], .x = memory[1], .y = memory[2]}),
+            item.reset_actions.empty() ? nullptr : &script);
+  require(!item.debug_interrupt_mode, "Fixture must use the supported non-JTAG instrument profile");
   core.set_registers(item.initial);
   const auto result = core.run(item.budget);
-  require(result.dispatches == item.dispatches, "Retired dispatch count");
+  require(result.retired == item.retired, "Retired dispatch count");
   require(result.progress == item.progress, "Instruction count and documented base cost");
   require(result.fault == item.fault, "Expected fault context");
-  require(result.state == item.state && core.processing_state() == item.state,
+  require(result.state == item.state && core.state().execution == item.state,
           "Explicit running/WAIT/STOP/debug state");
-  require(core.debug_status() == item.debug, "Functional IME/SWO debug status");
   require(script.complete(), "RESET callback PC/order/count follows explicit host script");
-  if (backend == Backend::jit) {
-    const auto statistics = core.jit_statistics();
-    require(statistics.native_alu_instructions + statistics.helper_instructions ==
-                result.dispatches,
-            "Native/helper retirement accounting");
-  }
-  require(core.interruptible() == item.interruptible, "Interrupt admission boundary");
-  // Failed dispatches do not promise a committed architectural state.
+
+  require(core.interrupt_ready() == item.interrupt_ready, "Interrupt admission boundary");
+  // Failed instructions do not promise a committed architectural state.
   if (item.fault.kind == FaultKind::none) {
     require(core.registers() == item.expected, "Complete architectural register state");
     require(memory == expected, "All P/X/Y memory, including locations outside expected writes");
   }
 }
 
-void check_backend(const BinaryCase &item, const Backend backend) {
-  switch (backend) {
-    case Backend::automatic: check<BackendCore<Backend::automatic>>(item, backend); return;
-    case Backend::reference: check<BackendCore<Backend::reference>>(item, backend); return;
-    case Backend::cached: check<BackendCore<Backend::cached>>(item, backend); return;
-    case Backend::jit: check<BackendCore<Backend::jit>>(item, backend); return;
-    default: throw std::invalid_argument("Unknown fixture backend");
-  }
-}
-
 void run(const std::filesystem::path &path) {
   const auto cases = read_fixture(path);
   require(!cases.empty(), "Fixture contains cases");
-  for (const auto backend : {Backend::reference, Backend::cached, Backend::jit}) {
-    for (std::size_t index = 0; index < cases.size(); ++index) {
-      try {
-        check_backend(cases[index], backend);
-      } catch (const std::exception &error) {
-        const std::string engine{backend_name(backend)};
-        throw std::runtime_error(path.string() + ": case " + std::to_string(index) + " (" +
-                                 cases[index].name + ", " + engine + "): " + error.what());
-      }
+  for (std::size_t index = 0; index < cases.size(); ++index) {
+    try {
+      check(cases[index]);
+    } catch (const std::exception &error) {
+      throw std::runtime_error(path.string() + ": case " + std::to_string(index) + " (" +
+                               cases[index].name + "): " + error.what());
     }
   }
-  std::cout << path.filename().string() << ": " << cases.size() << " cases per backend\n";
+  std::cout << path.filename().string() << ": " << cases.size()
+            << " cases through public Core API\n";
 }
 } // namespace
 } // namespace dsp56300::test

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 
@@ -9,7 +10,7 @@
 
 namespace dsp56300::test::scripted_io {
 inline constexpr Word boot = 0xff0000, data_address = 0x100, raw_datum = 0xab800001;
-inline constexpr std::array backends{Backend::reference, Backend::cached, Backend::jit};
+inline constexpr std::array backends{Backend::jit};
 enum class Action : unsigned char { read, write, bit, reset };
 
 struct Event {

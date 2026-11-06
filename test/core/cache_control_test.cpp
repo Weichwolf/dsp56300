@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "cache_isa_model.hpp"
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "native_sequence_model.hpp"
@@ -20,7 +21,7 @@ constexpr Word words = 4096, immediate_x0 = 0x44f400, movem_read_x0 = 0x07f084;
 constexpr Word movem_write_x0 = 0x077084, movec_sr = 0x05f439, mac_a = 0x2000d2;
 constexpr Word lock_absolute = 0x0bf081, unlock_absolute = 0x0af081;
 constexpr Word first = 0x123456, second = 0x654321, third = 0xabcdef;
-constexpr std::array backends{Backend::reference, Backend::cached, Backend::jit};
+constexpr std::array backends{Backend::jit};
 
 struct Step {
   Word pc = start, length = 1, cost = 1, alu = 0;
@@ -43,7 +44,7 @@ struct Fixture {
 
   std::array<Word, words> program{};
   std::array<Word, 16> data{};
-  Core core;
+  TestCore core;
 
   void input_x0(const Word value) {
     auto state = core.registers();
@@ -65,7 +66,7 @@ struct Fixture {
     }
     const auto before = core.progress();
     const auto result = core.run(1);
-    require(result.fault.kind == FaultKind::none && result.dispatches == 1,
+    require(result.fault.kind == FaultKind::none && result.retired == 1,
             "Cache-aware instruction retires exactly once without fault");
     require(core.registers() == expected, "Cache-aware instruction has exact architectural state");
     require(result.progress == Progress{.instructions = before.instructions + 1,
@@ -148,7 +149,7 @@ void burst_fetch(const Backend backend, const unsigned width, const bool burst) 
                .length = burst ? 1U : 2U,
                .cost = burst ? 1U : 2U,
                .x0 = burst ? std::nullopt : std::optional<Word>{second}});
-  require(fixture.core.run(0).dispatches == 0, "Zero budgets never fetch or flush cache words");
+  require(fixture.core.run(0).retired == 0, "Zero budgets never fetch or flush cache words");
 }
 
 void mode_and_reset(const Backend backend, const unsigned width) {
@@ -197,13 +198,10 @@ void native_mode_boundary(const unsigned width) {
   sequence_model::alu(expected, old, mac_a);
   expected.pc = start + code.size();
   const auto result = fixture.core.run(6);
-  require(result.dispatches == 6 && result.fault.kind == FaultKind::none &&
+  require(result.retired == 6 && result.fault.kind == FaultKind::none &&
               fixture.core.registers() == expected &&
               result.progress == Progress{.instructions = 6, .estimated_cycles = 8},
           "Native/general/native CE transitions preserve complete state and budgets");
-  const auto stats = fixture.core.jit_statistics();
-  require(stats.native_alu_instructions == 2 && stats.helper_instructions == 4,
-          "Actual native work stops at CE enable and resumes only after CE clear");
 }
 
 void effective_sector(const Backend backend,
@@ -226,7 +224,7 @@ void effective_sector(const Backend backend,
   const std::array code{cache_isa_model::opcode(form), external};
   fixture.core.load(Space::program, start, code);
   const auto result = fixture.core.run(1);
-  require(result.dispatches == 1 && result.fault.kind == FaultKind::none &&
+  require(result.retired == 1 && result.fault.kind == FaultKind::none &&
               fixture.core.registers() == expected,
           "Every effective cache lock selects its independently modeled EA and update");
   fixture.control(1);
@@ -242,7 +240,7 @@ void effective_sector(const Backend backend,
   expected = input;
   cache_isa_model::apply(expected, unlock);
   const auto unlocked = fixture.core.run(1);
-  require(unlocked.dispatches == 1 && unlocked.fault.kind == FaultKind::none &&
+  require(unlocked.retired == 1 && unlocked.fault.kind == FaultKind::none &&
               fixture.core.registers() == expected,
           "Every effective unlock selects the same sector and exact AGU result");
   fixture.control(1);
@@ -271,26 +269,26 @@ void invalid_effective(const Backend backend, const unsigned width) {
       auto expected = input;
       expected.pc += 2;
       const auto result = fixture.core.run(1);
-      require(result.dispatches == 0 &&
+      require(result.retired == 0 &&
                   result.fault == Fault{.kind = FaultKind::invalid_instruction,
                                         .address = start,
                                         .value = opcode,
                                         .pc = start} &&
                   fixture.core.registers() == expected && fixture.core.progress() == Progress{},
               "Invalid cache EA selector cannot update state, retire or access a sector");
-      require(fixture.core.run(1).dispatches == 0, "Failed cache control remains stopped");
+      require(fixture.core.run(1).retired == 0, "Failed cache control remains stopped");
     }
   }
 }
 
 void invalid_configuration() {
   std::array<Word, 16> memory{};
-  for (const Options options : {Options{.cacheable_begin = 1, .cacheable_end = 0},
-                                Options{.cacheable_end = word_mask + 2},
-                                Options{.cache_sector_words = 64}}) {
+  for (const TestOptions options : {TestOptions{.cacheable_begin = 1, .cacheable_end = 0},
+                                    TestOptions{.cacheable_end = word_mask + 2},
+                                    TestOptions{.cache_sector_words = 64}}) {
     bool rejected = false;
     try {
-      const Core core({.program = memory, .x = memory, .y = memory}, nullptr, options);
+      const TestCore core({.program = memory, .x = memory, .y = memory}, nullptr, options);
     } catch (const std::invalid_argument &) { rejected = true; }
     require(rejected, "Invalid cache geometry/address intervals are explicitly rejected");
   }

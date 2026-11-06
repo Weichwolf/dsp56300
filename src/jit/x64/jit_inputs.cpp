@@ -23,10 +23,10 @@ constexpr std::array offsets{
 constexpr auto latched_offset = offsetof(NativeContext, runtime) + offsetof(JitRuntime, latched);
 }
 
-bool JitEmitter::admit_cached_inputs(const std::span<const NativeOp> operations) const {
-  return optimize_ && std::ranges::any_of(operations, [this](const auto &operation) {
-           return lowerable(operation) && analyze_dataflow(operation.instruction).old_inputs != 0;
-         });
+bool JitEmitter::admit_cached_inputs(const std::span<const NativeOp> operations) {
+  return std::ranges::any_of(operations, [](const auto &operation) {
+    return lowerable(operation) && analyze_dataflow(operation.instruction).old_inputs != 0;
+  });
 }
 
 x64::Xmm JitEmitter::input_snapshot(const unsigned index) const {

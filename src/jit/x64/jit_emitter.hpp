@@ -20,8 +20,6 @@ namespace dsp56300::detail {
 class JitEmitter {
 public:
   JitEmitter(JitRuntime runtime,
-             bool optimize,
-             BatchBackend batch = BatchBackend::automatic,
              std::array<Word, agu_registers> modifiers = {},
              RegionMode region = RegionMode::automatic,
              LoopResidency residency = LoopResidency::automatic,
@@ -55,7 +53,7 @@ public:
   [[nodiscard]] bool loop_window() const noexcept { return loop_window_; }
 
 private:
-  [[nodiscard]] bool lowerable(const NativeOp &operation) const;
+  [[nodiscard]] static bool lowerable(const NativeOp &operation);
   [[nodiscard]] static bool saturation_supported(const NativeOp &operation);
   [[nodiscard]] static bool has_moves(const NativeOp &operation);
   [[nodiscard]] bool observable_moves(const NativeOp &operation) const;
@@ -64,7 +62,7 @@ private:
   void region_guard(x64::Code &code, x64::Reg cpu, x64::Label &failed) const;
   void region_address(const NativeMove &move);
   [[nodiscard]] static bool is_addition(const NativeOp &operation);
-  [[nodiscard]] bool is_right_shift(const NativeOp &operation) const;
+  [[nodiscard]] static bool is_right_shift(const NativeOp &operation);
   void helper(JitHelper function, const NativeOp &operation);
   void native(const NativeOp &operation);
   void moves(const NativeOp &operation);
@@ -73,7 +71,7 @@ private:
   void restore_inputs();
   [[nodiscard]] x64::Xmm input_snapshot(unsigned index) const;
   void materialize_loop_banks();
-  [[nodiscard]] bool admit_cached_inputs(std::span<const NativeOp> operations) const;
+  [[nodiscard]] static bool admit_cached_inputs(std::span<const NativeOp> operations);
   void register_move(const NativeRegisterMove &move, Word mode);
   void move_guard(const NativeMove &move, x64::Label &slow);
   void move_effective(const NativeMove &move);
@@ -125,7 +123,7 @@ private:
   void read_status(x64::Reg destination);
   void merge_status(x64::Reg source, Word changed = 0, x64::Reg scratch = x64::Reg::ax);
   [[nodiscard]] std::vector<Word> plan_flags(std::span<const NativeOp> operations) const;
-  [[nodiscard]] Word written_flags(const NativeOp &operation) const;
+  [[nodiscard]] static Word written_flags(const NativeOp &operation);
   void input(x64::Reg destination, unsigned selector, bool destination_b, bool latched);
   void value(x64::Reg destination, unsigned index, bool latched);
   void current_value(x64::Reg destination, unsigned index);
@@ -138,7 +136,6 @@ private:
   [[nodiscard]] bool admit_packed_retirement(std::span<const NativeOp> operations) const;
   void initialize_retirement();
   void materialize_retirement();
-  void count_move();
   void materialize_pending_accounting();
   void retire_progress(const NativeOp &operation);
   [[nodiscard]] bool publish_pc(std::span<const NativeOp> operations, std::size_t index) const;
@@ -165,8 +162,6 @@ private:
   std::vector<RingGuard> ring_guards_;
   JitRuntime runtime_;
   std::array<Word, agu_registers> modifiers_;
-  bool optimize_;
-  BatchBackend batch_backend_;
   RegionMode region_mode_;
   LoopResidency residency_mode_;
   RangeMode range_mode_;
@@ -186,7 +181,7 @@ private:
   bool coalesced_accounting_ = false;
   bool loop_residency_ = false;
   bool loop_bank_cache_ = false;
-  Word pending_instructions_ = 0, pending_moves_ = 0, pending_extra_cycles_ = 0;
+  Word pending_instructions_ = 0, pending_extra_cycles_ = 0;
   NativeDataflow dataflow_;
   // Dirty implies valid. Closed resident loops seed both slots before all effects.
   std::array<bool, 2> accumulator_dirty_{};

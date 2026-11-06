@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "native_sequence_model.hpp"
@@ -23,7 +24,7 @@ constexpr Word ce = Word{1} << 19, be = Word{1} << 10, lf = Word{1} << 15;
 constexpr Word excess_budget = 100, native_cycles = 21, wake_cycles = 22;
 constexpr Word loop_retired = 20, loop_cycles = 51;
 constexpr Word initial_priority = 0x654321;
-constexpr std::array backends{Backend::reference, Backend::cached, Backend::jit};
+constexpr std::array backends{Backend::jit};
 
 class NoResetIo : public Io {
 public:
@@ -49,7 +50,7 @@ struct Observation {
   Registers state;
   Progress progress;
   Word pc = 0;
-  ProcessingState processing = ProcessingState::running;
+  ExecutionState processing = ExecutionState::running;
 };
 
 template <typename Action> bool rejected(Action action) {
@@ -61,7 +62,7 @@ template <typename Action> bool rejected(Action action) {
 
 class ResetDevice final : public NoResetIo {
 public:
-  Core *core = nullptr;
+  TestCore *core = nullptr;
   std::array<Observation, 8> observations{};
   std::size_t calls = 0, reject_at = 0, reentry_rejections = 0;
   Word priority = initial_priority;
@@ -106,7 +107,7 @@ struct Machine {
   std::array<Word, program_words> p{};
   std::array<Word, 1> x{}, y{};
   ResetDevice device;
-  Core core;
+  TestCore core;
 
   explicit Machine(const Backend backend, const bool connected = true)
       : core({.program = p, .x = x, .y = y}, connected ? &device : nullptr, {.backend = backend}) {
@@ -114,20 +115,20 @@ struct Machine {
   }
 };
 
-void quiescent(Core &core,
+void quiescent(TestCore &core,
                const Registers &expected,
                const Progress progress,
-               const ProcessingState state) {
+               const ExecutionState state) {
   for (const auto budget : {0U, std::numeric_limits<std::uint32_t>::max()}) {
     const auto result = core.run(budget);
-    require(result.dispatches == 0 && result.fault.kind == FaultKind::none &&
+    require(result.retired == 0 && result.fault.kind == FaultKind::none &&
                 result.progress == progress && result.state == state &&
                 core.processing_state() == state && core.registers() == expected,
             "Sleeping neither retires nor fetches a successor, even for maximum budgets");
   }
   core.clear_code_cache();
   core.set_registers(expected);
-  require(core.processing_state() == state && core.run(1).dispatches == 0 &&
+  require(core.processing_state() == state && core.run(1).retired == 0 &&
               core.registers() == expected && core.progress() == progress,
           "Cache clearing and visible-register initialization do not resume sleeping execution");
 }
@@ -166,24 +167,20 @@ void native_reset(const Backend backend, const NativeInput input) {
   }
   expected.pc = start + 6;
   const auto result = core.run(excess_budget);
-  require(result.dispatches == 6 && result.state == ProcessingState::waiting &&
+  require(result.retired == 6 && result.state == ExecutionState::waiting &&
               result.fault.kind == FaultKind::none && core.registers() == expected &&
               result.progress == Progress{.instructions = 6, .estimated_cycles = native_cycles},
           "Native/general RESET/native/WAIT preserves exact flags, precision and budget boundary");
   const auto &observed = machine.device.observations[0];
   require(machine.device.valid && machine.device.calls == 1 && machine.device.priority == 0 &&
               machine.device.reentry_rejections == 5 && observed.state == callback &&
-              observed.pc == start + 2 && observed.processing == ProcessingState::running &&
+              observed.pc == start + 2 && observed.processing == ExecutionState::running &&
               observed.progress == Progress{.instructions = 2, .estimated_cycles = 2},
           "RESET callback sees canonical pre-retirement state and rejects all execution reentry");
-  if (backend == Backend::jit) {
-    const auto stats = core.jit_statistics();
-    require(stats.native_alu_instructions == 4 && stats.helper_instructions == 2,
-            "Actual native arithmetic executes on both sides of RESET, including modified P");
-  }
-  quiescent(core, expected, result.progress, ProcessingState::waiting);
+
+  quiescent(core, expected, result.progress, ExecutionState::waiting);
   require(rejected([&core] { core.resume_from_stop(); }) &&
-              core.processing_state() == ProcessingState::waiting,
+              core.processing_state() == ExecutionState::waiting,
           "IRQA STOP completion cannot arbitrarily resume WAIT");
 }
 
@@ -207,12 +204,12 @@ void wake_interrupt(const Backend backend, const WakeInput input) {
   warm.pc = start + 1;
   warm.sr = 0;
   core.set_registers(warm);
-  require(core.run(2).dispatches == 2, "Warm foreground under an old numeric mode");
+  require(core.run(2).retired == 2, "Warm foreground under an old numeric mode");
   core.set_registers(initial);
   auto expected = initial;
   ++expected.pc;
   const auto sleeping = core.run(10);
-  require(sleeping.dispatches == 1 && sleeping.state == processing_model::state(input.kind) &&
+  require(sleeping.retired == 1 && sleeping.state == processing_model::state(input.kind) &&
               sleeping.progress == Progress{.instructions = 3, .estimated_cycles = 12} &&
               core.registers() == expected,
           "WAIT/STOP retire once before returning control to the host");
@@ -227,13 +224,13 @@ void wake_interrupt(const Backend backend, const WakeInput input) {
   if (!admissible) { return; }
   if (input.kind == Kind::stop) {
     core.resume_from_stop();
-    require(core.processing_state() == ProcessingState::running && core.registers() == expected &&
+    require(core.processing_state() == ExecutionState::running && core.registers() == expected &&
                 core.progress() == sleeping.progress,
             "Host-completed IRQA stabilization resumes STOP without fabricated work");
   }
   processing_model::interrupt_entry(expected, input.level);
   core.interrupt(vector_pc, input.level);
-  require(core.processing_state() == ProcessingState::running && core.registers() == expected &&
+  require(core.processing_state() == ExecutionState::running && core.registers() == expected &&
               core.progress() == Progress{.instructions = 4, .estimated_cycles = 15},
           "Admitted IRQ wakes WAIT and saves the independently bit-built continuation frame");
   for (const Word operation : {mac_a, round_a}) {
@@ -248,15 +245,10 @@ void wake_interrupt(const Backend backend, const WakeInput input) {
     ++expected.pc;
   }
   const auto result = core.run(5);
-  require(result.dispatches == 5 && result.state == ProcessingState::running &&
+  require(result.retired == 5 && result.state == ExecutionState::running &&
               result.fault.kind == FaultKind::none && core.registers() == expected &&
               result.progress == Progress{.instructions = 9, .estimated_cycles = wake_cycles},
           "Handler, RTI and warm foreground use restored Carry/scaling/RM after wake");
-  if (backend == Backend::jit) {
-    const auto stats = core.jit_statistics();
-    require(stats.native_alu_instructions == 6 && stats.helper_instructions == 2,
-            "IRQ wake contains actual native warmup, service and resumed arithmetic");
-  }
 }
 
 void wake_failures(const Backend backend) {
@@ -266,19 +258,19 @@ void wake_failures(const Backend backend) {
   auto expected = processing_model::seed(mode_up | flag_c);
   core.set_registers(expected);
   ++expected.pc;
-  require(core.run(1).state == ProcessingState::waiting, "Enter WAIT before failed IRQ admission");
+  require(core.run(1).state == ExecutionState::waiting, "Enter WAIT before failed IRQ admission");
   for (const Word vector : {3U, word_mask + 1}) {
     require(rejected([&core, vector] { core.interrupt(vector, 3); }) &&
-                core.processing_state() == ProcessingState::waiting &&
+                core.processing_state() == ExecutionState::waiting &&
                 core.registers() == expected &&
                 core.progress() == Progress{.instructions = 1, .estimated_cycles = 10},
             "Invalid vector metadata cannot wake or mutate a waiting CPU");
   }
   require(rejected([&core] { core.interrupt(vector_pc, 4); }) &&
-              core.processing_state() == ProcessingState::waiting,
+              core.processing_state() == ExecutionState::waiting,
           "Invalid priorities cannot wake WAIT");
   core.interrupt(program_words, 3);
-  require(core.processing_state() == ProcessingState::running && core.registers() == expected &&
+  require(core.processing_state() == ExecutionState::running && core.registers() == expected &&
               core.progress() == Progress{.instructions = 1, .estimated_cycles = 10} &&
               core.fault() == Fault{.kind = FaultKind::memory_read,
                                     .address = program_words,
@@ -286,7 +278,7 @@ void wake_failures(const Backend backend) {
               machine.device.calls == 0,
           "Admitted wake survives a failed vector fetch without fake frame or retirement");
   const auto result = core.run(1);
-  require(result.dispatches == 0 && result.state == ProcessingState::running &&
+  require(result.retired == 0 && result.state == ExecutionState::running &&
               result.fault == core.fault() && core.registers() == expected,
           "A failed wake remains fail-stopped without reentering WAIT or replaying the vector");
 }
@@ -300,10 +292,10 @@ void stop_foreground(const Backend backend, const Word mask) {
   core.set_registers(expected);
   ++expected.pc;
   const auto stopped = core.run(10);
-  require(stopped.dispatches == 1 && stopped.state == ProcessingState::stopped &&
-              core.registers() == expected && !core.interruptible(),
+  require(stopped.retired == 1 && stopped.state == ExecutionState::stopped &&
+              core.registers() == expected && !core.interrupt_ready(),
           "STOP records its own processing state instead of a generic WAIT");
-  quiescent(core, expected, stopped.progress, ProcessingState::stopped);
+  quiescent(core, expected, stopped.progress, ExecutionState::stopped);
   core.resume_from_stop();
   for (const auto operation : {adc_a, round_a}) {
     const auto old = expected;
@@ -311,8 +303,8 @@ void stop_foreground(const Backend backend, const Word mask) {
     ++expected.pc;
   }
   const auto result = core.run(2);
-  require(result.dispatches == 2 && result.fault.kind == FaultKind::none &&
-              result.state == ProcessingState::running && core.registers() == expected &&
+  require(result.retired == 2 && result.fault.kind == FaultKind::none &&
+              result.state == ExecutionState::running && core.registers() == expected &&
               result.progress == Progress{.instructions = 3, .estimated_cycles = 12},
           "IRQA wake without an admitted IRQ continues at the instruction following STOP");
   require(rejected([&core] { core.resume_from_stop(); }),
@@ -330,7 +322,7 @@ void reset_sleepers(const Backend backend) {
     Registers initial;
     initial.m.fill(word_mask);
     const auto result = core.run(0);
-    require(result.state == ProcessingState::running && result.dispatches == 0 &&
+    require(result.state == ExecutionState::running && result.retired == 0 &&
                 result.progress == Progress{} && result.fault.kind == FaultKind::none &&
                 core.registers() == initial && machine.device.calls == 0,
             "Library reset cancels sleep without issuing a guest peripheral-reset request");
@@ -349,7 +341,7 @@ void reset_failures(const Backend backend) {
       auto expected = input;
       ++expected.pc;
       const auto result = core.run(4);
-      require(result.dispatches == 0 && result.state == ProcessingState::running &&
+      require(result.retired == 0 && result.state == ExecutionState::running &&
                   result.progress == Progress{} && core.registers() == expected &&
                   result.fault == Fault{.kind = FaultKind::host_event,
                                         .address = start,
@@ -358,7 +350,7 @@ void reset_failures(const Backend backend) {
                   machine.device.calls == static_cast<std::size_t>(connected) &&
                   machine.device.priority == initial_priority,
               "Absent/rejected peripheral reset never fabricates CPU reset or retirement");
-      require(core.run(1).dispatches == 0 && core.registers() == expected &&
+      require(core.run(1).retired == 0 && core.registers() == expected &&
                   machine.device.calls == static_cast<std::size_t>(connected),
               "Failed RESET stays stopped without replaying an external action");
       require(rejected([&core] { core.resume_from_stop(); }),
@@ -367,7 +359,7 @@ void reset_failures(const Backend backend) {
   }
   std::array<Word, memory_words> memory{};
   NoResetIo device;
-  Core core({.program = memory, .x = memory, .y = memory}, &device, {.backend = backend});
+  TestCore core({.program = memory, .x = memory, .y = memory}, &device, {.backend = backend});
   core.write(Space::program, start, processing_model::reset);
   core.set_registers(initial_state());
   require(core.run(1).fault.kind == FaultKind::host_event,
@@ -390,7 +382,7 @@ void repeated_reset(const Backend backend, const std::size_t reject_at) {
   const auto result = core.run(6);
   const Word retired = reject_at == 0 ? 6U : 1 + accepted;
   const Word cost = 5 + (accepted * 7) + (reject_at == 0 ? 1U : 0U);
-  require(result.dispatches == retired && result.state == ProcessingState::running &&
+  require(result.retired == retired && result.state == ExecutionState::running &&
               result.progress == Progress{.instructions = retired, .estimated_cycles = cost} &&
               core.registers() == expected &&
               machine.device.calls == (reject_at == 0 ? 4 : reject_at),
@@ -443,7 +435,7 @@ void loop_reset(const Backend backend) {
   expected.stack[input.sp + 1] = frame({.high = input.la, .low = input.lc});
   expected.stack[input.sp + 2] = frame({.high = start + 2, .low = input.sr});
   const auto result = core.run(excess_budget);
-  require(result.dispatches == loop_retired && result.state == ProcessingState::waiting &&
+  require(result.retired == loop_retired && result.state == ExecutionState::waiting &&
               result.fault.kind == FaultKind::none && core.registers() == expected &&
               result.progress ==
                   Progress{.instructions = loop_retired, .estimated_cycles = loop_cycles} &&
@@ -492,7 +484,7 @@ void fast_reset(const Backend backend, const FastInput input) {
   }
   core.interrupt(vector_pc, 0);
   const bool failed = input.reject_at != 0;
-  require(core.processing_state() == ProcessingState::running && core.registers() == expected &&
+  require(core.processing_state() == ExecutionState::running && core.registers() == expected &&
               core.progress() == progress && machine.device.calls == calls,
           "Fast RESET preserves the complete foreground state and counts only accepted actions");
   require(core.fault().kind == (failed ? FaultKind::host_event : FaultKind::none),
@@ -507,17 +499,17 @@ void fast_reset(const Backend backend, const FastInput input) {
             "Fast RESET callback PC identifies its vector while register PC stays foreground");
   }
   if (failed) {
-    require(core.run(2).dispatches == 0 && core.progress() == progress &&
+    require(core.run(2).retired == 0 && core.progress() == progress &&
                 machine.device.calls == calls,
             "A rejected vector RESET cannot replay an accepted or failed peripheral action");
   } else {
-    require(!core.interruptible() && core.run(0).dispatches == 0,
+    require(!core.interrupt_ready() && core.run(0).retired == 0,
             "Fast RESET retains the ordinary post-vector exclusion over zero budgets");
     ++expected.pc;
     ++progress.instructions;
     ++progress.estimated_cycles;
-    require(core.run(1).dispatches == 1 && core.registers() == expected &&
-                core.progress() == progress && core.interruptible(),
+    require(core.run(1).retired == 1 && core.registers() == expected &&
+                core.progress() == progress && core.interrupt_ready(),
             "A completed fast RESET service resumes foreground execution exactly once");
   }
 }
@@ -532,7 +524,7 @@ void reset_long_vector(const Backend backend, const WakeInput input) {
   processing_model::interrupt_entry(expected, input.level);
   core.interrupt(vector_pc, input.level);
   require(core.fault().kind == FaultKind::none &&
-              core.processing_state() == ProcessingState::running && core.registers() == expected &&
+              core.processing_state() == ExecutionState::running && core.registers() == expected &&
               machine.device.calls == 1 &&
               core.progress() == Progress{.instructions = 2, .estimated_cycles = 10},
           "Accepted vector RESET preserves old state for the subsequent long IRQ frame");
@@ -552,7 +544,7 @@ void fast_restrictions(const Backend backend) {
       const auto initial = processing_model::seed(flag_c);
       core.set_registers(initial);
       core.interrupt(vector_pc, 0);
-      require(core.processing_state() == ProcessingState::running && core.registers() == initial &&
+      require(core.processing_state() == ExecutionState::running && core.registers() == initial &&
                   core.progress() == Progress{.instructions = slot, .estimated_cycles = slot} &&
                   core.fault() == Fault{.kind = FaultKind::unsupported_instruction,
                                         .address = vector_pc + slot,
@@ -570,7 +562,7 @@ void fast_restrictions(const Backend backend) {
   core.interrupt(vector_pc, 0);
   require(
       core.fault().kind == FaultKind::stack && core.registers() == initial &&
-          core.processing_state() == ProcessingState::running &&
+          core.processing_state() == ExecutionState::running &&
           core.progress() == Progress{.instructions = 1, .estimated_cycles = 7} &&
           machine.device.calls == 1 && machine.device.priority == 0,
       "A failed later vector push retains an already accepted RESET without fake service state");
@@ -580,9 +572,9 @@ void cache_sleep(const Backend backend, const Kind kind) {
   std::array<Word, program_words> memory{};
   ResetDevice device;
   constexpr Word external = 1024;
-  Core core({.program = memory, .x = memory, .y = memory},
-            &device,
-            {.backend = backend, .cacheable_begin = external, .cacheable_end = program_words});
+  TestCore core({.program = memory, .x = memory, .y = memory},
+                &device,
+                {.backend = backend, .cacheable_begin = external, .cacheable_end = program_words});
   device.core = &core;
   const std::array code{processing_model::opcode(kind), mac_a, round_a, Word{0}};
   core.load(Space::program, external, code);
@@ -594,7 +586,7 @@ void cache_sleep(const Backend backend, const Kind kind) {
   core.set_registers(expected);
   ++expected.pc;
   const auto asleep = core.run(10);
-  require(asleep.dispatches == 1 && asleep.state == processing_model::state(kind),
+  require(asleep.retired == 1 && asleep.state == processing_model::state(kind),
           "Burst-enabled external program enters its explicit sleeping state");
   core.write(Space::program, external + 1, adc_a);
   quiescent(core, expected, asleep.progress, asleep.state);
@@ -607,7 +599,7 @@ void cache_sleep(const Backend backend, const Kind kind) {
   sequence_model::alu(expected, old, mac_a);
   ++expected.pc;
   require(core.run(1).fault.kind == FaultKind::none && core.registers() == expected &&
-              core.processing_state() == ProcessingState::running && device.calls == 0,
+              core.processing_state() == ExecutionState::running && device.calls == 0,
           "Sleep/wake and host P edits preserve already cached instruction data");
 }
 
@@ -615,27 +607,27 @@ void software_reset_preserves_cache(const Backend backend) {
   std::array<Word, program_words> memory{};
   ResetDevice device;
   constexpr Word external = 1024;
-  Core core({.program = memory, .x = memory, .y = memory},
-            &device,
-            {.backend = backend, .cacheable_begin = external, .cacheable_end = program_words});
+  TestCore core({.program = memory, .x = memory, .y = memory},
+                &device,
+                {.backend = backend, .cacheable_begin = external, .cacheable_end = program_words});
   device.core = &core;
   auto input = processing_model::seed(ce | flag_c);
   input.pc = external;
   input.x = 3;
   input.y = 5;
   core.set_registers(input);
-  require(core.run(1).dispatches == 1, "Prime a valid cached NOP before guest RESET");
+  require(core.run(1).retired == 1, "Prime a valid cached NOP before guest RESET");
   core.write(Space::program, external, mac_a);
   core.write(Space::program, start, processing_model::reset);
   input.pc = start;
   core.set_registers(input);
-  require(core.run(1).dispatches == 1 && device.calls == 1,
+  require(core.run(1).retired == 1 && device.calls == 1,
           "Guest RESET is explicitly accepted by the synthetic derivative");
   input.pc = external;
   core.set_registers(input);
   auto expected = input;
   ++expected.pc;
-  require(core.run(1).dispatches == 1 && core.registers() == expected,
+  require(core.run(1).retired == 1 && core.registers() == expected,
           "Guest peripheral RESET preserves CE, cached instructions and CPU numeric state");
 }
 

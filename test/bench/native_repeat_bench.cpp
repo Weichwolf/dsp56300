@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "external_run_fixture.hpp"
 #include "native_repeat_fixture.hpp"
@@ -20,26 +21,24 @@ void measure(const external_run::Workload input) {
   Bus bus;
   bus.program[start] = repeat(0);
   bus.program[body] = input.opcode;
-  Core core(bus);
+  TestCore core(bus);
   const auto wanted = expected(input, {.retired = zero_count});
   for (unsigned sample = 0; sample <= samples; ++sample) {
     double seconds = 0;
-    std::uint64_t native = 0;
-    std::uint64_t helpers = 0;
+
     unsigned reads = 0;
     for (unsigned round = 0; round < rounds; ++round) {
       core.set_registers(seed(input));
-      require(core.run(1).dispatches == 1, "Benchmark executes real REP setup outside timing");
+      require(core.run(1).retired == 1, "Benchmark executes real REP setup outside timing");
       const auto before = core.progress();
-      const auto counters = core.jit_statistics();
+
       const auto program_reads = bus.program_reads;
       const auto begin = std::chrono::steady_clock::now();
       const auto result = core.run(zero_count);
       seconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count();
-      native += core.jit_statistics().native_alu_instructions - counters.native_alu_instructions;
-      helpers += core.jit_statistics().helper_instructions - counters.helper_instructions;
+
       reads += bus.program_reads - program_reads;
-      require(result.dispatches == zero_count && result.fault.kind == FaultKind::none &&
+      require(result.retired == zero_count && result.fault.kind == FaultKind::none &&
                   core.registers() == wanted &&
                   core.progress() ==
                       Progress{.instructions = before.instructions + zero_count,
@@ -50,7 +49,7 @@ void measure(const external_run::Workload input) {
     constexpr auto count = std::uint64_t{rounds} * zero_count;
     std::cout << input.name << " sample=" << sample << " instructions=" << count
               << " seconds=" << seconds << " guest-mips=" << count / seconds / million
-              << " native=" << native << " helpers=" << helpers << " reads=" << reads << '\n';
+              << " reads=" << reads << '\n';
   }
 }
 }

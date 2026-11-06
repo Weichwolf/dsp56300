@@ -2,6 +2,7 @@
 #include "native_partial_store_fixture.hpp"
 
 #include "bfu_logic_model.hpp"
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "native_sequence_model.hpp"
@@ -132,29 +133,26 @@ Timing workload(const std::string_view domain, const bool partial, const unsigne
   }
   std::array<Word, 1> x{};
   std::array<Word, 1> y{};
-  Core cpu({.program = program, .x = x, .y = y});
+  TestCore cpu({.program = program, .x = x, .y = y});
   Timing result;
   for (unsigned interval = 0; interval <= repetitions * intervals; ++interval) {
     cpu.set_registers(sample.initial);
     x[0] = sentinel;
     const auto before = cpu.progress();
-    const auto counters = cpu.jit_statistics();
+
     const auto began = std::chrono::steady_clock::now();
     const auto run = cpu.run(stream_words);
     const auto finished = std::chrono::steady_clock::now();
-    require(run.dispatches == stream_words && run.fault.kind == FaultKind::none &&
+    require(run.retired == stream_words && run.fault.kind == FaultKind::none &&
                 cpu.registers() == sample.expected && x[0] == sample.output && y[0] == 0 &&
                 cpu.progress() ==
                     Progress{.instructions = before.instructions + stream_words,
                              .estimated_cycles = before.estimated_cycles + stream_words},
             "Independent three-domain partial/data-word stream state, RAM and progress");
     if (interval == 0) { continue; } // Untimed native compilation and semantic warmup.
-    const auto current = cpu.jit_statistics();
+
     result.seconds += std::chrono::duration<double>(finished - began).count();
     result.instructions += stream_words;
-    result.native += current.native_alu_instructions - counters.native_alu_instructions;
-    result.helpers += current.helper_instructions - counters.helper_instructions;
-    result.moves += current.native_move_instructions - counters.native_move_instructions;
   }
   return result;
 }

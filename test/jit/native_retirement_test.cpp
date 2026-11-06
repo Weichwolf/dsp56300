@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "architecture.hpp"
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
@@ -148,7 +149,7 @@ void execute_case(const native::Direct &code,
           "Independent qword lanes retain carries, wrap and mixed one/two-cycle instruction costs");
   require(cpu.repeat_completed == (retired == 0) && cpu.interrupt_inhibited == (retired == 0) &&
               cpu.repeat_remaining == 0 && !cpu.repeat_loaded &&
-              cpu.processing == ProcessingState::running && cpu.debug_flags == 0,
+              cpu.processing == ExecutionState::running && cpu.debug_flags == 0,
           "Zero-retirement exits retain exclusion state; successful prefixes clear it");
 }
 
@@ -160,7 +161,7 @@ void generated(const std::span<const Step> steps, const Word mode, const bool lo
       Progress{.instructions = boundary63 - 1, .estimated_cycles = maximum - 3}};
   for (const auto first : {start, word_mask - 1}) {
     const auto ops = operations(steps, mode, first, loop);
-    detail::JitEmitter emitter({}, true);
+    detail::JitEmitter emitter({});
     const auto bytes = emitter.generate(ops);
     const bool expected_admission = !steps.empty() && (loop || steps.size() >= 4);
     require(emitter.packed_retirement() == expected_admission,
@@ -218,29 +219,27 @@ void admission_guards() {
   const std::array body{mac_a, mac_b, mac_a, mac_b};
   const auto ops = operations(body, 0, start, false);
   const auto check = [](const std::span<const detail::NativeOp> input,
-                        const detail::JitRuntime runtime,
-                        const bool optimize) {
-    detail::JitEmitter emitter(runtime, optimize);
+                        const detail::JitRuntime runtime) {
+    detail::JitEmitter emitter(runtime);
     static_cast<void>(emitter.generate(input));
     require(!emitter.packed_retirement(),
             "General helpers, unsupported modes, invalid costs and aliased stores reject packing");
     require(!emitter.cached_status(), "Rejected native regions retain canonical status in memory");
   };
-  check(ops, {}, false);
   auto changed = ops;
   changed[1].instruction = detail::decode(shift); // General ASL helper.
-  check(changed, {}, true);
+  check(changed, {});
   changed = ops;
   for (auto &operation : changed) { operation.mode = detail::arithmetic_16; }
-  check(changed, {}, true);
+  check(changed, {});
   changed = ops;
   changed[1].instruction.cycles = 0;
-  check(changed, {}, true);
+  check(changed, {});
   changed = ops;
   for (auto &operation : changed) { operation.instruction = detail::decode(aliased_store); }
   detail::JitRuntime runtime;
   runtime.memory[0].aliases_program = true;
-  check(changed, runtime, true);
+  check(changed, runtime);
 }
 
 void encodings() {
@@ -371,7 +370,7 @@ struct Snapshot {
 class Observer final : public Io {
 public:
   std::array<Snapshot, 2> expected;
-  Core *core = nullptr;
+  TestCore *core = nullptr;
   Word patch_pc = 0;
   int reject = -1;
   unsigned reads = 0;
@@ -420,7 +419,7 @@ struct Machine {
   explicit Machine(Io *io) : core({.program = p, .x = x, .y = y}, io, {.backend = Backend::jit}) {}
 
   std::array<Word, memory_words> p{}, x{}, y{};
-  Core core;
+  TestCore core;
 };
 
 Expected callback_expectations(Observer &observer, const Registers &initial, const Progress base) {
@@ -474,8 +473,7 @@ void callback_case(const CallbackInput input) {
   machine.x[7] = datum;
   machine.core.set_registers(initial);
   const auto count = static_cast<Word>(body.size());
-  require(machine.core.run(count).dispatches == count && observer.reads == 0 &&
-              machine.core.jit_statistics().native_move_instructions == 2,
+  require(machine.core.run(count).retired == count && observer.reads == 0,
           "Warm the complete native RAM path before reusing its I/O slow branches");
   initial.r[0] = port_address;
   machine.core.set_registers(initial);
@@ -491,14 +489,14 @@ void callback_case(const CallbackInput input) {
     const auto state = machine.core.registers();
     require(result.fault.kind == FaultKind::io_read && result.fault.pc == stopped.pc &&
                 result.progress == stopped.progress &&
-                result.dispatches == stopped.progress.instructions - base.instructions &&
+                result.retired == stopped.progress.instructions - base.instructions &&
                 state.a == stopped.state.a && state.b == stopped.state.b &&
                 state.sr == stopped.state.sr,
             "A rejected slow move retains prior arithmetic/progress and cannot retire its ALU");
-    require(machine.core.run(count).dispatches == 0 && machine.core.progress() == stopped.progress,
+    require(machine.core.run(count).retired == 0 && machine.core.progress() == stopped.progress,
             "Faulted SIMD/helper boundaries cannot replay work or invent retirement");
   } else {
-    require(result.fault.kind == FaultKind::none && result.dispatches == count &&
+    require(result.fault.kind == FaultKind::none && result.retired == count &&
                 result.progress == expected.progress && machine.core.registers() == expected.state,
             "SIMD clobbers and optional P invalidation preserve every completed result and count");
   }

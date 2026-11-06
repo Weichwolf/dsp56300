@@ -480,7 +480,7 @@ void call_returns(Cases &cases) {
     item.expected.sp = 0;
     item.expected.sc = 0;
     item.budget = 2;
-    item.dispatches = 2;
+    item.retired = 2;
     item.progress = {.instructions = 2, .estimated_cycles = opcode == conditional_call ? 7U : 8U};
     const Word target = opcode == conditional_call ? start + 4 : 4;
     append(cases, std::move(item), {opcode, target, 0, 0, return_subroutine});
@@ -502,7 +502,7 @@ void conditional_repeats(Cases &cases) {
     item.expected.pc = start + 2;
     if (update_flags) { item.expected.sr |= flag_c | flag_z | flag_u; }
     item.budget = 3;
-    item.dispatches = 3;
+    item.retired = 3;
     item.progress = {.instructions = 3, .estimated_cycles = 7};
     const auto opcode = conditional_asr | (update_flags ? update : 0U);
     append(cases, std::move(item), {repeat_two, opcode});
@@ -516,7 +516,7 @@ void conditional_repeats(Cases &cases) {
   item.expected.pc = start + 2;
   item.expected.sr = (item.initial.sr & ~flag_c) | flag_u;
   item.budget = 4;
-  item.dispatches = 4;
+  item.retired = 4;
   item.progress = {.instructions = 4, .estimated_cycles = 8};
   constexpr Word repeat_three = 0x0603a0;
   constexpr Word add_one_b = 0x014188;
@@ -529,9 +529,9 @@ void rejected_control(Cases &cases) {
   BinaryCase repeated;
   repeated.initial = seed({.flags = flag_z}); // NE is false, but REP still prohibits a jump.
   repeated.budget = 2;
-  repeated.dispatches = 1;
+  repeated.retired = 1;
   repeated.progress = {.instructions = 1, .estimated_cycles = 5};
-  repeated.interruptible = false;
+  repeated.interrupt_ready = false;
   repeated.fault = {.kind = FaultKind::invalid_instruction,
                     .space = Space::program,
                     .address = start + 1,
@@ -541,9 +541,9 @@ void rejected_control(Cases &cases) {
   constexpr Word immediate_ea_jump = 0x0af4a2;
   BinaryCase address;
   address.initial = seed({.flags = flag_z});
-  address.dispatches = 0;
+  address.retired = 0;
   address.progress = {};
-  address.interruptible = false;
+  address.interrupt_ready = false;
   address.fault = {.kind = FaultKind::invalid_instruction,
                    .space = Space::program,
                    .address = start,

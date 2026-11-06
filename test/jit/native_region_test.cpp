@@ -2,6 +2,7 @@
 // Original mixed RAM traces and independent ordered transfer/arithmetic expectations.
 #include "address_model.hpp"
 #include "architecture.hpp"
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
@@ -297,17 +298,15 @@ void direct_case(const native::Direct &code,
     --expected.lc;
     expected.pc = start;
   }
-  std::uint64_t moves = 0;
-  detail::NativeContext context{
-      .runtime = {.memory = {}}, .native_moves = &moves, .budget = input.bodies * size};
+  detail::NativeContext context{.runtime = {.memory = {}}, .budget = input.bodies * size};
   const auto result = code.enter(cpu, context);
   cpu.reg.a >>= detail::padding_bits;
   cpu.reg.b >>= detail::padding_bits;
   require(result == retired && cpu.reg == expected && actual_memory.words == expected_memory.words,
           "Guarded bytes preserve complete independent state, old inputs and ordered RAM aliases");
   require(cpu.instructions == sum(maximum - 2, retired) &&
-              cpu.cycles == sum(maximum - 3, retired) && moves == retired &&
-              cpu.repeat_completed == (retired == 0) && cpu.interrupt_inhibited == (retired == 0),
+              cpu.cycles == sum(maximum - 3, retired) && cpu.repeat_completed == (retired == 0) &&
+              cpu.interrupt_inhibited == (retired == 0),
           "Initial/backedge guard rejection preserves exact progress, moves and exclusion fields");
 }
 
@@ -341,8 +340,7 @@ void direct_shape(
       .memory = {{{.data = memory.bank(false).data(), .words = memory.limits[0]},
                   {.data = memory.bank(true).data(), .words = memory.limits[1]}}}};
   const auto ops = operations(mode, loop, shape);
-  detail::JitEmitter emitter(
-      runtime, true, BatchBackend::disabled, modifiers(shape), detail::RegionMode::guarded);
+  detail::JitEmitter emitter(runtime, modifiers(shape), detail::RegionMode::guarded);
   const native::Direct code(emitter.generate(ops));
   require(emitter.guarded_region() && emitter.cached_status() && emitter.packed_retirement(),
           "Actual guarded bytes qualify held status and helper-free packed retirement");
@@ -452,16 +450,16 @@ std::vector<Word> program(const Shape shape = Shape::unit) {
 void prefixes(const Backend backend, const Word mode, const Shape shape) {
   Memory memory;
   std::array<Word, memory_words> p{};
-  Core core({.program = p, .x = memory.bank(false), .y = memory.bank(true)},
-            nullptr,
-            {.backend = backend});
+  TestCore core({.program = p, .x = memory.bank(false), .y = memory.bank(true)},
+                nullptr,
+                {.backend = backend});
   const auto words = program(shape);
   core.load(Space::program, start, words);
   const auto state = initial(mode, shape);
   const auto steps = trace(shape);
   memory.initialize();
   core.set_registers(state);
-  require(core.run(static_cast<Word>(steps.size())).dispatches == steps.size(),
+  require(core.run(static_cast<Word>(steps.size())).retired == steps.size(),
           "Warm the original trace before testing exact call prefixes");
   for (Word budget = 0; budget <= steps.size(); ++budget) {
     memory.initialize();
@@ -473,7 +471,7 @@ void prefixes(const Backend backend, const Word mode, const Shape shape) {
     core.set_registers(state);
     const auto base = core.progress();
     const auto run = core.run(budget);
-    require(run.dispatches == budget && run.fault.kind == FaultKind::none &&
+    require(run.retired == budget && run.fault.kind == FaultKind::none &&
                 core.registers() == expected && memory.words == expected_memory.words &&
                 run.progress == Progress{.instructions = base.instructions + budget,
                                          .estimated_cycles = base.estimated_cycles + budget},
@@ -484,9 +482,9 @@ void prefixes(const Backend backend, const Word mode, const Shape shape) {
 void changed_offsets(const Backend backend, const Word mode, const Shape shape) {
   Memory memory;
   std::array<Word, memory_words> p{};
-  Core core({.program = p, .x = memory.bank(false), .y = memory.bank(true)},
-            nullptr,
-            {.backend = backend});
+  TestCore core({.program = p, .x = memory.bank(false), .y = memory.bank(true)},
+                nullptr,
+                {.backend = backend});
   core.load(Space::program, start, program(shape));
   const auto steps = trace(shape);
   for (const Word offset : {1U, 0U, 2U, word_mask, 1U}) {
@@ -501,7 +499,7 @@ void changed_offsets(const Backend backend, const Word mode, const Shape shape) 
     core.set_registers(state);
     const auto base = core.progress();
     const auto run = core.run(static_cast<Word>(steps.size()));
-    require(run.dispatches == steps.size() && run.fault.kind == FaultKind::none &&
+    require(run.retired == steps.size() && run.fault.kind == FaultKind::none &&
                 core.registers() == expected && memory.words == expected_memory.words &&
                 core.progress() ==
                     Progress{.instructions = base.instructions + steps.size(),
@@ -512,7 +510,7 @@ void changed_offsets(const Backend backend, const Word mode, const Shape shape) 
 
 class Observer final : public Io {
 public:
-  Core *core = nullptr;
+  TestCore *core = nullptr;
   Registers expected;
   Progress progress;
   bool accept = true, replace_next = false, observed = false;
@@ -551,9 +549,9 @@ void callback(const Backend backend, const bool accept, const bool replace_next)
   observer.replace_next = replace_next;
   Memory memory{.alias = true};
   std::array<Word, memory_words> p{};
-  Core core({.program = p, .x = memory.bank(false), .y = memory.bank(true)},
-            &observer,
-            {.backend = backend});
+  TestCore core({.program = p, .x = memory.bank(false), .y = memory.bank(true)},
+                &observer,
+                {.backend = backend});
   observer.core = &core;
   const auto words = program();
   core.load(Space::program, start, words);
@@ -561,8 +559,7 @@ void callback(const Backend backend, const bool accept, const bool replace_next)
   memory.initialize();
   core.set_registers(state);
   const auto steps = trace();
-  require(core.run(static_cast<Word>(steps.size())).dispatches == steps.size() &&
-              observer.calls == 0,
+  require(core.run(static_cast<Word>(steps.size())).retired == steps.size() && observer.calls == 0,
           "Populate a proved RAM translation before changing the same-PC R to I/O");
   memory.initialize();
   auto expected_memory = memory;
@@ -580,14 +577,14 @@ void callback(const Backend backend, const bool accept, const bool replace_next)
           "A changed entry guard selects ordinary execution with complete callback state");
   if (!accept) {
     auto rejected = observer.expected;
-    require(run.dispatches == 3 && run.progress == observer.progress &&
+    require(run.retired == 3 && run.progress == observer.progress &&
                 run.fault == Fault{.kind = FaultKind::io_read,
                                    .space = Space::x,
                                    .address = io_begin,
                                    .pc = start + 3} &&
                 core.registers() == rejected && memory.words == expected_memory.words,
             "Rejected ordinary loads preserve the destination and do not execute the ALU");
-    require(core.run(1).dispatches == 0 && core.registers() == rejected &&
+    require(core.run(1).retired == 0 && core.registers() == rejected &&
                 core.progress() == run.progress,
             "Faulted region fallback remains stopped without replay or invented retirement");
     return;
@@ -600,7 +597,7 @@ void callback(const Backend backend, const bool accept, const bool replace_next)
     const bool replaced = index == 9 || index == 17 || (index == 4 && replace_next);
     execute(expected, expected_memory, replaced ? Step{.ports = {}, .count = 0} : steps[index]);
   }
-  require(run.dispatches == steps.size() && run.fault.kind == FaultKind::none &&
+  require(run.retired == steps.size() && run.fault.kind == FaultKind::none &&
               core.registers() == expected && memory.words == expected_memory.words,
           "Callback P changes discard stale region code and preserve old parallel operands");
 }
@@ -608,9 +605,9 @@ void callback(const Backend backend, const bool accept, const bool replace_next)
 void interrupt_boundary(const Backend backend) {
   Memory memory;
   std::array<Word, memory_words> p{};
-  Core core({.program = p, .x = memory.bank(false), .y = memory.bank(true)},
-            nullptr,
-            {.backend = backend});
+  TestCore core({.program = p, .x = memory.bank(false), .y = memory.bank(true)},
+                nullptr,
+                {.backend = backend});
   const auto words = program();
   core.load(Space::program, start, words);
   constexpr Word vector = 32;
@@ -621,17 +618,17 @@ void interrupt_boundary(const Backend backend) {
   core.set_registers(expected);
   const auto steps = trace();
   for (const auto step : steps) { execute(expected, expected_memory, step); }
-  require(core.run(static_cast<Word>(steps.size())).dispatches == steps.size() &&
-              core.registers() == expected && core.interruptible(),
+  require(core.run(static_cast<Word>(steps.size())).retired == steps.size() &&
+              core.registers() == expected && core.interrupt_ready(),
           "A completed region exposes full status/PC for host interrupt admission");
   core.interrupt(vector, 1);
   require(core.registers() == expected && memory.words == expected_memory.words &&
-              !core.interruptible() &&
+              !core.interrupt_ready() &&
               core.progress() ==
                   Progress{.instructions = steps.size() + 2, .estimated_cycles = steps.size() + 2},
           "Fast service preserves the canonical region checkpoint and its retirement");
   ++expected.pc;
-  require(core.run(1).dispatches == 1 && core.registers() == expected && core.interruptible(),
+  require(core.run(1).retired == 1 && core.registers() == expected && core.interrupt_ready(),
           "Foreground execution releases vector exclusion after a guarded region");
 }
 } // namespace
@@ -641,8 +638,7 @@ int main() {
   try {
     dsp56300::test::admission();
     dsp56300::test::direct_matrix();
-    for (const auto backend :
-         {dsp56300::Backend::reference, dsp56300::Backend::cached, dsp56300::Backend::jit}) {
+    for (const auto backend : {dsp56300::Backend::jit}) {
       for (const auto mode : dsp56300::test::modes) {
         for (const auto shape : dsp56300::test::shapes) {
           dsp56300::test::prefixes(backend, mode, shape);

@@ -11,8 +11,14 @@ inline constexpr Word word_mask = 0x00ffffff;
 inline constexpr std::size_t address_words = std::size_t{1} << 24;
 enum class Space : std::uint8_t { program, x, y };
 
+struct CacheRegion {
+  Word begin = address_words, end = address_words;
+  unsigned sector_words = 128;
+};
+
 struct Buffers {
   std::span<Word> program, x, y;
+  CacheRegion cache{};
 };
 
 // Explicit ordinary storage grant. Empty known means all words are initialized;
@@ -29,10 +35,12 @@ struct MemoryLayout {
   std::size_t program_words = 0, x_words = 0, y_words = 0;
 };
 
-// Borrowed physical backing with explicit logical P/X/Y views. No hot dispatch.
+// Borrowed memory; the consumer owns all backing storage and its lifetime.
 class Memory {
 public:
-  [[nodiscard]] static constexpr Memory external() noexcept { return {{}, true}; }
+  [[nodiscard]] static constexpr Memory external(const CacheRegion cache = {}) noexcept {
+    return Memory(Buffers{.program = {}, .x = {}, .y = {}, .cache = cache});
+  }
 
   [[nodiscard]] static Memory separate(const Buffers buffers) {
     if (buffers.program.empty() || buffers.x.empty() || buffers.y.empty() ||
@@ -40,10 +48,11 @@ public:
         buffers.y.size() > address_words) {
       throw std::invalid_argument("DSP requires nonempty memory spans of at most 2^24 words");
     }
-    return {buffers, false};
+    return Memory(buffers);
   }
 
-  // Explicit physical aliasing, including executable P aliases. Mutate through Core.
+  // Explicit physical aliasing, including executable P aliases. Program identity
+  // stays stable during execution; ordinary data is consumer-owned.
   [[nodiscard]] static Memory unified(const std::span<Word> words) {
     return separate({.program = words, .x = words, .y = words});
   }
@@ -70,13 +79,9 @@ public:
 
   [[nodiscard]] constexpr Buffers storage() const noexcept { return buffers_; }
 
-  [[nodiscard]] constexpr bool externally_owned() const noexcept { return external_; }
-
 private:
-  constexpr Memory(const Buffers buffers, const bool external) noexcept
-      : buffers_(buffers), external_(external) {}
+  explicit constexpr Memory(const Buffers buffers) noexcept : buffers_(buffers) {}
 
   Buffers buffers_;
-  bool external_;
 };
 }

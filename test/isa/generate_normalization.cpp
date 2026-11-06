@@ -212,7 +212,7 @@ void chain(Cases &cases, const Input input, const bool clb_alias) {
   cases.push_back(item);
   model(item.expected, normalize);
   ++item.expected.pc;
-  item.budget = item.dispatches = 2;
+  item.budget = item.retired = 2;
   item.progress = {.instructions = 2, .estimated_cycles = 2};
   if (!clb_alias) { assert_normalized(target_b ? item.expected.b : item.expected.a); }
   cases.push_back(std::move(item));
@@ -254,8 +254,8 @@ BinaryCase repeated(const Input input, const Word budget) {
   const bool completed = iterations == count;
   item.expected.pc = start + (completed ? 2U : 1U);
   item.expected.lc = completed ? item.initial.lc : count - iterations;
-  item.interruptible = completed;
-  item.budget = item.dispatches = budget;
+  item.interrupt_ready = completed;
+  item.budget = item.retired = budget;
   item.progress = {.instructions = budget, .estimated_cycles = 5 + iterations};
   item.name = "REP NORMF partial budgets re-read the current source and old Carry";
   return item;
@@ -357,7 +357,7 @@ void native_sequences(Cases &cases) {
         }
         ++item.expected.pc;
         ++item.budget;
-        item.dispatches = item.budget;
+        item.retired = item.budget;
         item.progress = {.instructions = item.budget, .estimated_cycles = item.budget};
         cases.push_back(item);
       }
@@ -367,9 +367,9 @@ void native_sequences(Cases &cases) {
 
 void fault(Cases &cases, const BinaryCase &original, const FaultKind kind, const Word value) {
   auto item = original;
-  item.dispatches = 0;
+  item.retired = 0;
   item.progress = {};
-  item.interruptible = false;
+  item.interrupt_ready = false;
   item.fault = {
       .kind = kind, .space = Space::program, .address = start, .value = value, .pc = start};
   cases.push_back(std::move(item));

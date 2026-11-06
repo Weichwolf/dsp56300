@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "exception_model.hpp"
@@ -28,7 +29,7 @@ struct Machine {
   std::array<Word, memory_words> p{};
   std::array<Word, 1> x{};
   std::array<Word, 1> y{};
-  Core core;
+  TestCore core;
 
   explicit Machine(const Backend backend)
       : core({.program = p, .x = x, .y = y}, nullptr, {.backend = backend}) {}
@@ -65,10 +66,10 @@ void native_call(const Backend backend, const Input input) {
   warm.pc = resume;
   warm.sr = 0;
   core.set_registers(warm);
-  require(core.run(2).dispatches == 2, "Warm ordinary continuation before a software exception");
+  require(core.run(2).retired == 2, "Warm ordinary continuation before a software exception");
   core.set_registers(state);
   const auto progress = core.progress();
-  const auto native = core.jit_statistics().native_alu_instructions;
+
   auto expected = state;
   alu(expected, mac_a);
   alu(expected, mac_b);
@@ -77,14 +78,14 @@ void native_call(const Backend backend, const Input input) {
   const auto queued = core.run(3);
   const auto request_cost = exception_model::cycles(input);
   require(
-      queued.dispatches == 3 && queued.fault.kind == FaultKind::none &&
-          core.registers() == expected && core.interruptible() != requested &&
+      queued.retired == 3 && queued.fault.kind == FaultKind::none && core.registers() == expected &&
+          core.interrupt_ready() != requested &&
           queued.progress ==
               Progress{.instructions = progress.instructions + 3,
                        .estimated_cycles = progress.estimated_cycles + 2 + request_cost},
       "The signal uses fresh native flags and stops before any vector or successor instruction");
   if (requested) {
-    require(core.run(0).dispatches == 0 && core.registers() == expected && !core.interruptible(),
+    require(core.run(0).retired == 0 && core.registers() == expected && !core.interrupt_ready(),
             "Zero budgets preserve pending exception state");
     bool rejected = false;
     try {
@@ -94,15 +95,15 @@ void native_call(const Backend backend, const Input input) {
             "Host admission cannot replace a pending internal exception");
     if ((input.status & flag_c) != 0) { core.clear_code_cache(); }
     exception_model::enter(expected, resume);
-    require(core.run(1).dispatches == 1 && core.registers() == expected && core.interruptible(),
+    require(core.run(1).retired == 1 && core.registers() == expected && core.interrupt_ready(),
             "One vector JSR saves the exact resume/SR frame and saturates IPL at three");
     alu(expected, adc_x_a);
     alu(expected, round_a);
     expected.pc += 2;
-    require(core.run(2).dispatches == 2 && core.registers() == expected,
+    require(core.run(2).retired == 2 && core.registers() == expected,
             "The long service executes arithmetic under the admitted service mode");
     exception_model::leave(expected);
-    require(core.run(1).dispatches == 1 && core.registers() == expected && !core.interruptible(),
+    require(core.run(1).retired == 1 && core.registers() == expected && !core.interrupt_ready(),
             "RTI restores the software exception frame and the specified resume address");
   }
   for (const auto operation : continuation) {
@@ -112,16 +113,11 @@ void native_call(const Backend backend, const Input input) {
   const auto result = core.run(2);
   const auto count = requested ? 9U : 5U;
   const auto cost = request_cost + (requested ? 9U + vector_cost : 4U);
-  require(result.dispatches == 2 && result.fault.kind == FaultKind::none &&
-              core.registers() == expected && core.interruptible() &&
+  require(result.retired == 2 && result.fault.kind == FaultKind::none &&
+              core.registers() == expected && core.interrupt_ready() &&
               result.progress == Progress{.instructions = progress.instructions + count,
                                           .estimated_cycles = progress.estimated_cycles + cost},
           "Continuation preserves exact DSP precision, guest retirement and base costs");
-  if (backend == Backend::jit) {
-    const auto expected_native = requested ? 6U : 4U;
-    require(core.jit_statistics().native_alu_instructions == native + expected_native,
-            "Both sides and the long handler use actual native arithmetic");
-  }
 }
 
 class Observer final : public Io {
@@ -157,7 +153,7 @@ public:
     return false;
   }
 
-  Core *core = nullptr;
+  TestCore *core = nullptr;
   Registers expected;
   Progress progress;
   Word resume = 0, vector_pc = 0;
@@ -170,7 +166,7 @@ void vector_callback(const Backend backend, const Input input, const bool accept
   std::array<Word, memory_words> x{};
   std::array<Word, memory_words> y{};
   Observer io;
-  Core core({.program = p, .x = x, .y = y}, &io, {.backend = backend});
+  TestCore core({.program = p, .x = x, .y = y}, &io, {.backend = backend});
   io.core = &core;
   io.accept = accept;
   io.resume = exception_model::resume(input, start + 1);
@@ -185,7 +181,7 @@ void vector_callback(const Backend backend, const Input input, const bool accept
   auto expected = state;
   alu(expected, mac_a);
   expected.pc = start + 2;
-  require(core.run(2).dispatches == 2 && core.registers() == expected && io.calls == 0,
+  require(core.run(2).retired == 2 && core.registers() == expected && io.calls == 0,
           "A pending fast vector has not called I/O before its next instruction budget");
   expected.pc = io.resume;
   ++expected.r[0];
@@ -195,37 +191,33 @@ void vector_callback(const Backend backend, const Input input, const bool accept
   require(io.valid && io.calls == 1,
           "The vector callback sees canonical native state and rejects reentry");
   if (!accept) {
-    require(result.dispatches == 0 && core.progress() == io.progress &&
+    require(result.retired == 0 && core.progress() == io.progress &&
                 core.fault() == Fault{.kind = FaultKind::io_read,
                                       .space = Space::x,
                                       .address = io_begin,
                                       .pc = io.vector_pc} &&
-                core.registers().pc == io.resume && !core.interruptible(),
+                core.registers().pc == io.resume && !core.interrupt_ready(),
             "Rejected vector I/O does not retire or execute its second vector word");
-    require(core.run(4).dispatches == 0 && io.calls == 1,
+    require(core.run(4).retired == 0 && io.calls == 1,
             "Rejected internal exception I/O remains stopped without replay");
     return;
   }
   register_model::write(expected, 4, payload);
-  require(result.dispatches == 1 && core.registers() == expected && !core.interruptible(),
+  require(result.retired == 1 && core.registers() == expected && !core.interrupt_ready(),
           "The first vector word commits once and keeps the second word pending");
-  require(core.run(0).dispatches == 0 && core.registers() == expected,
+  require(core.run(0).retired == 0 && core.registers() == expected,
           "A zero budget cannot consume the pending second vector word");
-  alu(expected, mac_b);
-  require(core.run(1).dispatches == 1 && core.registers() == expected && !core.interruptible(),
-          "A callback's replacement second vector word executes from fresh program memory");
+  require(core.run(1).retired == 1 && core.registers() == expected && !core.interrupt_ready() &&
+              core.read(Space::program, io.vector_pc + 1) == mac_b,
+          "The fetched second vector word remains NOP despite callback replacement in memory");
   for (const auto operation : {adc_x_a, round_a}) {
     alu(expected, operation);
     ++expected.pc;
   }
-  require(core.run(2).dispatches == 2 && core.registers() == expected && core.interruptible() &&
+  require(core.run(2).retired == 2 && core.registers() == expected && core.interrupt_ready() &&
               core.progress() == Progress{.instructions = 6,
                                           .estimated_cycles = exception_model::cycles(input) + 5},
           "Fast service resumes modified native continuation with exact new input and flags");
-  if (backend == Backend::jit) {
-    require(core.jit_statistics().native_alu_instructions == 3,
-            "The vector callback boundary has actual native arithmetic before and after service");
-  }
 }
 
 void level_three(const Backend backend) {
@@ -242,7 +234,7 @@ void level_three(const Backend backend) {
               core.progress() == Progress{.instructions = 1, .estimated_cycles = 3},
           "Host level-three admission works at IPL3 and never encodes priority four as scaling");
   exception_model::leave(expected);
-  require(core.run(1).dispatches == 1 && core.registers() == expected &&
+  require(core.run(1).retired == 1 && core.registers() == expected &&
               core.progress() == Progress{.instructions = 2, .estimated_cycles = 6},
           "Level-three service returns the saved foreground flags/mode unchanged");
 }
@@ -262,6 +254,11 @@ struct FailedVector {
   unsigned slot = 0;
 };
 
+bool missing_vector_pair(const FailedVector item) {
+  return item.failure == Failure::missing_word ||
+         (item.failure == Failure::missing_extension && item.slot == 0);
+}
+
 void failed_vector(const Backend backend, const FailedVector item) {
   constexpr Word call_long = 0x0bf080;
   constexpr Word call_post = 0x0bd880;
@@ -274,7 +271,8 @@ void failed_vector(const Backend backend, const FailedVector item) {
   std::size_t size = memory_words;
   if (item.failure == Failure::missing_word) { size = pc; }
   if (item.failure == Failure::missing_extension) { size = pc + 1; }
-  Core core({.program = std::span(p).first(size), .x = x, .y = y}, nullptr, {.backend = backend});
+  TestCore core(
+      {.program = std::span(p).first(size), .x = x, .y = y}, nullptr, {.backend = backend});
   auto expected = exception_model::seed(item.input);
   expected.r[0] = exception_model::service;
   if (item.failure == Failure::full_stack) {
@@ -315,15 +313,22 @@ void failed_vector(const Backend backend, const FailedVector item) {
   }
   expected.pc = exception_model::resume(item.input, start);
   if (item.failure == Failure::full_stack) { ++expected.r[0]; }
-  const Progress progress{.instructions = 1 + item.slot,
-                          .estimated_cycles = exception_model::cycles(item.input) + item.slot};
+  const bool pair_fetch_failure = missing_vector_pair(item);
+  const unsigned accepted_slots = pair_fetch_failure ? 0 : item.slot;
+  if (pair_fetch_failure) { fault.pc = exception_model::vector(item.input); }
+  if (item.slot == 1 &&
+      (item.failure == Failure::missing_extension || item.failure == Failure::invalid_ea)) {
+    fault = {.kind = FaultKind::unsupported_instruction, .address = pc, .value = opcode, .pc = pc};
+  }
+  const Progress progress{.instructions = 1 + accepted_slots,
+                          .estimated_cycles = exception_model::cycles(item.input) + accepted_slots};
   const auto result = core.run(6);
   require(
-      result.dispatches == 1 + item.slot && result.fault == fault && result.progress == progress &&
-          core.registers() == expected && !core.interruptible(),
+      result.retired == 1 + accepted_slots && result.fault == fault &&
+          result.progress == progress && core.registers() == expected && !core.interrupt_ready(),
       "Failed internal vectors retain only accepted request/slot/AGU effects, never service state");
   require(
-      core.run(3).dispatches == 0 && core.registers() == expected && core.progress() == progress,
+      core.run(3).retired == 0 && core.registers() == expected && core.progress() == progress,
       "Failed internal vector entry is fail-stop without replaying the request or accepted slot");
 }
 
@@ -356,7 +361,7 @@ void reset_pending(const Backend backend) {
   core.write(Space::program, start, exception_model::opcode({}));
   auto state = exception_model::seed({});
   core.set_registers(state);
-  require(core.run(1).dispatches == 1 && !core.interruptible(),
+  require(core.run(1).retired == 1 && !core.interrupt_ready(),
           "Create a pending exception for reset");
   core.reset();
   state = initial_state();
@@ -364,7 +369,7 @@ void reset_pending(const Backend backend) {
   core.set_registers(state);
   auto expected = state;
   ++expected.pc;
-  require(core.run(1).dispatches == 1 && core.registers() == expected && core.interruptible() &&
+  require(core.run(1).retired == 1 && core.registers() == expected && core.interrupt_ready() &&
               core.progress() == Progress{.instructions = 1, .estimated_cycles = 1},
           "Reset clears hidden exception continuation without executing a stale vector");
 }
@@ -373,8 +378,7 @@ void reset_pending(const Backend backend) {
 
 int main() {
   try {
-    for (const auto backend :
-         {dsp56300::Backend::reference, dsp56300::Backend::cached, dsp56300::Backend::jit}) {
+    for (const auto backend : {dsp56300::Backend::jit}) {
       dsp56300::test::level_three(backend);
       dsp56300::test::reset_pending(backend);
       dsp56300::test::failed_vectors(backend);

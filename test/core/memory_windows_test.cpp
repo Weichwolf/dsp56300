@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "bfu_logic_model.hpp"
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "external_run_fixture.hpp"
@@ -140,12 +141,12 @@ void xor_old(Registers &expected, const Registers &old) {
 
 struct TransferCase {
   unsigned reg = 4;
-  bool load = false, y = false, optimize = false;
+  bool load = false, y = false;
   Word mode = 0;
   std::size_t range = 0, index = 0;
 };
 
-void one_transfer(Core &core, Memory &memory, const TransferCase input) {
+void one_transfer(TestCore &core, Memory &memory, const TransferCase input) {
   auto &bank = memory.storage[input.y ? 1 : 0];
   auto &window = bank.windows[input.range];
   auto initial = register_model::seed(input.mode | flag_s | flag_l);
@@ -168,20 +169,20 @@ void one_transfer(Core &core, Memory &memory, const TransferCase input) {
     }
   }
   xor_old(expected, initial);
-  const auto native = core.jit_statistics().native_move_instructions;
+
   const auto reads = memory.reads;
   const auto writes = memory.writes;
   const auto result = core.run(1);
-  const bool valid = result.dispatches == 1 && result.fault.kind == FaultKind::none &&
+  const bool valid = result.retired == 1 && result.fault.kind == FaultKind::none &&
                      core.registers() == expected && bank.low == expected_memory.low &&
                      bank.high == expected_memory.high && bank.rom == expected_memory.rom &&
                      bank.low_known == expected_memory.low_known &&
                      bank.high_known == expected_memory.high_known;
   if (!valid) {
     const auto actual = core.registers();
-    std::cerr << "window opt=" << input.optimize << " load=" << input.load << " y=" << input.y
-              << " reg=" << input.reg << " mode=" << input.mode << " range=" << input.range
-              << " index=" << input.index << " retired=" << result.dispatches
+    std::cerr << "window load=" << input.load << " y=" << input.y << " reg=" << input.reg
+              << " mode=" << input.mode << " range=" << input.range << " index=" << input.index
+              << " retired=" << result.retired
               << " fault=" << static_cast<unsigned>(result.fault.kind) << std::hex
               << " opcode=" << memory.program[start] << " pc=" << actual.pc << '/' << expected.pc
               << " a=" << actual.a << '/' << expected.a << " x=" << actual.x << '/' << expected.x
@@ -191,12 +192,11 @@ void one_transfer(Core &core, Memory &memory, const TransferCase input) {
   require(
       valid,
       "Sparse windows preserve independent old-input XOR/bus flags and complete word/byte arrays");
-  require(core.jit_statistics().native_move_instructions == native + (input.optimize ? 1 : 0) &&
-              (!input.optimize || (memory.reads == reads && memory.writes == writes)),
+  require(memory.reads == reads && memory.writes == writes,
           "Actual native loads/stores avoid all owner callbacks and mark genuine writes");
 }
 
-void transfer_cases(Core &core, Memory &memory, TransferCase input) {
+void transfer_cases(TestCore &core, Memory &memory, TransferCase input) {
   constexpr Word saturation_mode = Word{1} << 20;
   auto &bank = memory.storage[input.y ? 1 : 0];
   for (const Word mode : {0U, mode_down, mode_up, mode_rm, saturation_mode}) {
@@ -212,53 +212,55 @@ void transfer_cases(Core &core, Memory &memory, TransferCase input) {
   }
 }
 
-void transfers(const bool optimize) {
+void transfers() {
   Memory memory;
-  Core core(memory, {.optimize = optimize});
+  TestCore core(memory, {});
   for (const bool y : {false, true}) {
     for (const bool load : {false, true}) {
       for (const unsigned reg : {4U, 5U, 6U, 7U, 14U, 15U}) {
         const std::array program{transfer(reg, load, y)};
         memory.code(program);
-        transfer_cases(core, memory, {.reg = reg, .load = load, .y = y, .optimize = optimize});
+        transfer_cases(core, memory, {.reg = reg, .load = load, .y = y});
       }
     }
   }
 }
 
-void bounded_unknown_and_dma() {
+void unknown_and_dma() {
   Memory memory;
   constexpr std::array program{Word{0x200017}, load_post};
   memory.code(program);
-  memory.storage[0].low_known[1] = 1;
-  Core core(memory);
+  TestCore core(memory);
   auto initial = register_model::seed(0);
   initial.r[0] = low_base;
   core.set_registers(initial);
   auto expected = initial;
   bfu_model::apply(expected, initial, {.function = bfu_model::Function::complement});
   ++expected.pc;
-  const auto stopped = core.run(RunBudget{.instructions = 10, .cycles = 10});
-  require(
-      stopped.execution.dispatches == 1 && stopped.cycles == 1 &&
-          stopped.stop == RunStop::external_effect && core.registers() == expected &&
-          stopped.next && stopped.next->opcode == load_post && memory.reads == 0,
-      "An unknown native window read stops before its whole EA/ALU/PC effect after a real prefix");
-  const auto repeated = core.run(RunBudget{.instructions = 1, .cycles = 1});
-  require(repeated.execution.dispatches == 0 && repeated.stop == RunStop::external_effect &&
-              core.registers() == expected && memory.reads == 0,
-          "Repeated owner-boundary queries neither initialize unknown RAM nor change CPU state");
-  const auto compiled = core.jit_statistics().compiled_blocks;
+  const auto stopped = core.run(2);
+  require(stopped.retired == 1 && stopped.progress.instructions == 1 &&
+              stopped.fault == Fault{.kind = FaultKind::memory_read,
+                                     .space = Space::x,
+                                     .address = low_base,
+                                     .pc = start + 1} &&
+              memory.reads == 1,
+          "An unknown operand reports the exact first refusal after its retired prefix");
+  const auto repeated = core.run(1);
+  require(repeated.retired == 0 && repeated.fault == stopped.fault && memory.reads == 1,
+          "A latched refusal cannot replay the prefix or repeat the refused callback");
   memory.storage[0].low[0] = datum;
-  memory.storage[0].low_known[0] = 1; // A real owner/DMA write needs no code revision.
+  memory.storage[0].low_known[0] = 1;
+  core.reset();
+  core.set_registers(expected);
   const auto old = expected;
   ++expected.r[0];
   register_model::write(expected, 4, datum);
   xor_old(expected, old);
-  const auto actual = core.run(RunBudget{.instructions = 1, .cycles = 1});
-  require(actual.execution.dispatches == 1 && actual.cycles == 1 && core.registers() == expected &&
-              memory.reads == 0 && core.jit_statistics().compiled_blocks == compiled,
-          "A warmed known-bit guard sees an actual DMA initialization without stale metadata");
+  const auto actual = core.run(1);
+  require(actual.retired == 1 && actual.fault.kind == FaultKind::none &&
+              actual.progress == Progress{.instructions = 1, .estimated_cycles = 1} &&
+              core.registers() == expected && memory.reads == 1,
+          "A real DMA initialization and explicit fault recovery expose the correct word");
 }
 
 void paired_guards() {
@@ -267,22 +269,18 @@ void paired_guards() {
     constexpr Word y_load = 0x400000;
     const std::array program{store_y ? pair & ~y_load : pair};
     memory.code(program);
-    Core core(memory);
+    TestCore core(memory);
     auto initial = register_model::seed(mode_up | flag_l);
     initial.r[0] = low_base;
     initial.r[4] = high_base;
     core.set_registers(initial);
     memory.storage[0].low[0] = datum;
     memory.storage[0].low_known[0] = 1;
-    auto stopped = core.run(RunBudget{.instructions = 1, .cycles = 1});
     if (!store_y) {
-      require(stopped.execution.dispatches == 0 && stopped.stop == RunStop::external_effect &&
-                  core.registers() == initial && memory.reads == 0 && memory.writes == 0,
-              "A second-port unknown read preserves the complete first-port/parallel state");
       memory.storage[1].high[0] = other;
       memory.storage[1].high_known[0] = 1;
-      stopped = core.run(RunBudget{.instructions = 1, .cycles = 1});
     }
+    const auto stopped = core.run(1);
     auto expected = initial;
     ++expected.r[0];
     ++expected.r[4];
@@ -291,7 +289,7 @@ void paired_guards() {
     register_model::write(expected, 4, datum);
     if (!store_y) { register_model::write(expected, 6, other); }
     xor_old(expected, initial);
-    require(stopped.execution.dispatches == 1 && core.registers() == expected &&
+    require(stopped.retired == 1 && core.registers() == expected &&
                 (store_y ? memory.storage[1].high[0] == y_value : true) &&
                 memory.storage[1].high_known[0] == 1 && memory.reads == 0 && memory.writes == 0,
             "Paired sparse windows preserve old X/Y inputs, both AGUs and initialized write state");
@@ -306,17 +304,11 @@ void aliased_pair() {
   auto &target = memory.storage[1].windows[1];
   target.words = memory.storage[0].low;
   target.known = memory.storage[0].low_known;
-  Core core(memory);
+  TestCore core(memory);
   auto initial = register_model::seed(0);
   initial.r[0] = low_base;
   initial.r[4] = high_base;
   core.set_registers(initial);
-  const auto stopped = core.run(RunBudget{.instructions = 1, .cycles = 1});
-  require(stopped.execution.dispatches == 0 && stopped.stop == RunStop::external_effect &&
-              core.registers() == initial && memory.storage[0].low[0] == 0 &&
-              memory.storage[0].low_known[0] == 0 && memory.writes == 0 && memory.reads == 0,
-          "A second unknown port cannot initialize the first port's aliased store or commit either "
-          "AGU");
   memory.storage[0].low[0] = other;
   memory.storage[0].low_known[0] = 1;
   auto expected = initial;
@@ -325,8 +317,8 @@ void aliased_pair() {
   const auto written = register_model::read(expected, 4);
   register_model::write(expected, 6, other);
   xor_old(expected, initial);
-  const auto actual = core.run(RunBudget{.instructions = 1, .cycles = 1});
-  require(actual.execution.dispatches == 1 && core.registers() == expected &&
+  const auto actual = core.run(1);
+  require(actual.retired == 1 && core.registers() == expected &&
               memory.storage[0].low[0] == written && memory.reads == 0 && memory.writes == 0,
           "Both ports capture the genuine old shared word before the native store commits");
 }
@@ -342,7 +334,7 @@ void callback_rebinding() {
   memory.storage[0].low_known[0] = 1;
   memory.storage[0].high[0] = other;
   memory.storage[0].high_known[0] = 1;
-  Core core(memory);
+  TestCore core(memory);
   auto expected = register_model::seed(0);
   expected.r[0] = port;
   core.set_registers(expected);
@@ -350,9 +342,8 @@ void callback_rebinding() {
   register_model::write(expected, 4, other);
   expected.pc += static_cast<Word>(program.size());
   const auto actual = core.run(3);
-  require(actual.dispatches == 3 && actual.fault.kind == FaultKind::none &&
-              core.registers() == expected && memory.reads == 0 && memory.writes == 1 &&
-              core.jit_statistics().invalidations != 0,
+  require(actual.retired == 3 && actual.fault.kind == FaultKind::none &&
+              core.registers() == expected && memory.reads == 0 && memory.writes == 1,
           "A real peripheral callback remaps storage and invalidates already embedded successor "
           "pointers");
 }
@@ -362,28 +353,28 @@ void all_known_writes() {
   constexpr std::array program{store};
   memory.code(program);
   memory.storage[0].windows[1].known = {};
-  Core core(memory);
+  TestCore core(memory);
   auto initial = register_model::seed(0);
   initial.r[0] = low_base;
   core.set_registers(initial);
-  require(core.run(1).dispatches == 1 && memory.storage[0].low_known[0] == 1,
+  require(core.run(1).retired == 1 && memory.storage[0].low_known[0] == 1,
           "A tracked direct store initializes exactly its genuine known byte");
   memory.storage[0].low_known[0] = 0;
   initial.r[0] = high_base;
   core.set_registers(initial);
-  require(core.run(1).dispatches == 1 && memory.storage[0].high[0] == (initial.x & word_mask) &&
+  require(core.run(1).retired == 1 && memory.storage[0].high[0] == (initial.x & word_mask) &&
               memory.storage[0].low_known[0] == 0 && memory.writes == 0,
           "An all-known window never reuses a previous window's initialization pointer");
 }
 
-void bounded_buffers() {
+void ordinary_buffers() {
   std::array<Word, memory_words> program{};
   std::array<Word, memory_words> x{};
   std::array<Word, memory_words> y{};
   constexpr Word address = 7;
   program[start] = load_post;
   x[address] = datum;
-  Core core({.program = program, .x = x, .y = y});
+  TestCore core({.program = program, .x = x, .y = y});
   auto initial = register_model::seed(0);
   initial.r[0] = address;
   core.set_registers(initial);
@@ -391,18 +382,14 @@ void bounded_buffers() {
   ++expected.r[0];
   register_model::write(expected, 4, datum);
   xor_old(expected, initial);
-  const auto actual = core.run(RunBudget{.instructions = 1, .cycles = 1});
-  require(actual.execution.dispatches == 1 && actual.cycles == 1 && core.registers() == expected &&
-              core.jit_statistics().native_move_instructions == 1,
-          "Bounded native ordinary-buffer RAM honors its actual load, old ALU input and AGU");
+  const auto actual = core.run(1);
+  require(actual.retired == 1 && actual.progress.estimated_cycles == 1 &&
+              core.registers() == expected,
+          "Native ordinary-buffer RAM honors its actual load, old ALU input and AGU");
   initial.r[0] = memory_words;
   core.set_registers(initial);
-  const auto stopped = core.run(RunBudget{.instructions = 1, .cycles = 1});
-  require(stopped.execution.dispatches == 0 && stopped.stop == RunStop::external_effect &&
-              core.registers() == initial,
-          "An out-of-span buffer access remains a complete-instruction owner boundary");
   const auto refused = core.run(1);
-  require(refused.dispatches == 0 && refused.fault.kind == FaultKind::memory_read &&
+  require(refused.retired == 0 && refused.fault.kind == FaultKind::memory_read &&
               refused.fault.space == Space::x && refused.fault.address == memory_words &&
               refused.fault.pc == start,
           "The real ordinary-buffer fallback retains its precise fail-stop read");
@@ -415,16 +402,12 @@ void refusals() {
     Memory memory;
     constexpr std::array program{store};
     memory.code(program);
-    Core core(memory);
+    TestCore core(memory);
     auto initial = register_model::seed(0);
     initial.r[0] = address;
     core.set_registers(initial);
-    const auto stopped = core.run(RunBudget{.instructions = 1, .cycles = 10});
-    require(stopped.execution.dispatches == 0 && stopped.stop == RunStop::external_effect &&
-                core.registers() == initial && memory.writes == 0,
-            "Hole, ROM and peripheral addresses stop before any bounded native store effect");
     const auto actual = core.run(1);
-    require(actual.dispatches == 0 && memory.writes == 1 && actual.fault.address == address &&
+    require(actual.retired == 0 && memory.writes == 1 && actual.fault.address == address &&
                 actual.fault.pc == start && actual.fault.space == Space::x &&
                 actual.fault.kind ==
                     (address == port ? FaultKind::io_write : FaultKind::memory_write),
@@ -440,24 +423,24 @@ void rebinding() {
   memory.storage[0].low_known[0] = 1;
   memory.storage[0].high[0] = other;
   memory.storage[0].high_known[0] = 1;
-  Core core(memory);
+  TestCore core(memory);
   auto initial = register_model::seed(0);
   initial.r[0] = low_base;
   core.set_registers(initial);
-  require(core.run(1).dispatches == 1 && (core.registers().x & word_mask) == datum,
+  require(core.run(1).retired == 1 && (core.registers().x & word_mask) == datum,
           "Warm a genuine first storage mapping");
   auto &window = memory.storage[0].windows[0];
   window.words = memory.storage[0].high;
   window.known = memory.storage[0].high_known;
   ++memory.revision;
   core.set_registers(initial);
-  require(core.run(1).dispatches == 1 && (core.registers().x & word_mask) == other,
+  require(core.run(1).retired == 1 && (core.registers().x & word_mask) == other,
           "A descriptor/pointer revision invalidates old embedded host addresses");
   window.words = memory.storage[0].low;
   window.known = memory.storage[0].low_known;
   ++memory.revision;
   core.set_registers(initial);
-  require(core.run(1).dispatches == 1 && (core.registers().x & word_mask) == datum &&
+  require(core.run(1).retired == 1 && (core.registers().x & word_mask) == datum &&
               memory.reads == 0,
           "A subsequent explicit descriptor revision rebinds the original storage");
 }
@@ -471,24 +454,19 @@ void executable_alias() {
   window.known = std::span(memory.storage[0].low_known).first(1);
   window.known[0] = 1;
   window.aliases_program = true;
-  Core core(memory);
+  TestCore core(memory);
   auto initial = register_model::seed(0);
   initial.r[0] = low_base;
   initial.x = complement;
   core.set_registers(initial);
-  const auto stopped = core.run(RunBudget{.instructions = 2, .cycles = 2});
-  require(stopped.execution.dispatches == 0 && stopped.stop == RunStop::external_effect &&
-              core.registers() == initial && memory.writes == 0,
-          "An executable alias is never silently written through a direct bounded RAM pointer");
   auto expected = initial;
   ++expected.pc;
   const auto old = expected;
   bfu_model::apply(expected, old, {.function = bfu_model::Function::complement});
   ++expected.pc;
   const auto actual = core.run(2);
-  require(actual.dispatches == 2 && core.registers() == expected && memory.writes == 1 &&
-              memory.program[start + 1] == complement &&
-              core.jit_statistics().native_move_instructions == 0,
+  require(actual.retired == 2 && core.registers() == expected && memory.writes == 1 &&
+              memory.program[start + 1] == complement,
           "The true executable-alias write invalidates its already compiled successor once");
 }
 
@@ -496,14 +474,13 @@ void domain_kernels() {
   constexpr Word count = 97;
   for (const auto input : external_run::workloads) {
     window_workload::Memory memory(input, true);
-    Core core(memory);
+    TestCore core(memory);
     core.set_registers(window_workload::initial(input, count));
-    const auto result = core.run(RunBudget{.instructions = count, .cycles = count});
-    require(result.execution.dispatches == count && result.cycles == count &&
-                result.execution.fault.kind == FaultKind::none &&
-                core.registers() == window_workload::expected(input, count) && memory.reads == 0 &&
-                core.jit_statistics().native_move_instructions == count,
-            "Bounded multi-iteration RAM kernels retain independent audio/image/communications "
+    const auto result = core.run(count);
+    require(result.retired == count && result.progress.estimated_cycles == count &&
+                result.fault.kind == FaultKind::none &&
+                core.registers() == window_workload::expected(input, count) && memory.reads == 0,
+            "Multi-iteration RAM kernels retain independent audio/image/communications "
             "arithmetic");
   }
 }
@@ -519,10 +496,10 @@ void malformed() {
     if (variant == 2) { windows[0].address = port; }
     if (variant == 3) { windows[1].address = low_base; }
     if (variant == 4) { windows[2].address = 0; }
-    Core core(memory);
+    TestCore core(memory);
     core.set_registers(register_model::seed(0));
     const auto result = core.run(1);
-    require(result.dispatches == 0 && result.fault.kind == FaultKind::host_event &&
+    require(result.retired == 0 && result.fault.kind == FaultKind::host_event &&
                 result.fault.space == Space::x && memory.reads == 0 && memory.writes == 0,
             "Malformed grants fail visibly before compilation or any CPU/data access");
   }
@@ -532,20 +509,19 @@ void malformed() {
 
 int main() {
   try {
-    dsp56300::test::transfers(false);
-    dsp56300::test::transfers(true);
-    dsp56300::test::bounded_unknown_and_dma();
+    dsp56300::test::transfers();
+    dsp56300::test::unknown_and_dma();
     dsp56300::test::paired_guards();
     dsp56300::test::aliased_pair();
     dsp56300::test::callback_rebinding();
     dsp56300::test::all_known_writes();
-    dsp56300::test::bounded_buffers();
+    dsp56300::test::ordinary_buffers();
     dsp56300::test::refusals();
     dsp56300::test::rebinding();
     dsp56300::test::executable_alias();
     dsp56300::test::domain_kernels();
     dsp56300::test::malformed();
-    std::cout << dsp56300::test::checks << " external window/owner-boundary checks passed\n";
+    std::cout << dsp56300::test::checks << " external memory window checks passed\n";
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';
     return 1;

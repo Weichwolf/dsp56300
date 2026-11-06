@@ -38,7 +38,7 @@ BinaryCase single(const Frame frame) {
   return_model::apply(item.expected);
   item.before = {{.words = {rti}, .address = start}};
   item.progress.estimated_cycles = 3;
-  item.interruptible = false;
+  item.interrupt_ready = false;
   item.name =
       "RTI restores raw PC/SR and decrements SP/SC; pointer=" + std::to_string(frame.pointer) +
       "; status=" + std::to_string(frame.status);
@@ -89,7 +89,7 @@ void invalid(Cases &cases) {
       item.initial.sc = 0;
       item.expected = item.initial;
       ++item.expected.pc;
-      item.dispatches = 0;
+      item.retired = 0;
       item.progress = {};
       item.fault = {.kind = FaultKind::stack, .address = start, .value = pointer, .pc = start};
       item.name = "RTI empty-stack failure is explicit, nonretiring and fail-stop";
@@ -133,10 +133,10 @@ void native_sequence(Cases &cases, const Frame frame) {
       sequence_model::alu(item.expected, old, operation);
       ++item.expected.pc;
     }
-    item.dispatches = ++item.budget;
+    item.retired = ++item.budget;
     item.progress.instructions = item.budget;
     item.progress.estimated_cycles += operation == rti ? 3U : 1U;
-    item.interruptible = operation != rti;
+    item.interrupt_ready = operation != rti;
     item.name = "Native/RTI/native: every prefix restores Carry, scaling and RM before consumers";
     cases.push_back(item);
   }
@@ -177,10 +177,10 @@ void nested_trace(Cases &cases, const Nested input) {
       sequence_model::alu(item.expected, old, phase == 2 ? 0U : adc_x_a);
       ++item.expected.pc;
     }
-    item.dispatches = ++item.budget;
+    item.retired = ++item.budget;
     item.progress.instructions = item.budget;
     item.progress.estimated_cycles += phase < 2 ? 3U : 1U;
-    item.interruptible = phase >= 2;
+    item.interrupt_ready = phase >= 2;
     item.name = "Nested RTI restores each PC/SR frame and only then admits another interrupt";
     cases.push_back(item);
   }
@@ -241,10 +241,10 @@ void interrupted_loop(Cases &cases, const Loop input) {
         }
       }
     }
-    item.dispatches = ++item.budget;
+    item.retired = ++item.budget;
     item.progress.instructions = item.budget;
     item.progress.estimated_cycles += phase == 0 ? 3U : 1U;
-    item.interruptible = phase != 0;
+    item.interrupt_ready = phase != 0;
     item.name = "RTI returns to interrupted DO at LA or LA-1; exact iteration/cleanup prefixes";
     cases.push_back(item);
   }

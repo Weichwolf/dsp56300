@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "native_sequence_model.hpp"
@@ -29,11 +30,11 @@ constexpr std::array native_chain{mac_a,
                                   Word{0x200069}};
 
 struct Machine {
-  explicit Machine(const Options options, Io *io = nullptr)
+  explicit Machine(const TestOptions options, Io *io = nullptr)
       : core({.program = p, .x = x, .y = y}, io, options) {}
 
   std::array<Word, memory_words> p{}, x{}, y{};
-  Core core;
+  TestCore core;
 };
 
 void model_alu(Registers &state, const Word opcode) {
@@ -42,14 +43,13 @@ void model_alu(Registers &state, const Word opcode) {
   ++state.pc;
 }
 
-void prefixes(const Options options) {
+void prefixes(const TestOptions options) {
   Machine machine(options);
   machine.core.load(Space::program, start, native_chain);
   auto initial = register_model::seed(mode_rm | mode_up | flag_l | flag_s);
   initial.sr &= ~flag_c;
   machine.core.set_registers(initial);
-  require(machine.core.run(static_cast<Word>(native_chain.size())).dispatches ==
-              native_chain.size(),
+  require(machine.core.run(static_cast<Word>(native_chain.size())).retired == native_chain.size(),
           "Warm the complete native register chain");
   for (std::size_t length = 1; length <= native_chain.size(); ++length) {
     auto expected = initial;
@@ -59,25 +59,25 @@ void prefixes(const Options options) {
     machine.core.set_registers(initial);
     const auto before = machine.core.progress();
     const auto result = machine.core.run(static_cast<Word>(length));
-    require(result.dispatches == length && result.fault.kind == FaultKind::none &&
+    require(result.retired == length && result.fault.kind == FaultKind::none &&
                 machine.core.registers() == expected,
             "Every shorter warm-block prefix exposes complete independently modeled state");
     require(result.progress.instructions == before.instructions + length &&
                 result.progress.estimated_cycles == before.estimated_cycles + length,
             "Register reuse preserves exact partial-budget instruction and cycle counts");
-    require(machine.core.interruptible(),
+    require(machine.core.interrupt_ready(),
             "Native register reuse retains stopped interrupt boundaries");
   }
   auto expected = initial;
   for (const auto opcode : native_chain) { model_alu(expected, opcode); }
   machine.core.set_registers(initial);
-  require(machine.core.run(3).dispatches == 3 && machine.core.run(6).dispatches == 6 &&
+  require(machine.core.run(3).retired == 3 && machine.core.run(6).retired == 6 &&
               machine.core.registers() == expected,
           "A partitioned chain reloads registers at a new native entry");
 }
 
 struct HelperInput {
-  Options options;
+  TestOptions options;
   unsigned source = 4, target = 14;
 };
 
@@ -97,22 +97,14 @@ void helper_writes(const HelperInput input) {
   model_alu(expected, add_a_b);
   machine.core.set_registers(initial);
   const auto result = machine.core.run(static_cast<Word>(program.size()));
-  require(result.dispatches == program.size() && machine.core.registers() == expected &&
+  require(result.retired == program.size() && machine.core.registers() == expected &&
               machine.x == std::array<Word, memory_words>{} && machine.y == machine.x,
           "General partial/full accumulator writes invalidate reused native values");
-  if (input.options.backend == Backend::jit && input.options.optimize) {
-    const auto statistics = machine.core.jit_statistics();
-    const bool native_move = (input.source < 8 || input.source >= 14) && input.target >= 14;
-    require(statistics.native_alu_instructions == (native_move ? 5U : 4U) &&
-                statistics.helper_instructions == (native_move ? 0U : 1U) &&
-                statistics.native_move_instructions == (native_move ? 1U : 0U),
-            "Coherency crosses actual native register transfers or the qualified general helper");
-  }
 }
 
 class Observer final : public Io {
 public:
-  Core *core = nullptr;
+  TestCore *core = nullptr;
   Registers expected;
   bool invalidate = false, accept = true, observed = false;
   unsigned reads = 0;
@@ -152,7 +144,7 @@ private:
 };
 
 struct CallbackInput {
-  Options options;
+  TestOptions options;
   bool invalidate = false, accept = true, overflow_first = false;
 };
 
@@ -182,7 +174,7 @@ void callback(const CallbackInput input) {
   require(observer.observed && observer.reads == 1,
           "I/O observes fully materialized accumulator state after preceding native instructions");
   if (!input.accept) {
-    require(result.dispatches == 2 && result.progress.instructions == 2 &&
+    require(result.retired == 2 && result.progress.instructions == 2 &&
                 result.fault.kind == FaultKind::io_read && result.fault.pc == start + 2,
             "A rejected callback cannot retire its native ALU or successor");
     return;
@@ -192,16 +184,12 @@ void callback(const CallbackInput input) {
   sequence_model::alu(expected, old, io_add_load_a);
   ++expected.pc;
   model_alu(expected, input.invalidate ? 0 : add_a_b);
-  require(result.dispatches == program.size() && result.fault.kind == FaultKind::none &&
+  require(result.retired == program.size() && result.fault.kind == FaultKind::none &&
               machine.core.registers() == expected,
           "Slow move fallback retains old inputs and invalidates overwritten accumulator caches");
-  if (input.options.backend == Backend::jit && input.invalidate) {
-    require(machine.core.jit_statistics().invalidations == 1,
-            "Callback code invalidation leaves canonical state before entering replacement code");
-  }
 }
 
-void loop_exit(const Options options, const unsigned written) {
+void loop_exit(const TestOptions options, const unsigned written) {
   Machine machine(options);
   constexpr Word do_once = 0x060180;
   constexpr Word loop_flag = Word{1} << 15;
@@ -226,18 +214,13 @@ void loop_exit(const Options options, const unsigned written) {
   const auto budget = static_cast<Word>(body.size() + 2);
   const auto result = machine.core.run(budget);
   require(
-      result.dispatches == budget && result.fault.kind == FaultKind::none &&
+      result.retired == budget && result.fault.kind == FaultKind::none &&
           result.progress == Progress{.instructions = budget, .estimated_cycles = budget + 4} &&
-          machine.core.registers() == expected && machine.core.interruptible(),
+          machine.core.registers() == expected && machine.core.interrupt_ready(),
       "Loop-ending exits materialize any combination of updated accumulators and restore frames");
-  if (options.backend == Backend::jit && options.optimize) {
-    require(machine.core.jit_statistics().native_alu_instructions == body.size() + 1 &&
-                machine.core.jit_statistics().helper_instructions == 1,
-            "Native DO setup and body materialization retain authoritative general final cleanup");
-  }
 }
 
-void fault_after_native(const Options options) {
+void fault_after_native(const TestOptions options) {
   Machine machine(options);
   const std::array program{mac_a, mac_b, io_add_load_a};
   machine.core.load(Space::program, start, program);
@@ -248,7 +231,7 @@ void fault_after_native(const Options options) {
   model_alu(preceding, mac_b);
   machine.core.set_registers(initial);
   const auto result = machine.core.run(3);
-  require(result.dispatches == 2 && result.progress.instructions == 2 &&
+  require(result.retired == 2 && result.progress.instructions == 2 &&
               result.fault.kind == FaultKind::memory_read && result.fault.pc == start + 2 &&
               result.fault.address == memory_words,
           "A native memory guard fault materializes only previously retired instructions");
@@ -259,11 +242,9 @@ void fault_after_native(const Options options) {
       "A refused load preserves the complete retired prefix and never fabricates a zero result");
 }
 
-void check(const Backend backend, const bool optimize) {
-  for (const Word length : {1U, 2U, 3U, 8U, 64U}) {
-    prefixes({.backend = backend, .instructions_per_block = length, .optimize = optimize});
-  }
-  const Options options{.backend = backend, .optimize = optimize};
+void check(const Backend backend) {
+  { prefixes({.backend = backend}); }
+  const TestOptions options{.backend = backend};
   for (const unsigned source : {4U, 6U, 8U, 9U, 14U, 15U}) {
     for (unsigned target = 8; target <= 15; ++target) {
       helper_writes({.options = options, .source = source, .target = target});
@@ -283,11 +264,7 @@ void check(const Backend backend, const bool optimize) {
 
 int main() {
   try {
-    for (const auto backend :
-         {dsp56300::Backend::reference, dsp56300::Backend::cached, dsp56300::Backend::jit}) {
-      dsp56300::test::check(backend, true);
-    }
-    dsp56300::test::check(dsp56300::Backend::jit, false);
+    for (const auto backend : {dsp56300::Backend::jit}) { dsp56300::test::check(backend); }
     std::cout << dsp56300::test::checks << " native dataflow boundary checks passed\n";
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';

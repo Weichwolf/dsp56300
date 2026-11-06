@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Exact public-Core old-input, observer and mode boundaries for BFU SM forms.
+// Exact public-TestCore old-input, observer and mode boundaries for BFU SM forms.
 #include "bfu_logic_model.hpp"
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "register_model.hpp"
@@ -23,11 +24,11 @@ constexpr Input bit_and{.function = Function::bit_and};
 constexpr std::array modes{0U, mode_down, mode_up, mode_rm, mode_rm | mode_down, mode_rm | mode_up};
 
 struct Machine {
-  explicit Machine(const Options options, Io *io = nullptr)
+  explicit Machine(const TestOptions options, Io *io = nullptr)
       : core({.program = p, .x = x, .y = y}, io, options) {}
 
   std::array<Word, memory_words> p{}, x{}, y{};
-  Core core;
+  TestCore core;
 };
 
 Registers seed(const Word mode) {
@@ -48,7 +49,7 @@ void logic(Registers &state, const Input input) {
   state.pc += bfu_model::words(input);
 }
 
-void prefixes(const Options options, const Word mode) {
+void prefixes(const TestOptions options, const Word mode) {
   constexpr Input long_and{.form = Form::long_immediate, .value = 0xaaaaaa};
   constexpr Input rotate{.function = Function::rotate_left, .destination_b = true};
   const std::array program{add_a,
@@ -68,23 +69,15 @@ void prefixes(const Options options, const Word mode) {
     if (budget >= 4) { logic(expected, rotate); }
     if (budget >= 5) { arithmetic(expected, add_b); }
     const auto run = machine.core.run(budget);
-    require(run.dispatches == budget && run.fault.kind == FaultKind::none &&
+    require(run.retired == budget && run.fault.kind == FaultKind::none &&
                 run.progress == Progress{.instructions = budget,
                                          .estimated_cycles = budget + (budget >= 3 ? 1U : 0U)} &&
                 machine.core.registers() == expected,
             "Every native/BFU prefix preserves exact flags, old operands, word lengths and costs");
-    if (budget == 5 && options.backend == Backend::jit) {
-      const auto stats = machine.core.jit_statistics();
-      const auto native = options.optimize ? 3U : 0U;
-      require(stats.native_alu_instructions == native &&
-                  stats.helper_instructions == budget - native,
-              "Parallel OR executes native logic between native arithmetic and guarded "
-              "immediate/shift helpers");
-    }
   }
 }
 
-void mode_reuse(const Options options, const Word mode) {
+void mode_reuse(const TestOptions options, const Word mode) {
   for (const auto function : {Function::complement, Function::rotate_right, Function::bit_xor}) {
     Machine machine(options);
     const Input input{.function = function};
@@ -95,7 +88,7 @@ void mode_reuse(const Options options, const Word mode) {
       logic(expected, input);
       const auto previous = machine.core.progress();
       const auto run = machine.core.run(1);
-      require(run.dispatches == 1 && run.fault.kind == FaultKind::none &&
+      require(run.retired == 1 && run.fault.kind == FaultKind::none &&
                   run.progress == Progress{.instructions = previous.instructions + 1,
                                            .estimated_cycles = previous.estimated_cycles + 1} &&
                   machine.core.registers() == expected,
@@ -104,7 +97,7 @@ void mode_reuse(const Options options, const Word mode) {
   }
 }
 
-void invalid_counts(const Options options) {
+void invalid_counts(const TestOptions options) {
   for (const auto function : {Function::left, Function::right}) {
     for (unsigned count = word_bits + 1; count < 32; ++count) {
       for (const auto form : {Form::shift_immediate, Form::shift_register}) {
@@ -116,7 +109,7 @@ void invalid_counts(const Options options) {
         machine.core.set_registers(expected);
         ++expected.pc;
         const auto run = machine.core.run(1);
-        require(run.dispatches == 0 && run.progress == Progress{} &&
+        require(run.retired == 0 && run.progress == Progress{} &&
                     run.fault == Fault{.kind = FaultKind::invalid_instruction,
                                        .space = Space::program,
                                        .address = start,
@@ -129,7 +122,7 @@ void invalid_counts(const Options options) {
   }
 }
 
-void unqualified(const Options options) {
+void unqualified(const TestOptions options) {
   constexpr Word compare_a = 0x200045;
   constexpr Word compare_long = 0x0140c5;
   constexpr std::array unsupported{0x2000U, 0x4000U, 0x20000U, mode_up | mode_down};
@@ -145,7 +138,7 @@ void unqualified(const Options options) {
       machine.core.set_registers(expected);
       expected.pc += bfu_model::words(input);
       const auto run = machine.core.run(1);
-      require(run.dispatches == 0 && run.progress == Progress{} &&
+      require(run.retired == 0 && run.progress == Progress{} &&
                   run.fault == Fault{.kind = FaultKind::unsupported_mode,
                                      .space = Space::program,
                                      .address = start,
@@ -167,7 +160,7 @@ void unqualified(const Options options) {
     const auto words = opcode == compare_a ? 1U : 2U;
     expected.pc += words;
     const auto run = machine.core.run(1);
-    require(run.dispatches == 1 &&
+    require(run.retired == 1 &&
                 run.progress == Progress{.instructions = 1, .estimated_cycles = words} &&
                 run.fault.kind == FaultKind::none && machine.core.registers() == expected,
             "Qualified SM parallel/immediate CMP preserve A and independent saturation flags");
@@ -176,7 +169,7 @@ void unqualified(const Options options) {
 
 class Observer final : public Io {
 public:
-  Core *core = nullptr;
+  TestCore *core = nullptr;
   Registers expected;
   bool accept = true, patch = false, observed = false;
   unsigned calls = 0;
@@ -212,7 +205,7 @@ struct Request {
   bool accept = false, patch = false;
 };
 
-void callback(const Options options, const Request input) {
+void callback(const TestOptions options, const Request input) {
   Observer observer;
   observer.accept = input.accept;
   observer.patch = input.patch;
@@ -233,7 +226,7 @@ void callback(const Options options, const Request input) {
   require(observer.observed && observer.calls == 1,
           "I/O sees exact canonical native state before a BFU old-source parallel load");
   if (!input.accept) {
-    require(run.dispatches == 1 &&
+    require(run.retired == 1 &&
                 run.progress == Progress{.instructions = 1, .estimated_cycles = 1} &&
                 run.fault == Fault{.kind = FaultKind::io_read,
                                    .space = Space::x,
@@ -241,14 +234,14 @@ void callback(const Options options, const Request input) {
                                    .pc = start + 1} &&
                 machine.core.registers() == expected,
             "Rejected load writes its destination but performs no BFU operation or retirement");
-    require(machine.core.run(3).dispatches == 0 && machine.core.registers() == expected &&
+    require(machine.core.run(3).retired == 0 && machine.core.registers() == expected &&
                 observer.calls == 1,
             "Fail-stop retry never replays native prefixes or I/O");
     return;
   }
   bfu_model::apply(expected, old, bit_or);
   logic(expected, input.patch ? bit_and : bit_or);
-  require(run.dispatches == 3 && run.fault.kind == FaultKind::none &&
+  require(run.retired == 3 && run.fault.kind == FaultKind::none &&
               run.progress == Progress{.instructions = 3, .estimated_cycles = 3} &&
               machine.core.registers() == expected,
           "Accepted BFU uses old X0; a patched suffix uses current X0 with exact progress");
@@ -258,12 +251,10 @@ void callback(const Options options, const Request input) {
 
 int main() {
   try {
-    for (const auto backend :
-         {dsp56300::Backend::reference, dsp56300::Backend::cached, dsp56300::Backend::jit}) {
-      for (const bool optimize : {false, true}) {
-        for (const auto limit : {1U, 64U}) {
-          const dsp56300::Options options{
-              .backend = backend, .instructions_per_block = limit, .optimize = optimize};
+    for (const auto backend : {dsp56300::Backend::jit}) {
+      {
+        {
+          const dsp56300::TestOptions options{.backend = backend};
           dsp56300::test::invalid_counts(options);
           dsp56300::test::unqualified(options);
           for (const auto mode : dsp56300::test::modes) {

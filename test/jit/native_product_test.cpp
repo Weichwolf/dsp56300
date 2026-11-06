@@ -37,7 +37,7 @@ constexpr std::array<Word, 4> flags{0, 0x55, 0xaa, status_byte};
 constexpr std::array<Word, 6> extrema{0, 1, sign24 - 1, sign24, word_mask - 1, word_mask};
 constexpr Word clear = 0x13, register_move = 0x200000;
 constexpr unsigned source_shift = 13, destination_shift = 8;
-constexpr std::uint64_t initial_moves = 29, initial_instructions = 17, initial_cycles = 23;
+constexpr std::uint64_t initial_instructions = 17, initial_cycles = 23;
 
 struct Step {
   Word code;
@@ -99,14 +99,11 @@ std::uint32_t forbidden(void *const owner, const detail::NativeOp * /*operation*
 
 void check(const native::Direct &code, const std::span<const Step> body, const Registers &initial) {
   auto expected = initial;
-  std::uint64_t moves = initial_moves;
-  auto expected_moves = moves;
   for (const auto step : body) {
     const auto old = expected;
     if (step.move) {
       register_model::write(
           expected, step.destination, register_model::read(expected, step.source));
-      ++expected_moves;
     }
     if ((initial.sr & saturation_model::mode) != 0) {
       saturation_model::alu(expected, old, step.code);
@@ -131,7 +128,6 @@ void check(const native::Direct &code, const std::span<const Step> body, const R
                                             .moves = forbidden,
                                             .memory = {}},
                                 .exit_requested = &dirty,
-                                .native_moves = &moves,
                                 .budget = static_cast<Word>(body.size())};
   const auto retired = code.enter(cpu, context);
   expected.a <<= detail::padding_bits;
@@ -144,7 +140,7 @@ void check(const native::Direct &code, const std::span<const Step> body, const R
               cpu.cycles == initial_cycles + body.size() && !cpu.repeat_completed &&
               !cpu.interrupt_inhibited,
           "Product simplification preserves exact retirement, costs and canonical exit state");
-  require(moves == expected_moves && !dirty, "Parallel product moves retain exact accounting");
+  require(!dirty, "Parallel register moves cannot request an external-effect side exit");
 }
 
 struct Inputs {
@@ -199,8 +195,6 @@ void matrix(const Word mode) {
                                  detail::WordReuseMode::vectors,
                                  detail::WordReuseMode::disabled}) {
           detail::JitEmitter emitter({.execute = forbidden, .moves = forbidden, .memory = {}},
-                                     true,
-                                     BatchBackend::disabled,
                                      {},
                                      detail::RegionMode::ordinary,
                                      detail::LoopResidency::disabled,

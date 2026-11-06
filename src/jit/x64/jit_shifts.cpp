@@ -31,8 +31,8 @@ void JitEmitter::right_shift(const NativeOp &operation) {
 }
 
 // Keep lowering admission separable for local matched performance controls.
-bool JitEmitter::is_right_shift(const NativeOp &operation) const {
-  return optimize_ && operation.instruction.operation == Operation::parallel &&
+bool JitEmitter::is_right_shift(const NativeOp &operation) {
+  return operation.instruction.operation == Operation::parallel &&
          (operation.instruction.opcode & operation_mask) == right_shift_code;
 }
 } // namespace dsp56300::detail

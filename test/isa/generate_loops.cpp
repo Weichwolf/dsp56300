@@ -57,7 +57,7 @@ BinaryCase generate(const Input input) {
   const auto total = 1 + (input.count * static_cast<Word>(steps.size()));
   const std::array budgets{Word{1}, Word{2}, total - 1, total};
   item.budget = budgets.at(input.budget_kind);
-  item.dispatches = item.budget;
+  item.retired = item.budget;
   item.name = "Counted loop count=" + std::to_string(input.count) +
               " body=" + std::to_string(input.kind) + " budget=" + std::to_string(item.budget);
   item.initial = register_model::seed(input.mode | flag_l | flag_s);

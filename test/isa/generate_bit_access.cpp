@@ -335,9 +335,9 @@ void failed_access(Cases &cases, FailedAccess input) {
   item.initial.sc = input.stack_count;
   item.initial.sp = input.stack_count;
   item.expected = item.initial;
-  item.dispatches = 0;
+  item.retired = 0;
   item.progress = {};
-  item.interruptible = false;
+  item.interrupt_ready = false;
   item.fault = input.fault;
   item.fault.pc = start;
   if (input.opcode_value) {
@@ -400,7 +400,7 @@ void repeated_cases(Cases &cases) {
   item.expected.sr &= ~flag_c;
   item.expected.pc = start + 2;
   item.budget = 4;
-  item.dispatches = 4;
+  item.retired = 4;
   item.progress = {.instructions = 4, .estimated_cycles = 11};
   append(cases, std::move(item), {repeat_three, change_x0});
   for (const auto action : {BitAction::clear, BitAction::set, BitAction::change}) {
@@ -426,7 +426,7 @@ void loop_case(Cases &cases) {
   item.expected.stack[3] = (std::uint64_t{item.initial.la} << word_bits) | item.initial.lc;
   item.expected.stack[4] = (std::uint64_t{start + 2} << word_bits) | item.initial.sr;
   item.budget = 7;
-  item.dispatches = 7;
+  item.retired = 7;
   item.progress = {.instructions = 7, .estimated_cycles = loop_cycles};
   append(cases, std::move(item), {do_three, start + 3, set_x0, change_x0});
 }
@@ -438,9 +438,9 @@ void rejected_repeat(Cases &cases) {
   item.initial = seed(0);
   item.expected = item.initial;
   item.budget = 2;
-  item.dispatches = 1;
+  item.retired = 1;
   item.progress = {.instructions = 1, .estimated_cycles = 5};
-  item.interruptible = false;
+  item.interrupt_ready = false;
   item.fault = {.kind = FaultKind::invalid_instruction,
                 .address = start + 1,
                 .value = jump_bit,

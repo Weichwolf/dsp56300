@@ -253,7 +253,8 @@ void matrix(const Profile profile) {
 }
 
 void rejected_ir() {
-  for (const Word size : {0U, 257U}) {
+  constexpr Word beyond_program_space = static_cast<Word>(address_words) + 1;
+  for (const Word size : {0U, beyond_program_space}) {
     detail::NativeRegion region;
     region.valid = region.loop = true;
     detail::x64::Code code;

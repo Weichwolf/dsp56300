@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "native_sequence_model.hpp"
@@ -70,8 +71,8 @@ Expected model(const Registers &initial, const Word length, const bool io) {
 }
 
 struct Machine {
-  explicit Machine(const bool optimize, Io *io = nullptr)
-      : core({.program = p, .x = x, .y = y}, io, {.backend = Backend::jit, .optimize = optimize}) {
+  explicit Machine(Io *io = nullptr)
+      : core({.program = p, .x = x, .y = y}, io, {.backend = Backend::jit}) {
     core.load(Space::program, start, program);
   }
 
@@ -84,7 +85,7 @@ struct Machine {
   }
 
   std::array<Word, memory_words> p{}, x{}, y{};
-  Core core;
+  TestCore core;
 };
 
 struct Input {
@@ -112,8 +113,8 @@ Registers initial(const Input input) {
   return state;
 }
 
-void prefixes(const bool optimize) {
-  Machine machine(optimize);
+void prefixes() {
+  Machine machine;
   for (const auto mode : modes) {
     for (Word flags = 0; flags <= status_byte; ++flags) {
       for (unsigned seed = 0; seed < 4; ++seed) {
@@ -123,7 +124,7 @@ void prefixes(const bool optimize) {
           machine.prepare(state);
           const auto before = machine.core.progress();
           const auto result = machine.core.run(length);
-          require(result.dispatches == length && result.fault.kind == FaultKind::none &&
+          require(result.retired == length && result.fault.kind == FaultKind::none &&
                       machine.core.registers() == expected.state && machine.x == expected.x &&
                       machine.y == expected.y,
                   "Every warmed prefix preserves full SR, clipped stores and both old ALU inputs");
@@ -134,15 +135,11 @@ void prefixes(const bool optimize) {
       }
     }
   }
-  const auto counts = machine.core.jit_statistics();
-  require((counts.native_alu_instructions != 0) == optimize &&
-              (counts.native_move_instructions != 0) == optimize,
-          "The matrix executes actual native ALU/transfers and the optimization-disabled fallback");
 }
 
 class Observer final : public Io {
 public:
-  Core *core = nullptr;
+  TestCore *core = nullptr;
   std::array<Observation, 4> expected;
   Progress base{};
   unsigned accesses = 0;
@@ -193,11 +190,11 @@ private:
 
 void callbacks(const Input input) {
   Observer observer;
-  Machine machine(true, &observer);
+  Machine machine(&observer);
   auto state = initial(input);
   machine.prepare(state);
   const auto budget = static_cast<Word>(program.size());
-  require(machine.core.run(budget).dispatches == budget,
+  require(machine.core.run(budget).retired == budget,
           "Warm every native RAM transfer before selecting its slow helper branch");
   state.r[0] = port;
   machine.prepare(state);
@@ -212,7 +209,7 @@ void callbacks(const Input input) {
           "All observers see complete SR after native arithmetic and earlier slow clipping stores");
   if (input.reject < 0) {
     require(
-        result.dispatches == budget && result.fault.kind == FaultKind::none &&
+        result.retired == budget && result.fault.kind == FaultKind::none &&
             machine.core.registers() == expected.state && machine.x == expected.x &&
             machine.y == expected.y,
         "Slow helpers reload changed S/L bits before subsequent carry and arithmetic consumers");
@@ -220,14 +217,14 @@ void callbacks(const Input input) {
     const auto &stopped = expected.observations[static_cast<std::size_t>(input.reject)];
     const auto progress = machine.core.progress();
     require(
-        result.dispatches == stopped.progress.instructions &&
+        result.retired == stopped.progress.instructions &&
             result.fault.kind == FaultKind::io_write && result.fault.pc + 1 == stopped.state.pc &&
             machine.core.registers() == stopped.state &&
             progress.instructions == observer.base.instructions + stopped.progress.instructions &&
             progress.estimated_cycles ==
                 observer.base.estimated_cycles + stopped.progress.estimated_cycles,
         "Every rejected store preserves its exact partial state and newly sticky status");
-    require(machine.core.run(budget).dispatches == 0 && machine.core.progress() == progress,
+    require(machine.core.run(budget).retired == 0 && machine.core.progress() == progress,
             "A failed status checkpoint cannot replay previously retired work");
   }
 }
@@ -236,8 +233,7 @@ void callbacks(const Input input) {
 
 int main() {
   try {
-    dsp56300::test::prefixes(true);
-    dsp56300::test::prefixes(false);
+    dsp56300::test::prefixes();
     for (const auto mode : dsp56300::test::modes) {
       for (unsigned seed = 0; seed < 4; ++seed) {
         for (const int reject : {-1, 0, 1}) {

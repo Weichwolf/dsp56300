@@ -16,67 +16,53 @@
 #include <stdexcept>
 
 namespace dsp56300 {
+
 namespace {
 
-Options select(Options options) {
-  if (options.backend == Backend::automatic) {
-    options.backend = detail::Jit::available() ? Backend::jit : Backend::cached;
-  }
-  return options;
-}
-
 Buffers bind_memory(const Memory memory, Io *const io) {
-  if (memory.externally_owned() && io == nullptr) {
+  if (memory.storage().program.empty() && io == nullptr) {
     throw std::invalid_argument("External DSP memory requires an I/O owner");
   }
   return memory.storage();
 }
 
-Buffers validate(const Buffers buffers, const Options options, const bool external) {
+Buffers validate(const Buffers buffers, const bool external) {
   if (!external && (buffers.program.empty() || buffers.x.empty() || buffers.y.empty() ||
                     buffers.program.size() > address_words || buffers.x.size() > address_words ||
                     buffers.y.size() > address_words)) {
     throw std::invalid_argument("DSP requires nonempty memory spans of at most 2^24 words");
   }
-  if (options.cacheable_begin > options.cacheable_end || options.cacheable_end > address_words ||
-      (options.cache_sector_words != 128 && options.cache_sector_words != 256)) {
+  if (buffers.cache.begin > buffers.cache.end || buffers.cache.end > address_words ||
+      (buffers.cache.sector_words != 128 && buffers.cache.sector_words != 256)) {
     throw std::invalid_argument("Invalid DSP instruction cache interval or sector size");
   }
-  if (options.backend == Backend::jit && !detail::Jit::available()) {
+  if (!detail::Jit::available()) {
     throw std::invalid_argument("Native translation requires Linux x86-64");
   }
   return buffers;
 }
 }
 
-Core::Impl::Impl(const Buffers supplied,
-                 Io *const host_io,
-                 const Options settings,
-                 const bool external_memory)
-    : io(host_io),
-      buffers(validate(supplied, settings, external_memory)),
-      options(select(settings)),
-      external(external_memory) {
+Core::Impl::Impl(const Buffers supplied, Io *const host_io, const bool external_memory)
+    : io(host_io), buffers(validate(supplied, external_memory)), external(external_memory) {
   aliases_program[1] = overlaps_program(buffers.x);
   aliases_program[2] = overlaps_program(buffers.y);
-  if (options.backend == Backend::jit) {
-    jit = std::make_unique<detail::Jit>(
-        cpu,
-        buffers.program,
-        options,
-        detail::JitRuntime{.owner = this,
-                           .latched = &latched,
-                           .execute = jit_execute,
-                           .moves = jit_moves,
-                           .program = external ? jit_program : nullptr,
-                           .memory = {{{.data = buffers.x.data(),
-                                        .words = buffers.x.size(),
-                                        .aliases_program = aliases_program[1]},
-                                       {.data = buffers.y.data(),
-                                        .words = buffers.y.size(),
-                                        .aliases_program = aliases_program[2]}}},
-                           .cacheable_program = options.cacheable_begin < options.cacheable_end});
-  }
+
+  jit = std::make_unique<detail::Jit>(
+      cpu,
+      buffers.program,
+      detail::JitRuntime{.owner = this,
+                         .latched = &latched,
+                         .execute = jit_execute,
+                         .moves = jit_moves,
+                         .program = external ? jit_program : nullptr,
+                         .memory = {{{.data = buffers.x.data(),
+                                      .words = buffers.x.size(),
+                                      .aliases_program = aliases_program[1]},
+                                     {.data = buffers.y.data(),
+                                      .words = buffers.y.size(),
+                                      .aliases_program = aliases_program[2]}}},
+                         .cacheable_program = buffers.cache.begin < buffers.cache.end});
 }
 
 bool Core::Impl::overlaps_program(const std::span<const Word> memory) const {
@@ -86,14 +72,11 @@ bool Core::Impl::overlaps_program(const std::span<const Word> memory) const {
                          : other - program < buffers.program.size_bytes();
 }
 
-void Core::Impl::invalidate_program_word(const Word *const location) {
+void Core::Impl::invalidate_program_word(const Word *const location) const {
   const auto program = reinterpret_cast<std::uintptr_t>(buffers.program.data());
   const auto address = reinterpret_cast<std::uintptr_t>(location);
   if (address < program || address - program >= buffers.program.size_bytes()) { return; }
-  const auto index = (address - program) / sizeof(Word);
   if (jit) { jit->invalidate(); }
-  pages[index / page_words].reset();
-  if (index != 0) { pages[(index - 1) / page_words].reset(); }
 }
 
 std::span<Word> Core::Impl::area(const Space space) const {
@@ -162,23 +145,9 @@ void Core::Impl::write_memory(const Space space, const Word address, const Word 
 }
 
 detail::Instruction Core::Impl::instruction(const Word pc) {
-
-  const auto opcode = fetch_program(pc);
-  if (options.backend != Backend::reference && pages[pc / page_words]) {
-    const auto &cached = (*pages[pc / page_words])[pc % page_words];
-    if (cached.operation != detail::Operation::unsupported && cached.opcode == opcode &&
-        (cached.words == 1 || cached.extension == fetch_program((pc + 1) & word_mask))) {
-      return cached;
-    }
-  }
-  auto decoded = detail::decode(opcode);
+  auto decoded = detail::decode(fetch_program(pc));
   if (decoded.words == 2) { decoded.extension = fetch_program((pc + 1) & word_mask); }
-  if (options.backend == Backend::reference) { return decoded; }
-  auto &page = pages[pc / page_words];
-  if (!page) { page = std::make_unique<Page>(); }
-  auto &cached = (*page)[pc % page_words];
-  if (cached != decoded) { cached = decoded; }
-  return cached;
+  return decoded;
 }
 
 void Core::Impl::step() {
@@ -236,53 +205,16 @@ void Core::Impl::step_decoded(const detail::Instruction &decoded) {
   if (fault.kind == FaultKind::none) { retire_instruction(decoded.cycles); }
 }
 
-Core::Core(const Memory memory, Io *const io, const Options options)
-    : impl_(
-          std::make_unique<Impl>(bind_memory(memory, io), io, options, memory.externally_owned())) {
+Core::Core(const Memory memory, Io *const io)
+    : impl_(std::make_unique<Impl>(bind_memory(memory, io), io, memory.storage().program.empty())) {
   reset();
 }
 
-Core::Core(const Buffers buffers, Io *const io, const Options options)
-    : Core(Memory::separate(buffers), io, options) {}
-
-Core::Core(Io &bus, const Options options) : Core(Memory::external(), &bus, options) {}
-
-Core::~Core() = default;
-
-void Core::reset() {
-  if (impl_->executing) { throw std::logic_error("Reset requires stopped DSP execution"); }
-
-  impl_->cpu = {};
-  impl_->vector = {};
-  impl_->debug_vector = 0;
-  impl_->cpu.processing = ProcessingState::running;
-  impl_->icache.reset();
-  impl_->cpu.reg.m.fill(word_mask);
-  impl_->fault = {};
-  clear_code_cache();
-  if (impl_->jit) { impl_->jit->reset(); }
-}
-
-Progress Core::progress() const noexcept {
-  return {.instructions = impl_->cpu.instructions, .estimated_cycles = impl_->cpu.cycles};
-}
-
-Fault Core::fault() const noexcept {
-  return impl_->fault;
-}
-
-JitStatistics Core::jit_statistics() const noexcept {
-  return impl_->jit ? impl_->jit->statistics() : JitStatistics{};
-}
-
-Word Core::read(const Space space, const Word address) const {
-  const auto memory = impl_->area(space);
-  if (address >= memory.size()) { throw std::out_of_range("DSP host read outside memory span"); }
-  return memory[address] & word_mask;
-}
-
-void Core::write(const Space space, const Word address, const Word value) {
-  load(space, address, std::span(&value, 1));
+State Core::state() const {
+  return {.registers = registers(),
+          .failure = fault(),
+          .execution = processing_state(),
+          .progress = progress()};
 }
 
 void Core::load(const Space space, const Word address, const std::span<const Word> words) {
@@ -305,14 +237,32 @@ void Core::load(const Space space, const Word address, const std::span<const Wor
   }
 }
 
-std::uint32_t Core::Impl::run_general(const std::uint32_t budget) {
-  std::uint32_t retired = 0;
-  while (retired < budget && !yield_requested && fault.kind == FaultKind::none &&
-         cpu.processing == ProcessingState::running) {
-    step();
-    if (fault.kind == FaultKind::none) { ++retired; }
-  }
-  return retired;
+RunResult Core::step() {
+  return run(1);
+}
+
+Core::~Core() = default;
+
+void Core::reset() {
+  if (impl_->executing) { throw std::logic_error("Reset requires stopped DSP execution"); }
+
+  impl_->cpu = {};
+  impl_->vector = {};
+  impl_->debug_vector = 0;
+  impl_->cpu.processing = ExecutionState::running;
+  impl_->icache.reset();
+  impl_->cpu.reg.m.fill(word_mask);
+  impl_->fault = {};
+  clear_code_cache();
+  if (impl_->jit) { impl_->jit->reset(); }
+}
+
+Progress Core::progress() const noexcept {
+  return {.instructions = impl_->cpu.instructions, .estimated_cycles = impl_->cpu.cycles};
+}
+
+Fault Core::fault() const noexcept {
+  return impl_->fault;
 }
 
 RunResult Core::run(const std::uint32_t instruction_budget) {
@@ -320,34 +270,22 @@ RunResult Core::run(const std::uint32_t instruction_budget) {
   const detail::ExecutionGuard guard(impl_->executing);
   impl_->yield_requested = false;
   RunResult result;
-  if (!impl_->jit) {
-    result.dispatches = impl_->run_general(instruction_budget);
-    result.progress = progress();
-    result.fault = fault();
-    result.state = processing_state();
-    result.yielded = impl_->yield_requested;
-    return result;
-  }
+
   impl_->synchronize_program_view();
   impl_->yield_requested = false;
-  while (result.dispatches < instruction_budget && !impl_->yield_requested &&
-         fault().kind == FaultKind::none && impl_->cpu.processing == ProcessingState::running) {
+  while (result.retired < instruction_budget && !impl_->yield_requested &&
+         fault().kind == FaultKind::none && impl_->cpu.processing == ExecutionState::running) {
     if (impl_->vector.phase == Impl::VectorPhase::none && !impl_->instruction_cache_active() &&
         (impl_->cpu.debug_flags & detail::debug_interrupt_pending) == 0) {
-      const auto remaining = instruction_budget - result.dispatches;
-      const auto retired =
-          impl_->cpu.repeat_remaining != 0
-              ? impl_->run_repeat_native({.instructions = remaining, .cycles = ~std::uint64_t{0}})
-              : impl_->jit->run(remaining);
-      result.dispatches += retired;
+      const auto remaining = instruction_budget - result.retired;
+      const auto retired = impl_->cpu.repeat_remaining != 0 ? impl_->run_repeat_native(remaining)
+                                                            : impl_->jit->run(remaining);
+      result.retired += retired;
       if (retired != 0 || fault().kind != FaultKind::none) { continue; }
     }
     impl_->step();
     impl_->synchronize_program_view();
-    if (fault().kind == FaultKind::none) {
-      ++result.dispatches;
-      impl_->jit->helper_retired();
-    }
+    if (fault().kind == FaultKind::none) { ++result.retired; }
   }
   result.progress = progress();
   result.fault = fault();
@@ -356,10 +294,10 @@ RunResult Core::run(const std::uint32_t instruction_budget) {
   return result;
 }
 
-bool Core::interruptible() const {
+bool Core::interrupt_ready() const {
 
-  if ((impl_->cpu.processing != ProcessingState::running &&
-       impl_->cpu.processing != ProcessingState::waiting) ||
+  if ((impl_->cpu.processing != ExecutionState::running &&
+       impl_->cpu.processing != ExecutionState::waiting) ||
       (impl_->cpu.debug_flags & detail::debug_interrupt_pending) != 0 ||
       fault().kind != FaultKind::none || impl_->vector.phase != Impl::VectorPhase::none ||
       impl_->cpu.repeat_remaining != 0 || impl_->cpu.interrupt_inhibited) {
@@ -387,6 +325,5 @@ bool Core::interruptible() const {
 void Core::clear_code_cache() {
   impl_->windows_bound = false;
   if (impl_->jit) { impl_->jit->invalidate(); }
-  for (auto &page : impl_->pages) { page.reset(); }
 }
 } // namespace dsp56300

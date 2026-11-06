@@ -123,7 +123,7 @@ BinaryCase fixture(const Input input) {
   const auto words = program(input.taps);
   item.expected.pc = start + static_cast<Word>(words.size());
   item.budget = input.taps + 4;
-  item.dispatches = item.budget;
+  item.retired = item.budget;
   // DO adds four base clocks; the final absolute-short store adds one.
   item.progress = {.instructions = item.budget, .estimated_cycles = item.budget + 5};
   item.before = {{.words = words, .address = start},

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "native_sequence_model.hpp"
@@ -56,7 +57,7 @@ public:
     return false;
   }
 
-  Core *core = nullptr;
+  TestCore *core = nullptr;
   Registers expected;
   bool accept = true, valid = true;
   unsigned calls = 0;
@@ -67,7 +68,7 @@ void boundary(const Backend backend, const Alu alu, const bool accept) {
   std::array<Word, memory_words> x{};
   std::array<Word, memory_words> y{};
   Observer io;
-  Core core({.program = p, .x = x, .y = y}, &io, {.backend = backend});
+  TestCore core({.program = p, .x = x, .y = y}, &io, {.backend = backend});
   io.core = &core;
   io.accept = accept;
   const std::array program{mac_a, mac_b, load_x0_increment | selection_model::code(alu), Word{0}};
@@ -93,7 +94,7 @@ void boundary(const Backend backend, const Alu alu, const bool accept) {
     const auto old = expected;
     sequence_model::alu(expected, old, adc_x_a);
     ++expected.pc;
-    require(result.dispatches == 4 && result.fault.kind == FaultKind::none &&
+    require(result.retired == 4 && result.fault.kind == FaultKind::none &&
                 result.progress == Progress{.instructions = 4, .estimated_cycles = 4} &&
                 core.registers() == expected,
             "An accepted move executes the ALU once, then consumes new Carry/input after P "
@@ -102,7 +103,7 @@ void boundary(const Backend backend, const Alu alu, const bool accept) {
     const auto actual = core.registers();
     // A rejected parallel move can expose its own partial data-transfer state;
     // it must not execute the following ALU or count that guest instruction.
-    require(result.dispatches == 2 &&
+    require(result.retired == 2 &&
                 result.progress == Progress{.instructions = 2, .estimated_cycles = 2} &&
                 result.fault == Fault{.kind = FaultKind::io_read,
                                       .space = Space::x,
@@ -113,13 +114,9 @@ void boundary(const Backend backend, const Alu alu, const bool accept) {
                 actual.pc == expected.pc && actual.stack == expected.stack &&
                 actual.sp == expected.sp && actual.sc == expected.sc,
             "A rejected parallel transfer performs no MAX/MAXM/NOT/TST effect or guest retirement");
-    require(core.run(4).dispatches == 0 && io.calls == 1 && core.registers() == actual,
+    require(core.run(4).retired == 0 && io.calls == 1 && core.registers() == actual,
             "Failed selection/status instructions remain stopped without replaying the transfer or "
             "ALU");
-  }
-  if (backend == Backend::jit) {
-    require(core.jit_statistics().native_alu_instructions >= (accept ? 3U : 2U),
-            "The observer test executes real native arithmetic around the selection/status helper");
   }
 }
 } // namespace
@@ -127,8 +124,7 @@ void boundary(const Backend backend, const Alu alu, const bool accept) {
 
 int main() {
   try {
-    for (const auto backend :
-         {dsp56300::Backend::reference, dsp56300::Backend::cached, dsp56300::Backend::jit}) {
+    for (const auto backend : {dsp56300::Backend::jit}) {
       for (const auto operation : dsp56300::test::operations) {
         dsp56300::test::boundary(backend, operation, false);
         dsp56300::test::boundary(backend, operation, true);

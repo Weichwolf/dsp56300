@@ -378,9 +378,9 @@ void rejected_case(Cases &cases, const Rejected input) {
   BinaryCase item;
   item.initial = seed();
   item.initial.sr = input.status;
-  item.dispatches = 0;
+  item.retired = 0;
   item.progress = {};
-  item.interruptible = false;
+  item.interrupt_ready = false;
   item.fault = {.kind = input.kind,
                 .space = Space::program,
                 .address = start,
@@ -493,7 +493,7 @@ void repeat_case(Cases &cases, const RepeatCase input) {
   constexpr Word repeat_three = 0x0603a0;
   item.before.push_back({.words = {repeat_three, input.opcode}, .address = start});
   item.budget = 4;
-  item.dispatches = 4;
+  item.retired = 4;
   item.progress = {.instructions = 4, .estimated_cycles = 8};
   cases.push_back(std::move(item));
 }

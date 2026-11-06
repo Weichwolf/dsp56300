@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Exhaustive eight-bit subdomains and full-width chains against a serial circuit.
 #include "address_model.hpp"
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "register_model.hpp"
@@ -46,9 +47,9 @@ public:
     ++retired_;
     ++cases;
     require(
-        result.dispatches == 1 && result.fault.kind == FaultKind::none &&
+        result.retired == 1 && result.fault.kind == FaultKind::none &&
             result.progress == Progress{.instructions = retired_, .estimated_cycles = retired_} &&
-            core_.registers() == expected && core_.interruptible(),
+            core_.registers() == expected && core_.interrupt_ready(),
         "Reverse-carry update matches a serial MSB-first carry/borrow circuit and complete state");
   }
 
@@ -56,7 +57,7 @@ private:
   std::array<Word, memory_words> p_{};
   std::array<Word, memory_words> x_{};
   std::array<Word, memory_words> y_{};
-  Core core_;
+  TestCore core_;
   Registers seed_;
   std::uint64_t retired_ = 0;
   bool subtract_ = false;
@@ -97,8 +98,7 @@ void chains(Matrix &matrix, const bool subtract) {
 
 int main() {
   try {
-    for (const auto backend :
-         {dsp56300::Backend::reference, dsp56300::Backend::cached, dsp56300::Backend::jit}) {
+    for (const auto backend : {dsp56300::Backend::jit}) {
       for (const bool subtract : {false, true}) {
         dsp56300::test::Matrix matrix(backend, subtract);
         dsp56300::test::dense(matrix);

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "scripted_io.hpp"
@@ -113,7 +114,7 @@ Registers seed(const Word status) {
   return result;
 }
 
-void execute(Core &core, const Input input, const Word extension) {
+void execute(TestCore &core, const Input input, const Word extension) {
   const auto result =
       input.path == Path::captured
           ? core.run_instruction(
@@ -121,7 +122,7 @@ void execute(Core &core, const Input input, const Word extension) {
                  .opcode = input.form.opcode,
                  .extension = input.form.words == 2 ? std::optional(extension) : std::nullopt})
           : core.run(1);
-  require(result.dispatches == 1 && result.fault.kind == FaultKind::none,
+  require(result.retired == 1 && result.fault.kind == FaultKind::none,
           "Dispatched, externally fetched and captured execution retire the real instruction");
 }
 
@@ -151,10 +152,11 @@ void one(const Input input) {
          .address = form.address,
          .value = form.load ? input.replacement : input.previous});
   }
-  Core core(input.path == Path::dispatched ? Memory::separate({.program = program, .x = x, .y = y})
-                                           : Memory::external(),
-            &bus,
-            {.backend = input.backend});
+  TestCore core(input.path == Path::dispatched
+                    ? Memory::separate({.program = program, .x = x, .y = y})
+                    : Memory::external(),
+                &bus,
+                {.backend = input.backend});
   auto expected = seed(input.previous);
   core.set_registers(expected);
   expected.pc += form.words;

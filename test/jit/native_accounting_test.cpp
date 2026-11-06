@@ -2,6 +2,7 @@
 // Independent mixed-body accounting, modulo counters and guarded RX execution.
 #include "address_model.hpp"
 #include "architecture.hpp"
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
@@ -39,8 +40,6 @@ constexpr std::array progress_seeds{
     Progress{.instructions = maximum - 2, .estimated_cycles = maximum - 4},
     Progress{.instructions = boundary32 - 1, .estimated_cycles = maximum},
     Progress{.instructions = maximum, .estimated_cycles = boundary63 - 1}};
-constexpr std::array move_seeds{
-    std::uint64_t{0}, maximum - 1, boundary32 - 1, boundary63 - 1, maximum};
 
 enum class Action : std::uint8_t { constant, alu, nop, immediate, reg, ram };
 constexpr Word default_budget = 36, datum = 0xfedcba;
@@ -124,11 +123,6 @@ std::vector<Step> body() {
 
 Word words(const Step step) {
   return step.action == Action::constant || step.action == Action::immediate ? 2U : 1U;
-}
-
-bool moved(const Step step) {
-  return step.action == Action::constant || step.action == Action::ram ||
-         step.action == Action::reg;
 }
 
 enum class Pattern : std::uint8_t { mixed, loads, crossed, only_a, only_b, reused };
@@ -297,9 +291,8 @@ std::uint64_t wrapping_sum(const std::uint64_t value, const std::uint64_t increm
 
 struct Input {
   Progress progress;
-  std::uint64_t moves = 0;
   Word flags = 0, r1 = 0, lc = 4, sp = 2, target = start, budget = default_budget;
-  bool mismatch = false, counter_null = false;
+  bool mismatch = false;
 };
 
 Registers initial(const Shape shape, const Input input) {
@@ -334,14 +327,12 @@ void direct_case(const native::Direct &code, Memory &memory, const Shape shape, 
   cpu.repeat_completed = cpu.interrupt_inhibited = true;
   Word retired = 0;
   std::uint64_t cycles = 0;
-  std::uint64_t moves = 0;
   while (input.budget - retired >= trace.size() && expected.r[1] < ram_words &&
          expected.m[1] == word_mask && (!shape.loop || expected.lc > 1)) {
     for (const auto step : trace) {
       execute(expected, expected_memory, step);
       ++retired;
       cycles += shape.maximum_cost ? std::numeric_limits<std::uint8_t>::max() : words(step);
-      moves += moved(step) ? 1U : 0U;
     }
     if (!shape.loop) { break; }
     --expected.lc;
@@ -349,12 +340,8 @@ void direct_case(const native::Direct &code, Memory &memory, const Shape shape, 
     if (input.target != shape.first) { break; }
   }
   Probe probe;
-  constexpr std::uint64_t before_canary = 0x123456789abcdef0;
-  constexpr std::uint64_t after_canary = 0xfedcba9876543210;
-  std::array counters{before_canary, input.moves, after_canary};
-  require(!input.counter_null || retired == 0, "Null counter probe requires read-only rejection");
+
   detail::NativeContext context{.runtime = {.owner = &probe, .memory = banks(memory)},
-                                .native_moves = input.counter_null ? nullptr : &counters[1],
                                 .budget = input.budget};
   const auto count = code.enter(cpu, context);
   cpu.reg.a >>= detail::padding_bits;
@@ -363,9 +350,7 @@ void direct_case(const native::Direct &code, Memory &memory, const Shape shape, 
               memory.data == expected_memory.data,
           "Coalesced bytes preserve complete independent state, aliases and every guarded exit");
   require(cpu.instructions == wrapping_sum(input.progress.instructions, retired) &&
-              cpu.cycles == wrapping_sum(input.progress.estimated_cycles, cycles) &&
-              counters[1] == wrapping_sum(input.moves, moves) && counters[0] == before_canary &&
-              counters[2] == after_canary,
+              cpu.cycles == wrapping_sum(input.progress.estimated_cycles, cycles),
           "Retired/mixed-cycle/move lanes independently wrap without charging NOP/ALU or paired "
           "ports twice");
   require(cpu.repeat_completed == (retired == 0) && cpu.interrupt_inhibited == (retired == 0),
@@ -384,7 +369,7 @@ void exit_cases(const native::Direct &code, Memory &memory, const Shape shape) {
                       memory,
                       shape,
                       {.progress = progress_seeds[1],
-                       .moves = maximum - 3,
+
                        .flags = status_byte,
                        .r1 = r1,
                        .lc = lc,
@@ -399,10 +384,9 @@ void exit_cases(const native::Direct &code, Memory &memory, const Shape shape) {
               memory,
               shape,
               {.progress = progress_seeds[1],
-               .moves = maximum,
+
                .r1 = ram_words,
-               .target = shape.first,
-               .counter_null = true});
+               .target = shape.first});
 }
 
 void direct_shape(const Shape shape) {
@@ -411,8 +395,6 @@ void direct_shape(const Shape shape) {
   const detail::JitRuntime runtime{
       .execute = forbidden, .moves = forbidden, .memory = banks(memory)};
   detail::JitEmitter emitter(runtime,
-                             true,
-                             BatchBackend::disabled,
                              register_model::seed(0).m,
                              detail::RegionMode::guarded,
                              shape.residency,
@@ -420,7 +402,7 @@ void direct_shape(const Shape shape) {
                              shape.word_reuse,
                              shape.window);
   const native::Direct code(emitter.generate(ops));
-  require(emitter.coalesced_accounting() == (ops.size() <= 256) && emitter.guarded_region() &&
+  require(emitter.coalesced_accounting() && emitter.guarded_region() &&
               emitter.packed_retirement() && emitter.cached_status(),
           "Only bounded proved helper-free regions use the tested coalesced counter path");
   require(emitter.loop_residency() ==
@@ -429,8 +411,7 @@ void direct_shape(const Shape shape) {
   require(emitter.loop_bank_cache() ==
               (shape.loop && shape.residency == detail::LoopResidency::vectors),
           "Only helper-free resident loops hold X/Y separately from old parallel snapshots");
-  require(emitter.loop_window() ==
-              (shape.loop && ops.size() <= 256 && shape.window != detail::LoopWindowMode::disabled),
+  require(emitter.loop_window() == (shape.loop && shape.window != detail::LoopWindowMode::disabled),
           "Only bounded closed RAM loops emit whole-call window preflights");
   if (shape.pattern == Pattern::reused) {
     require(emitter.word_reuse() == (shape.word_reuse != detail::WordReuseMode::disabled),
@@ -441,7 +422,7 @@ void direct_shape(const Shape shape) {
                 memory,
                 shape,
                 {.progress = progress_seeds[flags % progress_seeds.size()],
-                 .moves = move_seeds[flags % move_seeds.size()],
+
                  .flags = flags,
                  .target = shape.first,
                  .budget = 3 * static_cast<Word>(ops.size())});
@@ -525,136 +506,116 @@ std::vector<Word> program(const std::span<const Step> trace) {
   return result;
 }
 
-void api_case(
-    Core &core, Memory &memory, const Options options, const Shape shape, const Word budget) {
+void api_case(TestCore &core, Memory &memory, const Shape shape, const Word budget) {
   memory.initialize();
   auto expected_memory = memory;
   auto expected = initial(shape, {.progress = {}, .flags = status_byte});
   core.set_registers(expected);
   const auto before = core.progress();
-  const auto counts = core.jit_statistics();
+
   const auto trace = steps(shape);
   Word cycles = 0;
-  Word move_count = 0;
+
   for (const auto step : std::span(trace).first(budget)) {
     execute(expected, expected_memory, step);
     cycles += words(step);
-    move_count += moved(step) ? 1U : 0U;
   }
   const auto run = core.run(budget);
-  require(run.dispatches == budget && run.fault.kind == FaultKind::none &&
+  require(run.retired == budget && run.fault.kind == FaultKind::none &&
               core.registers() == expected && memory.data == expected_memory.data &&
               run.progress == Progress{.instructions = before.instructions + budget,
                                        .estimated_cycles = before.estimated_cycles + cycles},
           "Every warm mixed API prefix exposes independent full state and exact base costs");
-  if (options.backend != Backend::jit) { return; }
-  const auto after = core.jit_statistics();
-  const auto native = after.native_alu_instructions - counts.native_alu_instructions;
-  const auto helpers = after.helper_instructions - counts.helper_instructions;
-  const auto native_moves = after.native_move_instructions - counts.native_move_instructions;
-  require(native + helpers == budget && native_moves <= move_count,
-          "Native and general prefixes charge every actual retirement and native move once");
-  if (options.optimize && budget == trace.size()) {
-    require(native == budget && helpers == 0 && native_moves == move_count,
-            "Complete warmed mixed bodies execute actual native arithmetic and all nine move "
-            "instructions");
-  }
 }
 
-void api_prefixes(const Options options, const bool alias) {
+void api_prefixes(const TestOptions options, const bool alias) {
   Memory memory{.alias = alias};
   std::array<Word, memory_words> p{};
-  Core core({.program = p, .x = memory.bank(false), .y = memory.bank(true)}, nullptr, options);
+  TestCore core({.program = p, .x = memory.bank(false), .y = memory.bank(true)}, nullptr, options);
   for (const auto mode : modes) {
     for (const bool saturated : {false, true}) {
       const Shape shape{.mode = mode | (saturated ? saturation_model::mode : 0), .alias = alias};
       const auto trace = steps(shape);
       core.load(Space::program, start, program(trace));
-      api_case(core, memory, options, shape, static_cast<Word>(trace.size()));
+      api_case(core, memory, shape, static_cast<Word>(trace.size()));
       for (Word budget = 0; budget <= trace.size(); ++budget) {
-        api_case(core, memory, options, shape, budget);
+        api_case(core, memory, shape, budget);
       }
     }
   }
 }
 
-void api_loop_case(
-    Core &core, Memory &memory, const Shape shape, const Word budget, const bool native_expected) {
+void api_loop_case(TestCore &core, Memory &memory, const Shape shape, const Word budget) {
   memory.initialize();
   auto expected_memory = memory;
   auto expected = initial(shape, {.progress = {}, .flags = status_byte, .target = start});
   core.set_registers(expected);
   const auto progress = core.progress();
-  const auto counts = core.jit_statistics();
+
   const auto trace = steps(shape);
   Word cycles = 0;
-  Word moves = 0;
+
   for (Word index = 0; index < budget; ++index) {
     const auto position = index % trace.size();
     const auto step = trace[position];
     execute(expected, expected_memory, step);
     cycles += words(step);
-    moves += moved(step) ? 1U : 0U;
+
     if (position + 1 == trace.size()) {
       --expected.lc;
       expected.pc = start;
     }
   }
   const auto run = core.run(budget);
-  require(run.dispatches == budget && run.fault.kind == FaultKind::none &&
+  require(run.retired == budget && run.fault.kind == FaultKind::none &&
               core.registers() == expected && memory.data == expected_memory.data &&
               run.progress == Progress{.instructions = progress.instructions + budget,
                                        .estimated_cycles = progress.estimated_cycles + cycles},
           "Every resident multi-iteration API prefix exposes exact registers, memory and costs");
   if (budget != 3 * trace.size()) { return; }
-  if (native_expected) {
-    const auto after = core.jit_statistics();
-    const auto native = after.native_alu_instructions - counts.native_alu_instructions;
-    require(native == budget && after.helper_instructions == counts.helper_instructions &&
-                after.native_move_instructions == counts.native_move_instructions + moves,
-            "Warmed closed loops retire every complete body and move through actual native code");
-  }
-  require(core.interruptible(), "A returned resident loop exposes an admitted IRQ boundary");
+
+  require(core.interrupt_ready(), "A returned resident loop exposes an admitted IRQ boundary");
   constexpr Word vector = 32;
   core.interrupt(vector, 1);
   require(core.registers() == expected && memory.data == expected_memory.data &&
-              !core.interruptible() &&
+              !core.interrupt_ready() &&
               core.progress() == Progress{.instructions = run.progress.instructions + 2,
                                           .estimated_cycles = run.progress.estimated_cycles + 2},
           "Fast service preserves the complete resident-loop checkpoint and live loop frame");
   execute(expected, expected_memory, trace.front());
   const auto resumed = core.run(1);
-  require(resumed.dispatches == 1 && resumed.fault.kind == FaultKind::none &&
+  require(resumed.retired == 1 && resumed.fault.kind == FaultKind::none &&
               core.registers() == expected && memory.data == expected_memory.data &&
               resumed.progress == Progress{.instructions = run.progress.instructions + 3,
                                            .estimated_cycles = run.progress.estimated_cycles + 4} &&
-              core.interruptible(),
+              core.interrupt_ready(),
           "Foreground reentry with final LC retains canonical accumulators and releases exclusion");
 }
 
-void api_loops(const Options options, const Word mode) {
+void api_loops(const TestOptions options, const Word mode) {
   for (const auto pattern :
        {Pattern::mixed, Pattern::loads, Pattern::crossed, Pattern::only_a, Pattern::only_b}) {
     Memory memory{.alias = true};
     std::array<Word, memory_words> p{};
-    Core core({.program = p, .x = memory.bank(false), .y = memory.bank(true)}, nullptr, options);
+    TestCore core(
+        {.program = p, .x = memory.bank(false), .y = memory.bank(true)}, nullptr, options);
     const Shape shape{.mode = mode, .loop = true, .alias = true, .pattern = pattern};
     const auto trace = steps(shape);
     constexpr Word vector = 32;
     core.load(Space::program, vector, std::array{0U, 0U});
     core.load(Space::program, start, program(trace));
     const auto maximum_budget = 3 * static_cast<Word>(trace.size());
-    const bool native_expected = options.backend == Backend::jit && options.optimize;
-    api_loop_case(core, memory, shape, maximum_budget, native_expected);
+
+    api_loop_case(core, memory, shape, maximum_budget);
     for (Word budget = 0; budget <= maximum_budget; ++budget) {
-      api_loop_case(core, memory, shape, budget, native_expected);
+      api_loop_case(core, memory, shape, budget);
     }
   }
 }
 
 class Observer final : public Io {
 public:
-  Core *core = nullptr;
+  TestCore *core = nullptr;
   Registers expected;
   Progress progress;
   Word opcode_pc = 0, extension_address = 0;
@@ -703,17 +664,16 @@ void callback(const CallbackInput input) {
   Observer observer;
   observer.accept = input.accept;
   observer.patch = input.patch;
-  Core core({.program = p, .x = memory.bank(false), .y = memory.bank(true)},
-            &observer,
-            {.backend = input.backend});
+  TestCore core({.program = p, .x = memory.bank(false), .y = memory.bank(true)},
+                &observer,
+                {.backend = input.backend});
   observer.core = &core;
   const Shape shape{.mode = input.mode, .loop = input.loop};
   auto trace = steps(shape);
   core.load(Space::program, start, program(trace));
   memory.initialize();
   core.set_registers(initial(shape, {.progress = {}, .flags = status_byte}));
-  require(core.run(static_cast<Word>(trace.size())).dispatches == trace.size() &&
-              observer.calls == 0,
+  require(core.run(static_cast<Word>(trace.size())).retired == trace.size() && observer.calls == 0,
           "Warm an actual closed region before changing the same-PC guard to I/O");
   memory.initialize();
   auto expected_memory = memory;
@@ -739,14 +699,14 @@ void callback(const CallbackInput input) {
   const auto old = state;
   state = observer.expected;
   if (!input.accept) {
-    require(run.dispatches == io_index && run.progress == observer.progress &&
+    require(run.retired == io_index && run.progress == observer.progress &&
                 run.fault == Fault{.kind = FaultKind::io_read,
                                    .space = Space::y,
                                    .address = io_begin,
                                    .pc = observer.opcode_pc} &&
                 core.registers() == state && memory.data == expected_memory.data,
             "Rejected mixed fallback preserves the destination and has no ALU/retirement");
-    require(core.run(1).dispatches == 0 && core.registers() == state &&
+    require(core.run(1).retired == 0 && core.registers() == state &&
                 core.progress() == run.progress,
             "A rejected fallback remains fail-stop without replaying a charged prefix");
     return;
@@ -761,7 +721,7 @@ void callback(const CallbackInput input) {
     --state.lc;
     state.pc = start;
   }
-  require(run.dispatches == trace.size() && run.fault.kind == FaultKind::none &&
+  require(run.retired == trace.size() && run.fault.kind == FaultKind::none &&
               run.progress == Progress{.instructions = before.instructions + trace.size(),
                                        .estimated_cycles = before.estimated_cycles + 15} &&
               core.registers() == state && memory.data == expected_memory.data,
@@ -793,17 +753,15 @@ int main() {
                                     .maximum_cost = true,
                                     .padding = padding});
     }
-    for (const auto backend :
-         {dsp56300::Backend::reference, dsp56300::Backend::cached, dsp56300::Backend::jit}) {
+    for (const auto backend : {dsp56300::Backend::jit}) {
       for (const auto mode : dsp56300::test::modes) {
         dsp56300::test::api_loops({.backend = backend}, mode);
         dsp56300::test::api_loops({.backend = backend},
                                   mode | dsp56300::test::saturation_model::mode);
       }
-      for (const auto limit : {1U, 4U, 64U}) {
+      {
         for (const bool alias : {false, true}) {
-          dsp56300::test::api_prefixes({.backend = backend, .instructions_per_block = limit},
-                                       alias);
+          dsp56300::test::api_prefixes({.backend = backend}, alias);
         }
       }
       for (const auto mode : {dsp56300::Word{0}, dsp56300::test::saturation_model::mode}) {
@@ -817,7 +775,7 @@ int main() {
         }
       }
     }
-    dsp56300::test::api_prefixes({.backend = dsp56300::Backend::jit, .optimize = false}, true);
+    dsp56300::test::api_prefixes({.backend = dsp56300::Backend::jit}, true);
     std::cout << dsp56300::test::checks << " independent region-accounting checks passed\n";
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';

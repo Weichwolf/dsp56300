@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "native_long_load_fixture.hpp"
@@ -69,16 +70,15 @@ void sparse_windows(const unsigned selector) {
   Memory memory;
   memory.instruction = opcode(input);
   memory.mapped = true;
-  Core cpu(memory, {.backend = Backend::jit});
+  TestCore cpu(memory, {.backend = Backend::jit});
   cpu.set_registers(seed(input));
   auto expected = seed(input);
   expected_load(expected, input);
-  const auto result = cpu.run(RunBudget{.instructions = 1, .cycles = 1});
-  require(result.execution.dispatches == 1 && result.execution.fault.kind == FaultKind::none &&
+  const auto result = cpu.run(1);
+  require(result.retired == 1 && result.fault.kind == FaultKind::none &&
               cpu.registers() == expected && memory.reads == 0 &&
-              memory.known == std::array<std::uint8_t, 2>{1, 1} &&
-              cpu.jit_statistics().native_move_instructions == 1,
-          "Long loads read both sparse known windows natively, including bounded execution");
+              memory.known == std::array<std::uint8_t, 2>{1, 1},
+          "Long loads read both sparse known windows natively, through the public execution API");
 }
 
 void unknown_y_window() {
@@ -87,23 +87,18 @@ void unknown_y_window() {
   memory.instruction = opcode(input);
   memory.mapped = true;
   memory.known[1] = 0;
-  Core cpu(memory, {.backend = Backend::jit});
+  TestCore cpu(memory, {.backend = Backend::jit});
   const auto before = seed(input);
   cpu.set_registers(before);
-  const auto bounded = cpu.run(RunBudget{.instructions = 1, .cycles = 1});
-  require(bounded.stop == RunStop::external_effect && bounded.execution.dispatches == 0 &&
-              cpu.registers() == before && memory.reads == 0 &&
-              cpu.jit_statistics().native_move_instructions == 0,
-          "Missing Y known bit leaves bounded ownership, both destinations and AGU untouched");
   const auto actual = cpu.run(1);
   auto expected = before;
   ++expected.r[0];
   expected.pc = 1;
 
-  require(actual.dispatches == 0 && actual.fault.kind == FaultKind::memory_read &&
+  require(actual.retired == 0 && actual.fault.kind == FaultKind::memory_read &&
               actual.fault.space == Space::y && actual.fault.address == address &&
               actual.fault.pc == 0 && cpu.registers() == expected && memory.reads == 2 &&
-              memory.valid && cpu.jit_statistics().native_move_instructions == 0,
+              memory.valid,
           "Unbounded unknown Y retains real ordered reads, first fault and sole AGU update");
 }
 
@@ -116,7 +111,7 @@ void peripheral(const unsigned failure) {
   memory.fail_at = failure;
   auto expected = seed(input);
   expected.r[0] = memory.port;
-  Core cpu(memory, {.backend = Backend::jit});
+  TestCore cpu(memory, {.backend = Backend::jit});
   cpu.set_registers(expected);
   if (failure == 0) {
     expected_load(expected, input);
@@ -125,12 +120,11 @@ void peripheral(const unsigned failure) {
     expected.pc = 1;
   }
   const auto result = cpu.run(1);
-  require(result.dispatches == (failure == 0 ? 1U : 0U) && cpu.registers() == expected &&
+  require(result.retired == (failure == 0 ? 1U : 0U) && cpu.registers() == expected &&
               memory.valid && memory.reads == (failure == 1 ? 1U : 2U) &&
               result.fault.kind == (failure == 0 ? FaultKind::none : FaultKind::io_read) &&
               (failure == 0 || (result.fault.address == memory.port && result.fault.pc == 0 &&
-                                result.fault.space == (failure == 1 ? Space::x : Space::y))) &&
-              cpu.jit_statistics().native_move_instructions == 0,
+                                result.fault.space == (failure == 1 ? Space::x : Space::y))),
           "Peripheral loads retain real ordered callbacks, partial faults and general ownership");
 }
 
@@ -145,12 +139,11 @@ void host_aliases() {
     const auto before_data = data;
     auto expected = seed(input);
     expected_load(expected, input);
-    Core cpu({.program = program, .x = data, .y = data}, nullptr, {.backend = Backend::jit});
+    TestCore cpu({.program = program, .x = data, .y = data}, nullptr, {.backend = Backend::jit});
     cpu.set_registers(seed(input));
     const auto result = cpu.run(1);
-    require(result.dispatches == 1 && result.fault.kind == FaultKind::none &&
-                cpu.registers() == expected && data == before_data &&
-                cpu.jit_statistics().native_move_instructions == 1,
+    require(result.retired == 1 && result.fault.kind == FaultKind::none &&
+                cpu.registers() == expected && data == before_data,
             "Both long-load bus reads accept shared host storage without modifying RAM");
   }
 }
@@ -165,13 +158,12 @@ void y_bounds() {
   auto expected = seed(input);
   ++expected.r[0];
   expected.pc = 1;
-  Core cpu({.program = program, .x = x, .y = y}, nullptr, {.backend = Backend::jit});
+  TestCore cpu({.program = program, .x = x, .y = y}, nullptr, {.backend = Backend::jit});
   cpu.set_registers(seed(input));
   const auto result = cpu.run(1);
-  require(result.dispatches == 0 && result.fault.kind == FaultKind::memory_read &&
+  require(result.retired == 0 && result.fault.kind == FaultKind::memory_read &&
               result.fault.space == Space::y && result.fault.address == address &&
-              result.fault.pc == 0 && cpu.registers() == expected &&
-              cpu.jit_statistics().native_move_instructions == 0,
+              result.fault.pc == 0 && cpu.registers() == expected,
           "The second RAM bound guard preserves genuine partial-fault and AGU semantics");
 }
 }
@@ -202,16 +194,14 @@ void repeated_cases() {
       expected_load(expected, {.selector = selector, .mode = 3, .value = value});
     }
     expected.pc = 2;
-    Core cpu({.program = program, .x = x, .y = y}, nullptr, {.backend = Backend::jit});
+    TestCore cpu({.program = program, .x = x, .y = y}, nullptr, {.backend = Backend::jit});
     cpu.set_registers(before);
-    require(cpu.run(1).dispatches == 1, "REP setup retires genuinely before long-load bodies");
-    const auto old = cpu.jit_statistics();
+    require(cpu.run(1).retired == 1, "REP setup retires genuinely before long-load bodies");
+
     const auto result = cpu.run(4);
-    require(result.dispatches == 4 && result.fault.kind == FaultKind::none &&
+    require(result.retired == 4 && result.fault.kind == FaultKind::none &&
                 cpu.registers() == expected &&
-                cpu.progress() == Progress{.instructions = 5, .estimated_cycles = 9} &&
-                cpu.jit_statistics().native_move_instructions == old.native_move_instructions + 4 &&
-                cpu.jit_statistics().helper_instructions == old.helper_instructions,
+                cpu.progress() == Progress{.instructions = 5, .estimated_cycles = 9},
             "REP long loads use fresh X/Y data and one shared AGU update per native retirement");
   }
 }

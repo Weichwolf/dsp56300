@@ -33,7 +33,7 @@ BinaryCase base(const Input input) {
   item.initial = item.expected = processing_model::seed(input.status);
   item.expected.pc = start + 1;
   item.state = processing_model::state(input.kind);
-  item.interruptible = input.kind != Kind::stop;
+  item.interrupt_ready = input.kind != Kind::stop;
   item.before = {{.words = {processing_model::opcode(input.kind), processing_model::invalid},
                   .address = start}};
   item.progress.estimated_cycles = processing_model::cycles(input.kind);
@@ -42,9 +42,9 @@ BinaryCase base(const Input input) {
       item.reset_actions = {{.pc = start, .accepted = input.reply == Reply::accept}};
     }
     if (input.reply != Reply::accept) {
-      item.dispatches = 0;
+      item.retired = 0;
       item.progress = {};
-      item.interruptible = false;
+      item.interrupt_ready = false;
       item.fault = {.kind = FaultKind::host_event,
                     .address = start,
                     .value = processing_model::reset,
@@ -79,12 +79,12 @@ void zero_budgets(Cases &cases, const Input input) {
       for (const Word flags : {0U, status_byte}) {
         auto item =
             base({.kind = input.kind, .reply = input.reply, .status = mode | (mask * 256) | flags});
-        item.budget = item.dispatches = 0;
+        item.budget = item.retired = 0;
         item.expected = item.initial;
         item.progress = {};
         item.fault = {};
-        item.state = ProcessingState::running;
-        item.interruptible = true;
+        item.state = ExecutionState::running;
+        item.interrupt_ready = true;
         item.reset_actions.clear();
         item.name = "Zero budget does not issue RESET or enter WAIT/STOP";
         cases.push_back(std::move(item));
@@ -116,10 +116,10 @@ BinaryCase native_prefix(const Input input, const Word budget) {
   item.before.front().words.push_back(processing_model::invalid);
   item.expected = item.initial;
   item.budget = budget;
-  item.dispatches = std::min(budget, input.reply == Reply::accept ? 6U : 2U);
-  item.progress = {.instructions = item.dispatches};
-  item.state = ProcessingState::running;
-  item.interruptible = true;
+  item.retired = std::min(budget, input.reply == Reply::accept ? 6U : 2U);
+  item.progress = {.instructions = item.retired};
+  item.state = ExecutionState::running;
+  item.interrupt_ready = true;
   if (budget > 2) {
     item.reset_actions = {{.pc = start + 2, .accepted = input.reply == Reply::accept}};
     if (input.reply == Reply::reject) {
@@ -127,10 +127,10 @@ BinaryCase native_prefix(const Input input, const Word budget) {
                     .address = start + 2,
                     .value = processing_model::reset,
                     .pc = start + 2};
-      item.interruptible = false;
+      item.interrupt_ready = false;
     }
   }
-  for (Word index = 0; index < item.dispatches; ++index) {
+  for (Word index = 0; index < item.retired; ++index) {
     const auto old = item.expected;
     if (index < prefix.size() && index != 2) {
       sequence_model::alu(item.expected, old, prefix[index]);
@@ -139,7 +139,7 @@ BinaryCase native_prefix(const Input input, const Word budget) {
     item.progress.estimated_cycles += index == 2 ? 7U : 1U;
     if (index == 5) {
       item.state = processing_model::state(input.kind);
-      item.interruptible = input.kind == Kind::wait;
+      item.interrupt_ready = input.kind == Kind::wait;
       item.progress.estimated_cycles += 9;
     }
   }
@@ -174,10 +174,10 @@ BinaryCase repeated_reset(const Input input, const RepeatInput repeat_input) {
   item.before.front().words = {repeat | (encoded * 256), processing_model::reset, 0, 0};
   item.expected = item.initial;
   item.reset_actions.clear();
-  item.budget = item.dispatches = budget;
+  item.budget = item.retired = budget;
   item.progress = {};
   item.fault = {};
-  item.interruptible = budget == 0;
+  item.interrupt_ready = budget == 0;
   item.name = "REP RESET: exact host requests, partial budgets, LC restore and encoded zero";
   if (budget == 0) { return item; }
   const bool accepted = input.reply == Reply::accept;
@@ -190,7 +190,7 @@ BinaryCase repeated_reset(const Input input, const RepeatInput repeat_input) {
     item.reset_actions.assign(calls, {.pc = start + 1, .accepted = accepted});
   }
   if (!accepted && budget > 1) {
-    item.dispatches = 1;
+    item.retired = 1;
     item.progress = {.instructions = 1, .estimated_cycles = 5};
     item.fault = {.kind = FaultKind::host_event,
                   .address = start + 1,
@@ -200,7 +200,7 @@ BinaryCase repeated_reset(const Input input, const RepeatInput repeat_input) {
   if (iterations == count) {
     item.expected.pc = start + 2;
     item.expected.lc = item.initial.lc;
-    item.interruptible = true;
+    item.interrupt_ready = true;
     if (budget > count + 1) {
       ++item.expected.pc;
       ++item.progress.estimated_cycles;
@@ -230,14 +230,14 @@ void repeats(Cases &cases) {
         const auto opcode = processing_model::opcode(kind);
         item.before.front().words = {repeat | (4U * 256), opcode};
         item.budget = 2;
-        item.dispatches = 1;
+        item.retired = 1;
         item.progress = {.instructions = 1, .estimated_cycles = 5};
         item.fault = {.kind = FaultKind::invalid_instruction,
                       .address = start + 1,
                       .value = opcode,
                       .pc = start + 1};
-        item.state = ProcessingState::running;
-        item.interruptible = false;
+        item.state = ExecutionState::running;
+        item.interrupt_ready = false;
         item.name = "REP rejects WAIT/STOP without sleeping or retiring the body";
         cases.push_back(std::move(item));
       }

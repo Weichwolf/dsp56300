@@ -112,7 +112,7 @@ void setup(BinaryCase &item, const Input input, const Program &code) {
   item.initial.m[1] = output_words - 1;
   item.memory_words = {1024, input_base + (channels * input_stride), 2048};
   item.budget = 1 + (input.frames * frame_instructions);
-  item.dispatches = item.budget;
+  item.retired = item.budget;
   item.progress = {.instructions = item.budget,
                    .estimated_cycles = 5 + (std::uint64_t{input.frames} * frame_cycles)};
   std::vector<Word> weights;

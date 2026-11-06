@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "scripted_io.hpp"
@@ -46,7 +47,7 @@ constexpr std::array boundaries{
 
 struct Input {
   Boundary boundary;
-  Backend backend = Backend::reference;
+  Backend backend = Backend::jit;
   Path path = Path::dispatched;
   std::size_t mode = 0;
   Word ccr = 0;
@@ -84,11 +85,11 @@ bool qualified_carry(const Boundary boundary) {
   return !boundary.magnitude || (destination >= -limit && destination < limit);
 }
 
-void execute(Core &core, const Path path, const Word opcode) {
+void execute(TestCore &core, const Path path, const Word opcode) {
   const auto result = path == Path::captured
                           ? core.run_instruction({.address = start, .opcode = opcode})
                           : core.run(1);
-  require(result.dispatches == 1 && result.fault.kind == FaultKind::none,
+  require(result.retired == 1 && result.fault.kind == FaultKind::none,
           "Dispatched, externally fetched and captured execution retire the real instruction");
 }
 
@@ -104,10 +105,10 @@ void one(const Input &input) {
   if (input.path == Path::owned) {
     bus.events = {{.space = Space::program, .address = start, .value = opcode}};
   }
-  Core core(input.path == Path::owned ? Memory::external()
-                                      : Memory::separate({.program = program, .x = x, .y = y}),
-            &bus,
-            {.backend = input.backend});
+  TestCore core(input.path == Path::owned ? Memory::external()
+                                          : Memory::separate({.program = program, .x = x, .y = y}),
+                &bus,
+                {.backend = input.backend});
   auto expected = initial(input);
   core.set_registers(expected);
   ++expected.pc;
@@ -135,7 +136,7 @@ int main() {
     using namespace dsp56300;
     using namespace dsp56300::test;
     for (const auto boundary : boundaries) {
-      for (const auto backend : {Backend::reference, Backend::cached, Backend::jit}) {
+      for (const auto backend : {Backend::jit}) {
         for (const auto path : {Path::dispatched, Path::owned, Path::captured}) {
           for (std::size_t mode = 0; mode < modes.size(); ++mode) {
             for (const auto ccr : {Word{0}, flag_c | flag_v, flag_s | flag_l, status_byte}) {

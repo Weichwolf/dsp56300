@@ -237,8 +237,8 @@ void repeated(Cases &cases, const Input input, const Word status) {
     item.expected.pc = start + (finished ? 2U : 1U);
     item.expected.lc = finished ? item.initial.lc : 4 - budget;
     item.before = {{.words = {repeat, bfu_model::opcode(input)}, .address = start}};
-    item.budget = item.dispatches = budget;
-    item.interruptible = finished;
+    item.budget = item.retired = budget;
+    item.interrupt_ready = finished;
     item.progress = {.instructions = budget, .estimated_cycles = 4 + budget};
     item.name = "REP BFU current count/Carry/word values, every exact partial prefix";
     cases.push_back(std::move(item));

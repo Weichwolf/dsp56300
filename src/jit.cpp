@@ -5,8 +5,8 @@
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
-#include "instruction_boundary.hpp"
 #include "jit_emitter.hpp"
+#include "mac_batch.hpp"
 #include "translation.hpp"
 
 #include <algorithm>
@@ -28,7 +28,6 @@
 
 namespace dsp56300::detail {
 namespace {
-constexpr std::size_t cache_limit = std::size_t{8} << 20;
 
 // A SysV tail bridge enters untyped generated code without pretending it has
 // Clang's compiler-emitted function-type metadata. No sanitizer is disabled.
@@ -98,28 +97,17 @@ bool terminates(const Operation operation) {
 struct Block {
   std::vector<NativeOp> operations;
   std::unique_ptr<Executable> code;
-  std::vector<Word> prefix_cycles{0};
   std::vector<std::unique_ptr<Block>> tails;
-  std::size_t storage_bytes = 0;
-  Word requested_limit = 0, pure = 0;
+  Word requested_limit = 0;
   bool terminated = false;
 };
 }
 
 struct Jit::Impl {
-  Impl(Cpu &state,
-       const std::span<const Word> supplied,
-       const Options settings,
-       const JitRuntime runtime)
+  Impl(Cpu &state, const std::span<const Word> supplied, const JitRuntime runtime)
       : cpu(state),
         program(supplied),
-        options(settings),
-        context{.runtime = runtime,
-                .exit_requested = &exit_requested,
-                .native_moves = &statistics.native_move_instructions,
-                .batch_instructions = &statistics.batch_instructions,
-                .avx2_instructions = &statistics.avx2_instructions,
-                .batch_calls = &statistics.batch_calls} {}
+        context{.runtime = runtime, .exit_requested = &exit_requested} {}
 
   [[nodiscard]] std::optional<Word> word(const Word address) const noexcept {
     if (context.runtime.program != nullptr) {
@@ -130,14 +118,11 @@ struct Jit::Impl {
 
   [[nodiscard]] std::unique_ptr<Block> compile(Word block_limit) const;
   [[nodiscard]] Block *prepare(Word budget);
-  [[nodiscard]] Block *prefix(Block &block, Word instructions);
-  void retain_current(Block &block);
+  [[nodiscard]] Block *prefix(Block &block, Word instructions) const;
   [[nodiscard]] std::uint32_t enter(const Block &block, Word budget);
   Cpu &cpu;
   std::span<const Word> program;
-  Options options;
   std::unordered_map<std::uint64_t, std::unique_ptr<Block>> blocks;
-  JitStatistics statistics;
   std::optional<NativeOp> rejected_repeat;
   bool invalidated = false;
   bool exit_requested = false;
@@ -172,33 +157,21 @@ std::unique_ptr<Block> Jit::Impl::compile(const Word block_limit) const {
     pc = (pc + decoded.words) & word_mask;
   }
   if (block->operations.empty()) { return nullptr; }
-  JitEmitter emitter(context.runtime, options.optimize, options.batch_backend, cpu.reg.m);
+  JitEmitter emitter(context.runtime, cpu.reg.m);
   const auto bytes = emitter.generate(block->operations);
-  if (bytes.size() > cache_limit / 2) { return nullptr; }
   block->code = std::make_unique<Executable>(bytes);
-  block->storage_bytes = block->code->size();
-  for (std::size_t index = 0; index < block->operations.size(); ++index) {
-    const auto &instruction = block->operations[index].instruction;
-    block->prefix_cycles.push_back(block->prefix_cycles.back() + instruction.cycles);
-    if (block->pure == index &&
-        (!requires_owner(instruction) || emitter.direct_memory(block->operations[index]))) {
-      ++block->pure;
-    }
-  }
+
   return block;
 }
 
-Jit::Jit(Cpu &cpu,
-         const std::span<const Word> program,
-         const Options options,
-         const JitRuntime runtime)
-    : impl_(std::make_unique<Impl>(cpu, program, options, runtime)) {}
+Jit::Jit(Cpu &cpu, const std::span<const Word> program, const JitRuntime runtime)
+    : impl_(std::make_unique<Impl>(cpu, program, runtime)) {}
 
 Jit::~Jit() = default;
 
 bool Jit::available() noexcept {
 #if defined(__x86_64__) && defined(__linux__)
-  return true;
+  return avx2_mac_available();
 #else
   return false;
 #endif
@@ -215,7 +188,7 @@ void Jit::request_yield() noexcept {
 void Jit::invalidate() noexcept {
   // Defer destruction until generated code and all embedded metadata have returned.
   if (!impl_->blocks.empty() && !impl_->invalidated) {
-    ++impl_->statistics.invalidations;
+
     impl_->invalidated = true;
     impl_->exit_requested = true;
   }
@@ -229,79 +202,49 @@ void Jit::bind_windows(const std::array<std::span<const MemoryWindow>, 2> window
 void Jit::reset() {
   impl_->blocks.clear();
   impl_->rejected_repeat.reset();
-  impl_->statistics = {};
   impl_->invalidated = false;
   impl_->exit_requested = false;
-}
-
-void Jit::helper_retired() noexcept {
-  ++impl_->statistics.helper_instructions;
-}
-
-JitStatistics Jit::statistics() const noexcept {
-  return impl_->statistics;
 }
 
 Block *Jit::Impl::prepare(const Word budget) {
   if (invalidated) {
     blocks.clear();
-    statistics.executable_bytes = 0;
+
     invalidated = false;
   }
   exit_requested = false;
   const auto key = translation_key(cpu.reg);
   auto found = blocks.find(key);
-  const auto translation_limit = options.instructions_per_block == 0
-                                     ? static_cast<Word>(address_words)
-                                     : options.instructions_per_block;
+  constexpr auto translation_limit = static_cast<Word>(address_words);
   const auto compile_limit = std::min(budget, translation_limit);
   if (found == blocks.end() ||
       (!found->second->terminated && found->second->requested_limit < compile_limit)) {
     auto block = compile(compile_limit);
     if (!block) { return nullptr; }
-    if (statistics.executable_bytes + block->storage_bytes > cache_limit) {
-      blocks.clear();
-      statistics.executable_bytes = 0;
-      found = blocks.end();
-    }
-    if (found != blocks.end()) { statistics.executable_bytes -= found->second->storage_bytes; }
-    statistics.executable_bytes += block->storage_bytes;
+
     blocks.insert_or_assign(key, std::move(block));
-    ++statistics.compiled_blocks;
+
     found = blocks.find(key);
   }
   return found->second.get();
 }
 
-void Jit::Impl::retain_current(Block &block) {
-  auto current = blocks.extract(translation_key(cpu.reg));
-  blocks.clear();
-  blocks.insert(std::move(current));
-  block.tails.clear();
-  block.storage_bytes = block.code->size();
-  statistics.executable_bytes = block.storage_bytes;
-}
-
-Block *Jit::Impl::prefix(Block &block, const Word instructions) {
+Block *Jit::Impl::prefix(Block &block, const Word instructions) const {
   if (instructions >= block.operations.size()) { return &block; }
   for (const auto &tail : block.tails) {
     if (tail->requested_limit == instructions) { return tail.get(); }
   }
   auto tail = compile(instructions);
   if (!tail) { return nullptr; }
-  if (statistics.executable_bytes + tail->storage_bytes > cache_limit) { retain_current(block); }
-  block.storage_bytes += tail->storage_bytes;
-  statistics.executable_bytes += tail->storage_bytes;
-  ++statistics.compiled_blocks;
+
   block.tails.push_back(std::move(tail));
   return block.tails.back().get();
 }
 
 std::uint32_t Jit::Impl::enter(const Block &block, const Word budget) {
-  const auto helpers = statistics.helper_instructions;
   context.budget = budget;
   const auto retired = block.code->enter(cpu, context);
-  statistics.native_alu_instructions += retired - (statistics.helper_instructions - helpers);
+
   return retired;
 }
 
@@ -315,10 +258,10 @@ std::uint32_t Jit::run(const std::uint32_t budget) {
 
 std::uint32_t Jit::run_repeat(const NativeOp operation, const std::uint32_t budget) {
   auto &self = *impl_;
-  if (budget == 0 || self.cpu.repeat_remaining == 0 || !self.options.optimize) { return 0; }
+  if (budget == 0 || self.cpu.repeat_remaining == 0) { return 0; }
   if (self.invalidated) {
     self.blocks.clear();
-    self.statistics.executable_bytes = 0;
+
     self.invalidated = false;
   }
   self.exit_requested = false;
@@ -336,26 +279,16 @@ std::uint32_t Jit::run_repeat(const NativeOp operation, const std::uint32_t budg
       found->second->operations.front().instruction != operation.instruction) {
     auto block = std::make_unique<Block>();
     block->operations.push_back(operation);
-    JitEmitter emitter(
-        self.context.runtime, self.options.optimize, self.options.batch_backend, self.cpu.reg.m);
+    JitEmitter emitter(self.context.runtime, self.cpu.reg.m);
     const auto bytes = emitter.generate_repeat(block->operations.front());
     if (bytes.empty()) {
       self.rejected_repeat = operation;
       return 0;
     }
     block->code = std::make_unique<Executable>(bytes);
-    block->storage_bytes = block->code->size();
-    if (self.statistics.executable_bytes + block->storage_bytes > cache_limit) {
-      self.blocks.clear();
-      self.statistics.executable_bytes = 0;
-      found = self.blocks.end();
-    }
-    if (found != self.blocks.end()) {
-      self.statistics.executable_bytes -= found->second->storage_bytes;
-    }
-    self.statistics.executable_bytes += block->storage_bytes;
+
     self.blocks.insert_or_assign(key, std::move(block));
-    ++self.statistics.compiled_blocks;
+
     found = self.blocks.find(key);
   }
   return self.enter(*found->second, budget);
@@ -371,7 +304,7 @@ std::uint32_t Jit::run_captured(NativeOp operation) {
   }
   if (self.invalidated) {
     self.blocks.clear();
-    self.statistics.executable_bytes = 0;
+
     self.invalidated = false;
   }
   self.exit_requested = false;
@@ -382,47 +315,15 @@ std::uint32_t Jit::run_captured(NativeOp operation) {
       found->second->operations.front().instruction != operation.instruction) {
     auto block = std::make_unique<Block>();
     block->operations.push_back(operation);
-    JitEmitter emitter(
-        self.context.runtime, self.options.optimize, self.options.batch_backend, self.cpu.reg.m);
+    JitEmitter emitter(self.context.runtime, self.cpu.reg.m);
     const auto bytes = emitter.generate(block->operations);
     block->code = std::make_unique<Executable>(bytes);
-    block->storage_bytes = block->code->size();
-    if (self.statistics.executable_bytes + block->storage_bytes > cache_limit) {
-      self.blocks.clear();
-      self.statistics.executable_bytes = 0;
-      found = self.blocks.end();
-    }
-    if (found != self.blocks.end()) {
-      self.statistics.executable_bytes -= found->second->storage_bytes;
-    }
-    self.statistics.executable_bytes += block->storage_bytes;
+
     self.blocks.insert_or_assign(key, std::move(block));
-    ++self.statistics.compiled_blocks;
+
     found = self.blocks.find(key);
   }
   return self.enter(*found->second, 1);
 }
 
-std::uint32_t Jit::run_bounded(const std::uint32_t instructions, const std::uint64_t cycles) {
-  auto &self = *impl_;
-  auto *block = self.prepare(instructions);
-  if (block == nullptr || block->pure == 0) { return 0; }
-  const auto count = static_cast<Word>(block->operations.size());
-  Word allowed = 0;
-  auto remaining_cycles = cycles;
-  if (block->pure == count && at_loop_end(block->operations.back())) {
-    const auto body_cycles = block->prefix_cycles.back();
-    if (body_cycles == 0) { return 0; }
-    const auto repeats = std::min(std::uint64_t{instructions / count}, cycles / body_cycles);
-    allowed = static_cast<Word>(repeats * count);
-    remaining_cycles -= repeats * body_cycles;
-  }
-  const auto tail_limit = std::min(instructions - allowed, block->pure);
-  Word tail = 0;
-  while (tail < tail_limit && block->prefix_cycles[tail + 1] <= remaining_cycles) { ++tail; }
-  allowed += tail;
-  if (allowed == 0) { return 0; }
-  block = self.prefix(*block, std::min(allowed, count));
-  return block != nullptr ? self.enter(*block, allowed) : 0;
-}
 } // namespace dsp56300::detail

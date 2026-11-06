@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Independent SM execution, native-mode transitions and exact callback boundaries.
 #include "bfu_logic_model.hpp"
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "native_sequence_model.hpp"
@@ -53,12 +54,12 @@ struct Machine {
       : core({.program = p, .x = x, .y = y}, io, {.backend = backend}) {}
 
   std::array<Word, memory_words> p{}, x{}, y{};
-  Core core;
+  TestCore core;
 };
 
 class Observer final : public Io {
 public:
-  Core *core = nullptr;
+  TestCore *core = nullptr;
   Registers expected;
   Progress progress;
   bool accept = true, patch = false, observed = false;
@@ -118,14 +119,14 @@ void callback(const Backend backend, const Word mode, const bool accept, const b
   register_model::write(expected, 4, datum);
   if (!accept) {
     ++expected.pc;
-    require(run.dispatches == 5 && run.progress == observer.progress &&
+    require(run.retired == 5 && run.progress == observer.progress &&
                 run.fault == Fault{.kind = FaultKind::io_read,
                                    .space = Space::x,
                                    .address = port,
                                    .pc = start + 5} &&
                 machine.core.registers() == expected,
             "Rejected SM transfer preserves partial destination with no ALU or retirement");
-    require(machine.core.run(1).dispatches == 0 && machine.core.registers() == expected,
+    require(machine.core.run(1).retired == 0 && machine.core.registers() == expected,
             "Rejected SM requests remain fail-stop without replay");
     return;
   }
@@ -136,16 +137,12 @@ void callback(const Backend backend, const Word mode, const bool accept, const b
   expected.sr &= ~saturation_model::mode;
   ++expected.pc;
   for (const auto word : std::span(program).last(4)) { arithmetic(expected, word); }
-  require(run.dispatches == program.size() && run.fault.kind == FaultKind::none &&
+  require(run.retired == program.size() && run.fault.kind == FaultKind::none &&
               run.progress == Progress{.instructions = program.size(),
                                        .estimated_cycles = program.size() + 2} &&
-              machine.core.registers() == expected && machine.core.interruptible(),
+              machine.core.registers() == expected && machine.core.interrupt_ready(),
           "Native/SM/native execution keeps old parallel operands, sticky flags and mode changes");
-  if (backend == Backend::jit) {
-    const auto stats = machine.core.jit_statistics();
-    require(stats.native_alu_instructions == 11 && stats.helper_instructions == 2,
-            "Ordinary and SM arithmetic execute natively; mode-control instructions use helpers");
-  }
+
   auto expected_p = std::array<Word, memory_words>{};
   for (std::size_t index = 0; index < program.size(); ++index) {
     expected_p.at(start + index) = patch && index == 6 ? clear_a : program[index];
@@ -164,21 +161,15 @@ void same_pc(const Backend backend, const Word mode) {
     if (sm) { expected.sr |= saturation_model::mode; }
     machine.core.set_registers(expected);
     const auto before = machine.core.progress();
-    const auto stats = machine.core.jit_statistics();
+
     for (const auto word : words) { arithmetic(expected, word); }
     const auto run = machine.core.run(static_cast<Word>(words.size()));
-    require(run.dispatches == words.size() && run.fault.kind == FaultKind::none &&
+    require(run.retired == words.size() && run.fault.kind == FaultKind::none &&
                 machine.core.registers() == expected &&
                 run.progress ==
                     Progress{.instructions = before.instructions + words.size(),
                              .estimated_cycles = before.estimated_cycles + words.size()},
             "Same-PC SM changes preserve independent full state without reusing ordinary code");
-    if (backend == Backend::jit) {
-      const auto after = machine.core.jit_statistics();
-      require(after.native_alu_instructions == stats.native_alu_instructions + 4 &&
-                  after.helper_instructions == stats.helper_instructions,
-              "Both exact numeric profiles execute independent native arithmetic");
-    }
   }
 }
 
@@ -204,7 +195,7 @@ void prefixes(const Backend backend, const Word mode) {
       cycles += control ? 2U : 1U;
     }
     const auto run = machine.core.run(static_cast<Word>(budget));
-    require(run.dispatches == budget && run.fault.kind == FaultKind::none &&
+    require(run.retired == budget && run.fault.kind == FaultKind::none &&
                 machine.core.registers() == expected &&
                 run.progress == Progress{.instructions = before.instructions + budget,
                                          .estimated_cycles = before.estimated_cycles + cycles},
@@ -219,7 +210,7 @@ void transfer(const Backend backend, const Word mode, const Word flags, const bo
   std::array<Word, memory_words> p{};
   std::array<Word, memory_words> shared{};
   shared.fill(datum);
-  Core core({.program = p, .x = shared, .y = shared}, nullptr, {.backend = backend});
+  TestCore core({.program = p, .x = shared, .y = shared}, nullptr, {.backend = backend});
   core.write(Space::program, start, paired ? paired_store : self_move);
   auto initial = seed(mode);
   initial.sr = mode | flags | saturation_model::mode;
@@ -241,7 +232,7 @@ void transfer(const Backend backend, const Word mode, const Word flags, const bo
   ++expected.pc;
   core.set_registers(initial);
   const auto run = core.run(1);
-  require(run.dispatches == 1 && run.fault.kind == FaultKind::none &&
+  require(run.retired == 1 && run.fault.kind == FaultKind::none &&
               run.progress == Progress{.instructions = 1, .estimated_cycles = 1} &&
               core.registers() == expected && shared == expected_memory,
           "SM preserves paired old operands/X-before-Y aliases and MOVE's distinct V/L contract");
@@ -259,7 +250,7 @@ void reject(const Backend backend, const Unsupported input) {
   machine.core.set_registers(expected);
   ++expected.pc;
   const auto run = machine.core.run(1);
-  require(run.dispatches == 0 && run.progress == Progress{} &&
+  require(run.retired == 0 && run.progress == Progress{} &&
               run.fault == Fault{.kind = FaultKind::unsupported_mode,
                                  .space = Space::program,
                                  .address = start,
@@ -267,7 +258,7 @@ void reject(const Backend backend, const Unsupported input) {
                                  .pc = start} &&
               machine.core.registers() == expected,
           "Unqualified SM arithmetic/combinations reject before register, RAM or ALU effects");
-  require(machine.core.run(1).dispatches == 0 && machine.core.registers() == expected,
+  require(machine.core.run(1).retired == 0 && machine.core.registers() == expected,
           "An unqualified mode remains fail-stop without invented execution");
 }
 
@@ -280,13 +271,12 @@ void qualified_complement(const Backend backend, const Unsupported input) {
   bfu_model::apply(expected, expected, {.function = bfu_model::Function::complement});
   ++expected.pc;
   const auto run = machine.core.run(1);
-  require(run.dispatches == 1 &&
-              run.progress == Progress{.instructions = 1, .estimated_cycles = 1} &&
+  require(run.retired == 1 && run.progress == Progress{.instructions = 1, .estimated_cycles = 1} &&
               run.fault.kind == FaultKind::none && machine.core.registers() == expected,
           "The original SM NOT stimulus now preserves outer bits and bypasses arithmetic limiting");
   ++expected.pc;
   const auto next = machine.core.run(1);
-  require(next.dispatches == 1 &&
+  require(next.retired == 1 &&
               next.progress == Progress{.instructions = 2, .estimated_cycles = 2} &&
               next.fault.kind == FaultKind::none && machine.core.registers() == expected,
           "The following NOP retires without replaying the qualified BFU result");
@@ -302,7 +292,7 @@ void qualified_shifted(const Backend backend, const Unsupported input) {
           "The retained shifted stimulus has independently qualified carry");
   ++expected.pc;
   const auto run = machine.core.run(1);
-  require(run.dispatches == 1 && run.fault.kind == FaultKind::none &&
+  require(run.retired == 1 && run.fault.kind == FaultKind::none &&
               run.progress == Progress{.instructions = 1, .estimated_cycles = 1} &&
               machine.core.registers() == expected,
           "Original shifted SM stimuli now execute full independent result/flag/stack checks");
@@ -323,7 +313,7 @@ void qualified_status(const Backend backend, const Unsupported input) {
       expected, operands, input.instruction == immediate_compare ? compare_x0 : input.instruction);
   ++expected.pc;
   const auto result = machine.core.run(1);
-  require(result.dispatches == 1 && result.fault.kind == FaultKind::none &&
+  require(result.retired == 1 && result.fault.kind == FaultKind::none &&
               machine.core.registers() == expected,
           "Original SM TST/CMP/immediate CMP stimuli now check flags without changing operands");
 }
@@ -356,8 +346,7 @@ void rejected_modes(const Backend backend) {
 
 int main() {
   try {
-    for (const auto backend :
-         {dsp56300::Backend::reference, dsp56300::Backend::cached, dsp56300::Backend::jit}) {
+    for (const auto backend : {dsp56300::Backend::jit}) {
       dsp56300::test::rejected_modes(backend);
       for (const auto mode : dsp56300::test::modes) {
         dsp56300::test::same_pc(backend, mode);

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "dsp56300/core.hpp"
+#include "core_access.hpp"
 #include "external_run_fixture.hpp"
 
 #include <algorithm>
@@ -40,9 +40,8 @@ void report(const Workload sample, const std::string_view selected, const unsign
     Timing result{.seconds = 0, .instructions = 0, .reads = 0};
     for (unsigned repetition = 0; repetition < repetitions; ++repetition) {
       const auto measured =
-          mode.captured
-              ? captured_workload(sample, dsp56300::Backend::automatic, mode.cache_enabled)
-              : workload(sample, dsp56300::Backend::automatic, mode.single_step);
+          mode.captured ? captured_workload(sample, dsp56300::Backend::jit, mode.cache_enabled)
+                        : workload(sample, dsp56300::Backend::jit, mode.single_step);
       result.seconds += measured.seconds;
       result.instructions += measured.instructions;
       result.reads += measured.reads;

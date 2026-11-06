@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "backend_support.hpp"
 #include "binary_fixture.hpp"
+#include "codegen_observer.hpp"
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "fixture_memory.hpp"
@@ -36,17 +38,10 @@ constexpr std::size_t sample_cases = 8;
 
 struct BenchBackend {
   Backend kind;
-  BatchBackend batch;
   std::string_view name;
 };
 
-constexpr std::array engines{
-    BenchBackend{.kind = Backend::reference, .batch = BatchBackend::automatic, .name = "reference"},
-    BenchBackend{.kind = Backend::cached, .batch = BatchBackend::automatic, .name = "cached"},
-    BenchBackend{.kind = Backend::jit, .batch = BatchBackend::automatic, .name = "jit"},
-    BenchBackend{.kind = Backend::jit, .batch = BatchBackend::scalar, .name = "jit-scalar"},
-    BenchBackend{.kind = Backend::jit, .batch = BatchBackend::avx2, .name = "jit-avx2"},
-    BenchBackend{.kind = Backend::jit, .batch = BatchBackend::disabled, .name = "jit-unbatched"}};
+constexpr std::array engines{BenchBackend{.kind = Backend::jit, .name = "jit"}};
 
 double elapsed(const Clock::time_point begin, const Clock::time_point end) {
   return std::chrono::duration<double, std::nano>(end - begin).count();
@@ -64,13 +59,13 @@ double cpu_time() {
 
 std::string_view exclusion(const BinaryCase &item) {
   if (item.fault.kind != FaultKind::none) { return "expected fault"; }
-  if (item.dispatches == 0 || item.progress.instructions == 0 || !item.interruptible) {
+  if (item.retired == 0 || item.progress.instructions == 0 || !item.interrupt_ready) {
     return "no quiescent retirement boundary";
   }
   if (((item.initial.sr | item.expected.sr) & (loop_flag | cache_flag)) != 0) {
     return "active loop or architectural cache state";
   }
-  if (item.state != ProcessingState::running || item.debug_interrupt_mode ||
+  if (item.state != ExecutionState::running || item.debug_interrupt_mode ||
       item.debug != DebugStatus{} || !item.reset_actions.empty()) {
     return "processing/debug/host-script state";
   }
@@ -91,7 +86,7 @@ public:
         core_({.program = memory_[0], .x = memory_[1], .y = memory_[2]},
               nullptr,
               {.backend = backend}) {
-    require(item.fault.kind == FaultKind::none && item.interruptible && item.dispatches != 0,
+    require(item.fault.kind == FaultKind::none && item.interrupt_ready && item.retired != 0,
             "Benchmark requires a successful, interruptible completion");
     require(((item.initial.sr | item.expected.sr) & loop_flag) == 0,
             "Benchmark replay requires boundaries outside active DO loops");
@@ -108,18 +103,16 @@ public:
 
   void execute() {
     const auto result = core_.run(item_.budget);
-    require(result.dispatches == item_.dispatches && result.fault.kind == FaultKind::none &&
+    require(result.retired == item_.retired && result.fault.kind == FaultKind::none &&
                 result.state == item_.state,
             "Benchmark execution completes");
   }
 
   void validate() const {
-    require(core_.interruptible() && core_.registers() == item_.expected && memory_ == expected_ &&
-                core_.processing_state() == item_.state && core_.debug_status() == item_.debug,
+    require(core_.interrupt_ready() && core_.registers() == item_.expected &&
+                memory_ == expected_ && core_.processing_state() == item_.state,
             "Benchmark reproduces the qualified fixture at a quiescent boundary");
   }
-
-  [[nodiscard]] JitStatistics statistics() const noexcept { return core_.jit_statistics(); }
 
   Timing trial(const unsigned calls_per_trial) {
     Timing timing;
@@ -161,15 +154,15 @@ bool benchmark(const BinaryCase &item, const BenchBackend backend, const unsigne
   replay.execute();
   const auto cold_end = Clock::now();
   replay.validate();
-  auto previous = replay.statistics();
+  auto previous = codegen::publications();
   for (unsigned call = 0; call < warmup_calls; ++call) {
-    previous = replay.statistics();
+    previous = codegen::publications();
     replay.prepare();
     replay.execute();
   }
   replay.validate();
-  const auto warmed = replay.statistics();
-  if (warmed.compiled_blocks != previous.compiled_blocks) {
+  const auto warmed = codegen::publications();
+  if (warmed.count != previous.count) {
     std::cout << "SKIP: replay repeatedly compiles code\n";
     return false;
   }
@@ -196,55 +189,14 @@ bool benchmark(const BinaryCase &item, const BenchBackend backend, const unsigne
             << ", process CPU: " << cpu[middle] << " ns/call (includes preparation/timer)\n"
             << "  cold execution: " << elapsed(cold_begin, cold_end)
             << " ns (includes any first-use compilation); replays/trial: " << replays << '\n';
-  require(replay.statistics().compiled_blocks == warmed.compiled_blocks,
+  require(codegen::publications().count == warmed.count,
           "Warm measurements cannot silently include JIT recompilation");
-  if (backend.kind == Backend::jit) {
-    const auto statistics = replay.statistics();
-    const auto calls = static_cast<double>(trial_count) * replays;
-    std::cout
-        << "  native ALU/retirement per call: "
-        << static_cast<double>(statistics.native_alu_instructions -
-                               warmed.native_alu_instructions) /
-               calls
-        << ", full helpers: "
-        << static_cast<double>(statistics.helper_instructions - warmed.helper_instructions) / calls
-        << ", native moves: "
-        << static_cast<double>(statistics.native_move_instructions -
-                               warmed.native_move_instructions) /
-               calls
-        << ", compiled blocks: " << statistics.compiled_blocks
-        << ", executable bytes: " << statistics.executable_bytes << '\n'
-        << "  compiled batch instructions/call: "
-        << static_cast<double>(statistics.batch_instructions - warmed.batch_instructions) / calls
-        << ", AVX2: "
-        << static_cast<double>(statistics.avx2_instructions - warmed.avx2_instructions) / calls
-        << ", batch calls/call: "
-        << static_cast<double>(statistics.batch_calls - warmed.batch_calls) / calls << '\n';
-  }
+
   return true;
 }
 
 bool benchmark_backend(const BinaryCase &item, const BenchBackend backend, const unsigned replays) {
-  switch (backend.kind) {
-    case Backend::automatic:
-      return benchmark<BackendCore<Backend::automatic>>(item, backend, replays);
-    case Backend::reference:
-      return benchmark<BackendCore<Backend::reference>>(item, backend, replays);
-    case Backend::cached: return benchmark<BackendCore<Backend::cached>>(item, backend, replays);
-    case Backend::jit: break;
-    default: throw std::invalid_argument("Unknown benchmark backend");
-  }
-  switch (backend.batch) {
-    case BatchBackend::automatic:
-      return benchmark<BackendCore<Backend::jit>>(item, backend, replays);
-    case BatchBackend::scalar:
-      return benchmark<BackendCore<Backend::jit, BatchBackend::scalar>>(item, backend, replays);
-    case BatchBackend::avx2:
-      return benchmark<BackendCore<Backend::jit, BatchBackend::avx2>>(item, backend, replays);
-    case BatchBackend::disabled:
-      return benchmark<BackendCore<Backend::jit, BatchBackend::disabled>>(item, backend, replays);
-    default: throw std::invalid_argument("Unknown benchmark batch implementation");
-  }
+  return benchmark<TestCore>(item, backend, replays);
 }
 
 std::size_t case_index(const std::string_view text) {
@@ -261,8 +213,7 @@ std::optional<BenchBackend> selected_backend(const std::string_view name) {
   for (const auto backend : engines) {
     if (name == backend.name) { return backend; }
   }
-  throw std::invalid_argument(
-      "Invalid backend: use all, reference, cached, jit, jit-scalar, jit-avx2 or jit-unbatched");
+  throw std::invalid_argument("Invalid backend: use all or jit");
 }
 
 std::vector<std::size_t> select_cases(const std::vector<BinaryCase> &cases,

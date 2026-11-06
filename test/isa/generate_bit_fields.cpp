@@ -342,9 +342,9 @@ BinaryCase rejected(const Input input, const FaultKind kind, const Word value) {
     set_partial(item.initial, input, Part::main, control(input));
   }
   item.expected = item.initial;
-  item.dispatches = 0;
+  item.retired = 0;
   item.progress = {};
-  item.interruptible = false;
+  item.interrupt_ready = false;
   item.fault = {
       .kind = kind, .space = Space::program, .address = start, .value = value, .pc = start};
   std::vector program{opcode(input)};
@@ -390,9 +390,9 @@ void extension_boundaries(std::vector<BinaryCase> &cases) {
     auto truncated = single(input);
     truncated.memory_words[0] = start + 1;
     truncated.before.front().words.resize(1);
-    truncated.dispatches = 0;
+    truncated.retired = 0;
     truncated.progress = {};
-    truncated.interruptible = false;
+    truncated.interrupt_ready = false;
     truncated.fault = {
         .kind = FaultKind::memory_read, .space = Space::program, .address = start + 1, .pc = start};
     truncated.name = "BFU missing control extension must fault";
@@ -401,9 +401,9 @@ void extension_boundaries(std::vector<BinaryCase> &cases) {
     repeat.before.front().words.insert(repeat.before.front().words.begin(),
                                        repeat_base | (2U << 8));
     repeat.budget = 2;
-    repeat.dispatches = 1;
+    repeat.retired = 1;
     repeat.progress = {.instructions = 1, .estimated_cycles = 5};
-    repeat.interruptible = false;
+    repeat.interrupt_ready = false;
     repeat.fault = {.kind = FaultKind::invalid_instruction,
                     .space = Space::program,
                     .address = start + 1,
@@ -419,7 +419,7 @@ BinaryCase repeated(const Input input, const Word count) {
   item.before.front().words.insert(item.before.front().words.begin(), repeat_base | (count << 8));
   for (Word iteration = 1; iteration < count; ++iteration) { model(item.expected, input); }
   item.expected.pc = start + 2;
-  item.budget = item.dispatches = count + 1;
+  item.budget = item.retired = count + 1;
   item.progress = {.instructions = count + 1, .estimated_cycles = count + 5};
   item.name += "; REP reevaluates current operands";
   return item;
@@ -527,14 +527,14 @@ void mixed_sequences(std::vector<BinaryCase> &cases) {
         model(item.expected, input);
         item.expected.pc += input.immediate ? 2U : 1U;
         ++item.budget;
-        item.dispatches = item.budget;
+        item.retired = item.budget;
         item.progress = {.instructions = item.budget, .estimated_cycles = item.expected.pc - start};
         cases.push_back(item);
         const auto previous = item.expected;
         sequence_model::alu(item.expected, previous, add_b_a);
         ++item.expected.pc;
         ++item.budget;
-        item.dispatches = item.budget;
+        item.retired = item.budget;
         item.progress = {.instructions = item.budget, .estimated_cycles = item.expected.pc - start};
         cases.push_back(item);
       }

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "backend_support.hpp"
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "support.hpp"
@@ -12,13 +13,12 @@
 
 namespace dsp56300::test {
 namespace {
-static_assert(CoreImplementation<BackendCore<Backend::automatic>>);
+static_assert(CoreImplementation<TestCore>);
 constexpr Word immediate_x0 = 0x44f400, payload = 0x923456, replacement = 0x123456;
 constexpr Word move_port_x0 = 0x044480, port_address = 0xffff80;
 constexpr Word repeat_three = 0x0603a0, clear_a = 0x200013;
 constexpr std::uint64_t high_x = 0x654321000000;
-constexpr std::array backends{
-    Backend::reference, Backend::cached, Backend::jit, Backend::automatic};
+constexpr std::array backends{Backend::jit};
 
 struct LocalRam {
   std::array<Word, 1> x{}, y{};
@@ -74,7 +74,7 @@ void immutable_capture() {
   for (const auto backend : backends) {
     std::array<Word, 4> program{};
     LocalRam ram;
-    Core cpu({.program = program, .x = ram.x, .y = ram.y}, nullptr, {.backend = backend});
+    TestCore cpu({.program = program, .x = ram.x, .y = ram.y}, nullptr, {.backend = backend});
     Registers initial;
     initial.x = high_x | 1;
     cpu.set_registers(initial);
@@ -86,17 +86,12 @@ void immutable_capture() {
       expected.x = high_x | value;
       expected.pc = 2;
       const std::uint64_t instructions = value == payload ? 1U : 2U;
-      require(actual.dispatches == 1 && actual.fault.kind == FaultKind::none &&
+      require(actual.retired == 1 && actual.fault.kind == FaultKind::none &&
                   cpu.registers() == expected &&
                   actual.progress ==
                       Progress{.instructions = instructions, .estimated_cycles = instructions * 2},
               "Captured two-word load preserves high X and executes its own literal despite "
               "backing NOPs");
-    }
-    if (backend == Backend::jit || backend == Backend::automatic) {
-      require(cpu.jit_statistics().native_move_instructions == 2 &&
-                  cpu.jit_statistics().helper_instructions == 0,
-              "Changed captured literals use real native transfer lowering");
     }
   }
 }
@@ -111,7 +106,7 @@ void native_ram_capture() {
     std::array<Word, 16> y{};
     x[address] = payload;
     y[address] = static_cast<Word>(raw & word_mask);
-    Core cpu({.program = program, .x = x, .y = y}, nullptr, {.backend = backend});
+    TestCore cpu({.program = program, .x = x, .y = y}, nullptr, {.backend = backend});
     Registers initial;
     initial.r[0] = address;
     initial.m.fill(word_mask);
@@ -122,15 +117,10 @@ void native_ram_capture() {
     expected.x = raw;
     expected.pc = 1;
     ++expected.r[0];
-    require(actual.dispatches == 1 && actual.fault.kind == FaultKind::none &&
+    require(actual.retired == 1 && actual.fault.kind == FaultKind::none &&
                 cpu.registers() == expected &&
                 actual.progress == Progress{.instructions = 1, .estimated_cycles = 1},
             "Captured native long RAM read retains full flags and exactly one AGU update");
-    if (backend == Backend::jit || backend == Backend::automatic) {
-      require(cpu.jit_statistics().native_move_instructions == 1 &&
-                  cpu.jit_statistics().helper_instructions == 0,
-              "Captured RAM work uses emitted moves without staged replay or interpretation");
-    }
   }
 }
 
@@ -139,9 +129,9 @@ struct IoInput {
   bool write, accept, external;
 };
 
-Core make_io_cpu(Port &port, std::array<Word, 2> &program, LocalRam &ram, const IoInput input) {
-  if (input.external) { return Core(port, {.backend = input.backend}); }
-  return Core({.program = program, .x = ram.x, .y = ram.y}, &port, {.backend = input.backend});
+TestCore make_io_cpu(Port &port, std::array<Word, 2> &program, LocalRam &ram, const IoInput input) {
+  if (input.external) { return TestCore(port, {.backend = input.backend}); }
+  return TestCore({.program = program, .x = ram.x, .y = ram.y}, &port, {.backend = input.backend});
 }
 
 void real_io_case(const IoInput input) {
@@ -164,12 +154,12 @@ void real_io_case(const IoInput input) {
     auto expected = initial;
     expected.x = high_x | payload;
     expected.pc = 1;
-    require(actual.dispatches == 1 && actual.fault.kind == FaultKind::none &&
+    require(actual.retired == 1 && actual.fault.kind == FaultKind::none &&
                 cpu.registers() == expected &&
                 actual.progress == Progress{.instructions = 1, .estimated_cycles = 1},
             "Actual successful Io preserves all independently expected CPU state");
   } else {
-    require(actual.dispatches == 0 && actual.progress == Progress{} &&
+    require(actual.retired == 0 && actual.progress == Progress{} &&
                 actual.fault == Fault{.kind = failure_kind,
                                       .space = Space::x,
                                       .address = port_address,
@@ -193,7 +183,7 @@ void real_io() {
 void ownership_guards() {
   std::array<Word, 4> program{};
   LocalRam ram;
-  Core cpu({.program = program, .x = ram.x, .y = ram.y});
+  TestCore cpu({.program = program, .x = ram.x, .y = ram.y});
   const auto before = cpu.registers();
   const std::array invalid{InstructionWords{.address = 1, .opcode = 0},
                            InstructionWords{.address = 0, .opcode = immediate_x0},
@@ -214,7 +204,7 @@ void fetch_ownership() {
   constexpr Word cache_enable = 0x80000;
   std::array<Word, 4> program{};
   LocalRam ram;
-  Core vector_cpu({.program = program, .x = ram.x, .y = ram.y});
+  TestCore vector_cpu({.program = program, .x = ram.x, .y = ram.y});
   vector_cpu.set_registers({});
   vector_cpu.request_interrupt(vector, 0);
   const auto before = vector_cpu.registers();
@@ -225,9 +215,9 @@ void fetch_ownership() {
   require(refused && vector_cpu.registers() == before && vector_cpu.progress() == Progress{} &&
               vector_cpu.instruction_fetch().exception_vector,
           "A captured ordinary instruction cannot bypass actual pending vector ownership");
-  Core cache_cpu({.program = program, .x = ram.x, .y = ram.y},
-                 nullptr,
-                 {.cacheable_begin = 0, .cacheable_end = program.size()});
+  TestCore cache_cpu({.program = program, .x = ram.x, .y = ram.y},
+                     nullptr,
+                     {.cacheable_begin = 0, .cacheable_end = program.size()});
   Registers enabled;
   enabled.sr = cache_enable;
   cache_cpu.set_registers(enabled);
@@ -245,13 +235,13 @@ void loop_capture() {
   for (const auto backend : backends) {
     std::array<Word, 5> program{dor_three, end_displacement, 0, 0, 0};
     LocalRam ram;
-    Core cpu({.program = program, .x = ram.x, .y = ram.y}, nullptr, {.backend = backend});
-    require(cpu.run(1).dispatches == 1, "Actual DOR establishes a three-iteration two-NOP loop");
+    TestCore cpu({.program = program, .x = ram.x, .y = ram.y}, nullptr, {.backend = backend});
+    require(cpu.run(1).retired == 1, "Actual DOR establishes a three-iteration two-NOP loop");
     for (unsigned iteration = 0; iteration < 3; ++iteration) {
-      require(cpu.run_instruction({.address = 2, .opcode = 0}).dispatches == 1,
+      require(cpu.run_instruction({.address = 2, .opcode = 0}).retired == 1,
               "Captured loop entry retires only its single owned NOP");
       const auto end = cpu.run_instruction({.address = 3, .opcode = 0});
-      require(end.dispatches == 1 && end.fault.kind == FaultKind::none &&
+      require(end.retired == 1 && end.fault.kind == FaultKind::none &&
                   cpu.registers().pc == (iteration == 2 ? 4U : 2U),
               "The actual loop endpoint selects saved start or normal completion");
     }
@@ -267,11 +257,11 @@ void repeat_capture() {
   for (const auto backend : backends) {
     std::array<Word, 4> program{repeat_three, 0, 0, 0};
     LocalRam ram;
-    Core cpu({.program = program, .x = ram.x, .y = ram.y}, nullptr, {.backend = backend});
-    require(cpu.run(1).dispatches == 1, "Actual REP establishes three body iterations");
+    TestCore cpu({.program = program, .x = ram.x, .y = ram.y}, nullptr, {.backend = backend});
+    require(cpu.run(1).retired == 1, "Actual REP establishes three body iterations");
     for (unsigned iteration = 0; iteration < 3; ++iteration) {
       const auto actual = cpu.run_instruction({.address = 1, .opcode = clear_a});
-      require(actual.dispatches == 1 && actual.fault.kind == FaultKind::none &&
+      require(actual.retired == 1 && actual.fault.kind == FaultKind::none &&
                   cpu.registers().pc == (iteration == 2 ? 2U : 1U),
               "Captured REP body retires exactly one real iteration and restores its PC");
     }

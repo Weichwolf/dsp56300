@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "support.hpp"
@@ -11,12 +12,11 @@
 namespace dsp56300::test {
 namespace {
 enum class Kind : std::uint8_t { fused, mac, round };
-enum class Method : std::uint8_t { ordinary, bounded, captured };
+enum class Method : std::uint8_t { ordinary, captured };
 constexpr Word down = 0x400, rm = 0x200000, changed = 0x3e;
 constexpr std::uint64_t wrapped = 0x7fffffff000000, other = 0x123456789abcde;
 
-constexpr std::array backends{
-    Backend::reference, Backend::cached, Backend::jit, Backend::automatic};
+constexpr std::array backends{Backend::jit};
 
 struct Input {
   Kind kind;
@@ -31,9 +31,9 @@ Word opcode(const Input input) {
   return code | (input.destination_b ? 8U : 0U);
 }
 
-void captured(Core &cpu, const Input input) {
+void captured(TestCore &cpu, const Input input) {
   const auto result = cpu.run_instruction({.address = start, .opcode = opcode(input)});
-  require(result.dispatches == 1 && result.fault.kind == FaultKind::none,
+  require(result.retired == 1 && result.fault.kind == FaultKind::none,
           "The captured arithmetic retires its real complete fixed-point operation");
 }
 
@@ -42,7 +42,7 @@ void check(const Input input, const Backend backend, const Method method) {
   std::array<Word, 1> x{};
   std::array<Word, 1> y{};
   p[start] = opcode(input);
-  Core cpu({.program = p, .x = x, .y = y}, nullptr, {.backend = backend});
+  TestCore cpu({.program = p, .x = x, .y = y}, nullptr, {.backend = backend});
   auto before = initial_state();
   before.sr = down | input.incoming | (input.biased ? rm : 0U);
   before.x = 1;
@@ -65,16 +65,9 @@ void check(const Input input, const Backend backend, const Method method) {
   if (method == Method::captured) {
     captured(cpu, input);
   } else {
-    const auto run = method == Method::bounded
-                         ? cpu.run(RunBudget{.instructions = 1, .cycles = 1}).execution
-                         : cpu.run(1);
-    require(run.dispatches == 1 && run.fault.kind == FaultKind::none,
+    const auto run = cpu.run(1);
+    require(run.retired == 1 && run.fault.kind == FaultKind::none,
             "The actual authored instruction retires without a synthetic result");
-    if (cpu.backend() == Backend::jit) {
-      require(cpu.jit_statistics().native_alu_instructions == 1 &&
-                  cpu.jit_statistics().helper_instructions == 0,
-              "Default and explicit JIT execution retain actual native MACR/MAC/RND lowering");
-    }
   }
   require(cpu.registers() == wanted &&
               cpu.progress() == Progress{.instructions = 1, .estimated_cycles = 1},
@@ -90,7 +83,6 @@ void cases() {
               .kind = kind, .incoming = incoming, .biased = biased, .destination_b = destination_b};
           for (const auto backend : backends) {
             check(input, backend, Method::ordinary);
-            check(input, backend, Method::bounded);
             check(input, backend, Method::captured);
           }
         }

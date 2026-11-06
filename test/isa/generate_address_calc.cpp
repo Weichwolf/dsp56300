@@ -208,7 +208,7 @@ BinaryCase repeated(Input input) {
   for (Word index = 0; index < count; ++index) { model(item.expected, input); }
   item.expected.pc = start + 2;
   item.before.front().words.insert(item.before.front().words.begin(), repeat_base | (count << 8));
-  item.budget = item.dispatches = count + 1;
+  item.budget = item.retired = count + 1;
   item.progress = {.instructions = count + 1, .estimated_cycles = 5 + (3 * count)};
   item.name += "; REP recomputes current source and PC with explicit destination alias";
   return item;
@@ -297,7 +297,7 @@ void sequence_step(BinaryCase &item, const Step step) {
     ++item.progress.estimated_cycles;
   }
   ++item.budget;
-  item.dispatches = item.budget;
+  item.retired = item.budget;
   item.progress.instructions = item.budget;
 }
 
@@ -370,9 +370,9 @@ BinaryCase rejected(const Input input, const FaultKind kind, const Word value) {
   if (input.form == Form::relative_long) {
     item.before.push_back({.words = {input.update.offset}, .address = start + 1});
   }
-  item.dispatches = 0;
+  item.retired = 0;
   item.progress = {};
-  item.interruptible = false;
+  item.interrupt_ready = false;
   item.fault = {
       .kind = kind, .space = Space::program, .address = start, .value = value, .pc = start};
   item.name = "Address calculation invalid selector/unqualified mode/boundary";
@@ -388,10 +388,10 @@ void faults(Cases &cases) {
       if (mode == saturation_mode) {
         model(item.expected, input);
         item.expected.pc += form == Form::relative_long ? 2U : 1U;
-        item.dispatches = 1;
+        item.retired = 1;
         item.progress = {.instructions = 1, .estimated_cycles = 3};
         item.fault = {};
-        item.interruptible = true;
+        item.interrupt_ready = true;
         item.name = "SM address calculation preserves its formerly rejected input";
       }
       cases.push_back(std::move(item));

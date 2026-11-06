@@ -5,7 +5,7 @@
   flags, AGU, parallel transfers, loops and interrupts remain open. See OBJECTIVE.md.
 - Keep board clocks, derivative peripherals and application firmware in consumers.
   No foreign DSP execution dependency; use independently authored test programs.
-- Use Core(Memory, Io*, Options), typed memory and explicit ownership, aliases,
+- Use Core(Memory, Io*), typed memory and explicit ownership, aliases,
   invalidation and event limits. The core has one execution owner.
 - Automatically choose the fastest qualified host path. Fix slow instruction and
   transfer helpers here; JIT fallback gaps remain visible until native lowering
@@ -18,7 +18,7 @@
 
 - Expose only core.hpp and memory.hpp under include/. Keep ISA encodings in
   test/support/isa.hpp and production decoding/transfer helpers private; production code must not include test headers.
-- Keep the same minimal public Core/Memory/Io/Options API shape in both cores.
+- Keep the same minimal public Core/Memory/Io API shape in both cores.
   Core owns its state; optional read-only state inspection is outside normal use.
   Remove checkpoint/restore APIs and their implementation completely. Preserve
   ISA, wait and interrupt behavior; state inspection is read-only. Expose no

@@ -43,8 +43,6 @@ int main(const int count, char **arguments) {
         if (mode != "all" && mode != label) { continue; }
         const auto result = workload(name, partial, repeat);
         std::cout << name << " mode=" << label << " instructions=" << result.instructions
-                  << " native=" << result.native << " moves=" << result.moves
-                  << " helpers=" << result.helpers
                   << " seconds=" << std::setprecision(std::numeric_limits<double>::max_digits10)
                   << result.seconds << '\n';
         ++selected;

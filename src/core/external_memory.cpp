@@ -8,10 +8,6 @@
 #include <optional>
 
 namespace dsp56300 {
-Backend Core::backend() const noexcept {
-  return impl_->options.backend;
-}
-
 void Core::request_yield() noexcept {
   if (!impl_->executing) { return; }
   impl_->yield_requested = true;

@@ -2,6 +2,7 @@
 // Independent constant-address traces and helper-forbidden guarded execution.
 #include "address_model.hpp"
 #include "architecture.hpp"
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
@@ -244,9 +245,7 @@ void direct_case(const native::Direct &code, Memory &memory, const Shape shape, 
     expected.pc = start;
   }
   Probe probe;
-  std::uint64_t transfers = 0;
   detail::NativeContext context{.runtime = {.owner = &probe, .memory = banks(memory)},
-                                .native_moves = &transfers,
                                 .budget = budget};
   const auto result = code.enter(cpu, context);
   cpu.reg.a >>= detail::padding_bits;
@@ -256,7 +255,7 @@ void direct_case(const native::Direct &code, Memory &memory, const Shape shape, 
           "Constant-before-use guarded bytes preserve every register, old operand and RAM alias");
   require(
       cpu.instructions == wrapping_sum(maximum - 2, retired) &&
-          cpu.cycles == wrapping_sum(maximum - 3, retired + bodies) && transfers == retired &&
+          cpu.cycles == wrapping_sum(maximum - 3, retired + bodies) &&
           cpu.repeat_completed == (retired == 0) && cpu.interrupt_inhibited == (retired == 0),
       "Every initial/header rejection is read-only; constant retirement and costs wrap exactly");
 }
@@ -270,8 +269,7 @@ void direct_shape(const Shape shape, const bool alias, const bool shortened) {
   const auto plan = detail::plan_native_region(ops, runtime.memory, modifiers(shape));
   require(plan.valid && plan.addresses[shape.index].constant == (shape.value & word_mask),
           "The proof records the actual 24-bit assignment instead of constraining old R");
-  detail::JitEmitter emitter(
-      runtime, true, BatchBackend::disabled, modifiers(shape), detail::RegionMode::guarded);
+  detail::JitEmitter emitter(runtime, modifiers(shape), detail::RegionMode::guarded);
   const native::Direct code(emitter.generate(ops));
   require(emitter.guarded_region() && emitter.cached_status() && emitter.packed_retirement(),
           "The tested bytes are actual helper-free guarded regions with held status");
@@ -361,7 +359,7 @@ void admission() {
           "Constants do not remove program-alias invalidation boundaries");
 }
 
-void api_case(Core &core, Memory &memory, const Shape shape, const Word budget) {
+void api_case(TestCore &core, Memory &memory, const Shape shape, const Word budget) {
   memory.initialize();
   auto expected_memory = memory;
   auto expected = initial(shape, {.flags = status_byte});
@@ -374,19 +372,19 @@ void api_case(Core &core, Memory &memory, const Shape shape, const Word budget) 
   }
   const auto before = core.progress();
   const auto run = core.run(budget);
-  require(run.dispatches == budget && run.fault.kind == FaultKind::none &&
+  require(run.retired == budget && run.fault.kind == FaultKind::none &&
               core.registers() == expected && memory.data == expected_memory.data &&
               run.progress == Progress{.instructions = before.instructions + budget,
                                        .estimated_cycles = before.estimated_cycles + cycles},
           "Every warm API prefix and same-PC P-extension change preserves full independent state");
 }
 
-void api_prefixes(const Options options, const bool alias) {
+void api_prefixes(const TestOptions options, const bool alias) {
   Memory memory{.alias = alias};
   std::array<Word, memory_words> program_memory{};
-  Core core({.program = program_memory, .x = memory.bank(false), .y = memory.bank(true)},
-            nullptr,
-            options);
+  TestCore core({.program = program_memory, .x = memory.bank(false), .y = memory.bank(true)},
+                nullptr,
+                options);
   constexpr std::array selected_modes{0U,
                                       mode_rm | mode_up,
                                       saturation_model::mode,
@@ -419,16 +417,14 @@ int main() {
     dsp56300::test::admission();
     dsp56300::test::direct_matrix();
     dsp56300::test::boundary_shapes();
-    for (const auto backend :
-         {dsp56300::Backend::reference, dsp56300::Backend::cached, dsp56300::Backend::jit}) {
-      for (const auto limit : {1U, 4U, 64U}) {
+    for (const auto backend : {dsp56300::Backend::jit}) {
+      {
         for (const bool alias : {false, true}) {
-          dsp56300::test::api_prefixes({.backend = backend, .instructions_per_block = limit},
-                                       alias);
+          dsp56300::test::api_prefixes({.backend = backend}, alias);
         }
       }
     }
-    dsp56300::test::api_prefixes({.backend = dsp56300::Backend::jit, .optimize = false}, true);
+    dsp56300::test::api_prefixes({.backend = dsp56300::Backend::jit}, true);
     std::cout << dsp56300::test::checks << " independent constant-region checks passed\n";
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';

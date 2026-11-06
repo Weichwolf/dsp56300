@@ -24,7 +24,7 @@ option(DSP56300_BUILD_TESTING "Build DSP library tests" ${PROJECT_IS_TOP_LEVEL})
 set(CMAKE_CXX_CLANG_TIDY "${DSP56300_CLANG_TIDY};--warnings-as-errors=*")
 
 add_library(dsp56300_core STATIC
-  src/core.cpp src/core/captured.cpp src/core/bounded.cpp src/core/memory_windows.cpp src/core/instruction_boundary.cpp src/core/external_memory.cpp src/core/core_state.cpp
+  src/core.cpp src/core/captured.cpp src/core/repeat.cpp src/core/memory_windows.cpp src/core/external_memory.cpp src/core/core_state.cpp
              src/core/instruction_shape.cpp
   src/core/transfer_info.cpp src/core/transfer_parallel.cpp src/core/transfer_special.cpp
   src/core/transfer_description.cpp src/core/arithmetic.cpp src/core/saturation.cpp src/core/shifts.cpp
@@ -44,7 +44,7 @@ add_library(dsp56300_core STATIC
   src/jit/x64/jit_move_address.cpp src/jit/x64/jit_move_register.cpp src/jit/x64/jit_long_moves.cpp
   src/jit/x64/jit_retirement.cpp src/jit/x64/jit_status.cpp
   src/jit/x64/jit_shifts.cpp src/jit/native_register_moves.cpp src/jit/x64/jit_inputs.cpp
-  src/jit/mac_batch.cpp src/jit/mac_batch_scalar.cpp src/jit/x64/mac_batch_avx2.cpp src/jit/x64/jit_batch.cpp)
+  src/jit/mac_batch.cpp src/jit/x64/mac_batch_avx2.cpp src/jit/x64/jit_batch.cpp)
 add_library(dsp56300::core ALIAS dsp56300_core)
 target_include_directories(dsp56300_core PUBLIC include)
 target_compile_features(dsp56300_core PUBLIC cxx_std_23)
@@ -67,6 +67,13 @@ add_custom_target(${DSP56300_FORMAT_TARGET}
   VERBATIM)
 
 if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
+  add_library(dsp56300_codegen_observer STATIC test/support/codegen_observer.cpp)
+  target_include_directories(dsp56300_codegen_observer PUBLIC test/support)
+  target_link_libraries(dsp56300_codegen_observer PUBLIC dsp56300_quality)
+  target_link_options(dsp56300_codegen_observer INTERFACE -Wl,--wrap=mprotect)
+  add_executable(dsp56300_public_api_test test/core/public_api_test.cpp)
+  target_link_libraries(dsp56300_public_api_test PRIVATE dsp56300::core)
+  add_test(NAME public-api COMMAND dsp56300_public_api_test)
   add_executable(dsp56300_memory_api_test test/core/memory_api_test.cpp)
   target_link_libraries(dsp56300_memory_api_test PRIVATE dsp56300::core)
   add_test(NAME memory-api COMMAND dsp56300_memory_api_test)
@@ -93,9 +100,7 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
     add_executable(dsp56300_cache_eligibility_test test/jit/native_cache_eligibility_test.cpp)
     target_link_libraries(dsp56300_cache_eligibility_test PRIVATE dsp56300::core)
     add_test(NAME native-empty-cache-eligibility COMMAND dsp56300_cache_eligibility_test)
-    add_executable(dsp56300_bounded_run_test test/jit/bounded_run_test.cpp)
-    target_link_libraries(dsp56300_bounded_run_test PRIVATE dsp56300::core)
-    add_test(NAME bounded-native-prefixes COMMAND dsp56300_bounded_run_test)
+
     add_executable(dsp56300_automatic_jit_test test/jit/automatic_jit_test.cpp)
     target_link_libraries(dsp56300_automatic_jit_test PRIVATE dsp56300::core)
     add_test(NAME automatic-native-external-memory COMMAND dsp56300_automatic_jit_test)
@@ -785,6 +790,10 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   get_directory_property(core_test_targets BUILDSYSTEM_TARGETS)
   foreach(core_test_target IN LISTS core_test_targets)
     get_target_property(core_test_sources ${core_test_target} SOURCES)
+    get_target_property(core_test_libraries ${core_test_target} LINK_LIBRARIES)
+    if(core_test_libraries MATCHES "dsp56300::core")
+      target_link_libraries(${core_test_target} PRIVATE dsp56300_codegen_observer)
+    endif()
     if(core_test_sources MATCHES "test/")
       target_include_directories(${core_test_target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/test/support" "${CMAKE_CURRENT_SOURCE_DIR}/src")
     endif()

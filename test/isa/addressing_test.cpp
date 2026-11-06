@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "support.hpp"
@@ -25,7 +26,7 @@ constexpr std::array replacements{
     AddressCase{.modifier = 2, .cursor = 0x40002, .offset = 8, .result = 0x4000a},
     AddressCase{.modifier = 15, .cursor = 0x4000f, .result = 0x40000}};
 
-void reinitialize(Core &core, const unsigned index) {
+void reinitialize(TestCore &core, const unsigned index) {
   for (const auto &item : replacements) {
     auto state = initial_state();
     state.sr = status_byte;
@@ -39,13 +40,13 @@ void reinitialize(Core &core, const unsigned index) {
     const auto before = core.progress();
     core.set_registers(state);
     const auto result = core.run(1);
-    require(result.dispatches == 1 && result.fault.kind == FaultKind::none,
+    require(result.retired == 1 && result.fault.kind == FaultKind::none,
             "Reinitialized AGU instruction retires");
     require(core.registers() == expected, "Address arithmetic follows host register replacement");
     require(core.progress().instructions == before.instructions + 1 &&
                 core.progress().estimated_cycles == before.estimated_cycles + 1,
             "Reinitialized AGU retains exact accounting");
-    require(core.interruptible(), "AGU instruction retains interrupt admission");
+    require(core.interrupt_ready(), "AGU instruction retains interrupt admission");
   }
 }
 
@@ -53,8 +54,7 @@ void check(const Backend backend) {
   std::array<Word, memory_words> p{};
   std::array<Word, memory_words> x{};
   std::array<Word, memory_words> y{};
-  Core core(
-      {.program = p, .x = x, .y = y}, nullptr, {.backend = backend, .instructions_per_block = 1});
+  TestCore core({.program = p, .x = x, .y = y}, nullptr, {.backend = backend});
   constexpr Word update = 0x204800;
   for (unsigned index = 0; index < agu_registers; ++index) {
     core.write(Space::program, start, update | (index << 8));
@@ -73,10 +73,7 @@ void check(const Backend backend) {
 
 int main() {
   try {
-    for (const auto backend :
-         {dsp56300::Backend::reference, dsp56300::Backend::cached, dsp56300::Backend::jit}) {
-      dsp56300::test::check(backend);
-    }
+    for (const auto backend : {dsp56300::Backend::jit}) { dsp56300::test::check(backend); }
     std::cout << dsp56300::test::checks << " AGU host-boundary checks passed\n";
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';

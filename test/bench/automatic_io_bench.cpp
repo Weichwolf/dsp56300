@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "bfu_logic_model.hpp"
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "external_run_fixture.hpp"
@@ -76,7 +77,7 @@ Registers expected_result(Registers expected, const external_run::Workload workl
 void measure(const external_run::Workload workload) {
   CodeMemory memory;
   memory.program.fill(workload.opcode);
-  Core core(memory); // Ordinary construction: no backend or compiler selection.
+  TestCore core(memory); // Ordinary construction: no backend or compiler selection.
   auto initial = initial_state();
   initial.x = workload.x;
   initial.y = workload.y;
@@ -89,28 +90,24 @@ void measure(const external_run::Workload workload) {
   for (unsigned sample = 0; sample < samples; ++sample) {
     core.set_registers(initial);
     const auto prior = core.progress();
-    const auto counters = core.jit_statistics();
+
     const auto begin = std::chrono::steady_clock::now();
     const auto result = core.run(instruction_count);
     const auto seconds =
         std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count();
-    const auto after = core.jit_statistics();
-    require(result.dispatches == instruction_count && !result.yielded &&
+
+    require(result.retired == instruction_count && !result.yielded &&
                 result.fault.kind == FaultKind::none && core.registers() == expected &&
                 result.progress ==
                     Progress{.instructions = prior.instructions + instruction_count,
                              .estimated_cycles = prior.estimated_cycles + instruction_count} &&
-                memory.accesses == 0 && core.backend() == Backend::jit &&
-                after.native_alu_instructions - counters.native_alu_instructions ==
-                    instruction_count &&
-                after.helper_instructions == counters.helper_instructions,
+                memory.accesses == 0,
             "Automatic sparse-code execution matches independent full-state domain arithmetic and "
             "DO accounting");
     std::cout << workload.name << " sample=" << sample
               << " phase=" << (sample == 0 ? "cold" : "warm")
               << " instructions=" << instruction_count
-              << " native=" << after.native_alu_instructions - counters.native_alu_instructions
-              << " helpers=" << after.helper_instructions - counters.helper_instructions
+
               << " seconds=" << std::setprecision(std::numeric_limits<double>::max_digits10)
               << seconds << " guest-mips=" << (instruction_count / seconds) / million << '\n';
   }

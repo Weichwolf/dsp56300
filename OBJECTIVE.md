@@ -116,7 +116,7 @@ appropriate sanitizer coverage, before publishing source changes. Core tests
 remain active before the integrating instrument reaches real time. Keep strict
 compilation, formatting and static analysis; never weaken checks.
 
-Public setup follows Core(Memory, Io*, Options): explicit typed borrowed views,
+Public setup follows Core(Memory, Io*): explicit typed borrowed views,
 named unified/separate/partition/external layouts. The consumer owns allocations.
 Keep native architectural units, physical aliases and owner lifetimes explicit.
 No general virtual memory manager belongs in ordinary direct-RAM execution.

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "architecture.hpp"
 #include "backend_support.hpp"
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
@@ -31,18 +32,14 @@ namespace dsp56300::test {
 namespace {
 using detail::x64::Reg;
 using detail::x64::Xmm;
-static_assert(CoreImplementation<Core>);
-static_assert(CoreImplementation<BackendCore<Backend::reference>>);
-static_assert(CoreImplementation<BackendCore<Backend::cached>>);
-static_assert(CoreImplementation<BackendCore<Backend::jit>>);
-static_assert(sizeof(BackendCore<Backend::jit>) == sizeof(Core));
+static_assert(CoreImplementation<TestCore>);
 static_assert(SimdLayout<32, 128>::lanes == 4);
 static_assert(SimdLayout<64, 256>::lanes == 4);
 static_assert(SimdShape<16, 128> && !SimdShape<detail::word_bits, 128> && !SimdShape<0, 128>);
 static_assert(!detail::x64::ScalarTransferLane<16>);
 
-struct WrongRunResult : BackendCore<Backend::reference> {
-  using BackendCore::BackendCore;
+struct WrongRunResult : TestCore {
+  using TestCore::TestCore;
   std::uint64_t run(std::uint32_t budget);
 };
 
@@ -153,21 +150,20 @@ void admission() {
   for (const Word opcode : {no_snapshot, load_x_mac, load_a_tfr_b, register_x_to_a_tfr_b}) {
     const std::array operations{
         detail::NativeOp{.instruction = detail::decode(opcode), .pc = start}};
-    for (const bool optimize : {false, true}) {
-      detail::JitEmitter emitter({}, optimize);
+    {
+      detail::JitEmitter emitter({});
       static_cast<void>(emitter.generate(operations));
-      require(emitter.cached_inputs() == (optimize && opcode != no_snapshot),
+      require(emitter.cached_inputs() == (opcode != no_snapshot),
               "SIMD snapshot admission follows overwritten live operands, not application names");
     }
   }
 }
 
-template <Backend Kind> void typed_backend() {
+void consumer_memory() {
   std::array<Word, memory_words> p{};
   std::array<Word, memory_words> x{};
   std::array<Word, memory_words> y{};
-  constexpr auto conflicting = Kind == Backend::jit ? Backend::reference : Backend::jit;
-  BackendCore<Kind> core({.program = p, .x = x, .y = y}, nullptr, {.backend = conflicting});
+  TestCore core({.program = p, .x = x, .y = y});
   constexpr Word mac = 0x2000d2;
   constexpr Word shift = 0x200022;
   constexpr Word address = 16;
@@ -189,13 +185,11 @@ template <Backend Kind> void typed_backend() {
     ++expected.pc;
     core.set_registers(initial);
     const auto result = core.run(1);
-    require(result.dispatches == 1 && result.fault.kind == FaultKind::none &&
+    require(result.retired == 1 && result.fault.kind == FaultKind::none &&
                 core.registers() == expected && core.progress() == result.progress,
             "Every typed backend shares exact execution and program-mutation contracts");
   }
-  const auto statistics = core.jit_statistics();
-  require(statistics.native_alu_instructions == (Kind == Backend::jit ? 2U : 0U),
-          "The core type selects its implementation even when Options.backend disagrees");
+
   core.clear_code_cache();
   core.reset();
   require(core.progress() == Progress{} && core.fault().kind == FaultKind::none &&
@@ -205,7 +199,7 @@ template <Backend Kind> void typed_backend() {
 
 class Observer final : public Io {
 public:
-  Core *core = nullptr;
+  TestCore *core = nullptr;
   Registers expected;
   bool accept = true, invalidate = false, observed = false;
 
@@ -237,7 +231,7 @@ public:
 };
 
 struct CallbackInput {
-  Options options;
+  TestOptions options;
   std::size_t operation = 0;
   Word mode = 0;
   unsigned action = 0;
@@ -250,7 +244,7 @@ void callback(const CallbackInput input) {
   Observer observer;
   observer.accept = input.action != 2;
   observer.invalidate = input.action == 1;
-  Core core({.program = p, .x = x, .y = y}, &observer, input.options);
+  TestCore core({.program = p, .x = x, .y = y}, &observer, input.options);
   observer.core = &core;
   const auto opcode = io_operations.at(input.operation);
   constexpr Word mac_a = 0x2000d2;
@@ -272,7 +266,7 @@ void callback(const CallbackInput input) {
   const auto result = core.run(4);
   require(observer.observed, "An I/O helper observes exact state before all six bank overwrites");
   if (!observer.accept) {
-    require(result.dispatches == 2 && result.progress.instructions == 2 &&
+    require(result.retired == 2 && result.progress.instructions == 2 &&
                 result.fault.kind == FaultKind::io_read && result.fault.pc == start + 2,
             "A rejected helper does not consume undefined SIMD snapshots or retire its ALU");
     return;
@@ -284,14 +278,9 @@ void callback(const CallbackInput input) {
   old = expected;
   sequence_model::alu(expected, old, observer.invalidate ? 0U : round_b);
   ++expected.pc;
-  require(result.dispatches == 4 && result.progress.instructions == 4 &&
+  require(result.retired == 4 && result.progress.instructions == 4 &&
               result.fault.kind == FaultKind::none && core.registers() == expected,
           "All live banks reload pre-transfer inputs after SIMD-clobbering helpers");
-  if (input.options.backend == Backend::jit && input.options.optimize) {
-    const auto statistics = core.jit_statistics();
-    require(statistics.native_alu_instructions == 4 && statistics.helper_instructions == 0,
-            "The snapshot helper test really resumes native ALU execution");
-  }
 }
 
 struct ReuseProbe {
@@ -391,7 +380,6 @@ void helper_reuse_case(const native::Direct &code,
   probe.cpu = &cpu;
   detail::NativeContext context{.runtime = runtime,
                                 .exit_requested = &probe.dirty,
-                                .native_moves = &probe.moves,
                                 .budget = static_cast<Word>(reuse_program.size())};
   const auto count = code.enter(cpu, context);
   expected.a <<= detail::padding_bits;
@@ -427,8 +415,6 @@ void helper_reuse() {
                                          .moves = reuse_helper,
                                          .memory = {}};
         detail::JitEmitter emitter(runtime,
-                                   true,
-                                   BatchBackend::disabled,
                                    {},
                                    detail::RegionMode::ordinary,
                                    detail::LoopResidency::disabled,
@@ -449,13 +435,12 @@ void helper_reuse() {
 }
 
 void callbacks() {
-  for (const auto backend : {Backend::reference, Backend::cached, Backend::jit}) {
-    for (const bool optimize : {false, true}) {
-      if (backend != Backend::jit && !optimize) { continue; }
+  for (const auto backend : {Backend::jit}) {
+    {
       for (std::size_t operation = 0; operation < io_operations.size(); ++operation) {
         for (const auto mode : modes) {
           for (unsigned action = 0; action < 3; ++action) {
-            callback({.options = {.backend = backend, .optimize = optimize},
+            callback({.options = {.backend = backend},
                       .operation = operation,
                       .mode = mode,
                       .action = action});
@@ -485,9 +470,7 @@ int main() {
         dsp56300::test::extended_copy({.source = source, .destination = destination});
       }
     }
-    dsp56300::test::typed_backend<dsp56300::Backend::reference>();
-    dsp56300::test::typed_backend<dsp56300::Backend::cached>();
-    dsp56300::test::typed_backend<dsp56300::Backend::jit>();
+    dsp56300::test::consumer_memory();
     dsp56300::test::callbacks();
     dsp56300::test::helper_reuse();
     std::cout << dsp56300::test::checks << " native input snapshot checks passed\n";

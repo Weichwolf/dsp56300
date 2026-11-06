@@ -283,8 +283,8 @@ BinaryCase repeated(const Input input, const Repetition repetition) {
   const bool completed = iterations == count;
   item.expected.pc = start + (completed ? 2U : 1U);
   item.expected.lc = completed ? item.initial.lc : count - iterations;
-  item.interruptible = completed;
-  item.budget = item.dispatches = budget;
+  item.interrupt_ready = completed;
+  item.budget = item.retired = budget;
   const auto cost = input.kind == Kind::divide ? 1U : 5U;
   item.progress = {.instructions = budget, .estimated_cycles = 5 + (cost * iterations)};
   item.name += "; exact REP prefix and current Carry/CCR dependence";
@@ -445,7 +445,7 @@ void sequence_prefixes(Cases &cases) {
         }
         ++item.expected.pc;
         ++item.budget;
-        item.dispatches = item.budget;
+        item.retired = item.budget;
         item.progress.instructions = item.budget;
         item.progress.estimated_cycles +=
             step.iterative && step.input.kind == Kind::normalize ? 5U : 1U;
@@ -482,9 +482,9 @@ void faults(Cases &cases) {
       item.initial.sr = mode;
       item.expected = item.initial;
       item.before = {{.words = {opcode(input)}, .address = start}};
-      item.dispatches = 0;
+      item.retired = 0;
       item.progress = {};
-      item.interruptible = false;
+      item.interrupt_ready = false;
       item.fault = {.kind = FaultKind::unsupported_mode,
                     .space = Space::program,
                     .address = start,
@@ -494,9 +494,9 @@ void faults(Cases &cases) {
       if (mode == saturation_model::mode || (kind == Kind::normalize && mode == compatibility)) {
         model(item.expected, input);
         ++item.expected.pc;
-        item.dispatches = 1;
+        item.retired = 1;
         item.progress = {.instructions = 1, .estimated_cycles = kind == Kind::divide ? 1U : 5U};
-        item.interruptible = true;
+        item.interrupt_ready = true;
         item.fault = {};
         item.name = "DIV/NORM qualified SM or SC mode preserves architectural semantics";
       }

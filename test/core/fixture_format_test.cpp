@@ -72,11 +72,11 @@ void round_trip(const std::filesystem::path &path) {
     const bool processing = version != FixtureVersion::legacy;
     BinaryCase item;
     if (processing) {
-      item.state = ProcessingState::waiting;
+      item.state = ExecutionState::waiting;
       item.reset_actions = {{.pc = action_pc, .accepted = true}};
     }
     if (version == FixtureVersion::debugging) {
-      item.state = ProcessingState::debugging;
+      item.state = ExecutionState::debugging;
       item.debug.software_occurrence = true;
     }
     write_fixture(path, {item}, version);
@@ -183,7 +183,7 @@ void invalid_debug_records(const std::filesystem::path &path) {
 void reject_legacy_extensions(const std::filesystem::path &path) {
   for (unsigned choice = 0; choice < 3; ++choice) {
     BinaryCase item;
-    if (choice == 0) { item.state = ProcessingState::waiting; }
+    if (choice == 0) { item.state = ExecutionState::waiting; }
     if (choice == 1) { item.reset_actions = {{.pc = action_pc}}; }
     if (choice == 2) { item.fault.kind = FaultKind::host_event; }
     bool failed = false;

@@ -60,7 +60,7 @@ BinaryCase base(const Input input) {
                   .address = exception_model::vector(input)},
                  {.words = {adc_x_a, round_a, rti}, .address = exception_model::service}};
   item.progress.estimated_cycles = exception_model::cycles(input);
-  item.interruptible = !exception_model::requested(input, input.status);
+  item.interrupt_ready = !exception_model::requested(input, input.status);
   item.name =
       "Software exception request; opcode=" + std::to_string(exception_model::opcode(input)) +
       "; status=" + std::to_string(input.status);
@@ -87,11 +87,11 @@ void long_sequence(Cases &cases, const Input input) {
   const bool requested = exception_model::requested(input, input.status);
   for (unsigned phase = 0; phase < 6; ++phase) {
     Word cost = 1;
-    item.interruptible = true;
+    item.interrupt_ready = true;
     if (phase == 0) {
       ++item.expected.pc;
       cost = exception_model::cycles(input);
-      item.interruptible = !requested;
+      item.interrupt_ready = !requested;
     } else if (!requested) {
       ++item.expected.pc;
     } else if (phase == 1) {
@@ -100,7 +100,7 @@ void long_sequence(Cases &cases, const Input input) {
     } else if (phase == 4) {
       exception_model::leave(item.expected);
       cost = 3;
-      item.interruptible = false;
+      item.interrupt_ready = false;
     } else {
       if (phase < 4) {
         const auto old = item.expected;
@@ -108,7 +108,7 @@ void long_sequence(Cases &cases, const Input input) {
       }
       ++item.expected.pc;
     }
-    item.dispatches = ++item.budget;
+    item.retired = ++item.budget;
     item.progress.instructions = item.budget;
     item.progress.estimated_cycles += cost;
     item.name = "Software exception long service and RTI: every budget prefix and condition";
@@ -136,11 +136,11 @@ void fast_sequence(Cases &cases, const Input input, const bool immediate) {
   const unsigned length = immediate ? 3U : 4U;
   for (unsigned phase = 0; phase < length; ++phase) {
     Word cost = 1;
-    item.interruptible = false;
+    item.interrupt_ready = false;
     if (phase == 0) {
       ++item.expected.pc;
       cost = exception_model::cycles(input);
-      item.interruptible = !requested;
+      item.interrupt_ready = !requested;
     } else if (requested && phase == 1) {
       item.expected.pc = exception_model::resume(input, start);
       if (immediate) {
@@ -155,9 +155,9 @@ void fast_sequence(Cases &cases, const Input input, const bool immediate) {
       sequence_model::alu(item.expected, old, mac_b);
     } else {
       ++item.expected.pc;
-      item.interruptible = true;
+      item.interrupt_ready = true;
     }
-    item.dispatches = ++item.budget;
+    item.retired = ++item.budget;
     item.progress.instructions = item.budget;
     item.progress.estimated_cycles += cost;
     item.name =
@@ -193,17 +193,17 @@ void repeated_illegal(Cases &cases, const Input input, const Word encoded) {
     if (budget == 1) { item.expected.lc = encoded; }
     item.progress = {.instructions = budget,
                      .estimated_cycles = 5 + (std::uint64_t{iterations} * 5)};
-    item.interruptible = false;
+    item.interrupt_ready = false;
     for (Word extra = count + 1; extra < budget; ++extra) {
       const Word phase = extra - count;
       if (phase == 1) {
         exception_model::enter(item.expected, start + 3);
         item.progress.estimated_cycles += 3;
-        item.interruptible = true;
+        item.interrupt_ready = true;
       } else if (phase == 4) {
         exception_model::leave(item.expected);
         item.progress.estimated_cycles += 3;
-        item.interruptible = false;
+        item.interrupt_ready = false;
       } else {
         const auto old = item.expected;
         sequence_model::alu(item.expected, old, phase == 2 ? adc_x_a : round_a);
@@ -211,7 +211,7 @@ void repeated_illegal(Cases &cases, const Input input, const Word encoded) {
         ++item.progress.estimated_cycles;
       }
     }
-    item.budget = item.dispatches = budget;
+    item.budget = item.retired = budget;
     item.name = "REP ILLEGAL coalesces one exception, defers vector entry and returns past the "
                 "skipped word";
     cases.push_back(std::move(item));
@@ -235,7 +235,7 @@ void repeats(Cases &cases) {
       item.expected.lc = 4;
       item.budget = 2;
       item.progress = {.instructions = 1, .estimated_cycles = 5};
-      item.interruptible = false;
+      item.interrupt_ready = false;
       item.fault = {.kind = FaultKind::invalid_instruction,
                     .address = start + 1,
                     .value = opcode,

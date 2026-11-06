@@ -37,13 +37,12 @@ struct Core::Impl {
   void admit_debug();
 
   [[nodiscard]] bool instruction_cache_active() const noexcept {
-    return (cpu.reg.sr & detail::cache_enable) != 0 &&
-           options.cacheable_begin < options.cacheable_end;
+    return (cpu.reg.sr & detail::cache_enable) != 0 && buffers.cache.begin < buffers.cache.end;
   }
 
   [[nodiscard]] bool cacheable(const Word address) const noexcept {
-    return (cpu.reg.sr & detail::cache_enable) != 0 && address >= options.cacheable_begin &&
-           address < options.cacheable_end;
+    return (cpu.reg.sr & detail::cache_enable) != 0 && address >= buffers.cache.begin &&
+           address < buffers.cache.end;
   }
 
   [[nodiscard]] detail::ProgramCache &program_cache();
@@ -52,8 +51,7 @@ struct Core::Impl {
     if ((cpu.reg.sr & detail::cache_enable) == 0) { icache.reset(); }
   }
 
-  [[nodiscard]] std::uint32_t run_repeat_native(RunBudget budget);
-  [[nodiscard]] std::uint32_t run_bounded_native(RunBudget budget);
+  [[nodiscard]] std::uint32_t run_repeat_native(std::uint32_t instructions);
   [[nodiscard]] Word fetch_program(Word address);
   [[nodiscard]] Word read_external(Space space, Word address);
   void write_external(Space space, Word address, Word value);
@@ -64,7 +62,7 @@ struct Core::Impl {
   [[nodiscard]] detail::Instruction vector_instruction();
   void call_vector(const detail::Instruction &decoded);
 
-  explicit Impl(Buffers supplied, Io *io, Options settings, bool external_memory = false);
+  explicit Impl(Buffers supplied, Io *io, bool external_memory = false);
   [[nodiscard]] static detail::Instruction decode_words(InstructionWords words,
                                                         bool complete = true);
 
@@ -78,16 +76,12 @@ struct Core::Impl {
   [[nodiscard]] Word read_memory(Space space, Word address);
   void write_memory(Space space, Word address, Word value);
   [[nodiscard]] bool overlaps_program(std::span<const Word> memory) const;
-  void invalidate_program_word(const Word *location);
+  void invalidate_program_word(const Word *location) const;
   [[nodiscard]] detail::Instruction instruction(Word pc);
   void step();
   void step_decoded(const detail::Instruction &decoded);
-  [[nodiscard]] std::uint32_t run_general(std::uint32_t budget);
-  [[nodiscard]] std::optional<detail::Instruction> budget_instruction() const;
-  [[nodiscard]] std::optional<Word> budget_word(Word address) const;
-  [[nodiscard]] BoundedRunResult run_bounded(RunBudget budget);
-  [[nodiscard]] std::optional<RunStop> budget_stop(RunBudget budget,
-                                                   const BoundedRunResult &result) const;
+  [[nodiscard]] std::optional<detail::Instruction> repeat_instruction() const;
+  [[nodiscard]] std::optional<Word> known_program_word(Word address) const;
   [[nodiscard]] static std::uint32_t jit_execute(void *owner,
                                                  const detail::NativeOp *operation) noexcept;
   void synchronize_program_view();
@@ -173,22 +167,17 @@ struct Core::Impl {
   std::unique_ptr<detail::ProgramCache> icache;
   std::array<std::uint64_t, 4> latched{};
   Buffers buffers;
-  static constexpr std::size_t page_words = 1024;
-  static constexpr std::size_t page_count = address_words / page_words;
-  using Page = std::array<detail::Instruction, page_words>;
-  std::array<std::unique_ptr<Page>, page_count> pages{};
   Word current_pc = 0;
   unsigned current_words = 1;
   detail::Instruction repeated;
   Fault fault;
   Vector vector;
-  Options options;
   bool executing = false;
   std::array<bool, 3> aliases_program{true, false, false};
   Word debug_vector = 0;
   bool external = false;
   bool yield_requested = false;
-  bool windows_bound = false, bounded_execution = false, bounded_memory_blocked = false;
+  bool windows_bound = false;
   std::uint64_t program_revision = 0;
   Word program_omr = 0;
 };

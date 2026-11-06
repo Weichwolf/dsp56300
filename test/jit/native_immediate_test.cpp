@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Independently specified R/N assignments and complete native observation boundaries.
 #include "architecture.hpp"
+#include "core_access.hpp"
 #include "dataflow.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
@@ -168,7 +169,6 @@ void direct_case(const native::Direct &code, const Shape shape, const Invocation
   cpu.repeat_completed = cpu.interrupt_inhibited = true;
   Word retired = 0;
   Word cycles = 0;
-  Word assignments = 0;
   bool repeat = true;
   while (repeat && input.budget - retired >= steps.size()) {
     repeat = false;
@@ -178,7 +178,6 @@ void direct_case(const native::Direct &code, const Shape shape, const Invocation
       model(expected, steps[index]);
       ++retired;
       cycles += length(steps[index]);
-      assignments += steps[index].selector != 0 ? 1U : 0U;
       if (ending) {
         --expected.lc;
         expected.pc = target;
@@ -187,17 +186,13 @@ void direct_case(const native::Direct &code, const Shape shape, const Invocation
     }
   }
   Probe probe;
-  std::uint64_t transfers = 0;
-  detail::NativeContext context{.runtime = {.owner = &probe, .memory = {}},
-                                .native_moves = &transfers,
-                                .budget = input.budget};
+  detail::NativeContext context{.runtime = {.owner = &probe, .memory = {}}, .budget = input.budget};
   const auto actual_retired = code.enter(cpu, context);
   cpu.reg.a >>= detail::padding_bits;
   cpu.reg.b >>= detail::padding_bits;
   require(
       actual_retired == retired && cpu.reg == expected && probe.calls == 0 &&
-          transfers == assignments && cpu.instructions == sum(maximum - 2, retired) &&
-          cpu.cycles == sum(maximum - 3, cycles),
+          cpu.instructions == sum(maximum - 2, retired) && cpu.cycles == sum(maximum - 3, cycles),
       "Helper-free constants preserve every register, dirty accumulators, PC and wrapped costs");
   require(!cpu.repeat_completed && !cpu.interrupt_inhibited,
           "Completed native prefixes retain instruction-boundary exclusion semantics");
@@ -207,7 +202,7 @@ void direct_shape(const Shape shape) {
   const auto steps = body(shape);
   const auto ops = operations(shape, steps);
   detail::JitEmitter emitter(
-      {.owner = nullptr, .execute = forbidden, .moves = forbidden, .memory = {}}, true);
+      {.owner = nullptr, .execute = forbidden, .moves = forbidden, .memory = {}});
   const native::Direct code(emitter.generate(ops));
   require(emitter.packed_retirement() == shape.mixed && emitter.cached_status() == shape.mixed,
           "Long pure regions including R/N constants retain packed retirement and status holding");
@@ -253,14 +248,14 @@ void direct_matrix() {
 }
 
 struct Machine {
-  explicit Machine(const Options options, Io *io = nullptr)
+  explicit Machine(const TestOptions options, Io *io = nullptr)
       : core({.program = p, .x = x, .y = y}, io, options) {}
 
   std::array<Word, memory_words> p{}, x{}, y{};
-  Core core;
+  TestCore core;
 };
 
-void prefixes(const Options options) {
+void prefixes(const TestOptions options) {
   for (const auto mode : modes) {
     Machine machine(options);
     const std::array steps{Step{.word = mac_a},
@@ -275,7 +270,7 @@ void prefixes(const Options options) {
     machine.core.load(Space::program, start, words);
     const auto initial = register_model::seed(mode);
     machine.core.set_registers(initial);
-    require(machine.core.run(static_cast<Word>(steps.size())).dispatches == steps.size(),
+    require(machine.core.run(static_cast<Word>(steps.size())).retired == steps.size(),
             "Warm mixed assignment/arithmetic code before partition checks");
     for (Word budget = 0; budget <= steps.size(); ++budget) {
       auto expected = initial;
@@ -287,7 +282,7 @@ void prefixes(const Options options) {
       machine.core.set_registers(initial);
       const auto base = machine.core.progress();
       const auto run = machine.core.run(budget);
-      require(run.dispatches == budget && run.fault.kind == FaultKind::none &&
+      require(run.retired == budget && run.fault.kind == FaultKind::none &&
                   machine.core.registers() == expected &&
                   run.progress == Progress{.instructions = base.instructions + budget,
                                            .estimated_cycles = base.estimated_cycles + cycles},
@@ -298,7 +293,7 @@ void prefixes(const Options options) {
     std::size_t offset = 0;
     for (const Word budget : {1U, 3U, 2U, 2U}) {
       for (const auto step : std::span(steps).subspan(offset, budget)) { model(expected, step); }
-      require(machine.core.run(budget).dispatches == budget && machine.core.registers() == expected,
+      require(machine.core.run(budget).retired == budget && machine.core.registers() == expected,
               "Partitioned assignments resume with canonical R/N and live arithmetic");
       offset += budget;
     }
@@ -307,7 +302,7 @@ void prefixes(const Options options) {
 
 class Observer final : public Io {
 public:
-  Core *core = nullptr;
+  TestCore *core = nullptr;
   Registers expected;
   Progress progress;
   Word pc = 0, extension = 0;
@@ -337,7 +332,7 @@ public:
   }
 };
 
-void callback(const Options options, const bool accept, const bool invalidate) {
+void callback(const TestOptions options, const bool accept, const bool invalidate) {
   Observer observer;
   Machine machine(options, &observer);
   observer.core = &machine.core;
@@ -366,7 +361,7 @@ void callback(const Options options, const bool accept, const bool invalidate) {
   require(observer.observed && observer.calls == 1,
           "I/O sees canonical dirty A/B, R/N, flags, PC and both retirement lanes");
   if (!accept) {
-    require(run.dispatches == prefix.size() && run.progress == observer.progress &&
+    require(run.retired == prefix.size() && run.progress == observer.progress &&
                 run.fault.kind == FaultKind::io_read &&
                 machine.core.registers() == observer.expected,
             "Rejected I/O retains the exact pre-transfer checkpoint after packed constants");
@@ -380,13 +375,13 @@ void callback(const Options options, const bool accept, const bool invalidate) {
     if (step.selector != 0 && invalidate) { step.value = datum; }
     model(expected, step);
   }
-  require(run.dispatches == 7 && run.fault.kind == FaultKind::none &&
+  require(run.retired == 7 && run.fault.kind == FaultKind::none &&
               machine.core.registers() == expected &&
               run.progress == Progress{.instructions = 7, .estimated_cycles = 10},
           "Successor extension edits invalidate embedded constants before their execution");
 }
 
-void extension_and_loops(const Options options) {
+void extension_and_loops(const TestOptions options) {
   Machine machine(options);
   auto initial = register_model::seed(mode_rm);
   const std::array instruction{encoding(23, true), 1U};
@@ -396,7 +391,7 @@ void extension_and_loops(const Options options) {
     machine.core.set_registers(initial);
     auto expected = initial;
     model(expected, assignment(r7, value, true));
-    require(machine.core.run(1).dispatches == 1 && machine.core.registers() == expected,
+    require(machine.core.run(1).retired == 1 && machine.core.registers() == expected,
             "Host extension mutation replaces every embedded low24 constant");
   }
   const std::array body_steps{Step{.word = mac_a}, assignment(19, datum), assignment(27, 1, true)};
@@ -439,7 +434,7 @@ void extension_and_loops(const Options options) {
     machine.core.set_registers(initial);
     const auto base = machine.core.progress();
     const auto run = machine.core.run(budget);
-    require(run.dispatches == budget && run.fault.kind == FaultKind::none &&
+    require(run.retired == budget && run.fault.kind == FaultKind::none &&
                 machine.core.registers() == expected &&
                 run.progress == Progress{.instructions = base.instructions + budget,
                                          .estimated_cycles = base.estimated_cycles + cycles},
@@ -447,10 +442,10 @@ void extension_and_loops(const Options options) {
   }
 }
 
-void aliased_extensions(const Options options, const bool y) {
+void aliased_extensions(const TestOptions options, const bool y) {
   std::array<Word, memory_words> shared{};
   std::array<Word, memory_words> other{};
-  Core core(
+  TestCore core(
       {.program = shared, .x = y ? other : shared, .y = y ? shared : other}, nullptr, options);
   constexpr Word boundary = 0x1ff;
   const std::array code{encoding(16, y), 1U};
@@ -458,12 +453,12 @@ void aliased_extensions(const Options options, const bool y) {
   auto initial = register_model::seed(mode_rm);
   initial.pc = boundary;
   core.set_registers(initial);
-  require(core.run(1).dispatches == 1, "Warm an immediate extension across a decode-page boundary");
+  require(core.run(1).retired == 1, "Warm an immediate extension across a decode-page boundary");
   core.write(y ? Space::y : Space::x, boundary + 1, datum);
   core.set_registers(initial);
   auto expected = initial;
   model(expected, assignment(16, datum, y));
-  require(core.run(1).dispatches == 1 && core.registers() == expected,
+  require(core.run(1).retired == 1 && core.registers() == expected,
           "Host writes through either data alias invalidate a preceding-page embedded constant");
 
   constexpr Word store = 0x446000;
@@ -480,14 +475,14 @@ void aliased_extensions(const Options options, const bool y) {
   ++expected.pc;
   model(expected, assignment(n0, datum));
   core.set_registers(initial);
-  require(core.run(4).dispatches == 4 && core.registers() == expected && shared[start + 4] == datum,
+  require(core.run(4).retired == 4 && core.registers() == expected && shared[start + 4] == datum,
           "A guest alias store replaces a planned successor extension before it executes");
 }
 
-void wrapped_and_unsupported(const Options options) {
+void wrapped_and_unsupported(const TestOptions options) {
   const MemoryArena arena;
   arena.buffers().program[0] = raw_datum;
-  Core core(arena.buffers(), nullptr, options);
+  TestCore core(arena.buffers(), nullptr, options);
   core.write(Space::program, word_mask, encoding(n7, true));
   auto initial = register_model::seed(mode_rm);
   initial.pc = word_mask;
@@ -495,14 +490,13 @@ void wrapped_and_unsupported(const Options options) {
   model(expected, assignment(n7, datum, true));
   core.set_registers(initial);
   const auto run = core.run(1);
-  require(run.dispatches == 1 && run.fault.kind == FaultKind::none &&
-              core.registers() == expected &&
+  require(run.retired == 1 && run.fault.kind == FaultKind::none && core.registers() == expected &&
               run.progress == Progress{.instructions = 1, .estimated_cycles = 2},
           "A wrapped P extension supplies a native constant and advances PC/cost exactly");
   initial.sr = mode_down | mode_up;
   core.set_registers(initial);
   const auto failed = core.run(1);
-  require(failed.dispatches == 0 && failed.fault.kind == FaultKind::unsupported_mode &&
+  require(failed.retired == 0 && failed.fault.kind == FaultKind::unsupported_mode &&
               core.registers().n == initial.n && failed.progress == run.progress,
           "Unsupported numeric modes retain general rejection before native constant assignment");
 }
@@ -513,10 +507,9 @@ int main() {
   try {
     dsp56300::test::admission();
     dsp56300::test::direct_matrix();
-    for (const auto backend :
-         {dsp56300::Backend::reference, dsp56300::Backend::cached, dsp56300::Backend::jit}) {
-      for (const auto limit : {1U, 2U, 4U, 64U}) {
-        const dsp56300::Options options{.backend = backend, .instructions_per_block = limit};
+    for (const auto backend : {dsp56300::Backend::jit}) {
+      {
+        const dsp56300::TestOptions options{.backend = backend};
         dsp56300::test::prefixes(options);
         dsp56300::test::extension_and_loops(options);
         for (const bool accept : {false, true}) {
@@ -525,11 +518,11 @@ int main() {
           }
         }
       }
-      const dsp56300::Options options{.backend = backend};
+      const dsp56300::TestOptions options{.backend = backend};
       dsp56300::test::wrapped_and_unsupported(options);
       for (const bool y : {false, true}) { dsp56300::test::aliased_extensions(options, y); }
     }
-    dsp56300::test::prefixes({.backend = dsp56300::Backend::jit, .optimize = false});
+    dsp56300::test::prefixes({.backend = dsp56300::Backend::jit});
     std::cout << dsp56300::test::checks << " independent native address-immediate checks passed\n";
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';

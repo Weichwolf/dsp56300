@@ -2,6 +2,7 @@
 // Resume the original IIR at independently predicted instruction boundaries.
 #include "backend_support.hpp"
 #include "binary_fixture.hpp"
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "fixture_memory.hpp"
@@ -38,15 +39,15 @@ void observe_prefix(Implementation &core,
                     const Word previous) {
   auto expected = memory.initial;
   patch(expected, item.after);
-  const auto dispatches = item.budget - previous;
-  const auto result = core.run(dispatches);
-  require(result.dispatches == dispatches && result.fault.kind == FaultKind::none &&
-              result.progress == item.progress && result.state == ProcessingState::running,
+  const auto retired = item.budget - previous;
+  const auto result = core.run(retired);
+  require(result.retired == retired && result.fault.kind == FaultKind::none &&
+              result.progress == item.progress && result.state == ExecutionState::running,
           "Resumed IIR retains exact cumulative progress and dispatch boundaries");
   require(core.registers() == item.expected && memory.current == expected,
           "Every resumed IIR observation matches independent registers, flags, frames and all RAM");
-  require(core.interruptible() == item.interruptible && core.debug_status() == item.debug,
-          "A stopped IIR prefix preserves the declared interrupt/debug contract");
+  require(core.interrupt_ready() == item.interrupt_ready,
+          "A stopped IIR prefix preserves the declared interrupt contract");
 }
 
 template <CoreImplementation Implementation>
@@ -71,13 +72,6 @@ void group(const std::span<const BinaryCase> items, const Backend backend) {
   }
   require((core.registers().sr & (Word{1} << 15)) == 0,
           "The last resumed instruction completes the loop and restores the outer frame");
-  if (backend == Backend::jit) {
-    const auto statistics = core.jit_statistics();
-    require(statistics.native_alu_instructions + statistics.helper_instructions == previous,
-            "Resumed native/helper counters charge each instruction exactly once");
-    require(statistics.batch_instructions == 0,
-            "Causal multi-instruction IIR loops never enter the independent-product MAC batch");
-  }
 }
 
 template <CoreImplementation Implementation>
@@ -104,12 +98,9 @@ int main(const int argc, const char *const *const argv) {
   try {
     if (argc != 2) { throw std::runtime_error("Usage: dsp56300_iir_resume_test FILE.d56"); }
     const auto cases = dsp56300::test::read_fixture(argv[1]);
-    dsp56300::test::check<dsp56300::BackendCore<dsp56300::Backend::reference>>(
-        cases, dsp56300::Backend::reference);
-    dsp56300::test::check<dsp56300::BackendCore<dsp56300::Backend::cached>>(
-        cases, dsp56300::Backend::cached);
-    dsp56300::test::check<dsp56300::BackendCore<dsp56300::Backend::jit>>(cases,
-                                                                         dsp56300::Backend::jit);
+    dsp56300::test::check<dsp56300::TestCore>(cases, dsp56300::Backend::jit);
+    dsp56300::test::check<dsp56300::TestCore>(cases, dsp56300::Backend::jit);
+    dsp56300::test::check<dsp56300::TestCore>(cases, dsp56300::Backend::jit);
     std::cout << "864 original IIR resume scenarios, 19872 observations; " << dsp56300::test::checks
               << " checks passed\n";
   } catch (const std::exception &error) {

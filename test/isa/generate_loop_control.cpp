@@ -145,7 +145,7 @@ BinaryCase entry(const Input input) {
   }
   if (rep) {
     state.lc = loaded;
-    item.interruptible = false;
+    item.interrupt_ready = false;
   } else {
     state.lc = loaded;
     stack_push(state, (std::uint64_t{start + words} << word_bits) | state.sr);
@@ -224,8 +224,8 @@ void repeated(Cases &cases, const Input input) {
     const bool finished = iterations == loaded;
     result.expected.lc = finished ? item.initial.lc : loaded - iterations;
     result.expected.pc = start + (finished ? 2U : 1U);
-    result.interruptible = finished;
-    result.budget = result.dispatches = 1 + iterations;
+    result.interrupt_ready = finished;
+    result.budget = result.retired = 1 + iterations;
     result.progress = {.instructions = result.budget, .estimated_cycles = 5 + iterations};
     cases.push_back(std::move(result));
   }
@@ -254,9 +254,9 @@ void repeat_sequences(Cases &cases) {
     }
     item.expected.lc = item.initial.lc;
     item.expected.pc = start + 2;
-    item.budget = item.dispatches = repeat_zero + 1;
+    item.budget = item.retired = repeat_zero + 1;
     item.progress = {.instructions = item.budget, .estimated_cycles = repeat_zero + 5};
-    item.interruptible = true;
+    item.interrupt_ready = true;
     cases.push_back(std::move(item));
   }
 }
@@ -280,8 +280,8 @@ void zero_repeat_counter_reads(Cases &cases) {
       item.expected.lc = iterations == 0 ? 0U : repeat_zero - iterations;
       if (completed) { item.expected.lc = item.initial.lc; }
       item.expected.pc = start + (completed ? 2U : 1U);
-      item.interruptible = completed;
-      item.budget = item.dispatches = budget;
+      item.interrupt_ready = completed;
+      item.budget = item.retired = budget;
       item.progress = {.instructions = budget, .estimated_cycles = budget + 4};
       item.name = "REP zero: LC initially zero, first/subsequent body reads, 65536 iterations, "
                   "captured count";
@@ -318,7 +318,7 @@ BinaryCase forever_run(const Input input, const Execution execution) {
       state.pc = start + 2;
     }
   }
-  item.budget = item.dispatches = budget;
+  item.budget = item.retired = budget;
   item.progress = {.instructions = budget, .estimated_cycles = budget + 3};
   item.name = "FOREVER finite host budget, zero/one/wrapping LC, native ending";
   return item;
@@ -505,7 +505,7 @@ BinaryCase nested(const Nesting input) {
   for (Word retired = 1; retired < input.budget; ++retired) {
     cycles += nested_step(state, input, (retired - 1) % 7);
   }
-  item.budget = item.dispatches = input.budget;
+  item.budget = item.retired = input.budget;
   item.progress = {.instructions = input.budget, .estimated_cycles = cycles};
   item.name = "Nested finite/FOREVER DO/DOR with BRK: all execution prefixes and outer LF/FV";
   return item;
@@ -530,9 +530,9 @@ BinaryCase rejected(const Word instruction, const Fault fault) {
   item.initial = register_model::seed(0);
   item.expected = item.initial;
   item.before = {{.words = {instruction, last}, .address = start}};
-  item.dispatches = 0;
+  item.retired = 0;
   item.progress = {};
-  item.interruptible = false;
+  item.interrupt_ready = false;
   item.fault = fault;
   item.name = "Explicit unsupported count/mode, stack or memory boundary";
   return item;

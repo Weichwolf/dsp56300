@@ -45,21 +45,18 @@ struct JitRuntime {
 struct NativeContext {
   JitRuntime runtime;
   bool *exit_requested = nullptr;
-  std::uint64_t *native_moves = nullptr;
-  std::uint64_t *batch_instructions = nullptr, *avx2_instructions = nullptr, *batch_calls = nullptr;
   std::array<std::uint8_t *, 2> write_known{};
   std::uint32_t budget = 0;
 };
 
 class Jit {
 public:
-  Jit(Cpu &cpu, std::span<const Word> program, Options options, JitRuntime runtime);
+  Jit(Cpu &cpu, std::span<const Word> program, JitRuntime runtime);
   ~Jit();
   Jit(const Jit &) = delete;
   Jit &operator=(const Jit &) = delete;
   [[nodiscard]] static bool available() noexcept;
   [[nodiscard]] std::uint32_t run(std::uint32_t budget);
-  [[nodiscard]] std::uint32_t run_bounded(std::uint32_t instructions, std::uint64_t cycles);
   [[nodiscard]] std::uint32_t run_repeat(NativeOp operation, std::uint32_t budget);
   [[nodiscard]] std::uint32_t run_captured(NativeOp operation);
   [[nodiscard]] bool exit_requested() const noexcept;
@@ -67,8 +64,6 @@ public:
   void invalidate() noexcept;
   void bind_windows(std::array<std::span<const MemoryWindow>, 2> windows) noexcept;
   void reset();
-  void helper_retired() noexcept;
-  [[nodiscard]] JitStatistics statistics() const noexcept;
 
 private:
   struct Impl;

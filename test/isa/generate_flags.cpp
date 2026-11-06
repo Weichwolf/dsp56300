@@ -96,7 +96,7 @@ BinaryCase generate(const Sequence &sequence, const Input input) {
     item.expected.pc += step.immediate ? 2U : 1U;
     cycles += step.immediate ? 2U : 1U;
   }
-  item.budget = item.dispatches = static_cast<Word>(input.prefix);
+  item.budget = item.retired = static_cast<Word>(input.prefix);
   item.progress = {.instructions = item.budget, .estimated_cycles = cycles};
   item.before = {{.words = std::move(program), .address = start}};
   item.name = "Independent overwritten flags seed=" + std::to_string(input.seed) +

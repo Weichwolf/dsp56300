@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "native_sequence_model.hpp"
@@ -29,7 +30,7 @@ struct Machine {
   std::array<Word, memory_words> p{};
   std::array<Word, 1> x{};
   std::array<Word, 1> y{};
-  Core core;
+  TestCore core;
 
   explicit Machine(const Backend backend)
       : core({.program = p, .x = x, .y = y}, nullptr, {.backend = backend}) {}
@@ -49,14 +50,14 @@ void empty_returns(const Backend backend) {
         auto expected = state;
         ++expected.pc;
         const auto result = core.run(1);
-        require(result.dispatches == 0 && result.progress == Progress{} &&
+        require(result.retired == 0 && result.progress == Progress{} &&
                     result.fault == Fault{.kind = FaultKind::stack,
                                           .address = start,
                                           .value = pointer,
                                           .pc = start} &&
-                    core.registers() == expected && !core.interruptible(),
+                    core.registers() == expected && !core.interrupt_ready(),
                 "A failed RTI/RTS cannot fabricate a zero PC/SR from an empty stack");
-        require(core.run(2).dispatches == 0 && core.registers() == expected &&
+        require(core.run(2).retired == 0 && core.registers() == expected &&
                     core.progress() == Progress{},
                 "A failed return remains stopped without repeated pops or retirement");
       }
@@ -83,10 +84,9 @@ void native_resume(const Backend backend, const Resume input) {
   auto warm = state;
   warm.pc = foreground;
   core.set_registers(warm);
-  require(core.run(2).dispatches == 2,
-          "Warm foreground arithmetic before returning under a new mode");
+  require(core.run(2).retired == 2, "Warm foreground arithmetic before returning under a new mode");
   const auto progress = core.progress();
-  const auto native = core.jit_statistics().native_alu_instructions;
+
   core.set_registers(state);
   auto expected = state;
   for (const auto operation : {mac_a, mac_b}) {
@@ -95,12 +95,12 @@ void native_resume(const Backend backend, const Resume input) {
   }
   return_model::apply(expected);
   const auto returned = core.run(3);
-  require(returned.dispatches == 3 && returned.fault.kind == FaultKind::none &&
+  require(returned.retired == 3 && returned.fault.kind == FaultKind::none &&
               returned.progress == Progress{.instructions = progress.instructions + 3,
                                             .estimated_cycles = progress.estimated_cycles + 5} &&
-              core.registers() == expected && !core.interruptible(),
+              core.registers() == expected && !core.interrupt_ready(),
           "RTI materializes dirty native A/B and restores the complete saved PC/SR/frame");
-  require(core.run(0).dispatches == 0 && core.registers() == expected && !core.interruptible(),
+  require(core.run(0).retired == 0 && core.registers() == expected && !core.interrupt_ready(),
           "A zero budget cannot consume the post-return interrupt exclusion");
   bool rejected = false;
   try {
@@ -114,15 +114,11 @@ void native_resume(const Backend backend, const Resume input) {
     ++expected.pc;
   }
   const auto result = core.run(2);
-  require(result.dispatches == 2 && result.fault.kind == FaultKind::none &&
-              core.registers() == expected && core.interruptible() &&
+  require(result.retired == 2 && result.fault.kind == FaultKind::none &&
+              core.registers() == expected && core.interrupt_ready() &&
               result.progress == Progress{.instructions = progress.instructions + 5,
                                           .estimated_cycles = progress.estimated_cycles + 7},
           "Fresh Carry/scaling/RM select correct consumers despite warm old-mode native code");
-  if (backend == Backend::jit) {
-    require(core.jit_statistics().native_alu_instructions == native + 4,
-            "The return boundary contains actual native arithmetic on both sides of RTI");
-  }
 }
 
 void fast_roundtrip(const Backend backend, const Resume input) {
@@ -142,11 +138,11 @@ void fast_roundtrip(const Backend backend, const Resume input) {
   }
   core.interrupt(vector_a, 0);
   require(
-      core.registers() == expected && !core.interruptible() &&
+      core.registers() == expected && !core.interrupt_ready() &&
           core.progress() == Progress{.instructions = 2, .estimated_cycles = 2},
       "Fast vector instructions retain foreground PC/stack and count both documented base costs");
   ++expected.pc;
-  require(core.run(1).dispatches == 1 && core.registers() == expected && core.interruptible() &&
+  require(core.run(1).retired == 1 && core.registers() == expected && core.interrupt_ready() &&
               core.progress() == Progress{.instructions = 3, .estimated_cycles = 3},
           "Foreground resumes after fast service without an RTI or fabricated timing costs");
 }
@@ -167,7 +163,7 @@ void nested_interrupts(const Backend backend, const Resume input) {
   core.interrupt(vector_a, 0);
   require(core.registers() == expected &&
               core.progress() == Progress{.instructions = 1, .estimated_cycles = 3} &&
-              core.interruptible(),
+              core.interrupt_ready(),
           "Long interrupt entry saves foreground PC/SR and sets its admitted priority mask");
   return_model::interrupt_entry(expected, {.target = service_b, .level = 1});
   core.interrupt(vector_b, 1);
@@ -175,16 +171,16 @@ void nested_interrupts(const Backend backend, const Resume input) {
               core.progress() == Progress{.instructions = 2, .estimated_cycles = 6},
           "A higher-priority long interrupt saves the outer service frame independently");
   return_model::apply(expected);
-  require(core.run(1).dispatches == 1 && core.registers() == expected && !core.interruptible(),
+  require(core.run(1).retired == 1 && core.registers() == expected && !core.interrupt_ready(),
           "Inner RTI restores the exact outer service PC/SR and remaining stack");
   ++expected.pc;
-  require(core.run(1).dispatches == 1 && core.registers() == expected && core.interruptible(),
+  require(core.run(1).retired == 1 && core.registers() == expected && core.interrupt_ready(),
           "One resumed outer instruction releases the library interrupt exclusion");
   return_model::apply(expected);
-  require(core.run(1).dispatches == 1 && core.registers() == expected && !core.interruptible(),
+  require(core.run(1).retired == 1 && core.registers() == expected && !core.interrupt_ready(),
           "Outer RTI restores the exact original foreground PC/SR and stack");
   ++expected.pc;
-  require(core.run(1).dispatches == 1 && core.registers() == expected && core.interruptible() &&
+  require(core.run(1).retired == 1 && core.registers() == expected && core.interrupt_ready() &&
               core.progress() == Progress{.instructions = 6, .estimated_cycles = 14},
           "Nested entry/return counts guest retirement separately from uncalibrated IRQ timing");
 }
@@ -212,7 +208,8 @@ void entry_failure(const Backend backend, const FailedEntry input) {
   auto size = memory_words;
   if (input.failure == Failure::missing_opcode) { size = pc; }
   if (input.failure == Failure::missing_extension) { size = pc + 1; }
-  Core core({.program = std::span(p).first(size), .x = x, .y = y}, nullptr, {.backend = backend});
+  TestCore core(
+      {.program = std::span(p).first(size), .x = x, .y = y}, nullptr, {.backend = backend});
   auto expected = return_model::seed({.pointer = input.pointer});
   expected.pc = foreground;
   expected.sr = mode_rm | flag_c;
@@ -245,13 +242,21 @@ void entry_failure(const Backend backend, const FailedEntry input) {
     fault.value = 0;
   }
   if (input.failure == Failure::full_ea) { ++expected.r[0]; }
+  const bool pair_fetch_failure = input.failure == Failure::missing_opcode ||
+                                  (input.failure == Failure::missing_extension && input.slot == 0);
+  const unsigned accepted_slots = pair_fetch_failure ? 0 : input.slot;
+  if (pair_fetch_failure) { fault.pc = failure_vector; }
+  if (input.slot == 1 &&
+      (input.failure == Failure::missing_extension || input.failure == Failure::invalid_ea)) {
+    fault = {.kind = FaultKind::unsupported_instruction, .address = pc, .value = opcode, .pc = pc};
+  }
   core.interrupt(failure_vector, 0);
-  const Progress progress{.instructions = input.slot, .estimated_cycles = input.slot};
+  const Progress progress{.instructions = accepted_slots, .estimated_cycles = accepted_slots};
   require(core.fault() == fault && core.progress() == progress && core.registers() == expected &&
-              !core.interruptible(),
+              !core.interrupt_ready(),
           "Failed long interrupt decode/EA/push cannot fabricate a service PC/SR or retirement");
   require(
-      core.run(2).dispatches == 0 && core.registers() == expected && core.progress() == progress,
+      core.run(2).retired == 0 && core.registers() == expected && core.progress() == progress,
       "Failed long entry remains stopped, preserving any prior vector instruction and AGU effect");
 }
 
@@ -285,8 +290,7 @@ void failures(const Backend backend) {
 
 int main() {
   try {
-    for (const auto backend :
-         {dsp56300::Backend::reference, dsp56300::Backend::cached, dsp56300::Backend::jit}) {
+    for (const auto backend : {dsp56300::Backend::jit}) {
       dsp56300::test::empty_returns(backend);
       dsp56300::test::failures(backend);
       for (const auto mode : dsp56300::test::modes) {

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 
@@ -21,7 +22,7 @@ inline constexpr Word store_x0 = 0x447000, program_store = 0x077084;
 inline constexpr Word load_post = 0x44d800, store_post = 0x445800;
 inline constexpr Word address = 0x80, port = 0xffff80;
 inline constexpr Word ce = Word{1} << 19, be = Word{1} << 10;
-inline constexpr std::array backends{Backend::reference, Backend::cached, Backend::jit};
+inline constexpr std::array backends{Backend::jit};
 enum class Operation : unsigned char { read, write, bit, reset };
 
 struct Event {

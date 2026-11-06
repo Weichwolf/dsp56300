@@ -3,7 +3,6 @@
 #include "core_impl.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
-#include "instruction_boundary.hpp"
 #include "jit.hpp"
 #include "translation.hpp"
 
@@ -13,16 +12,13 @@ namespace dsp56300 {
 std::uint32_t Core::Impl::jit_execute(void *const owner,
                                       const detail::NativeOp *const operation) noexcept {
   auto &self = *static_cast<Impl *>(owner);
-  if (self.bounded_execution && detail::requires_owner(operation->instruction)) {
-    self.bounded_memory_blocked = true;
-    return 0;
-  }
+
   self.step_decoded(operation->instruction);
   self.synchronize_program_view();
   if (self.fault.kind != FaultKind::none) { return 0; }
-  self.jit->helper_retired();
+
   const auto next = (operation->pc + operation->instruction.words) & word_mask;
-  return self.cpu.processing == ProcessingState::running &&
+  return self.cpu.processing == ExecutionState::running &&
                  (self.cpu.debug_flags & detail::debug_interrupt_pending) == 0 &&
                  self.vector.phase == VectorPhase::none && !self.instruction_cache_active() &&
                  self.cpu.reg.pc == next && self.cpu.repeat_remaining == 0 &&
@@ -36,10 +32,7 @@ std::uint32_t Core::Impl::jit_execute(void *const owner,
 std::uint32_t Core::Impl::jit_moves(void *const owner,
                                     const detail::NativeOp *const operation) noexcept {
   auto &self = *static_cast<Impl *>(owner);
-  if (self.bounded_execution && detail::requires_owner(operation->instruction)) {
-    self.bounded_memory_blocked = true;
-    return 0;
-  }
+
   self.current_pc = operation->pc;
   self.current_words = operation->instruction.words;
   self.cpu.interrupt_inhibited = false;

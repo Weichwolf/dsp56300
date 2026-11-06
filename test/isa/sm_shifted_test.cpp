@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "register_model.hpp"
@@ -45,11 +46,11 @@ struct Input {
   bool destination_b;
 };
 
-void execute(Core &core, const Input input, const Word opcode) {
+void execute(TestCore &core, const Input input, const Word opcode) {
   const auto result = input.path == Path::captured
                           ? core.run_instruction({.address = start, .opcode = opcode})
                           : core.run(1);
-  require(result.dispatches == 1 && result.fault.kind == FaultKind::none,
+  require(result.retired == 1 && result.fault.kind == FaultKind::none,
           "Dispatched, externally fetched and captured execution retire the real instruction");
 }
 
@@ -64,10 +65,10 @@ void one(const Input input) {
   if (input.path == Path::owned) {
     bus.events = {{.space = Space::program, .address = start, .value = opcode}};
   }
-  Core core(input.path == Path::owned ? Memory::external()
-                                      : Memory::separate({.program = program, .x = x, .y = y}),
-            &bus,
-            {.backend = input.backend});
+  TestCore core(input.path == Path::owned ? Memory::external()
+                                          : Memory::separate({.program = program, .x = x, .y = y}),
+                &bus,
+                {.backend = input.backend});
   auto expected = register_model::seed(input.status);
   expected.sr = input.status;
   expected.a = input.destination_b ? input.operands.source : input.operands.destination;

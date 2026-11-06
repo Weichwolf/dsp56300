@@ -2,6 +2,7 @@
 // Helper-forbidden RX execution against independent raw-width SM expectations.
 #include "architecture.hpp"
 #include "bfu_logic_model.hpp"
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
@@ -222,7 +223,7 @@ void alu_matrix() {
       const std::array steps{Step{.word = parallel_none | alu}};
       const auto ops = operations(steps, {.mode = mode});
       const detail::JitRuntime runtime{.execute = forbidden, .moves = forbidden, .memory = {}};
-      detail::JitEmitter emitter(runtime, true);
+      detail::JitEmitter emitter(runtime);
       const native::Direct code(emitter.generate(ops));
       if (!admitted(alu)) {
         rejected(code, mode);
@@ -249,7 +250,7 @@ void extension_matrix() {
       for (const Word destination : {0U, 8U}) {
         const std::array steps{Step{.word = parallel_none | form | destination}};
         const auto ops = operations(steps, {.mode = mode});
-        detail::JitEmitter emitter({.execute = forbidden, .moves = forbidden, .memory = {}}, true);
+        detail::JitEmitter emitter({.execute = forbidden, .moves = forbidden, .memory = {}});
         const native::Direct code(emitter.generate(ops));
         for (Word extension = 0; extension <= status_byte; ++extension) {
           for (const Word high : {0U, sign24}) {
@@ -278,7 +279,7 @@ void sequences() {
   for (const auto mode : modes) {
     for (const bool loop : {false, true}) {
       const auto ops = operations(steps, {.mode = mode, .loop = loop});
-      detail::JitEmitter emitter({.execute = forbidden, .moves = forbidden, .memory = {}}, true);
+      detail::JitEmitter emitter({.execute = forbidden, .moves = forbidden, .memory = {}});
       const native::Direct code(emitter.generate(ops));
       require(emitter.packed_retirement() && emitter.cached_status(),
               "SM mixed sequences use the packed counters and held status path");
@@ -304,7 +305,7 @@ void sequences() {
 void immediate_case(const Step step, const Word mode) {
   const std::array steps{step};
   const auto ops = operations(steps, {.mode = mode});
-  detail::JitEmitter emitter({.execute = forbidden, .moves = forbidden, .memory = {}}, true);
+  detail::JitEmitter emitter({.execute = forbidden, .moves = forbidden, .memory = {}});
   const native::Direct code(emitter.generate(ops));
   for (Word flags = 0; flags <= status_byte; ++flags) {
     for (const auto raw : raw_values) {
@@ -368,37 +369,22 @@ loop_expected(const Registers &initial, const std::span<const Step> steps, const
   return result;
 }
 
-void loop_case(Core &core,
-               const std::span<const Step> steps,
-               const Invocation input,
-               const Options options) {
+void loop_case(TestCore &core, const std::span<const Step> steps, const Invocation input) {
   const auto budget = input.budget;
   const auto expected = loop_expected(input.state, steps, budget);
   core.set_registers(input.state);
   const auto before = core.progress();
-  const auto counts = core.jit_statistics();
+
   const auto run = core.run(budget);
-  require(run.dispatches == budget && run.fault.kind == FaultKind::none &&
+  require(run.retired == budget && run.fault.kind == FaultKind::none &&
               core.registers() == expected &&
               run.progress == Progress{.instructions = before.instructions + budget,
                                        .estimated_cycles = before.estimated_cycles + budget +
                                                            (budget != 0 ? 4U : 0U)},
           "Every complete SM DO prefix and final general stack cleanup preserve exact state");
-  if (options.backend == Backend::jit && options.optimize) {
-    const auto after = core.jit_statistics();
-    const auto helpers = after.helper_instructions - counts.helper_instructions;
-    const auto native = after.native_alu_instructions - counts.native_alu_instructions;
-    const auto mandatory = (budget != 0 ? 1U : 0U) + (budget == 1 + (3 * steps.size()) ? 1U : 0U);
-    require(native + helpers == budget && helpers >= mandatory,
-            "Warm short-budget fallbacks charge every actual native/general retirement once");
-    if (options.instructions_per_block == 1 || budget == 1 + (3 * steps.size())) {
-      require(helpers == mandatory,
-              "Complete SM loops use native arithmetic except setup and final stack cleanup");
-    }
-  }
 }
 
-void core_loops(const Options options) {
+void core_loops(const TestOptions options) {
   constexpr std::array<Step, 4> steps{
       {{.word = 0x2000d3}, {.word = 0x200029}, {.word = 0x200036}, {.word = 0x200011}}};
   constexpr Word do_three = 0x060380;
@@ -406,7 +392,7 @@ void core_loops(const Options options) {
   std::array<Word, memory_words> p{};
   std::array<Word, memory_words> x{};
   std::array<Word, memory_words> y{};
-  Core core({.program = p, .x = x, .y = y}, nullptr, options);
+  TestCore core({.program = p, .x = x, .y = y}, nullptr, options);
   std::vector<Word> words{do_three, start + 1 + static_cast<Word>(steps.size())};
   for (const auto step : steps) { words.push_back(step.word); }
   core.load(Space::program, start, words);
@@ -417,7 +403,7 @@ void core_loops(const Options options) {
       initial.b = sign56;
       initial.x = initial.y = operands[1];
       for (Word budget = 0; budget <= budget_limit; ++budget) {
-        loop_case(core, steps, {.state = initial, .budget = budget}, options);
+        loop_case(core, steps, {.state = initial, .budget = budget});
       }
     }
   }
@@ -431,13 +417,10 @@ int main() {
     dsp56300::test::extension_matrix();
     dsp56300::test::sequences();
     dsp56300::test::immediates();
-    for (const auto backend :
-         {dsp56300::Backend::reference, dsp56300::Backend::cached, dsp56300::Backend::jit}) {
-      for (const auto limit : {1U, 4U, 64U}) {
-        dsp56300::test::core_loops({.backend = backend, .instructions_per_block = limit});
-      }
+    for (const auto backend : {dsp56300::Backend::jit}) {
+      { dsp56300::test::core_loops({.backend = backend}); }
     }
-    dsp56300::test::core_loops({.backend = dsp56300::Backend::jit, .optimize = false});
+    dsp56300::test::core_loops({.backend = dsp56300::Backend::jit});
     std::cout << dsp56300::test::checks << " independent native SM checks passed\n";
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';

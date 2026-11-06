@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "bfu_logic_model.hpp"
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "native_sequence_model.hpp"
@@ -26,14 +27,10 @@ constexpr std::array<std::uint64_t, 6> seeds{
 constexpr std::uint64_t middle_mask = std::uint64_t{word_mask} << word_bits;
 
 struct Machine {
-  explicit Machine(const bool native)
-      : core(
-            {.program = p, .x = x, .y = y}, nullptr, {.backend = Backend::jit, .optimize = native}),
-        optimize(native) {}
+  Machine() : core({.program = p, .x = x, .y = y}, nullptr, {.backend = Backend::jit}) {}
 
   std::array<Word, memory_words> p{}, x{}, y{};
-  Core core;
-  bool optimize;
+  TestCore core;
 };
 
 void word_logic(Registers &state, const Registers &old, const Input input) {
@@ -62,20 +59,15 @@ void check(Machine &machine,
            const Word budget,
            const Registers &expected) {
   machine.core.set_registers(initial);
-  const auto before = machine.core.jit_statistics();
+
   const auto progress = machine.core.progress();
   const auto result = machine.core.run(budget);
-  const auto after = machine.core.jit_statistics();
-  require(result.dispatches == budget && result.fault.kind == FaultKind::none &&
+
+  require(result.retired == budget && result.fault.kind == FaultKind::none &&
               machine.core.registers() == expected &&
               result.progress == Progress{.instructions = progress.instructions + budget,
                                           .estimated_cycles = progress.estimated_cycles + budget},
           "Word logic preserves independent per-bit results, full state, flags and prefix costs");
-  require(after.native_alu_instructions - before.native_alu_instructions ==
-                  (machine.optimize ? budget : 0) &&
-              after.helper_instructions - before.helper_instructions ==
-                  (machine.optimize ? 0 : budget),
-          "Every admitted logic instruction actually uses native code or the selected fallback");
 }
 
 struct SingleSeed {
@@ -117,8 +109,8 @@ void single_modes(Machine &machine, const Input input) {
   }
 }
 
-void single_forms(const bool optimize) {
-  Machine machine(optimize);
+void single_forms() {
+  Machine machine;
   for (const auto function : functions) {
     const unsigned sources = function == Function::complement ? 1U : 4U;
     for (unsigned source = 0; source < sources; ++source) {
@@ -168,8 +160,8 @@ void transfer_modes(Machine &machine, const Transfer transfer) {
   }
 }
 
-void parallel_transfers(const bool optimize) {
-  Machine machine(optimize);
+void parallel_transfers() {
+  Machine machine;
   for (const auto source : registers) {
     for (const auto destination : registers) {
       for (const auto function : functions) {
@@ -180,9 +172,9 @@ void parallel_transfers(const bool optimize) {
   }
 }
 
-void product_chains(const bool optimize) {
+void product_chains() {
   constexpr Word mac = 0x2000d2;
-  Machine machine(optimize);
+  Machine machine;
   for (const auto function : functions) {
     const Input input{.function = function};
     const auto logic = bfu_model::opcode(input);
@@ -212,10 +204,10 @@ void product_chains(const bool optimize) {
 
 int main() {
   try {
-    for (const bool optimize : {true, false}) {
-      dsp56300::test::single_forms(optimize);
-      dsp56300::test::parallel_transfers(optimize);
-      dsp56300::test::product_chains(optimize);
+    {
+      dsp56300::test::single_forms();
+      dsp56300::test::parallel_transfers();
+      dsp56300::test::product_chains();
     }
     std::cout << dsp56300::test::checks << " independent native word-logic checks passed\n";
   } catch (const std::exception &error) {

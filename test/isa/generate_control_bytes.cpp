@@ -73,7 +73,7 @@ void sequence(Cases &cases, const byte_model::Input input) {
     }
     ++item.expected.pc;
     ++item.budget;
-    item.dispatches = item.budget;
+    item.retired = item.budget;
     item.progress.instructions = item.budget;
     item.progress.estimated_cycles += index == 2 ? 3U : 1U;
     cases.push_back(item);
@@ -108,9 +108,9 @@ void repeated(Cases &cases, const byte_model::Input input) {
       item.expected.pc = start + (completed ? 2U : 1U);
       item.expected.lc = completed ? item.initial.lc : count + 1 - budget;
       if (budget == 1) { item.expected.lc = encoded; }
-      item.budget = item.dispatches = budget;
+      item.budget = item.retired = budget;
       item.progress = {.instructions = budget, .estimated_cycles = 5 + (3 * (budget - 1))};
-      item.interruptible = completed;
+      item.interrupt_ready = completed;
       item.name = "REP ANDI/ORI partial prefixes and zero count retain exact byte and LC state";
       cases.push_back(std::move(item));
     }

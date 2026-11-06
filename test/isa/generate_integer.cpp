@@ -93,7 +93,7 @@ BinaryCase unit(const UnitInput input, const Word repeat = 0) {
   program.push_back(opcode(input));
   for (Word iteration = 0; iteration < count; ++iteration) { model_unit(item.expected, input); }
   item.expected.pc += static_cast<Word>(program.size());
-  item.budget = item.dispatches = count + (repeat == 0 ? 0U : 1U);
+  item.budget = item.retired = count + (repeat == 0 ? 0U : 1U);
   item.progress = {.instructions = item.budget,
                    .estimated_cycles = count + (repeat == 0 ? 0U : 5U)};
   item.before = {{.words = std::move(program), .address = start}};
@@ -181,9 +181,9 @@ BinaryCase rejected(const Word instruction, const Word mode, const bool invalid 
   item.initial = register_model::seed(mode);
   item.initial.sr = mode;
   item.expected = item.initial;
-  item.dispatches = 0;
+  item.retired = 0;
   item.progress = {};
-  item.interruptible = false;
+  item.interrupt_ready = false;
   item.fault = {.kind = invalid ? FaultKind::invalid_instruction : FaultKind::unsupported_mode,
                 .space = Space::program,
                 .address = start,
@@ -239,9 +239,9 @@ void unit_cases(std::vector<BinaryCase> &cases) {
           model_unit(item.expected, {.subtract = subtract, .destination_b = destination_b});
           ++item.expected.pc;
           item.fault = {};
-          item.dispatches = 1;
+          item.retired = 1;
           item.progress = {.instructions = 1, .estimated_cycles = 1};
-          item.interruptible = true;
+          item.interrupt_ready = true;
           item.name = "Qualified SM unit arithmetic on the former unsupported stimulus";
           cases.push_back(std::move(item));
         } else {
@@ -324,7 +324,7 @@ void mixed_sequences(std::vector<BinaryCase> &cases) {
             sequence_model::alu(item.expected, old, instruction);
           }
           ++item.expected.pc;
-          item.budget = item.dispatches = static_cast<Word>(index + 1);
+          item.budget = item.retired = static_cast<Word>(index + 1);
           item.progress = {.instructions = item.budget, .estimated_cycles = item.budget};
           cases.push_back(item);
         }

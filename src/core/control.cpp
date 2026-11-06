@@ -160,15 +160,15 @@ void Core::interrupt(const Word vector, const unsigned level) {
   auto &state = impl_->cpu.reg;
   const auto mask = (state.sr >> interrupt_level_shift) & interrupt_level_mask;
   if (vector > word_mask || (vector & 1U) != 0 || level > maximum_level || level < mask ||
-      !interruptible()) {
+      !interrupt_ready()) {
     throw std::invalid_argument("DSP interrupt is not admissible at this boundary");
   }
-  impl_->cpu.processing = ProcessingState::running;
+  impl_->cpu.processing = ExecutionState::running;
   impl_->vector = {
       .resume = state.pc, .address = vector, .level = level, .phase = Impl::VectorPhase::first};
   impl_->cpu.repeat_completed = false;
   while (impl_->vector.phase != Impl::VectorPhase::none && impl_->fault.kind == FaultKind::none &&
-         impl_->cpu.processing == ProcessingState::running) {
+         impl_->cpu.processing == ExecutionState::running) {
     impl_->step_vector();
   }
 }

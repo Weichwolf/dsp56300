@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "native_sequence_model.hpp"
@@ -34,7 +35,7 @@ class Script final : public Io {
 public:
   explicit Script(std::vector<Event> expected) : expected_(std::move(expected)) {}
 
-  void bind(Core &owner, const Registers &visible, const bool mutate) {
+  void bind(TestCore &owner, const Registers &visible, const bool mutate) {
     core_ = &owner;
     visible_ = visible;
     mutate_ = mutate;
@@ -81,7 +82,7 @@ public:
   [[nodiscard]] bool complete() const { return valid_ && next_ == expected_.size(); }
 
 private:
-  Core *core_ = nullptr;
+  TestCore *core_ = nullptr;
   Registers visible_;
   bool mutate_ = false, reject_reentry_ = false;
   std::vector<Event> expected_;
@@ -95,21 +96,21 @@ struct PortInput {
   bool source_b = false, insert_one = false, absolute = false, mutate = false;
 };
 
-void check_result(Core &core,
+void check_result(TestCore &core,
                   const Script &io,
                   const PortInput input,
                   const RunResult &result,
                   const Registers &visible) {
   const auto shifted = low_shifted + (input.insert_one ? 1U : 0U);
   if (input.reject != 0) {
-    require(result.dispatches == 0 && result.progress == Progress{} &&
+    require(result.retired == 0 && result.progress == Progress{} &&
                 result.fault == Fault{.kind = FaultKind::io_write,
                                       .space = input.reject == 1 ? Space::x : Space::y,
                                       .address = input.address,
                                       .value = input.reject == 1 ? high : shifted,
                                       .pc = start},
             "VSL rejected I/O identifies the failing half and does not retire");
-    require(core.run(1).dispatches == 0 && io.complete(), "VSL fail-stop never replays I/O");
+    require(core.run(1).retired == 0 && io.complete(), "VSL fail-stop never replays I/O");
     return;
   }
   auto expected = visible;
@@ -119,11 +120,11 @@ void check_result(Core &core,
     sequence_model::flags(expected, {.full = signed56(expected.a)});
     ++expected.pc;
   }
-  require(result.dispatches == (input.mutate ? 2U : 1U) && result.fault.kind == FaultKind::none &&
+  require(result.retired == (input.mutate ? 2U : 1U) && result.fault.kind == FaultKind::none &&
               result.progress ==
                   Progress{.instructions = input.mutate ? 2U : 1U,
                            .estimated_cycles = input.absolute || input.mutate ? 2U : 1U} &&
-              core.registers() == expected && core.interruptible(),
+              core.registers() == expected && core.interrupt_ready(),
           "VSL I/O has exact retirement, preserved source/flags, and fresh successor execution");
   if (input.mutate) { require(io.reentry_rejected(), "VSL callbacks cannot reenter execution"); }
 }
@@ -142,7 +143,7 @@ void port_case(const Backend backend, const PortInput input) {
                         .accept = input.reject != 2});
   }
   Script io(std::move(requests));
-  Core core({.program = p, .x = x, .y = y}, &io, {.backend = backend});
+  TestCore core({.program = p, .x = x, .y = y}, &io, {.backend = backend});
   const auto field = input.absolute ? 6U : 3U;
   const Word instruction =
       base | (field << 11) | (input.source_b ? 0x010000U : 0U) | (input.insert_one ? 16U : 0U);
@@ -192,14 +193,14 @@ void ram_faults(const Backend backend) {
     const std::span xs{x.data(), fail_x ? target : memory_words};
     const std::span ys{y.data(), fail_x ? memory_words : target};
     Script io({});
-    Core core({.program = p, .x = xs, .y = ys}, &io, {.backend = backend});
+    TestCore core({.program = p, .x = xs, .y = ys}, &io, {.backend = backend});
     core.write(Space::program, start, base | (3U << 11));
     auto initial = register_model::seed(0);
     initial.a = accumulator;
     initial.r[0] = target;
     core.set_registers(initial);
     const auto result = core.run(1);
-    require(result.dispatches == 0 && result.progress == Progress{} &&
+    require(result.retired == 0 && result.progress == Progress{} &&
                 result.fault == Fault{.kind = FaultKind::memory_write,
                                       .space = fail_x ? Space::x : Space::y,
                                       .address = target,
@@ -210,7 +211,7 @@ void ram_faults(const Backend backend) {
     require(x[target] == (fail_x ? 0U : high) && y[target] == 0 &&
                 core.registers().r[0] == target + 1,
             "VSL exposes one address update and prior X commit on a failing Y store");
-    require(core.run(1).dispatches == 0, "A faulted VSL is not replayed");
+    require(core.run(1).retired == 0, "A faulted VSL is not replayed");
   }
 }
 
@@ -219,7 +220,7 @@ void invalid_before_io(const Backend backend) {
   std::array<Word, memory_words> x{};
   std::array<Word, memory_words> y{};
   Script io({});
-  Core core({.program = p, .x = x, .y = y}, &io, {.backend = backend});
+  TestCore core({.program = p, .x = x, .y = y}, &io, {.backend = backend});
   for (const bool immediate : {false, true}) {
     core.reset();
     const auto instruction = immediate ? base | (6U << 11) | (4U << 8) : base | (3U << 11);
@@ -231,7 +232,7 @@ void invalid_before_io(const Backend backend) {
     core.set_registers(initial);
     const auto result = core.run(1);
     require(
-        result.dispatches == 0 &&
+        result.retired == 0 &&
             result.fault.kind ==
                 (immediate ? FaultKind::invalid_instruction : FaultKind::unsupported_mode) &&
             io.complete() && core.registers().r == initial.r,
@@ -254,7 +255,7 @@ void alias_store(const Backend backend, const Alias alias, const Word displaceme
   const auto p = xp || yp ? shared_program : std::span{separate_p};
   const auto x = xp || xy ? shared_data : std::span{separate_x};
   const auto y = yp || xy ? shared_data : std::span{separate_y};
-  Core core({.program = p, .x = x, .y = y}, nullptr, {.backend = backend});
+  TestCore core({.program = p, .x = x, .y = y}, nullptr, {.backend = backend});
   const std::array program{base | (4U << 11), clear_a};
   core.load(Space::program, start, program);
   auto initial = initial_state();
@@ -270,14 +271,11 @@ void alias_store(const Backend backend, const Alias alias, const Word displaceme
   auto expected = initial;
   sequence_model::alu(expected, initial, xp || yp ? next : clear_a);
   expected.pc = start + 2;
-  require(result.dispatches == 2 && result.fault.kind == FaultKind::none &&
+  require(result.retired == 2 && result.fault.kind == FaultKind::none &&
               core.registers() == expected,
           "VSL aliased stores invalidate the translated successor before executing it");
   if (xy) {
     require(shared_data[target] == 0, "The later Y half is visible in aliased X/Y memory");
-  }
-  if (backend == Backend::jit && (xp || yp)) {
-    require(core.jit_statistics().invalidations != 0, "VSL alias stores invalidate native code");
   }
 }
 
@@ -288,11 +286,11 @@ void alias_extension(const Backend backend, const bool y_alias) {
   constexpr Word immediate_a = 0x56f400;
   std::array<Word, extension + 1> shared{};
   std::array<Word, extension + 1> other{};
-  Core core({.program = shared,
-             .x = y_alias ? std::span{other} : std::span{shared},
-             .y = y_alias ? std::span{shared} : std::span{other}},
-            nullptr,
-            {.backend = backend});
+  TestCore core({.program = shared,
+                 .x = y_alias ? std::span{other} : std::span{shared},
+                 .y = y_alias ? std::span{shared} : std::span{other}},
+                nullptr,
+                {.backend = backend});
   const std::array program{base | (4U << 11), immediate_a, Word{1}};
   core.load(Space::program, entry, program);
   auto initial = initial_state();
@@ -300,15 +298,14 @@ void alias_extension(const Backend backend, const bool y_alias) {
   initial.r[0] = extension;
   initial.pc = extension - 1;
   core.set_registers(initial);
-  require(core.run(1).dispatches == 1,
-          "VSL extension-alias successor is cached before modification");
+  require(core.run(1).retired == 1, "VSL extension-alias successor is cached before modification");
   initial.pc = entry;
   core.set_registers(initial);
   const auto result = core.run(2);
   auto expected = initial;
   expected.a = std::uint64_t{y_alias ? 0U : 2U} << word_bits;
   expected.pc = extension + 1;
-  require(result.dispatches == 2 && result.fault.kind == FaultKind::none &&
+  require(result.retired == 2 && result.fault.kind == FaultKind::none &&
               result.progress == Progress{.instructions = 3, .estimated_cycles = 5} &&
               core.registers() == expected && shared[extension] == (y_alias ? 0U : 2U),
           "VSL invalidates an aliased extension and its preceding opcode across a decode-page "
@@ -319,8 +316,7 @@ void alias_extension(const Backend backend, const bool y_alias) {
 
 int main() {
   try {
-    for (const auto backend :
-         {dsp56300::Backend::reference, dsp56300::Backend::cached, dsp56300::Backend::jit}) {
+    for (const auto backend : {dsp56300::Backend::jit}) {
       dsp56300::test::ports(backend);
       dsp56300::test::ram_faults(backend);
       dsp56300::test::invalid_before_io(backend);

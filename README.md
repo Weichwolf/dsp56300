@@ -2,7 +2,7 @@
 
 Independent DSP56300 emulator with an x86-64 JIT.
 
-C++23 · Linux x86-64 · GPL-3.0-only
+C++23 · Linux x86-64 with AVX2 · GPL-3.0-only
 
 ## Build
 
@@ -42,7 +42,8 @@ int main() {
 
 Memory is borrowed and must outlive the core. One execution thread owns each
 core. The example executes NOP and STOP; a consumer supplies its own program and
-optional I/O. Unsupported instructions or modes report explicit faults.
+optional I/O. `run()` and `step()` execute native code; `state()` gives a read-only
+snapshot. Unsupported instructions or modes report explicit faults.
 `Memory::unified` explicitly aliases P/X/Y; `Memory::separate` supplies distinct
 logical address spaces.
 

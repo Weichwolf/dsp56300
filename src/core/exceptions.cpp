@@ -99,17 +99,22 @@ void Core::Impl::step_vector() {
   const auto decoded = vector_instruction();
   if (fault.kind != FaultKind::none) { return; }
   current_words = decoded.words;
+  // The inserted vector contains exactly two words (FM 2.3.2.5/2.3.2.7).
+  // A second-slot two-word call must not consume an invented zero extension.
+  if (decoded.words == 2 && vector.phase == VectorPhase::second) {
+    fail(FaultKind::unsupported_instruction, Space::program, current_pc, decoded.opcode);
+    return;
+  }
   if (decoded.operation == Operation::call_short ||
       decoded.operation == Operation::call_effective) {
     call_vector(decoded);
   } else {
-    if ((decoded.operation != Operation::parallel && decoded.operation != Operation::nop &&
-         decoded.operation != Operation::move_peripheral_memory &&
-         decoded.operation != Operation::move_peripheral_program && !permitted_fast_move(decoded) &&
-         decoded.operation != Operation::reset_peripherals &&
-         decoded.operation != Operation::debug &&
-         decoded.operation != Operation::conditional_debug) ||
-        (decoded.words == 2 && vector.phase == VectorPhase::second)) {
+    if (decoded.operation != Operation::parallel && decoded.operation != Operation::nop &&
+        decoded.operation != Operation::move_peripheral_memory &&
+        decoded.operation != Operation::move_peripheral_program && !permitted_fast_move(decoded) &&
+        decoded.operation != Operation::reset_peripherals &&
+        decoded.operation != Operation::debug &&
+        decoded.operation != Operation::conditional_debug) {
       fail(FaultKind::unsupported_instruction, Space::program, current_pc, decoded.opcode);
       return;
     }
