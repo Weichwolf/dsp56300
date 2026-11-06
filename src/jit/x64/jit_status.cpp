@@ -13,13 +13,24 @@ using x64::Reg;
 using x64::Width;
 constexpr auto status_offset = offsetof(Cpu, reg) + offsetof(Registers, sr);
 constexpr unsigned op_or = 0x09, group_and = 4;
+constexpr unsigned shift_left = 4, shift_right = 5;
 }
 
 void JitEmitter::initialize_status() {
   if (cached_status_) { code_.load(Reg::r14, Reg::r12, status_offset, Width::dword); }
+  if (deferred_growth_shift_ != 0) {
+    code_.packed(x64::Packed::bit_xor, x64::Xmm::x12, x64::Xmm::x12);
+  }
 }
 
 void JitEmitter::materialize_status() {
+  if (deferred_growth_shift_ != 0) {
+    code_.packed_to(Reg::r9, x64::Xmm::x12);
+    code_.shift(shift_right, Reg::r9, deferred_growth_shift_);
+    code_.immediate(group_and, Reg::r9, 1, Width::dword);
+    code_.shift(shift_left, Reg::r9, 7, Width::dword);
+    merge_status(Reg::r9);
+  }
   if (cached_status_) { code_.store(Reg::r12, status_offset, Reg::r14, Width::dword); }
 }
 

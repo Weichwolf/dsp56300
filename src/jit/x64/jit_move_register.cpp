@@ -57,13 +57,22 @@ void JitEmitter::move_read_register(const Reg value, const NativeMove &move, con
   constexpr unsigned growth_width = aligned_growth_shift - padding_bits + 1;
   if (width > growth_width + scaling - up) {
     code_.mov({.destination = Reg::r9, .source = value});
-    code_.shift(shift_right, Reg::r9, growth_shift);
-    code_.mov({.destination = Reg::r10, .source = Reg::r9});
-    code_.shift(shift_right, Reg::r10, 1);
-    code_.binary(op_xor, {.destination = Reg::r9, .source = Reg::r10});
-    code_.immediate(group_and, Reg::r9, 1, Width::dword);
-    code_.shift(shift_left, Reg::r9, 7, Width::dword);
-    merge_status(Reg::r9);
+    if (deferred_growth_shift_ != 0) {
+      // Helper-free regions observe S only at exit. OR adjacent-bit changes
+      // across transfers before extracting the region's fixed scaling bit.
+      code_.shift(shift_right, Reg::r9, 1);
+      code_.binary(op_xor, {.destination = Reg::r9, .source = value});
+      code_.packed_from<64>(x64::Xmm::x7, Reg::r9);
+      code_.packed(x64::Packed::bit_or, x64::Xmm::x12, x64::Xmm::x7);
+    } else {
+      code_.shift(shift_right, Reg::r9, growth_shift);
+      code_.mov({.destination = Reg::r10, .source = Reg::r9});
+      code_.shift(shift_right, Reg::r10, 1);
+      code_.binary(op_xor, {.destination = Reg::r9, .source = Reg::r10});
+      code_.immediate(group_and, Reg::r9, 1, Width::dword);
+      code_.shift(shift_left, Reg::r9, 7, Width::dword);
+      merge_status(Reg::r9);
+    }
   }
   code_.shift(shift_arithmetic, value, main_shift + scaling - up);
   // This is the pre-transfer accumulator width, before any parallel ALU/write.

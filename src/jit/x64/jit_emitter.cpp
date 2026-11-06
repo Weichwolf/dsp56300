@@ -577,6 +577,12 @@ std::vector<std::uint8_t> JitEmitter::generate_body(const std::span<const Native
                     residency_mode_ != LoopResidency::disabled;
   loop_bank_cache_ =
       loop_residency_ && !retirement_helpers_ && residency_mode_ == LoopResidency::vectors;
+  if (coalesced_accounting_ && !retirement_helpers_) {
+    const auto mode = operations.front().mode;
+    constexpr unsigned aligned_growth_shift = 53;
+    deferred_growth_shift_ = aligned_growth_shift + ((mode & scale_down) != 0 ? 1U : 0U) -
+                             ((mode & scale_up) != 0 ? 1U : 0U);
+  }
   code_.raw(entry_landing); // ENDBR64.
   code_.raw(save_nonvolatile);
   code_.mov({.destination = Reg::r12, .source = Reg::di});

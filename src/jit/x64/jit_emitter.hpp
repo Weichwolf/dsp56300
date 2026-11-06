@@ -187,6 +187,7 @@ private:
   bool coalesced_accounting_ = false;
   bool loop_residency_ = false;
   bool loop_bank_cache_ = false;
+  unsigned deferred_growth_shift_ = 0;
   Word pending_instructions_ = 0, pending_extra_cycles_ = 0;
   NativeDataflow dataflow_;
   // Dirty implies valid. Closed resident loops seed both slots before all effects.
