@@ -2,6 +2,7 @@
 // Original overlapping Hann/FFT/mean-IQ-power stream, with explicit loop metadata.
 #pragma once
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "fft_program.hpp"
 #include "support.hpp"
 

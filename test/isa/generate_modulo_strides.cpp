@@ -2,6 +2,7 @@
 // Independent block/ring coordinates; no DSP execution or implementation helpers.
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "support.hpp"
 
 #include <array>

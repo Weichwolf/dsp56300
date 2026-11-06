@@ -2,12 +2,12 @@
 #pragma once
 
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 
 #include <bit>
 #include <cstdint>
 
 namespace dsp56300::detail {
-enum class StackOwner : std::uint8_t { operand, pcu };
 
 struct AddressForm {
   unsigned mode = 0;

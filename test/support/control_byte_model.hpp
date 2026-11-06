@@ -2,6 +2,7 @@
 // Independent per-bit byte logic; no emulator implementation or register helpers.
 #pragma once
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "register_model.hpp"
 #include "support.hpp"
 

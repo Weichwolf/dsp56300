@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "register_model.hpp"
 #include "saturation_model.hpp"
+#include "scripted_io.hpp"
 #include "shifted_model.hpp"
-#include "staged_support.hpp"
 #include "support.hpp"
 
 #include <array>
@@ -45,24 +46,11 @@ struct Input {
 };
 
 void execute(Core &core, const Input input, const Word opcode) {
-  if (input.path == Path::dispatched) {
-    const auto result = core.run(1);
-    require(result.dispatches == 1 && result.fault.kind == FaultKind::none,
-            "Shifted SM arithmetic executes one native instruction");
-    return;
-  }
-  auto result = input.path == Path::owned
-                    ? core.begin_fetch(InstructionPublication::pcu_updates)
-                    : core.begin_instruction({.address = start, .opcode = opcode},
-                                             InstructionPublication::pcu_updates);
-  constexpr unsigned maximum_effects = 16;
-  for (unsigned i = 0; i < maximum_effects && result.pending && !result.retired &&
-                       result.fault.kind == FaultKind::none;
-       ++i) {
-    result = core.advance_instruction(result.pending->ticket);
-  }
-  require(result.retired && result.fault.kind == FaultKind::none,
-          "Shifted SM arithmetic retires real owned/captured effects");
+  const auto result = input.path == Path::captured
+                          ? core.run_instruction({.address = start, .opcode = opcode})
+                          : core.run(1);
+  require(result.dispatches == 1 && result.fault.kind == FaultKind::none,
+          "Dispatched, externally fetched and captured execution retire the real instruction");
 }
 
 void one(const Input input) {
@@ -71,12 +59,15 @@ void one(const Input input) {
   std::array<Word, memory_words> y{};
   const Word opcode = input.opcode | (input.destination_b ? 8U : 0U);
   program[start] = opcode;
-  staged_test::Bus bus;
+  scripted_io::Bus bus;
   bus.pc = start;
   if (input.path == Path::owned) {
     bus.events = {{.space = Space::program, .address = start, .value = opcode}};
   }
-  Core core({.program = program, .x = x, .y = y}, &bus, {.backend = input.backend});
+  Core core(input.path == Path::owned ? Memory::external()
+                                      : Memory::separate({.program = program, .x = x, .y = y}),
+            &bus,
+            {.backend = input.backend});
   auto expected = register_model::seed(input.status);
   expected.sr = input.status;
   expected.a = input.destination_b ? input.operands.source : input.operands.destination;
@@ -118,7 +109,7 @@ int main() {
     using namespace dsp56300::test;
     for (const auto operands : values) {
       for (const auto opcode : operations) {
-        for (const auto backend : staged_test::backends) {
+        for (const auto backend : scripted_io::backends) {
           for (const auto path : {Path::dispatched, Path::owned, Path::captured}) {
             variants({.operands = operands,
                       .opcode = opcode,

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "bfu_logic_model.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "external_run_fixture.hpp"
 #include "native_sequence_model.hpp"
 #include "support.hpp"

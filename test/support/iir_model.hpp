@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Independent algebraic word-quantized recurrence; no instruction decoder or core.
 #pragma once
-#include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "support.hpp"
 
 #include <algorithm>

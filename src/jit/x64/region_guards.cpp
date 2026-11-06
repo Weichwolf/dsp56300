@@ -3,6 +3,7 @@
 
 #include "architecture.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "fields.hpp"
 #include "jit.hpp"
 #include "native_region.hpp"

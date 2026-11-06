@@ -2,6 +2,7 @@
 // Independent processing-state and guest RESET callback expectations.
 #pragma once
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "exception_model.hpp"
 #include "register_model.hpp"
 #include "support.hpp"

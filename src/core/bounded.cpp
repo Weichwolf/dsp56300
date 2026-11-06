@@ -2,6 +2,7 @@
 #include "architecture.hpp"
 #include "core_impl.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "execution_guard.hpp"
 #include "instruction.hpp"
 #include "instruction_boundary.hpp"
@@ -140,11 +141,10 @@ BoundedRunResult Core::Impl::run_bounded(const RunBudget budget) {
 }
 
 BoundedRunResult Core::run(const RunBudget budget) {
-  impl_->validate_staged_mutation();
+
   BoundedRunResult result;
   {
     const detail::ExecutionGuard guard(impl_->executing);
-    if (budget.instructions != 0 && budget.cycles != 0) { impl_->last_outcome.reset(); }
     impl_->yield_requested = false;
     impl_->synchronize_program_view();
     impl_->yield_requested = false;

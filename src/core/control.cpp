@@ -2,8 +2,8 @@
 #include "architecture.hpp"
 #include "core_impl.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "execution_guard.hpp"
-#include "hidden_retirement.hpp"
 #include "instruction.hpp"
 
 #include <cstdint>
@@ -20,49 +20,39 @@ constexpr Word stack_pointer_mask = 0x3f;
 constexpr unsigned maximum_level = 3;
 }
 
-void Core::Impl::push(const Word high, const Word low, const StackOwner owner) {
+void Core::Impl::push(const Word high, const Word low) {
   if (cpu.reg.sc >= stack_entries - 1) {
     fail(FaultKind::stack, Space::program, current_pc, cpu.reg.sp);
     return;
   }
-  if (owner == StackOwner::pcu) {
-    mark_pcu_field({.storage = RegisterStorage::sp, .mask = stack_pointer_mask});
-    mark_pcu_field({.storage = RegisterStorage::sc, .mask = (stack_entries * 2) - 1});
-    mark_pcu_field({.storage = RegisterStorage::stack,
-                    .index = static_cast<std::uint8_t>((cpu.reg.sp + 1) & (stack_entries - 1)),
-                    .mask = long_mask});
-  }
+
   cpu.reg.sp = (cpu.reg.sp + 1) & stack_pointer_mask;
   ++cpu.reg.sc;
   cpu.reg.stack[cpu.reg.sp & (stack_entries - 1)] = (std::uint64_t{high} << word_bits) | low;
-  if (owner == StackOwner::pcu) { publish_pcu(); }
 }
 
-std::uint64_t Core::Impl::pop(const StackOwner owner) {
+std::uint64_t Core::Impl::pop() {
   if (cpu.reg.sc == 0) {
     fail(FaultKind::stack, Space::program, current_pc, cpu.reg.sp);
     return 0;
   }
-  if (owner == StackOwner::pcu) {
-    mark_pcu_field({.storage = RegisterStorage::sp, .mask = stack_pointer_mask});
-    mark_pcu_field({.storage = RegisterStorage::sc, .mask = (stack_entries * 2) - 1});
-  }
+
   const auto value = cpu.reg.stack[cpu.reg.sp & (stack_entries - 1)];
   cpu.reg.sp = address_add(cpu.reg.sp, -1) & stack_pointer_mask;
   --cpu.reg.sc;
-  if (owner == StackOwner::pcu) { publish_pcu(); }
+
   return value;
 }
 
 void Core::Impl::execute_return(const Instruction &decoded) {
-  const auto frame = pop(StackOwner::pcu);
+  const auto frame = pop();
   if (fault.kind != FaultKind::none) { return; }
-  mark_control_transfer();
+
   cpu.reg.pc = static_cast<Word>(frame >> word_bits);
   if (decoded.operation == Operation::return_interrupt) {
-    mark_pcu_field({.storage = RegisterStorage::sr, .mask = word_mask});
+
     cpu.reg.sr = static_cast<Word>(frame) & word_mask;
-    mark_hidden(RetirementField::interrupt_inhibited);
+
     cpu.interrupt_inhibited = true;
   }
 }
@@ -140,12 +130,10 @@ void Core::Impl::execute_operation(const Instruction &decoded) {
       const unsigned shift = field == 0 || field == 3 ? control_byte_shift : 0;
       const auto value = ((opcode >> control_byte_shift) & 0xff) << shift;
       const Word byte_mask = Word{0xff} << shift;
-      begin_unit(RegisterUnit::control_byte);
-      mark_unit_field(
-          {.storage = field >= 2 ? RegisterStorage::omr : RegisterStorage::sr, .mask = byte_mask});
+
       target = decoded.operation == Operation::and_control ? target & (value | ~byte_mask)
                                                            : target | value;
-      publish_unit();
+
       return;
     }
     case Operation::repeat_immediate:
@@ -167,7 +155,7 @@ void Core::Impl::execute_operation(const Instruction &decoded) {
 }
 
 void Core::interrupt(const Word vector, const unsigned level) {
-  impl_->validate_staged_mutation();
+
   const ExecutionGuard guard(impl_->executing);
   auto &state = impl_->cpu.reg;
   const auto mask = (state.sr >> interrupt_level_shift) & interrupt_level_mask;

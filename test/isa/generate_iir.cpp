@@ -2,6 +2,7 @@
 // Original causal biquad cascade and independent architectural/algorithm oracles.
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "iir_model.hpp"
 #include "iir_program.hpp"
 #include "native_sequence_model.hpp"

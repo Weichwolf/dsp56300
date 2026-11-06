@@ -2,6 +2,7 @@
 // Independent bit, raw-register and control-flow expectations; no DSP execution.
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "register_model.hpp"
 #include "support.hpp"
 

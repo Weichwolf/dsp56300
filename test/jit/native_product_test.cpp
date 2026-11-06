@@ -2,6 +2,7 @@
 // Independent raw56 witnesses for native product coordinates and old-zero sums.
 #include "architecture.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
 #include "jit_emitter.hpp"

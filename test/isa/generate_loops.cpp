@@ -2,6 +2,7 @@
 // Counted arithmetic recurrence and explicit loop frames; no emulator execution.
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
 #include "support.hpp"

@@ -2,6 +2,7 @@
 // Independent per-bit stack-frame reconstruction, with raw architectural fields.
 #pragma once
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "register_model.hpp"
 #include "support.hpp"
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Original driven feedback cascade with continuously retained quantized history.
 #pragma once
-#include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "iir_program.hpp"
 #include "iir_stream_program.hpp"
 #include "support.hpp"

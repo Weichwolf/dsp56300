@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Own Q1.23 cosine/negative-sine table; 70-digit decimal Taylor evaluation.
 #pragma once
-#include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 
 #include <array>
 

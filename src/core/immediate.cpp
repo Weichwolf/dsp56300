@@ -2,6 +2,7 @@
 #include "architecture.hpp"
 #include "core_impl.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "fields.hpp"
 #include "instruction.hpp"
 
@@ -34,7 +35,7 @@ void Core::Impl::execute_immediate(const Instruction &decoded) {
     case 6: result &= input; break;
     default: fail(FaultKind::invalid_instruction, Space::program, current_pc, opcode); return;
   }
-  mark_alu_accumulator(destination_b, main_mask >> padding_bits);
+
   destination = (destination & ~main_mask) | (std::uint64_t{result} << main_shift);
   logical_flags(result);
 }

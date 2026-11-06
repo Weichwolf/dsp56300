@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "dataflow.hpp"
 
-#include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "fields.hpp"
 #include "instruction.hpp"
 #include "native_moves.hpp"

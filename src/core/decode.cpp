@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "bit_instruction.hpp"
-#include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "encoding.hpp"
 #include "fields.hpp"
 #include "instruction.hpp"

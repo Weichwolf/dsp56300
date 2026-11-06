@@ -3,12 +3,12 @@
 
 #include "bfu_logic_model.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "native_sequence_model.hpp"
 #include "support.hpp"
 
 #include <chrono>
 #include <initializer_list>
-#include <stdexcept>
 
 namespace dsp56300::test::external_run {
 bool Bus::read(const Space space, const Word index, const Word pc, Word &value) noexcept {
@@ -87,19 +87,6 @@ void Bus::program(const Word first, const std::initializer_list<Word> words) {
 }
 
 namespace {
-void complete_owned(Core &core, InstructionProgress progress) {
-  for (unsigned effects = 0; !progress.retired && effects < 32; ++effects) {
-    if (!progress.pending || progress.fault.kind != FaultKind::none) {
-      throw std::runtime_error("Authored external-Io staged workload fault");
-    }
-    progress = core.advance_instruction(progress.pending->ticket);
-  }
-  require(progress.retired, "The authored staged workload retires its actual instruction");
-}
-
-void execute_staged(Core &core, const unsigned count) {
-  for (unsigned index = 0; index < count; ++index) { complete_owned(core, core.begin_fetch()); }
-}
 
 void execute_synchronous(Core &core, const unsigned count, const bool single_step) {
   const auto calls = single_step ? count : 1U;
@@ -125,8 +112,7 @@ Registers expected_workload(Registers state, const Workload input, const unsigne
 }
 }
 
-Timing
-workload(const Workload input, const Backend backend, const bool staged, const bool single_step) {
+Timing workload(const Workload input, const Backend backend, const bool single_step) {
   constexpr unsigned count = 4096;
   Bus bus;
   bus.record = false;
@@ -140,11 +126,7 @@ workload(const Workload input, const Backend backend, const bool staged, const b
   core.set_registers(initial);
   const auto expected = expected_workload(initial, input, count);
   const auto begin = std::chrono::steady_clock::now();
-  if (staged) {
-    execute_staged(core, count);
-  } else {
-    execute_synchronous(core, count, single_step);
-  }
+  execute_synchronous(core, count, single_step);
   const auto seconds =
       std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count();
   require(
@@ -171,16 +153,15 @@ Timing captured_workload(const Workload input, const Backend backend, const bool
   const auto expected = expected_workload(initial, input, count);
   const auto begin = std::chrono::steady_clock::now();
   for (unsigned index = 0; index < count; ++index) {
-    complete_owned(core,
-                   core.begin_instruction({.address = origin + index, .opcode = input.opcode},
-                                          InstructionPublication::pcu_updates));
+    require(core.run_instruction({.address = origin + index, .opcode = input.opcode}).dispatches ==
+                1,
+            "The supplied real opcode retires once without a program fetch");
   }
   const auto seconds =
       std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count();
-  require(
-      core.registers() == expected &&
-          core.progress() == Progress{.instructions = count, .estimated_cycles = count},
-      "Captured PCU workloads retain every independently calculated register, flag and base cost");
+  require(core.registers() == expected &&
+              core.progress() == Progress{.instructions = count, .estimated_cycles = count},
+          "Captured workloads retain every independently calculated register, flag and base cost");
   require(bus.reads == 0 && bus.writes == 0 && bus.bits == 0 && bus.resets == 0,
           "Supplied captured words cause no implicit program read or fabricated peripheral input");
   return {.seconds = seconds, .instructions = count, .reads = bus.reads};

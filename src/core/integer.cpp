@@ -2,6 +2,7 @@
 #include "architecture.hpp"
 #include "core_impl.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 
 #include <cstdint>
@@ -41,7 +42,7 @@ void Core::Impl::compare_unsigned(const Word opcode) {
   // 55 (N), unlike Z's explicit low-48 test, is set precisely on a borrow.
   if (left < right) { flags |= carry | negative; }
   constexpr Word changed = carry | negative | zero | overflow;
-  mark_alu(RegisterStorage::sr, changed);
+
   cpu.reg.sr = (cpu.reg.sr & ~changed) | flags;
 }
 } // namespace dsp56300

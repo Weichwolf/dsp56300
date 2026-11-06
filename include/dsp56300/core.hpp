@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
+#include "dsp56300/memory.hpp"
 
 #include <array>
 #include <cstddef>
@@ -10,15 +11,11 @@
 #include <span>
 
 namespace dsp56300 {
-using Word = std::uint32_t;
-inline constexpr Word word_mask = 0x00ffffff;
-inline constexpr std::size_t address_words = std::size_t{1} << 24;
 inline constexpr std::uint64_t long_mask = 0x0000ffffffffffff;
 inline constexpr std::uint64_t accumulator_mask = 0x00ffffffffffffff;
 inline constexpr std::size_t agu_registers = 8;
 inline constexpr std::size_t stack_entries = 16;
 
-enum class Space : std::uint8_t { program, x, y };
 enum class Backend : std::uint8_t { cached, reference, jit, automatic };
 enum class BatchBackend : std::uint8_t { automatic, disabled, scalar, avx2 };
 enum class ProcessingState : std::uint8_t { running, waiting, stopped, debugging };
@@ -60,15 +57,6 @@ struct Progress {
   // overhead and board/bus wait states. Not a calibrated hardware clock.
   std::uint64_t estimated_cycles = 0;
   bool operator==(const Progress &) const = default;
-};
-
-// A receipt for an actually retired staged instruction, never a prediction.
-// Explicit taken control flow remains visible even when its target is sequential.
-struct InstructionOutcome {
-  std::uint64_t instructions = 0;
-  Word address = 0, opcode = 0;
-  bool control_transfer = false;
-  bool operator==(const InstructionOutcome &) const = default;
 };
 
 struct Fault {
@@ -128,16 +116,6 @@ struct JitStatistics {
   std::uint64_t executable_bytes = 0, invalidations = 0;
   // Compiled bulk execution, included in native_alu_instructions/native moves.
   std::uint64_t batch_instructions = 0, avx2_instructions = 0, batch_calls = 0;
-};
-
-// Explicit ordinary storage grant. Empty known means all words are initialized;
-// otherwise each byte is zero for unknown or nonzero for a known 24-bit word.
-// Grants never include peripherals, side effects, wait states or unstable maps.
-struct MemoryWindow {
-  Word address = 0;
-  std::span<Word> words;
-  std::span<std::uint8_t> known;
-  bool writable = false, aliases_program = false;
 };
 
 // No derivative peripherals are implemented by this CPU library. False means a
@@ -203,184 +181,6 @@ struct InstructionFetch {
   bool exception_vector = false;
 };
 
-enum class InstructionPublication : std::uint8_t {
-  retirement,
-  address_updates,
-  move_updates,
-  alu_updates,
-  unit_updates,
-  pcu_updates
-};
-
-enum class EffectKind : std::uint8_t {
-  read,
-  write,
-  bit,
-  reset,
-  retire,
-  address_update,
-  move_update,
-  alu_update,
-  fetch_opcode,
-  fetch_extension,
-  unit_update,
-  pcu_update
-};
-
-struct AddressWriteback {
-  std::uint8_t index = 0;
-  Word previous = 0, value = 0;
-  bool operator==(const AddressWriteback &) const = default;
-};
-
-// Physical storage, in the same unshifted coordinates as Registers. The mask
-// records a native write even when its value equals the previous value.
-enum class RegisterStorage : std::uint8_t {
-  x,
-  y,
-  a,
-  b,
-  r,
-  n,
-  m,
-  sr,
-  omr,
-  la,
-  lc,
-  sp,
-  sc,
-  sz,
-  ep,
-  vba,
-  stack,
-  pc
-};
-enum class MoveProducer : std::uint8_t { register_write, accumulator_read, stack_read, long_load };
-
-struct RegisterUpdate {
-  RegisterStorage storage = RegisterStorage::x;
-  std::uint8_t index = 0;
-  std::uint64_t mask = 0, previous = 0, value = 0;
-  bool operator==(const RegisterUpdate &) const = default;
-};
-
-struct MoveWriteback {
-  MoveProducer producer = MoveProducer::register_write;
-  // Native register encoding, or the L: selector for long_load.
-  std::uint8_t selector = 0, count = 0;
-  std::array<RegisterUpdate, 3> updates{};
-  bool operator==(const MoveWriteback &) const = default;
-};
-
-// Native data-ALU/BFU and conditional-transfer results, held before PCU retirement.
-struct AluWriteback {
-  Word opcode = 0;
-  std::uint8_t count = 0;
-  std::array<RegisterUpdate, 3> updates{};
-  bool operator==(const AluWriteback &) const = default;
-};
-
-enum class RegisterUnit : std::uint8_t { bit, control_byte, address_calculation };
-
-// Actual remaining scalar-unit writes, separate from ALU/MOVE and PCU retirement.
-struct UnitWriteback {
-  RegisterUnit unit = RegisterUnit::bit;
-  Word opcode = 0;
-  std::uint8_t count = 0;
-  std::array<RegisterUpdate, 3> updates{};
-  bool operator==(const UnitWriteback &) const = default;
-};
-
-// Actual native program-control register writes; hidden state retires separately.
-struct PcuWriteback {
-  Word opcode = 0;
-  std::uint8_t count = 0;
-  std::array<RegisterUpdate, 8> updates{};
-  bool operator==(const PcuWriteback &) const = default;
-};
-
-struct InstructionEffect {
-  EffectKind kind = EffectKind::retire;
-  Space space = Space::program;
-  Word address = 0, value = 0, pc = 0, omr = 0, bit = 0;
-  BitAction action = BitAction::test;
-  // Native automatic R writeback. address is the computed EA; space is unused.
-  // This is an owned CPU publication boundary, never a host bus transaction.
-  std::optional<AddressWriteback> address_update = std::nullopt;
-  std::optional<MoveWriteback> move_update = std::nullopt;
-  std::optional<AluWriteback> alu_update = std::nullopt;
-  std::optional<UnitWriteback> unit_update = std::nullopt;
-  std::optional<PcuWriteback> pcu_update = std::nullopt;
-  bool operator==(const InstructionEffect &) const = default;
-};
-
-class EffectTicket {
-public:
-  EffectTicket(const EffectTicket &) = default;
-  EffectTicket &operator=(const EffectTicket &) = default;
-  EffectTicket(EffectTicket &&) noexcept = default;
-  EffectTicket &operator=(EffectTicket &&) noexcept = default;
-  ~EffectTicket() = default;
-
-private:
-  friend class Core;
-
-  struct Position {
-    std::uint64_t epoch;
-    std::size_t ordinal;
-  };
-
-  EffectTicket(std::shared_ptr<const bool> owner, Position position);
-  std::shared_ptr<const bool> owner_;
-  std::uint64_t epoch_ = 0;
-  std::size_t position_ = 0;
-};
-
-struct PendingInstruction {
-  EffectTicket ticket;
-  InstructionEffect effect;
-  // Actual captured opcode, absent until the native fetch has completed.
-  // It identifies the owning instruction, not a pipeline or atomicity guarantee.
-  std::optional<Word> opcode = std::nullopt;
-  // Native computation before this effect; observation is not publication.
-  Registers computed;
-};
-
-struct InstructionProgress {
-  std::optional<PendingInstruction> pending = std::nullopt;
-  Progress progress;
-  Fault fault;
-  bool retired = false;
-};
-
-// Three RAM address spaces, each word stored in uint32_t; sizes may differ.
-// Memory beyond the supplied spans faults, except I/O routed to the host.
-// Spans may overlap. The embedder owns contents/lifetime; mutate words aliasing
-// P only through Core::load/write, including accesses through X/Y spans.
-struct Buffers {
-  std::span<Word> program, x, y;
-};
-
-class Memory;
-
-// Linux virtual address reservation: 192 MiB of zero-on-demand memory, without
-// touching cold pages. Only actually accessed pages contribute to the working set.
-class MemoryArena {
-public:
-  MemoryArena();
-  ~MemoryArena();
-  MemoryArena(const MemoryArena &) = delete;
-  MemoryArena &operator=(const MemoryArena &) = delete;
-  MemoryArena(MemoryArena &&) noexcept;
-  MemoryArena &operator=(MemoryArena &&) noexcept;
-  [[nodiscard]] Buffers buffers() const noexcept;
-  [[nodiscard]] Memory memory() const;
-
-private:
-  struct Impl;
-  std::unique_ptr<Impl> impl_;
-};
-
 // Single-thread-owned CPU. Construction, cold compilation and loading may allocate.
 // The public header deliberately exposes no native dependency types.
 class Core {
@@ -389,9 +189,8 @@ public:
   // Raw-view compatibility entry; new integrations use Memory explicitly.
   explicit Core(Buffers buffers, Io *io = nullptr, Options options = {});
   // External memory owner supplies every real P/X/Y/peripheral transfer.
-  // A pure known code view enables ordinary native execution. Staged interfaces
-  // additionally expose effect boundaries. Architectural cache state remains
-  // separate from translated code; the owner pairs external bus snapshots.
+  // A pure known code view enables ordinary native execution. Architectural
+  // instruction-cache state remains separate from translated code.
   explicit Core(Io &bus, Options options = {});
   ~Core();
   Core(const Core &) = delete;
@@ -404,21 +203,6 @@ public:
   // for initialization; hidden continuation remains owned by Core.
   void set_registers(const Registers &state);
   [[nodiscard]] InstructionFetch instruction_fetch() const;
-  // Empty during an active instruction, after initialization/fault, or after
-  // nonzero atomic run.
-  [[nodiscard]] std::optional<InstructionOutcome> instruction_outcome() const noexcept;
-  [[nodiscard]] InstructionProgress
-  begin_instruction(InstructionWords words,
-                    InstructionPublication publication = InstructionPublication::retirement);
-  // Own logical opcode/extension bus reads, preserving REP's genuine opcode latch.
-  [[nodiscard]] InstructionProgress
-  begin_fetch(InstructionPublication publication = InstructionPublication::retirement);
-  [[nodiscard]] std::optional<PendingInstruction> pending_instruction() const;
-  // Actual computed instruction/cycle increment at an owned pcu_updates
-  // retirement boundary. Observation neither publishes nor performs I/O.
-  // These native base units do not establish an external bus/pipeline clock.
-  [[nodiscard]] Progress retirement_delta(const EffectTicket &ticket) const;
-  [[nodiscard]] InstructionProgress advance_instruction(const EffectTicket &ticket);
   [[nodiscard]] bool interruptible(InstructionWords words) const;
   // Eligibility needs only the captured opcode; this query performs no fetch.
   [[nodiscard]] bool interruptible_opcode(InstructionWords words) const;
@@ -447,8 +231,7 @@ public:
   // Execute exactly the captured ordinary instruction through this CPU/JIT,
   // including synchronous real Io. The caller owns its external clock delay.
   // Refuses pending vector/debug/cache fetch ownership and mismatched PC/latch.
-  // Backing code may have changed since capture. Like atomic run(), this does
-  // not expose staged publication boundaries or a staged flow receipt.
+  // Backing code may have changed since capture; the supplied words own this execution.
   [[nodiscard]] RunResult run_instruction(InstructionWords words);
   // A synchronous Io callback can return this run after actual instruction
   // retirement. Guest state and compiled code survive; no cross-thread mutation.
@@ -471,8 +254,6 @@ public:
   void clear_code_cache();
 
 private:
-  [[nodiscard]] InstructionProgress begin_owned(std::optional<InstructionWords> captured,
-                                                InstructionPublication publication);
   [[nodiscard]] bool interruptible_captured(InstructionWords words, bool complete) const;
   struct Impl;
   std::unique_ptr<Impl> impl_;

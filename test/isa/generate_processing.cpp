@@ -2,6 +2,7 @@
 // Independent processing/RESET fixtures; no emulator execution or linkage.
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "native_sequence_model.hpp"
 #include "processing_model.hpp"
 #include "support.hpp"

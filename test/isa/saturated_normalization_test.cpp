@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Public-Core normalization boundaries with independent raw-bit expectations.
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "register_model.hpp"
 #include "saturated_normalization_model.hpp"
 #include "saturated_shift_model.hpp"

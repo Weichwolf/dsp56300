@@ -2,6 +2,7 @@
 // Independent overlapping window/FFT/power expectations and direct DFT probes.
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "fft_model.hpp"
 #include "fft_program.hpp"
 #include "native_sequence_model.hpp"

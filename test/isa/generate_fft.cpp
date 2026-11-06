@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Independent radix-2 integer recurrence and direct complex DFT qualification.
 #include "binary_fixture.hpp"
-#include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "fft_model.hpp"
 #include "fft_program.hpp"
 #include "fft_twiddles.hpp"

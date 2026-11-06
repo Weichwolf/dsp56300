@@ -2,6 +2,7 @@
 // Independent continuous driven-feedback expectations; never links an emulator.
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "nonlinear_stream_model.hpp"
 #include "nonlinear_stream_program.hpp"
 #include "register_model.hpp"

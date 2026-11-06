@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "backend_support.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "register_model.hpp"
 #include "support.hpp"
 
@@ -18,15 +19,10 @@ using dsp56300::test::require;
 constexpr Word vector = 0x54, foreground = 0x100;
 constexpr Word wait_opcode = 0x86, stop_opcode = 0x87, repeat_two = 0x0602a0;
 constexpr Word move_seven = 0x320700, move_nine = 0x320900;
-constexpr unsigned effect_bound = 32, level_shift = 8, maximum_level = 3;
+constexpr unsigned level_shift = 8, maximum_level = 3;
 constexpr std::array backends{
     Backend::reference, Backend::cached, Backend::jit, Backend::automatic};
-constexpr std::array policies{InstructionPublication::retirement,
-                              InstructionPublication::address_updates,
-                              InstructionPublication::move_updates,
-                              InstructionPublication::alu_updates,
-                              InstructionPublication::unit_updates,
-                              InstructionPublication::pcu_updates};
+
 static_assert(CoreImplementation<BackendCore<Backend::automatic>>);
 
 class Bus final : public Io {
@@ -88,19 +84,10 @@ Registers initial() {
   return result;
 }
 
-void finish(Core &core, InstructionProgress result) {
-  for (unsigned effect = 0; effect < effect_bound; ++effect) {
-    require(result.fault.kind == FaultKind::none, "An admitted vector has no fabricated fault");
-    if (result.retired) { return; }
-    const auto pending = core.pending_instruction();
-    if (!pending) { throw std::runtime_error("An unfinished instruction lost its owned effect"); }
-    result = core.advance_instruction(pending->ticket);
-  }
-  throw std::runtime_error("Deferred vector exceeded its bounded effects");
-}
-
 void captured(Core &core, const Word opcode) {
-  finish(core, core.begin_instruction({.address = core.registers().pc, .opcode = opcode}));
+  const auto result = core.run_instruction({.address = core.registers().pc, .opcode = opcode});
+  require(result.dispatches == 1 && result.fault.kind == FaultKind::none,
+          "Captured native instruction reaches its actual retirement boundary");
 }
 
 void prepare(Core &core, const bool waiting) {
@@ -116,13 +103,10 @@ void prepare(Core &core, const bool waiting) {
           "Real WAIT retires ten base cycles and preserves the full foreground state");
 }
 
-void complete_vector(Core &core,
-                     Bus &bus,
-                     const InstructionPublication policy,
-                     const Progress base) {
+void complete_vector(Core &core, Bus &bus, const Progress base) {
   const auto reads = bus.reads;
   bus.owner = &core;
-  finish(core, core.begin_fetch(policy));
+  require(core.run(1).dispatches == 1, "A real vector instruction retires once");
   require(bus.reads == reads + 2 && bus.addresses[reads] == vector &&
               bus.addresses[reads + 1] == vector + 1 && bus.pcs[reads] == vector &&
               bus.pcs[reads + 1] == vector && core.registers() == initial() &&
@@ -132,7 +116,7 @@ void complete_vector(Core &core,
           "The first real vector fetch accepts both words once, rejects reentry and retires NOP");
   bus.owner = nullptr;
   bus.words[1] = move_nine;
-  finish(core, core.begin_fetch(policy));
+  require(core.run(1).dispatches == 1, "A real vector instruction retires once");
   auto expected = initial();
   expected.r[2] = 7;
   require(core.registers() == expected && bus.reads == reads + 2 &&
@@ -149,7 +133,7 @@ void complete_vector(Core &core,
           "Unknown foreground performs a genuine refused P read only after the vector returns");
 }
 
-void admission(const Backend backend, const InstructionPublication policy, const bool waiting) {
+void admission(const Backend backend, const bool waiting) {
   Bus bus;
   Core core(bus, {.backend = backend});
   prepare(core, waiting);
@@ -162,7 +146,7 @@ void admission(const Backend backend, const InstructionPublication policy, const
           core.fault().kind == FaultKind::none && core.instruction_fetch().exception_vector &&
           core.instruction_fetch().address == vector,
       "State-only admission wakes WAIT without reading code, acknowledging a device or retiring");
-  complete_vector(core, bus, policy, base);
+  complete_vector(core, bus, base);
 }
 
 template <class Exception, class Action> void rejects(Core &core, Bus &bus, Action action) {
@@ -170,8 +154,7 @@ template <class Exception, class Action> void rejects(Core &core, Bus &bus, Acti
   const auto progress = core.progress();
   const auto state = core.processing_state();
   const auto fault = core.fault();
-  const bool owned = core.pending_instruction().has_value();
-  const auto fetch = owned ? InstructionFetch{} : core.instruction_fetch();
+  const auto fetch = core.instruction_fetch();
   const auto reads = bus.reads;
   bool rejected = false;
   try {
@@ -179,9 +162,8 @@ template <class Exception, class Action> void rejects(Core &core, Bus &bus, Acti
   } catch (const Exception &) { rejected = true; }
   require(rejected && core.registers() == registers && core.progress() == progress &&
               core.processing_state() == state && core.fault() == fault && bus.reads == reads &&
-              core.pending_instruction().has_value() == owned &&
-              (owned || (core.instruction_fetch().address == fetch.address &&
-                         core.instruction_fetch().exception_vector == fetch.exception_vector)),
+              core.instruction_fetch().address == fetch.address &&
+              core.instruction_fetch().exception_vector == fetch.exception_vector,
           "Rejected admission preserves actual CPU state and performs no bus effect");
 }
 
@@ -212,9 +194,6 @@ void exclusions(const Backend backend) {
   for (const auto address : {vector + 1, word_mask + 1}) {
     rejects<std::invalid_argument>(core, bus, [&] { core.request_interrupt(address, 0); });
   }
-  const auto held = core.begin_instruction({.address = foreground, .opcode = 0});
-  rejects<std::logic_error>(core, bus, [&] { core.request_interrupt(vector, 0); });
-  finish(core, held);
   core.request_interrupt(vector, 0);
   rejects<std::invalid_argument>(core, bus, [&] { core.request_interrupt(vector, 0); });
   core.reset();
@@ -281,9 +260,7 @@ void synchronous(const Backend backend) {
 int main() {
   try {
     for (const auto backend : backends) {
-      for (const auto policy : policies) {
-        for (const bool waiting : {false, true}) { admission(backend, policy, waiting); }
-      }
+      for (const bool waiting : {false, true}) { admission(backend, waiting); }
       priorities(backend);
       exclusions(backend);
       repeat_tail(backend);

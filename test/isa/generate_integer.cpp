@@ -2,6 +2,7 @@
 // Independent raw-width integer/unsigned-compare models; no core execution/link.
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
 #include "saturation_model.hpp"

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Independent ring coordinates and serial MSB-first carry circuit for fixture generators.
 #pragma once
-#include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "support.hpp"
 
 #include <cstdint>

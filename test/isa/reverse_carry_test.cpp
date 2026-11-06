@@ -2,6 +2,7 @@
 // Exhaustive eight-bit subdomains and full-width chains against a serial circuit.
 #include "address_model.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "register_model.hpp"
 #include "support.hpp"
 

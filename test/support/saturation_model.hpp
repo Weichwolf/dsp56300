@@ -2,6 +2,7 @@
 // Independent raw-width saturation decisions and signed arithmetic expectations.
 #pragma once
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "native_sequence_model.hpp"
 #include "support.hpp"
 

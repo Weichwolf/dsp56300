@@ -2,6 +2,7 @@
 #include "architecture.hpp"
 #include "core_impl.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "fields.hpp"
 #include "instruction.hpp"
 
@@ -33,7 +34,7 @@ void Core::Impl::normalize_fast(const Word opcode) {
   const bool destination_b = (opcode & 1U) != 0;
   auto &destination = destination_b ? cpu.reg.b : cpu.reg.a;
   const auto saved_carry = cpu.reg.sr & carry;
-  mark_alu_accumulator(destination_b);
+
   if (shift == static_cast<int>(accumulator_bits)) {
     destination = (destination >> host_sign_bit) != 0 ? padding_mask : 0;
     arithmetic_flags(destination, false);
@@ -45,7 +46,6 @@ void Core::Impl::normalize_fast(const Word opcode) {
                       .saturate = false});
   }
   cpu.reg.sr = (cpu.reg.sr & ~carry) | saved_carry;
-  omit_alu_status(carry);
 }
 
 void Core::Impl::execute_iteration(const Instruction &decoded) {
@@ -61,21 +61,15 @@ void Core::Impl::execute_iteration(const Instruction &decoded) {
     const auto source = read_register(divisors[(opcode >> 4) & 3U]);
     const auto shifted = (before << 1) | (std::uint64_t{cpu.reg.sr & carry} << padding_bits);
     const bool opposite_signs = (before >> host_sign_bit) != (source >> (word_bits - 1));
-    mark_alu_accumulator(destination_b);
+
     destination = opposite_signs ? wrapped_add(shifted, aligned_word(source))
                                  : wrapped_sub(shifted, aligned_word(source));
-    mark_alu(RegisterStorage::sr, carry | overflow);
+
     cpu.reg.sr &= ~(carry | overflow);
     if ((destination >> host_sign_bit) == 0) { cpu.reg.sr |= carry; }
-    if (((before ^ shifted) >> host_sign_bit) != 0) {
-      mark_alu(RegisterStorage::sr, overflow | limit);
-      cpu.reg.sr |= overflow | limit;
-    }
+    if (((before ^ shifted) >> host_sign_bit) != 0) { cpu.reg.sr |= overflow | limit; }
     // SM limits the result but DIV preserves N/Z/U/E/S and its raw quotient Carry.
-    if (limit_arithmetic(destination)) {
-      mark_alu(RegisterStorage::sr, overflow | limit);
-      cpu.reg.sr |= overflow | limit;
-    }
+    if (limit_arithmetic(destination)) { cpu.reg.sr |= overflow | limit; }
     return;
   }
   const bool left = (cpu.reg.sr & extension) == 0;
@@ -84,18 +78,15 @@ void Core::Impl::execute_iteration(const Instruction &decoded) {
     auto result = before;
     arithmetic_flags(result, false);
     saturate_arithmetic(result);
-    if (result != before) {
-      mark_alu_accumulator(destination_b);
-      destination = result;
-    }
+    if (result != before) { destination = result; }
     return;
   }
   const auto saved_carry = cpu.reg.sr & carry;
   arithmetic_shift(before, {.count = 1, .destination_b = destination_b, .left = left});
   cpu.reg.sr = (cpu.reg.sr & ~carry) | saved_carry;
-  omit_alu_status(carry);
+
   const auto index = (opcode >> 8) & 7U;
-  mark_alu_address(index);
+
   constexpr Word compatibility_address_mask = 0xffff; // FM4.2: clear the upper eight AGU bits.
   const auto mask = (cpu.reg.sr & compatibility_mode) != 0 ? compatibility_address_mask : word_mask;
   cpu.reg.r[index] = address_add(cpu.reg.r[index], left ? -1 : 1) & mask;

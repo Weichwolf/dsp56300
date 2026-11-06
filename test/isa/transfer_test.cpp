@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "register_model.hpp"
 #include "support.hpp"
 
@@ -8,7 +9,6 @@
 #include <cstdint>
 #include <exception>
 #include <iostream>
-#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -305,38 +305,6 @@ void fast_memory_port(const Backend backend, const MemoryCase input, const Word 
           "Fast MOVEP resumes the foreground without an RTI or repeated peripheral effect");
 }
 
-void staged_fast_immediate(const Backend backend, const Word modes) {
-  constexpr Word vector = 0x54;
-  constexpr Word opcode = 0x07f405;
-  Script io({{.address = low_port + 5, .pc = vector, .value = payload, .write = true}});
-  Machine machine(backend, &io);
-  auto state = initial_state();
-  state.sr = modes;
-  machine.core.set_registers(state);
-  machine.core.request_interrupt(vector, 0, {.address = start, .opcode = 0});
-  const auto first =
-      machine.core.begin_instruction({.address = vector, .opcode = opcode, .extension = payload});
-  if (!first.pending) { throw std::runtime_error("Fast MOVEP has no staged peripheral write"); }
-  require(first.pending->effect.kind == EffectKind::write && first.pending->effect.pc == vector &&
-              !io.complete() && machine.core.registers() == state &&
-              machine.core.progress() == Progress{},
-          "Captured fast MOVEP waits for its actual vector-addressed peripheral effect");
-  static_cast<void>(machine.core.advance_instruction(first.pending.value().ticket));
-  const auto finish = [&] {
-    unsigned effects = 0;
-    while (const auto pending = machine.core.pending_instruction()) {
-      require(++effects <= 16, "Fast MOVEP has a bounded native retirement suffix");
-      const auto result = machine.core.advance_instruction(pending->ticket);
-      require(result.fault.kind == FaultKind::none, "Fast MOVEP retirement must remain successful");
-    }
-    require(io.complete() && machine.core.registers() == state &&
-                machine.core.progress() == Progress{.instructions = 1, .estimated_cycles = 2} &&
-                !machine.core.interruptible(),
-            "Fast MOVEP retires one instruction without changing foreground PC or stack");
-  };
-  finish();
-}
-
 void memory_ports(const Backend backend) {
   constexpr std::array<MemoryCase, 10> cases{
       {{.opcode = 0x075805},
@@ -441,9 +409,6 @@ int main() {
       dsp56300::test::register_ports(backend);
       dsp56300::test::memory_ports(backend);
       dsp56300::test::saturated_ports(backend);
-      for (const auto modes : {0U, dsp56300::test::mode_sa}) {
-        dsp56300::test::staged_fast_immediate(backend, modes);
-      }
       dsp56300::test::self_modify(backend, false);
       dsp56300::test::self_modify(backend, true);
       dsp56300::test::mode_change(backend);

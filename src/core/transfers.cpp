@@ -2,6 +2,7 @@
 #include "architecture.hpp"
 #include "core_impl.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "fields.hpp"
 #include "instruction.hpp"
 
@@ -68,7 +69,7 @@ void Core::Impl::control_move(const Instruction &decoded) {
     return;
   }
   if (decoded.operation == Operation::move_control_immediate) {
-    write_move_register(control, (opcode >> 8) & byte_mask);
+    write_register(control, (opcode >> 8) & byte_mask);
     return;
   }
   const bool load = (opcode & direction_bit) != 0;
@@ -93,9 +94,9 @@ void Core::Impl::control_move(const Instruction &decoded) {
   const auto space = (opcode & y_space_bit) != 0 ? Space::y : Space::x;
   if (load) {
     const auto value = immediate ? decoded.extension : read_memory(space, address);
-    if (fault.kind == FaultKind::none) { write_move_register(control, value); }
+    if (fault.kind == FaultKind::none) { write_register(control, value); }
   } else {
-    const auto value = read_move_register(control);
+    const auto value = read_register(control);
     if (fault.kind == FaultKind::none) { write_memory(space, address, value); }
   }
 }
@@ -109,8 +110,8 @@ void Core::Impl::control_register_move(const Word opcode) {
   }
   if (accumulator(other) && !numeric_mode_supported(arithmetic_saturation)) { return; }
   const bool load = (opcode & direction_bit) != 0;
-  const auto value = read_move_register(load ? other : control);
-  if (fault.kind == FaultKind::none) { write_move_register(load ? control : other, value); }
+  const auto value = read_register(load ? other : control);
+  if (fault.kind == FaultKind::none) { write_register(load ? control : other, value); }
 }
 
 void Core::Impl::program_move(const Instruction &decoded) {
@@ -128,10 +129,10 @@ void Core::Impl::program_move(const Instruction &decoded) {
                            : effective(form);
   if (fault.kind != FaultKind::none) { return; }
   const bool load = (opcode & direction_bit) != 0;
-  const auto value = load ? read_memory(Space::program, address) : read_move_register(reg);
+  const auto value = load ? read_memory(Space::program, address) : read_register(reg);
   if (fault.kind != FaultKind::none) { return; }
   if (load) {
-    write_move_register(reg, value);
+    write_register(reg, value);
   } else {
     write_memory(Space::program, address, value);
   }
@@ -151,12 +152,12 @@ void Core::Impl::peripheral_register_move(const Instruction &decoded) {
       !numeric_mode_supported(arithmetic_saturation)) {
     return;
   }
-  const auto value = port.write ? read_move_register(reg) : read_memory(port.space, port.address);
+  const auto value = port.write ? read_register(reg) : read_memory(port.space, port.address);
   if (fault.kind != FaultKind::none) { return; }
   if (port.write) {
     write_memory(port.space, port.address, value);
   } else {
-    write_move_register(reg, value);
+    write_register(reg, value);
   }
 }
 

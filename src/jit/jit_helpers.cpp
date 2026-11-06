@@ -2,6 +2,7 @@
 #include "architecture.hpp"
 #include "core_impl.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "instruction_boundary.hpp"
 #include "jit.hpp"
 #include "translation.hpp"

@@ -2,6 +2,7 @@
 // Reusable independent integer FFT recurrence; no emulator execution or decoder.
 #pragma once
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "fft_program.hpp"
 #include "fft_twiddles.hpp"
 #include "support.hpp"

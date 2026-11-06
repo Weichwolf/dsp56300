@@ -2,6 +2,7 @@
 // Algebraic expectations for a persistent 92-channel, four-biquad filter bank.
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "iir_model.hpp"
 #include "iir_program.hpp"
 #include "iir_stream_program.hpp"

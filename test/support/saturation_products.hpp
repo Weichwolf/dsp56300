@@ -3,6 +3,7 @@
 #pragma once
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "saturation_model.hpp"
 #include "support.hpp"
 

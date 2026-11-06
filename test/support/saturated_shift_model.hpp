@@ -2,6 +2,7 @@
 // Independent one-bit-at-a-time raw56 shifts and post-shift saturation.
 #pragma once
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "native_sequence_model.hpp"
 #include "saturation_model.hpp"
 #include "support.hpp"

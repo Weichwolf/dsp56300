@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
+#include "memory_arena.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
 #include "support.hpp"

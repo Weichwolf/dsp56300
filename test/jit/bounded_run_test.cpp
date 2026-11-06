@@ -2,6 +2,7 @@
 #include "backend_support.hpp"
 #include "bfu_logic_model.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
 #include "support.hpp"
@@ -224,17 +225,12 @@ void effects(const Backend backend, const bool accept) {
   require(store.next->address == start + 2 && store.next->opcode == store_x &&
               store.next->extension == datum_address,
           "The boundary returns genuine opcode/extension words for a stable in-flight reservation");
-  auto captured = core.begin_instruction(*store.next);
-  require(captured.pending && !captured.retired && memory.writes == 0,
-          "Latching the pending instruction performs no future store");
+  const auto captured = *store.next;
   memory.program[start + 2] = jump;
   ++memory.revision;
-  constexpr unsigned maximum_effects = 16;
-  for (unsigned index = 0; captured.pending && index < maximum_effects; ++index) {
-    captured = core.advance_instruction(captured.pending->ticket);
-  }
+  const auto actual = core.run_instruction(captured);
   expected.pc += 2;
-  require(captured.retired && captured.fault.kind == FaultKind::none &&
+  require(actual.dispatches == 1 && actual.fault.kind == FaultKind::none &&
               core.registers() == expected && memory.writes == 1 && memory.data == datum,
           "The real captured store retires once with original code despite a later P change");
 }
@@ -363,12 +359,8 @@ void vector_previews() {
               before.next_cycles == 1 && core.registers() == state && memory.reads == 0 &&
               core.progress() == Progress{},
           "Pending-vector metadata preview neither performs vector reads nor acknowledges an IRQ");
-  auto actual = core.begin_fetch();
-  constexpr unsigned maximum_effects = 16;
-  for (unsigned index = 0; actual.pending && index < maximum_effects; ++index) {
-    actual = core.advance_instruction(actual.pending->ticket);
-  }
-  require(actual.retired && memory.reads == 2 && core.progress().instructions == 1,
+  const auto actual = core.run(1);
+  require(actual.dispatches == 1 && memory.reads == 2 && core.progress().instructions == 1,
           "Both genuine vector reads precede actual first-vector retirement");
   memory.program[vector + 1] = store_x;
   ++memory.revision;

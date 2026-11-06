@@ -3,6 +3,7 @@
 #include "binary_fixture.hpp"
 #include "cache_isa_model.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "exception_model.hpp"
 #include "native_sequence_model.hpp"
 #include "support.hpp"

@@ -2,6 +2,7 @@
 // Independent integer expectations: this generator never executes or links a DSP core.
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "support.hpp"
 
 #include <array>

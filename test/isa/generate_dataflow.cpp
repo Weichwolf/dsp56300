@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Directed register-dependency sequences, modeled without executing a DSP core.
 #include "binary_fixture.hpp"
-#include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
 #include "support.hpp"

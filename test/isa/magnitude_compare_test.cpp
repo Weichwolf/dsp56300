@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "dsp56300/core.hpp"
-#include "staged_support.hpp"
+#include "dsp56300/memory.hpp"
+#include "scripted_io.hpp"
 #include "support.hpp"
 
 #include <array>
@@ -84,23 +85,11 @@ bool qualified_carry(const Boundary boundary) {
 }
 
 void execute(Core &core, const Path path, const Word opcode) {
-  if (path == Path::dispatched) {
-    const auto result = core.run(1);
-    require(result.dispatches == 1 && result.fault.kind == FaultKind::none,
-            "Boundary comparison dispatches exactly one real instruction");
-    return;
-  }
-  auto result = path == Path::owned ? core.begin_fetch(InstructionPublication::pcu_updates)
-                                    : core.begin_instruction({.address = start, .opcode = opcode},
-                                                             InstructionPublication::pcu_updates);
-  constexpr unsigned maximum_effects = 16;
-  for (unsigned count = 0; count < maximum_effects && result.pending && !result.retired &&
-                           result.fault.kind == FaultKind::none;
-       ++count) {
-    result = core.advance_instruction(result.pending->ticket);
-  }
-  require(result.retired && result.fault.kind == FaultKind::none,
-          "Owned and captured comparison effects retire without a fabricated bus result");
+  const auto result = path == Path::captured
+                          ? core.run_instruction({.address = start, .opcode = opcode})
+                          : core.run(1);
+  require(result.dispatches == 1 && result.fault.kind == FaultKind::none,
+          "Dispatched, externally fetched and captured execution retire the real instruction");
 }
 
 void one(const Input &input) {
@@ -110,12 +99,15 @@ void one(const Input &input) {
   const auto opcode =
       (input.boundary.magnitude ? cmpm_a : cmp_a) | (input.accumulator_b ? destination_b : 0);
   program[start] = opcode;
-  staged_test::Bus bus;
+  scripted_io::Bus bus;
   bus.pc = start;
   if (input.path == Path::owned) {
     bus.events = {{.space = Space::program, .address = start, .value = opcode}};
   }
-  Core core({.program = program, .x = x, .y = y}, &bus, {.backend = input.backend});
+  Core core(input.path == Path::owned ? Memory::external()
+                                      : Memory::separate({.program = program, .x = x, .y = y}),
+            &bus,
+            {.backend = input.backend});
   auto expected = initial(input);
   core.set_registers(expected);
   ++expected.pc;

@@ -2,6 +2,7 @@
 #pragma once
 #include "architecture.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "jit.hpp"
 
 #include <array>

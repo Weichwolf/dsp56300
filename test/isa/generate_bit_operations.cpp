@@ -3,6 +3,7 @@
 #include "bfu_logic_model.hpp"
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "saturated_shift_model.hpp"
 #include "saturation_model.hpp"
 #include "support.hpp"

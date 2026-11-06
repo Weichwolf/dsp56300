@@ -75,7 +75,7 @@ Current user requirements
   boundaries. The normal consumer does not manage CPU state. Instruction and
   memory effects preserve ISA ordering; physical pipeline phases and electrical
   wiring are not implementation goals. Remove opaque checkpoint APIs and their
-  implementation. Retire staged effect-ticket APIs as their consumers migrate to
+  implementation. Do not expose phased effect-ticket APIs; execute through
   normal native execution.
 - Use C++23, LLVM 19, CMake/Ninja, strict warnings, hardening, clang-format/tidy,
   and nonrecovering ASan/UBSan with native dependencies instrumented in strict
@@ -102,7 +102,7 @@ Discovered slow helper fallbacks and similar performance defects must be correct
 
 JIT execution must not retire legal instructions through the general instruction
 executor or general transfer helper. Audit every emitted helper and every
-dispatcher/staged fallback, including dynamic AGU and numerical modes, memory
+dispatcher fallback, including dynamic AGU and numerical modes, memory
 guards, REP/DO boundaries, cache transitions and owner continuations. Native
 code may call the explicit host I/O/event interface; that is distinct from
 interpreting the instruction. Existing correct fallbacks remain temporary open
@@ -117,7 +117,7 @@ remain active before the integrating instrument reaches real time. Keep strict
 compilation, formatting and static analysis; never weaken checks.
 
 Public setup follows Core(Memory, Io*, Options): explicit typed borrowed views,
-named unified/separate/partition/external layouts and owned MemoryArena views.
+named unified/separate/partition/external layouts. The consumer owns allocations.
 Keep native architectural units, physical aliases and owner lifetimes explicit.
 No general virtual memory manager belongs in ordinary direct-RAM execution.
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Native algorithm lower bound; this executable never runs a DSP instruction.
 #include "binary_fixture.hpp"
-#include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "fft_native.hpp"
 #include "fft_program.hpp"
 #include "fft_twiddles.hpp"

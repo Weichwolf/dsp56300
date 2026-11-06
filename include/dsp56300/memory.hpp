@@ -1,12 +1,30 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
-#include "dsp56300/core.hpp"
-
 #include <cstddef>
+#include <cstdint>
 #include <span>
 #include <stdexcept>
 
 namespace dsp56300 {
+using Word = std::uint32_t;
+inline constexpr Word word_mask = 0x00ffffff;
+inline constexpr std::size_t address_words = std::size_t{1} << 24;
+enum class Space : std::uint8_t { program, x, y };
+
+struct Buffers {
+  std::span<Word> program, x, y;
+};
+
+// Explicit ordinary storage grant. Empty known means all words are initialized;
+// otherwise each byte is zero for unknown or nonzero for a known 24-bit word.
+// Grants never include peripherals, side effects, wait states or unstable maps.
+struct MemoryWindow {
+  Word address = 0;
+  std::span<Word> words;
+  std::span<std::uint8_t> known;
+  bool writable = false, aliases_program = false;
+};
+
 struct MemoryLayout {
   std::size_t program_words = 0, x_words = 0, y_words = 0;
 };

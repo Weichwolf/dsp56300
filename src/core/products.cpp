@@ -2,6 +2,7 @@
 #include "architecture.hpp"
 #include "core_impl.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "fields.hpp"
 #include "instruction.hpp"
 #include "rounding.hpp"
@@ -106,7 +107,7 @@ void Core::Impl::execute_product(const Instruction &decoded) {
   }
   const auto value = 2 * product.left * product.right * (product.subtract ? -1 : 1);
   const auto term = (static_cast<std::uint64_t>(value) & accumulator_mask) << padding_bits;
-  mark_alu_accumulator(product.destination_b);
+
   destination = wrapped_add(initial, term);
   const bool overflowed = ((initial ^ destination) & (term ^ destination)) >> host_sign_bit != 0;
   if (product.rounded) {

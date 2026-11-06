@@ -2,6 +2,7 @@
 // Independent RTI frame/sequence expectations; no emulator implementation is linked.
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "native_sequence_model.hpp"
 #include "return_model.hpp"
 #include "support.hpp"

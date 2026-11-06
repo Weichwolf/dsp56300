@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "support.hpp"
 
 #include <array>
@@ -13,7 +14,6 @@ constexpr unsigned short_words = 64, address_shift = 8, register_shift = 24;
 constexpr Word source = 0x345678, high = 0x654321;
 constexpr Word xword = 0x123456, yword = 0x56789a;
 constexpr Word move_x0 = 0x440000, y_space = 0x080000, load_bit = 0x8000;
-constexpr unsigned effect_bound = 16;
 
 struct Image final : Io {
   std::array<Word, 1> program{};
@@ -110,20 +110,6 @@ void ordinary(const Case item, const Backend backend, const bool external) {
   verify(cpu, image, initial, item, external);
 }
 
-void staged(const Case item, const Backend backend, const InstructionPublication publication) {
-  Image image;
-  const auto initial = setup(image, item);
-  Core cpu(image, {.backend = backend});
-  cpu.set_registers(initial);
-  auto progress = cpu.begin_fetch(publication);
-  for (unsigned effect = 0; effect < effect_bound && progress.pending && !progress.retired;
-       ++effect) {
-    require(cpu.progress() == Progress{}, "Intermediate effects do not publish base clocks");
-    progress = cpu.advance_instruction(progress.pending->ticket);
-  }
-  require(progress.retired, "The actual staged short MOVE retires within its effect bound");
-  verify(cpu, image, initial, item, true);
-}
 }
 }
 
@@ -131,12 +117,7 @@ int main() {
   using namespace dsp56300;
   using namespace dsp56300::test;
   try {
-    constexpr std::array publications{InstructionPublication::retirement,
-                                      InstructionPublication::address_updates,
-                                      InstructionPublication::move_updates,
-                                      InstructionPublication::alu_updates,
-                                      InstructionPublication::unit_updates,
-                                      InstructionPublication::pcu_updates};
+
     for (const auto backend : {Backend::reference, Backend::cached, Backend::jit}) {
       for (const auto space : {Space::x, Space::y}) {
         for (Word address = 0; address < short_words; ++address) {
@@ -144,7 +125,6 @@ int main() {
             const Case item{.space = space, .address = address, .load = load};
             ordinary(item, backend, false);
             ordinary(item, backend, true);
-            for (const auto publication : publications) { staged(item, backend, publication); }
           }
         }
       }
@@ -152,7 +132,7 @@ int main() {
     std::cout
         << "Short X/Y MOVE timing: " << checks
         << " assertions, all 64 addresses, both directions, three backends, buffered/external "
-           "execution and six publication modes\n";
+           "execution\n";
     return 0;
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';

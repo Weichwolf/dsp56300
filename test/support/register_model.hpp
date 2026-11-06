@@ -2,6 +2,7 @@
 // Independent raw-register and quotient/remainder bus model for fixture generators.
 #pragma once
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "support.hpp"
 
 #include <algorithm>

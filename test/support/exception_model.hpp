@@ -2,6 +2,7 @@
 // Independent software-exception conditions, bit-built frames and vector coordinates.
 #pragma once
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "register_model.hpp"
 #include "return_model.hpp"
 #include "selection_model.hpp"

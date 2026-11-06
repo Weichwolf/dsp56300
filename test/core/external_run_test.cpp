@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "external_run_fixture.hpp"
 #include "support.hpp"
 
@@ -164,9 +165,8 @@ int main() {
         refused_flow(backend, index);
       }
       for (const auto sample : workloads) {
-        static_cast<void>(workload(sample, backend, false, false));
-        static_cast<void>(workload(sample, backend, false, true));
-        static_cast<void>(workload(sample, backend, true, true));
+        static_cast<void>(workload(sample, backend, false));
+        static_cast<void>(workload(sample, backend, true));
         for (const bool enabled : {false, true}) {
           static_cast<void>(captured_workload(sample, backend, enabled));
         }

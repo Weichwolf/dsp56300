@@ -2,6 +2,7 @@
 #pragma once
 
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 
 #include <concepts>
 #include <cstdint>
@@ -17,7 +18,6 @@ concept CoreImplementation = std::constructible_from<Implementation, Buffers, Io
                                       const Implementation &view,
                                       const Registers &state,
                                       const InstructionWords instruction,
-                                      const EffectTicket &ticket,
                                       const Space space,
                                       const Word address,
                                       const Word value,
@@ -30,15 +30,6 @@ concept CoreImplementation = std::constructible_from<Implementation, Buffers, Io
                                { view.registers() } -> std::same_as<Registers>;
                                { core.set_registers(state) } -> std::same_as<void>;
                                { view.instruction_fetch() } -> std::same_as<InstructionFetch>;
-                               {
-                                 core.begin_instruction(instruction)
-                               } -> std::same_as<InstructionProgress>;
-                               {
-                                 view.pending_instruction()
-                               } -> std::same_as<std::optional<PendingInstruction>>;
-                               {
-                                 core.advance_instruction(ticket)
-                               } -> std::same_as<InstructionProgress>;
                                { view.interruptible(instruction) } -> std::same_as<bool>;
                                {
                                  core.request_interrupt(address, level, instruction)
@@ -88,18 +79,6 @@ public:
   void set_registers(const Registers &state) { core_.set_registers(state); }
 
   [[nodiscard]] InstructionFetch instruction_fetch() const { return core_.instruction_fetch(); }
-
-  [[nodiscard]] InstructionProgress begin_instruction(const InstructionWords words) {
-    return core_.begin_instruction(words);
-  }
-
-  [[nodiscard]] std::optional<PendingInstruction> pending_instruction() const {
-    return core_.pending_instruction();
-  }
-
-  [[nodiscard]] InstructionProgress advance_instruction(const EffectTicket &ticket) {
-    return core_.advance_instruction(ticket);
-  }
 
   [[nodiscard]] bool interruptible(const InstructionWords words) const {
     return core_.interruptible(words);

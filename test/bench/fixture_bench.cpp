@@ -2,6 +2,7 @@
 #include "backend_support.hpp"
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "fixture_memory.hpp"
 #include "support.hpp"
 

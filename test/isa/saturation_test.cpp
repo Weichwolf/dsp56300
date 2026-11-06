@@ -2,6 +2,7 @@
 // Independent SM execution, native-mode transitions and exact callback boundaries.
 #include "bfu_logic_model.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
 #include "saturation_model.hpp"

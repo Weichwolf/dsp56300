@@ -2,6 +2,7 @@
 // Independent software-debug conditions, visible state and per-bit entry frames.
 #pragma once
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "exception_model.hpp"
 #include "register_model.hpp"
 #include "selection_model.hpp"

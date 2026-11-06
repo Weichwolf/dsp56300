@@ -2,6 +2,7 @@
 // Independent raw-56 signed arithmetic model for directed native sequences.
 #pragma once
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "support.hpp"
 
 #include <array>

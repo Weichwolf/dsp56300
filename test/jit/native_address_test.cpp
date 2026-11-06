@@ -4,6 +4,7 @@
 #include "architecture.hpp"
 #include "dataflow.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
 #include "jit_emitter.hpp"

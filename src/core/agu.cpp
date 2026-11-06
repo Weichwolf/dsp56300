@@ -2,6 +2,7 @@
 #include "architecture.hpp"
 #include "core_impl.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "fields.hpp"
 #include "instruction.hpp"
 
@@ -126,14 +127,7 @@ Word Core::Impl::effective(const AddressForm form) {
                                             .offset = offset,
                                             .positive_operand = !register_offset ||
                                                                 signed_word(cpu.reg.n[index]) > 0});
-  if (mode != 5) {
-    cpu.reg.r[index] = result;
-    if (staged_computing()) {
-      publish_address_update(
-          {.index = static_cast<std::uint8_t>(index), .previous = original, .value = result},
-          mode == 7 ? result : original);
-    }
-  }
+  if (mode != 5) { cpu.reg.r[index] = result; }
   return mode == 5 || mode == 7 ? result : original;
 }
 
@@ -159,11 +153,7 @@ void Core::Impl::execute_address_calculation(const Instruction &decoded) {
         displacement ? offset > 0 : mode >= 2 || signed_word(cpu.reg.n[index]) > 0;
     result = update_address({.index = index, .offset = offset, .positive_operand = positive});
   }
-  if (fault.kind == FaultKind::none) {
-    begin_unit(RegisterUnit::address_calculation);
-    write_unit_register(destination, result);
-    publish_unit();
-  }
+  if (fault.kind == FaultKind::none) { write_register(destination, result); }
 }
 
 } // namespace dsp56300

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "address_model.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
+#include "memory_arena.hpp"
 #include "register_model.hpp"
 #include "support.hpp"
 

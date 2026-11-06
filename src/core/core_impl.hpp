@@ -4,11 +4,11 @@
 #include "architecture.hpp"
 #include "bit_instruction.hpp"
 #include "dsp56300/core.hpp"
-#include "execution_state.hpp"
+#include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
 #include "program_cache.hpp"
-#include "staged.hpp"
+#include "vector_state.hpp"
 
 #include <array>
 #include <cstddef>
@@ -65,64 +65,14 @@ struct Core::Impl {
   void call_vector(const detail::Instruction &decoded);
 
   explicit Impl(Buffers supplied, Io *io, Options settings, bool external_memory = false);
-  [[nodiscard]] detail::ExecutionState execution_state() const;
-  void restore_execution(const detail::ExecutionState &state);
-
-  [[nodiscard]] bool staged_active() const noexcept { return staged && staged->active; }
-
-  [[nodiscard]] bool staged_computing() const noexcept { return staged && staged->computing; }
-
-  void compute_instruction();
-  [[nodiscard]] std::exception_ptr compute_attempt();
-  void resume_instruction(const InstructionEffect &effect);
-  [[nodiscard]] bool plan_instruction() const;
-  void finish_computation(const std::exception_ptr &error);
-  void apply_publication(const InstructionEffect &effect);
-  void capture_program_words();
-  [[nodiscard]] bool pcu_publication() const noexcept;
-  void mark_pcu_field(RegisterUpdate update) const;
-  void mark_control_transfer() const;
-  void publish_pcu() const;
-  void apply_pcu(const PcuWriteback &update);
-  [[nodiscard]] Word read_pcu_register(unsigned number);
-  void mark_hidden(detail::RetirementField field) const;
-  void mark_debug(std::uint8_t mask) const;
-  void mark_vector() const;
-  void retire_instruction(unsigned cycles);
-  void retire_owned();
-  [[nodiscard]] bool unit_publication() const noexcept;
-  void begin_unit(RegisterUnit unit) const;
-  void mark_unit_field(RegisterUpdate update) const;
-  [[nodiscard]] Word read_unit_register(unsigned number);
-  void write_unit_register(unsigned number, Word value);
-  void publish_unit() const;
-  void apply_unit(const UnitWriteback &update);
-  [[nodiscard]] bool alu_publication() const noexcept;
-  void mark_alu(RegisterStorage storage, std::uint64_t mask) const;
-  void mark_alu_field(RegisterUpdate update) const;
-  void mark_alu_address(unsigned index) const;
-  void mark_alu_accumulator(bool destination_b, std::uint64_t mask = accumulator_mask) const;
-  void omit_alu_status(Word mask) const;
-  void publish_alu() const;
-  void apply_alu(const AluWriteback &update);
-  void publish_address_update(AddressWriteback update, Word address) const;
-  void restore_published_results();
-  [[nodiscard]] bool move_publication() const noexcept;
-  [[nodiscard]] MoveWriteback move_destination(unsigned number) const;
-  [[nodiscard]] static MoveWriteback long_destination(unsigned selector);
-  void capture_move(MoveWriteback &update) const;
-  void publish_move(MoveWriteback update) const;
-  void apply_move(const MoveWriteback &update);
-  [[nodiscard]] Word read_move_register(unsigned number);
-  void write_move_register(unsigned number, Word value);
-  void transfer_status(Word flags, std::optional<unsigned> source_register);
-  [[nodiscard]] detail::Instruction captured_instruction(Word address) const;
-  [[nodiscard]] Word sample_instruction(InstructionEffect effect) const;
-  [[nodiscard]] bool perform_instruction(const InstructionEffect &effect, Word &response) const;
   [[nodiscard]] static detail::Instruction decode_words(InstructionWords words,
                                                         bool complete = true);
-  void validate_staged_mutation() const;
-  void invalidate_effect_tickets();
+
+  void retire_instruction(const unsigned cycles) {
+    ++cpu.instructions;
+    cpu.cycles += cycles;
+  }
+
   [[nodiscard]] std::span<Word> area(Space space) const;
   void fail(FaultKind kind, Space space, Word address, Word value = 0);
   [[nodiscard]] Word read_memory(Space space, Word address);
@@ -145,7 +95,6 @@ struct Core::Impl {
   [[nodiscard]] static std::optional<Word> jit_program(void *owner, Word address) noexcept;
   [[nodiscard]] static std::uint32_t jit_moves(void *owner,
                                                const detail::NativeOp *operation) noexcept;
-  void execute(const detail::Instruction &decoded);
   void execute_operation(const detail::Instruction &decoded);
   void execute_return(const detail::Instruction &decoded);
   void execute_immediate(const detail::Instruction &decoded);
@@ -202,21 +151,18 @@ struct Core::Impl {
   void execute_shift(const detail::Instruction &decoded);
   void arithmetic_shift(std::uint64_t value, detail::ShiftControl control);
   void logical_shift(detail::ShiftControl control, bool rotate = false);
-  [[nodiscard]] Word read_register(unsigned number,
-                                   detail::StackOwner owner = detail::StackOwner::operand);
+  [[nodiscard]] Word read_register(unsigned number);
   void write_register(unsigned number, Word value);
   [[nodiscard]] Word effective(detail::AddressForm form);
   [[nodiscard]] Word update_address(detail::AddressUpdate update);
-  [[nodiscard]] Word transfer_word(std::uint64_t value,
-                                   std::optional<unsigned> source_register = std::nullopt);
-  [[nodiscard]] std::uint64_t transfer_long(std::uint64_t value,
-                                            std::optional<unsigned> source_register = std::nullopt);
+  [[nodiscard]] Word transfer_word(std::uint64_t value);
+  [[nodiscard]] std::uint64_t transfer_long(std::uint64_t value);
   [[nodiscard]] std::uint64_t source(unsigned selector, bool destination_b) const;
   void arithmetic_flags(std::uint64_t value, bool overflowed);
   void logical_flags(Word value);
   void round(std::uint64_t &value);
-  void push(Word high, Word low, detail::StackOwner owner = detail::StackOwner::operand);
-  [[nodiscard]] std::uint64_t pop(detail::StackOwner owner = detail::StackOwner::operand);
+  void push(Word high, Word low);
+  [[nodiscard]] std::uint64_t pop();
   void finish_loop();
   void restore_loop();
   void execute_loop(const detail::Instruction &decoded);
@@ -235,7 +181,6 @@ struct Core::Impl {
   unsigned current_words = 1;
   detail::Instruction repeated;
   Fault fault;
-  std::optional<InstructionOutcome> last_outcome;
   Vector vector;
   Options options;
   bool executing = false;
@@ -246,8 +191,5 @@ struct Core::Impl {
   bool windows_bound = false, bounded_execution = false, bounded_memory_blocked = false;
   std::uint64_t program_revision = 0;
   Word program_omr = 0;
-  std::unique_ptr<detail::StagedState> staged;
-  std::shared_ptr<const bool> effect_owner;
-  std::uint64_t effect_epoch = 0;
 };
 } // namespace dsp56300

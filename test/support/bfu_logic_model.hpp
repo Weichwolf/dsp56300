@@ -2,6 +2,7 @@
 // Independent per-bit truth tables, serial middle-word shifts and raw56 assembly.
 #pragma once
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "support.hpp"
 
 #include <array>

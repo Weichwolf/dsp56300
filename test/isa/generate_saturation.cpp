@@ -2,6 +2,7 @@
 // Original SM arithmetic/bypass programs with independent complete-state expectations.
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
 #include "saturation_model.hpp"

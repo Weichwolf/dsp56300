@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Independent forward generation and cost witnesses for backward reuse planning.
-#include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 #include "support.hpp"
 #include "word_reuse.hpp"

@@ -24,8 +24,8 @@ option(DSP56300_BUILD_TESTING "Build DSP library tests" ${PROJECT_IS_TOP_LEVEL})
 set(CMAKE_CXX_CLANG_TIDY "${DSP56300_CLANG_TIDY};--warnings-as-errors=*")
 
 add_library(dsp56300_core STATIC
-  src/core.cpp src/core/captured.cpp src/core/bounded.cpp src/core/memory_windows.cpp src/core/instruction_boundary.cpp src/core/external_memory.cpp src/core/core_state.cpp src/core/execution_state.cpp
-  src/core/staged.cpp src/core/staged_compute.cpp src/core/staged_plan.cpp src/core/move_publication.cpp src/core/move_storage.cpp src/core/alu_publication.cpp src/core/unit_publication.cpp src/core/pcu_publication.cpp src/core/hidden_retirement.cpp src/core/native_retirement.cpp src/core/program_capture.cpp src/core/instruction_shape.cpp
+  src/core.cpp src/core/captured.cpp src/core/bounded.cpp src/core/memory_windows.cpp src/core/instruction_boundary.cpp src/core/external_memory.cpp src/core/core_state.cpp
+             src/core/instruction_shape.cpp
   src/core/transfer_info.cpp src/core/transfer_parallel.cpp src/core/transfer_special.cpp
   src/core/transfer_description.cpp src/core/arithmetic.cpp src/core/saturation.cpp src/core/shifts.cpp
   src/core/conditional.cpp src/core/immediate.cpp src/core/integer.cpp src/core/decode.cpp src/core/moves.cpp
@@ -42,7 +42,7 @@ add_library(dsp56300_core STATIC
   src/jit/x64/region_guards.cpp src/jit/x64/jit_window.cpp
   src/jit/x64/jit_word_reuse.cpp
   src/jit/x64/jit_move_address.cpp src/jit/x64/jit_move_register.cpp src/jit/x64/jit_long_moves.cpp
-  src/core/memory.cpp src/jit/x64/jit_retirement.cpp src/jit/x64/jit_status.cpp
+  src/jit/x64/jit_retirement.cpp src/jit/x64/jit_status.cpp
   src/jit/x64/jit_shifts.cpp src/jit/native_register_moves.cpp src/jit/x64/jit_inputs.cpp
   src/jit/mac_batch.cpp src/jit/mac_batch_scalar.cpp src/jit/x64/mac_batch_avx2.cpp src/jit/x64/jit_batch.cpp)
 add_library(dsp56300::core ALIAS dsp56300_core)
@@ -239,68 +239,11 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   add_test(NAME external-memory-execution COMMAND dsp56300_external_run_test)
   add_executable(dsp56300_external_run_bench test/bench/external_run_bench.cpp)
   target_link_libraries(dsp56300_external_run_bench PRIVATE dsp56300_external_run_fixture)
-  add_executable(dsp56300_staged_test test/core/staged_test.cpp test/core/staged_control.cpp
-    test/core/staged_effects.cpp test/core/staged_events.cpp test/core/staged_timing.cpp)
-  target_link_libraries(dsp56300_staged_test PRIVATE dsp56300::core)
-  add_test(NAME staged-instruction-boundaries COMMAND dsp56300_staged_test)
-  add_executable(dsp56300_address_publication_test test/core/address_publication_test.cpp
-    test/core/address_publication_restore.cpp)
-  target_link_libraries(dsp56300_address_publication_test PRIVATE dsp56300::core)
-  add_test(NAME native-address-publication COMMAND dsp56300_address_publication_test)
-  add_executable(dsp56300_program_fetch_test test/core/program_fetch_test.cpp)
-  target_link_libraries(dsp56300_program_fetch_test PRIVATE dsp56300::core)
-  add_test(NAME native-program-fetch COMMAND dsp56300_program_fetch_test)
-  add_executable(dsp56300_pcu_publication_test test/core/pcu_publication_test.cpp)
-  target_link_libraries(dsp56300_pcu_publication_test PRIVATE dsp56300::core)
-  add_test(NAME native-pcu-publication COMMAND dsp56300_pcu_publication_test)
-  add_executable(dsp56300_pure_pcu_test test/core/pure_pcu_test.cpp)
-  target_link_libraries(dsp56300_pure_pcu_test PRIVATE dsp56300::core)
-  add_test(NAME captured-pure-control-publication COMMAND dsp56300_pure_pcu_test)
-  add_executable(dsp56300_cpu_continuation_test test/core/cpu_continuation_test.cpp)
-  target_link_libraries(dsp56300_cpu_continuation_test PRIVATE dsp56300::core)
-  add_test(NAME bounded-cpu-continuations COMMAND dsp56300_cpu_continuation_test)
-  add_executable(dsp56300_cacheless_plan_test test/core/cacheless_plan_test.cpp)
-  target_link_libraries(dsp56300_cacheless_plan_test PRIVATE dsp56300_external_run_fixture)
-  add_test(NAME captured-cache-mode-planning COMMAND dsp56300_cacheless_plan_test)
-  add_executable(dsp56300_cpu_plan_storage_test test/isa/cpu_plan_storage_test.cpp)
-  target_include_directories(dsp56300_cpu_plan_storage_test PRIVATE src/core)
-  target_link_libraries(dsp56300_cpu_plan_storage_test PRIVATE dsp56300::core)
-  add_test(NAME bounded-cpu-plan-storage COMMAND dsp56300_cpu_plan_storage_test)
-  add_executable(dsp56300_instruction_outcome_test test/core/instruction_outcome_test.cpp)
-  target_link_libraries(dsp56300_instruction_outcome_test PRIVATE dsp56300::core)
-  add_test(NAME native-instruction-outcome COMMAND dsp56300_instruction_outcome_test)
-  add_executable(dsp56300_instruction_outcome_io_test test/core/instruction_outcome_io_test.cpp)
-  target_link_libraries(dsp56300_instruction_outcome_io_test PRIVATE dsp56300::core)
-  add_test(NAME native-instruction-outcome-io COMMAND dsp56300_instruction_outcome_io_test)
-  add_executable(dsp56300_vector_fetch_test test/core/vector_fetch_test.cpp)
-  target_link_libraries(dsp56300_vector_fetch_test PRIVATE dsp56300::core)
-  add_test(NAME native-vector-fetch COMMAND dsp56300_vector_fetch_test)
-  add_executable(dsp56300_vector_restriction_test test/core/vector_restriction_test.cpp)
-  target_link_libraries(dsp56300_vector_restriction_test PRIVATE dsp56300::core)
-  add_test(NAME native-vector-restrictions COMMAND dsp56300_vector_restriction_test)
+
   add_executable(dsp56300_deferred_interrupt_test test/core/deferred_interrupt_test.cpp)
   target_link_libraries(dsp56300_deferred_interrupt_test PRIVATE dsp56300::core)
   add_test(NAME deferred-state-interrupt COMMAND dsp56300_deferred_interrupt_test)
-  add_executable(dsp56300_vector_movep_test test/core/vector_movep_test.cpp)
-  target_link_libraries(dsp56300_vector_movep_test PRIVATE dsp56300::core)
-  add_test(NAME native-vector-movep COMMAND dsp56300_vector_movep_test)
-  add_executable(dsp56300_hidden_retirement_test test/jit/hidden_retirement_test.cpp)
-  target_include_directories(dsp56300_hidden_retirement_test PRIVATE src/core)
-  target_link_libraries(dsp56300_hidden_retirement_test PRIVATE dsp56300::core)
-  add_test(NAME hidden-retirement-merge COMMAND dsp56300_hidden_retirement_test)
-  add_executable(dsp56300_unit_publication_test test/core/unit_publication_test.cpp
-    test/core/unit_publication_model.cpp test/core/unit_publication_bits.cpp test/core/unit_publication_boundaries.cpp
-    test/core/unit_publication_ram.cpp)
-  target_link_libraries(dsp56300_unit_publication_test PRIVATE dsp56300::core)
-  add_test(NAME native-unit-publication COMMAND dsp56300_unit_publication_test)
-  add_executable(dsp56300_alu_publication_test test/core/alu_publication_test.cpp
-    test/core/alu_publication_model.cpp test/core/alu_publication_control.cpp)
-  target_link_libraries(dsp56300_alu_publication_test PRIVATE dsp56300::core)
-  add_test(NAME native-alu-publication COMMAND dsp56300_alu_publication_test)
-  add_executable(dsp56300_move_publication_test test/core/move_publication_test.cpp
-    test/core/move_publication_effects.cpp test/core/move_publication_restore.cpp)
-  target_link_libraries(dsp56300_move_publication_test PRIVATE dsp56300::core)
-  add_test(NAME native-move-publication COMMAND dsp56300_move_publication_test)
+
   add_executable(dsp56300_partial_accumulator_test test/isa/partial_accumulator_test.cpp)
   target_link_libraries(dsp56300_partial_accumulator_test PRIVATE dsp56300::core)
   add_test(NAME partial-accumulator-moves COMMAND dsp56300_partial_accumulator_test)
@@ -477,23 +420,12 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   target_link_libraries(dsp56300_generate_loop_control PRIVATE dsp56300_fixture_format)
   add_executable(dsp56300_generate_bit_fields test/isa/generate_bit_fields.cpp)
   target_link_libraries(dsp56300_generate_bit_fields PRIVATE dsp56300_fixture_format)
-  add_executable(dsp56300_alu_fixture_test test/isa/alu_fixture_test.cpp)
-  target_link_libraries(dsp56300_alu_fixture_test PRIVATE dsp56300::core dsp56300_fixture_format)
-  foreach(archive arithmetic addition saturation iteration normalization products-immediate products-mixed fused-rounding bit-fields bfu-logic-sm bfu-shifts-sm selection)
-    add_test(NAME alu-publication-${archive} COMMAND dsp56300_alu_fixture_test
-      "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/${archive}.d56")
-  endforeach()
+
   foreach(archive bit-access bit-branches control-bytes address-calculations)
-    add_test(NAME unit-publication-${archive} COMMAND dsp56300_alu_fixture_test --units
-      "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/${archive}.d56")
-  endforeach()
-  foreach(archive arithmetic addition saturation iteration normalization products-immediate products-mixed fused-rounding bit-fields bfu-logic-sm bfu-shifts-sm selection bit-access bit-branches control-bytes address-calculations)
-    add_test(NAME captured-pcu-publication-${archive} COMMAND dsp56300_alu_fixture_test --captured-pcu
-      "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/${archive}.d56")
+
   endforeach()
   foreach(archive loops loop-control return-state return-sequences exception-state exception-sequences debug-state debug-sequences processing-state processing-sequences)
-    add_test(NAME pcu-publication-${archive} COMMAND dsp56300_alu_fixture_test --pcu
-      "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/${archive}.d56")
+
   endforeach()
   add_executable(dsp56300_fixture_test test/isa/fixture_test.cpp)
   target_link_libraries(dsp56300_fixture_test PRIVATE dsp56300::core dsp56300_fixture_format)
@@ -673,16 +605,10 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/native-dataflow.d56")
   add_test(NAME sm-loop-counts-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/sm-loop-counts.d56")
-  add_test(NAME sm-loop-counts-owned-publication COMMAND dsp56300_alu_fixture_test
-    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/sm-loop-counts.d56")
-  add_test(NAME sm-loop-counts-captured-publication COMMAND dsp56300_alu_fixture_test --captured-pcu
-    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/sm-loop-counts.d56")
+
   add_test(NAME sm-cpu-domains-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/sm-cpu-domains.d56")
-  add_test(NAME sm-cpu-domains-owned-publication COMMAND dsp56300_alu_fixture_test
-    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/sm-cpu-domains.d56")
-  add_test(NAME sm-cpu-domains-captured-publication COMMAND dsp56300_alu_fixture_test --captured-pcu
-    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/sm-cpu-domains.d56")
+
   add_test(NAME saturation-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/saturation.d56")
   add_test(NAME saturation-reproducibility COMMAND "${CMAKE_COMMAND}"
@@ -706,10 +632,7 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   foreach(kind pure memory displacement)
     add_test(NAME modulo-strides-${kind}-fixtures COMMAND dsp56300_fixture_test
       "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/modulo-strides-${kind}.d56")
-    add_test(NAME modulo-strides-${kind}-owned-publication COMMAND dsp56300_alu_fixture_test
-      "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/modulo-strides-${kind}.d56")
-    add_test(NAME modulo-strides-${kind}-captured-publication COMMAND dsp56300_alu_fixture_test --captured-pcu
-      "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/modulo-strides-${kind}.d56")
+
     add_test(NAME modulo-strides-${kind}-reproducibility COMMAND "${CMAKE_COMMAND}"
       "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_modulo_strides>"
       "-DGENERATOR_ARGUMENTS=${kind}"

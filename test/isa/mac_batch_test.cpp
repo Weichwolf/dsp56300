@@ -2,6 +2,7 @@
 #include "architecture.hpp"
 #include "backend_support.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
 #include "mac_batch.hpp"

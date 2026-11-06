@@ -2,7 +2,7 @@
 #pragma once
 
 #include "binary_fixture.hpp"
-#include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 
 #include <algorithm>
 #include <array>

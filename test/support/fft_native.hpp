@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Native algorithm experiment, not an emulator backend or a program recognizer.
 #pragma once
-#include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "fft_program.hpp"
 #include "support.hpp"
 

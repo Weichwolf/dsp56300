@@ -2,6 +2,7 @@
 // Original SM shift fixtures: no DSP implementation is linked or executed.
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "register_model.hpp"
 #include "saturated_shift_model.hpp"
 #include "saturation_model.hpp"

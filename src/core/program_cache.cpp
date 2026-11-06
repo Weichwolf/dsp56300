@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "program_cache.hpp"
 
-#include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 
 #include <algorithm>
 #include <array>

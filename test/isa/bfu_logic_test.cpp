@@ -2,6 +2,7 @@
 // Exact public-Core old-input, observer and mode boundaries for BFU SM forms.
 #include "bfu_logic_model.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "register_model.hpp"
 #include "saturation_model.hpp"
 #include "support.hpp"

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "backend_support.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "support.hpp"
 
 #include <array>
@@ -91,8 +92,6 @@ void immutable_capture() {
                       Progress{.instructions = instructions, .estimated_cycles = instructions * 2},
               "Captured two-word load preserves high X and executes its own literal despite "
               "backing NOPs");
-      require(!cpu.instruction_outcome(),
-              "Atomic capture does not fabricate a staged flow receipt");
     }
     if (backend == Backend::jit || backend == Backend::automatic) {
       require(cpu.jit_statistics().native_move_instructions == 2 &&
@@ -208,14 +207,6 @@ void ownership_guards() {
     require(refused && cpu.registers() == before && cpu.progress() == Progress{},
             "Wrong PC, width or extension refuses before any CPU effect");
   }
-  const auto staged = cpu.begin_instruction({.address = 0, .opcode = 0});
-  require(staged.pending.has_value(), "A genuine staged NOP owns publication");
-  bool refused = false;
-  try {
-    static_cast<void>(cpu.run_instruction({.address = 0, .opcode = 0}));
-  } catch (const std::logic_error &) { refused = true; }
-  require(refused && cpu.progress() == Progress{},
-          "A captured run cannot steal active staged ownership");
 }
 
 void fetch_ownership() {

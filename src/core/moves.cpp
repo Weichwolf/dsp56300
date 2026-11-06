@@ -2,6 +2,7 @@
 #include "architecture.hpp"
 #include "core_impl.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "fields.hpp"
 #include "instruction.hpp"
 
@@ -9,7 +10,6 @@
 #include <array>
 #include <bit>
 #include <cstdint>
-#include <optional>
 
 namespace dsp56300 {
 using namespace detail;
@@ -36,9 +36,8 @@ std::uint64_t signed_long(const std::uint64_t value) noexcept {
 }
 }
 
-std::uint64_t Core::Impl::transfer_long(const std::uint64_t value,
-                                        const std::optional<unsigned> source_register) {
-  static_cast<void>(transfer_word(value, source_register));
+std::uint64_t Core::Impl::transfer_long(const std::uint64_t value) {
+  static_cast<void>(transfer_word(value));
   const unsigned shift = padding_bits + ((cpu.reg.sr & scale_down) != 0 ? 1U : 0U) -
                          ((cpu.reg.sr & scale_up) != 0 ? 1U : 0U);
   const auto scaled = std::bit_cast<std::int64_t>(value) >> shift;
@@ -78,8 +77,8 @@ void Core::Impl::parallel(const Instruction &decoded) {
 
 void Core::Impl::register_move(const Word opcode) {
   if ((opcode & register_group_mask) == no_move_group) {
-    const auto value = read_move_register((opcode >> 13) & five_bit_mask);
-    write_move_register((opcode >> 8) & five_bit_mask, value);
+    const auto value = read_register((opcode >> 13) & five_bit_mask);
+    write_register((opcode >> 8) & five_bit_mask, value);
     return;
   }
   const auto target = (opcode >> 16) & five_bit_mask;
@@ -88,7 +87,7 @@ void Core::Impl::register_move(const Word opcode) {
       target == y1_register || target == a_register || target == b_register) {
     value <<= 16;
   }
-  write_move_register(target, value);
+  write_register(target, value);
 }
 
 void Core::Impl::paired_move(const Word opcode) {
@@ -102,23 +101,23 @@ void Core::Impl::paired_move(const Word opcode) {
   const auto ya = effective({.mode = ymode == 0 ? 4 : ymode, .index = yindex});
   const bool load = (opcode & store_to_register) != 0;
   const bool yload = (opcode & (1U << 22)) != 0;
-  const auto xv = load ? read_memory(Space::x, xa) : read_move_register(xreg);
+  const auto xv = load ? read_memory(Space::x, xa) : read_register(xreg);
   if (xa >= io_begin && ya >= io_begin) {
     if (load) {
-      write_move_register(xreg, xv);
+      write_register(xreg, xv);
     } else {
       write_memory(Space::x, xa, xv);
     }
     return;
   }
-  const auto yv = yload ? read_memory(Space::y, ya) : read_move_register(yreg);
+  const auto yv = yload ? read_memory(Space::y, ya) : read_register(yreg);
   if (load) {
-    write_move_register(xreg, xv);
+    write_register(xreg, xv);
   } else {
     write_memory(Space::x, xa, xv);
   }
   if (yload) {
-    write_move_register(yreg, yv);
+    write_register(yreg, yv);
   } else {
     write_memory(Space::y, ya, yv);
   }
@@ -134,14 +133,14 @@ void Core::Impl::memory_move(const Instruction &decoded) {
   const auto address = extended ? effective(form) : (opcode >> 8) & six_bit_mask;
   if (fault.kind != FaultKind::none) { return; }
   if (!load) {
-    write_memory(space, address, read_move_register(reg));
+    write_memory(space, address, read_register(reg));
     return;
   }
   if (extended && form.mode == 6 && form.index == 4) {
-    write_move_register(reg, decoded.extension);
+    write_register(reg, decoded.extension);
   } else {
     const auto value = read_memory(space, address);
-    if (fault.kind == FaultKind::none) { write_move_register(reg, value); }
+    if (fault.kind == FaultKind::none) { write_register(reg, value); }
   }
 }
 
@@ -176,17 +175,16 @@ void Core::Impl::displacement_move(const Instruction &decoded) {
   const bool load = ((opcode >> (long_form ? 6U : 4U)) & 1U) != 0;
   if (load) {
     const auto value = read_memory(space, address);
-    if (fault.kind == FaultKind::none) { write_move_register(reg, value); }
+    if (fault.kind == FaultKind::none) { write_register(reg, value); }
   } else {
-    const auto value = read_move_register(reg);
+    const auto value = read_register(reg);
     if (fault.kind == FaultKind::none) { write_memory(space, address, value); }
   }
 }
 
 void Core::Impl::load_long(const Instruction &decoded, const std::uint64_t value) {
   const auto selector = ((decoded.opcode >> 16) & 3) | ((decoded.opcode >> 17) & 4);
-  auto update = move_publication() ? long_destination(selector) : MoveWriteback{};
-  capture_move(update);
+
   switch (selector) {
     case 0: cpu.reg.a = (cpu.reg.a & ~(long_mask << padding_bits)) | (value << padding_bits); break;
     case 1: cpu.reg.b = (cpu.reg.b & ~(long_mask << padding_bits)) | (value << padding_bits); break;
@@ -195,16 +193,15 @@ void Core::Impl::load_long(const Instruction &decoded, const std::uint64_t value
     case 4: cpu.reg.a = signed_long(value) << padding_bits; break;
     case 5: cpu.reg.b = signed_long(value) << padding_bits; break;
     case 6:
-      write_move_register(a_register, static_cast<Word>(value >> word_bits));
-      write_move_register(b_register, static_cast<Word>(value) & word_mask);
+      write_register(a_register, static_cast<Word>(value >> word_bits));
+      write_register(b_register, static_cast<Word>(value) & word_mask);
       break;
     case 7:
-      write_move_register(b_register, static_cast<Word>(value >> word_bits));
-      write_move_register(a_register, static_cast<Word>(value) & word_mask);
+      write_register(b_register, static_cast<Word>(value >> word_bits));
+      write_register(a_register, static_cast<Word>(value) & word_mask);
       break;
     default: break;
   }
-  publish_move(update);
 }
 
 void Core::Impl::long_move(const Instruction &decoded) {
@@ -228,8 +225,8 @@ void Core::Impl::long_move(const Instruction &decoded) {
     return;
   }
   if (selector >= 6) {
-    const auto first = read_move_register(selector == 6 ? a_register : b_register);
-    const auto second = read_move_register(selector == 6 ? b_register : a_register);
+    const auto first = read_register(selector == 6 ? a_register : b_register);
+    const auto second = read_register(selector == 6 ? b_register : a_register);
     write_memory(Space::x, address, first);
     if (fault.kind != FaultKind::none) { return; }
     write_memory(Space::y, address, second);
@@ -243,7 +240,7 @@ void Core::Impl::long_move(const Instruction &decoded) {
   } else {
     const auto accumulator = (selector & 1) == 0 ? cpu.reg.a : cpu.reg.b;
     value = accumulator >> padding_bits;
-    if (selector >= 4) { value = transfer_long(accumulator, a_register + (selector & 1U)); }
+    if (selector >= 4) { value = transfer_long(accumulator); }
   }
   write_memory(Space::x, address, static_cast<Word>(value >> word_bits) & word_mask);
   if (fault.kind != FaultKind::none) { return; }
@@ -266,18 +263,18 @@ void Core::Impl::mixed_move(const Instruction &decoded) {
       yspace ? y_registers[(opcode >> 16) & 3] : x_registers[(opcode >> 18) & 3];
   const auto address = effective(form);
   if (fault.kind != FaultKind::none) { return; }
-  const auto secondary = read_move_register(source_acc);
+  const auto secondary = read_register(source_acc);
   const auto space = yspace ? Space::y : Space::x;
   if (!load) {
-    write_memory(space, address, read_move_register(first_target));
+    write_memory(space, address, read_register(first_target));
   } else if (form.mode == 6 && form.index == 4) {
-    write_move_register(first_target, decoded.extension);
+    write_register(first_target, decoded.extension);
   } else {
     const auto value = read_memory(space, address);
     if (fault.kind != FaultKind::none) { return; }
-    write_move_register(first_target, value);
+    write_register(first_target, value);
   }
-  if (fault.kind == FaultKind::none) { write_move_register(second_target, secondary); }
+  if (fault.kind == FaultKind::none) { write_register(second_target, secondary); }
 }
 
 void Core::Impl::class_two_move(const Instruction &decoded) {
@@ -291,10 +288,10 @@ void Core::Impl::class_two_move(const Instruction &decoded) {
   const unsigned accumulator = (opcode & (1U << 16)) != 0 ? b_register : a_register;
   const auto address = effective(form);
   if (fault.kind != FaultKind::none) { return; }
-  const auto value = read_move_register(accumulator);
-  const auto operand = read_move_register(yspace ? y0_register : x0_register);
+  const auto value = read_register(accumulator);
+  const auto operand = read_register(yspace ? y0_register : x0_register);
   write_memory(yspace ? Space::y : Space::x, address, value);
-  if (fault.kind == FaultKind::none) { write_move_register(accumulator, operand); }
+  if (fault.kind == FaultKind::none) { write_register(accumulator, operand); }
 }
 
 void Core::Impl::moves(const Instruction &decoded) {

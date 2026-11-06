@@ -2,6 +2,7 @@
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "isa.hpp"
+#include "memory_arena.hpp"
 
 #include <algorithm>
 #include <array>
@@ -188,7 +189,7 @@ void validation() {
     static_cast<void>(Memory::partition(backing, {.program_words = 1, .x_words = 1, .y_words = 1}));
   } catch (const std::invalid_argument &) { short_storage = true; }
   require(short_storage, "Partition extents are checked before slicing host memory");
-  MemoryArena arena;
+  test::MemoryArena arena;
   const auto view = arena.memory();
   require(view.storage().program.size() == address_words,
           "Owned lazy arena exposes the same typed memory interface");

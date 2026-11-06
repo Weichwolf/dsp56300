@@ -2,6 +2,7 @@
 #include "architecture.hpp"
 #include "core_impl.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "fields.hpp"
 #include "instruction.hpp"
 
@@ -47,9 +48,9 @@ void Core::Impl::arithmetic_shift(const std::uint64_t value, const ShiftControl 
   if (control.saturate && (cpu.reg.sr & arithmetic_saturation) != 0) {
     saturate_arithmetic(result);
   }
-  mark_alu_accumulator(control.destination_b);
+
   (control.destination_b ? cpu.reg.b : cpu.reg.a) = result;
-  mark_alu(RegisterStorage::sr, carry);
+
   cpu.reg.sr = (cpu.reg.sr & ~carry) | (carried ? carry : 0);
 }
 
@@ -71,10 +72,10 @@ void Core::Impl::logical_shift(const ShiftControl control, const bool rotate) {
       result |= control.left ? previous : previous << (word_bits - 1);
     }
   }
-  mark_alu_accumulator(control.destination_b, main_word_mask >> padding_bits);
+
   accumulator = (accumulator & ~main_word_mask) | (std::uint64_t{result} << main_shift);
   logical_flags(result);
-  mark_alu(RegisterStorage::sr, carry);
+
   cpu.reg.sr = (cpu.reg.sr & ~carry) | (carried ? carry : 0);
 }
 
@@ -87,7 +88,7 @@ bool Core::Impl::word_shift(const Word opcode) {
   // Shift the original main word while retaining concurrent native EXT/LSP writes.
   const bool destination_b = (opcode & 8U) != 0;
   auto &destination = destination_b ? cpu.reg.b : cpu.reg.a;
-  mark_alu_accumulator(destination_b, main_word_mask >> padding_bits);
+
   destination = (destination & ~main_word_mask) | (latched[destination_b ? 1 : 0] & main_word_mask);
   logical_shift({.destination_b = destination_b, .left = (opcode & 16U) != 0}, (opcode & 4U) != 0);
   return true;

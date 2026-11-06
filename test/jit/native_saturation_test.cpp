@@ -3,6 +3,7 @@
 #include "architecture.hpp"
 #include "bfu_logic_model.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
 #include "jit_emitter.hpp"

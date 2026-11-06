@@ -2,6 +2,7 @@
 #include "architecture.hpp"
 #include "core_impl.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 
 #include <algorithm>
 #include <array>
@@ -43,12 +44,11 @@ Registers Core::registers() const {
 }
 
 void Core::set_registers(const Registers &state) {
-  impl_->validate_staged_mutation();
+
   if (impl_->executing) {
     throw std::logic_error("Register initialization requires stopped DSP execution");
   }
   validate(state);
-  impl_->last_outcome.reset();
   impl_->cpu.reg = state;
   impl_->cpu.reg.a <<= detail::padding_bits;
   impl_->cpu.reg.b <<= detail::padding_bits;

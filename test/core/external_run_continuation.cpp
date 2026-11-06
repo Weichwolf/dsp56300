@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "external_run_fixture.hpp"
-#include "staged_support.hpp"
 #include "support.hpp"
 
 #include <array>
@@ -81,44 +81,6 @@ void buffered_read_refusal(const Backend backend) {
           "The corresponding buffer-backed fault also blocks replay and retirement");
 }
 
-void mixed_ownership(const Backend backend) {
-  Bus bus;
-  bus.program(origin, {0, load_post, 0, store_post, 0});
-  bus.memory[{Space::x, address}] = datum;
-  Core core(bus, {.backend = backend});
-  auto expected = initial_state();
-  expected.r[0] = address;
-  core.set_registers(expected);
-  require(core.run(1).dispatches == 1,
-          "External ordinary execution reaches a genuine staged boundary");
-  ++expected.pc;
-  auto progress = core.begin_fetch();
-  while (progress.pending && progress.pending->effect.kind != EffectKind::read) {
-    progress = core.advance_instruction(progress.pending->ticket);
-  }
-  require(progress.pending.has_value() && core.registers() == expected,
-          "A synchronous successor can retain an actual pending staged RAM read");
-  staged_test::rejected([&] { static_cast<void>(core.run(1)); });
-  auto step = core.advance_instruction(staged_test::pending(core).ticket);
-  require(step.pending.has_value() && !step.retired,
-          "Accepted staged read awaits native retirement");
-  staged_test::retire(core);
-  auto after = expected;
-  ++after.pc;
-  ++after.r[0];
-  after.x = datum;
-  require(core.registers() == after && core.progress().instructions == 2,
-          "Mixed owners retain every literal native register and retirement");
-  require(core.run(3).dispatches == 3,
-          "An ordinary suffix resumes only after actual staged retirement");
-  after.pc += 3;
-  ++after.r[0];
-  require(core.registers() == after && core.progress().instructions == 5 && bus.writes == 1 &&
-              bus.memory.at({Space::x, address + 1}) == datum,
-          "A mixed synchronous/staged suffix performs its one actual independent RAM "
-          "store");
-}
-
 void repeated_opcode(const Backend backend) {
   constexpr Word repeat_three = 0x0603a0;
   constexpr Word add_x0 = 0x200040;
@@ -174,7 +136,7 @@ void continuation_checks() {
   for (const auto backend : backends) {
     peripheral_word_cases(backend);
     buffered_read_refusal(backend);
-    mixed_ownership(backend);
+
     repeated_opcode(backend);
     vector_pair(backend);
   }

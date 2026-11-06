@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "support.hpp"
 
 #include <array>
 #include <cstdint>
 #include <exception>
 #include <iostream>
-#include <span>
-#include <stdexcept>
 
 namespace dsp56300::test {
 namespace {
@@ -15,12 +14,7 @@ enum class Kind : std::uint8_t { fused, mac, round };
 enum class Method : std::uint8_t { ordinary, bounded, captured };
 constexpr Word down = 0x400, rm = 0x200000, changed = 0x3e;
 constexpr std::uint64_t wrapped = 0x7fffffff000000, other = 0x123456789abcde;
-constexpr std::array policies{InstructionPublication::retirement,
-                              InstructionPublication::address_updates,
-                              InstructionPublication::move_updates,
-                              InstructionPublication::alu_updates,
-                              InstructionPublication::unit_updates,
-                              InstructionPublication::pcu_updates};
+
 constexpr std::array backends{
     Backend::reference, Backend::cached, Backend::jit, Backend::automatic};
 
@@ -37,33 +31,13 @@ Word opcode(const Input input) {
   return code | (input.destination_b ? 8U : 0U);
 }
 
-void captured(Core &cpu, const Input input, const InstructionPublication policy) {
-  auto result = cpu.begin_instruction({.address = start, .opcode = opcode(input)}, policy);
-  constexpr unsigned maximum_effects = 16;
-  for (unsigned index = 0; index < maximum_effects && result.pending; ++index) {
-    const auto pending = *result.pending;
-    const auto &effect = pending.effect;
-    require(effect.kind != EffectKind::read && effect.kind != EffectKind::write &&
-                effect.kind != EffectKind::bit && effect.kind != EffectKind::reset,
-            "The captured authored arithmetic has no fabricated owner data effects");
-    if (input.kind == Kind::fused && effect.kind == EffectKind::alu_update) {
-      if (!effect.alu_update) { throw std::logic_error("Missing actual ALU publication payload"); }
-      for (const auto &update :
-           std::span(effect.alu_update->updates).first(effect.alu_update->count)) {
-        require(update.storage != RegisterStorage::sr || (update.mask & flag_l) == 0,
-                "A cancelled MACR overflow cannot publish a spurious sticky-L writer");
-      }
-    }
-    result = cpu.advance_instruction(pending.ticket);
-  }
-  require(result.retired && result.fault.kind == FaultKind::none,
-          "Every actual captured policy reaches genuine arithmetic retirement");
+void captured(Core &cpu, const Input input) {
+  const auto result = cpu.run_instruction({.address = start, .opcode = opcode(input)});
+  require(result.dispatches == 1 && result.fault.kind == FaultKind::none,
+          "The captured arithmetic retires its real complete fixed-point operation");
 }
 
-void check(const Input input,
-           const Backend backend,
-           const Method method,
-           const InstructionPublication policy = InstructionPublication::retirement) {
+void check(const Input input, const Backend backend, const Method method) {
   std::array<Word, memory_words> p{};
   std::array<Word, 1> x{};
   std::array<Word, 1> y{};
@@ -89,7 +63,7 @@ void check(const Input input,
   if (input.kind == Kind::round) { flags = round_flags; }
   wanted.sr = (before.sr & ~changed) | flags;
   if (method == Method::captured) {
-    captured(cpu, input, policy);
+    captured(cpu, input);
   } else {
     const auto run = method == Method::bounded
                          ? cpu.run(RunBudget{.instructions = 1, .cycles = 1}).execution
@@ -117,7 +91,7 @@ void cases() {
           for (const auto backend : backends) {
             check(input, backend, Method::ordinary);
             check(input, backend, Method::bounded);
-            for (const auto policy : policies) { check(input, backend, Method::captured, policy); }
+            check(input, backend, Method::captured);
           }
         }
       }

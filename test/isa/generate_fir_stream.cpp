@@ -2,6 +2,7 @@
 // Independent prefix-moment convolution and direct-dot checks for persistent FIR.
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "fir_stream_program.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"

@@ -2,6 +2,7 @@
 // Independent widened products and quotient/remainder rounding; no CPU executor.
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "support.hpp"
 
 #include <array>

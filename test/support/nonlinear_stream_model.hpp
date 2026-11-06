@@ -2,6 +2,7 @@
 // Numerical recurrence and quantization, independent of instruction execution.
 #pragma once
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "nonlinear_stream_program.hpp"
 #include "support.hpp"
 

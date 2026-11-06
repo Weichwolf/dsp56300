@@ -2,6 +2,7 @@
 // Independent linear-address and bus model; no emulator implementation is linked.
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "register_model.hpp"
 #include "support.hpp"
 

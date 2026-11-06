@@ -23,20 +23,16 @@ struct Selection {
 
 struct Mode {
   std::string_view name;
-  bool staged, single_step, captured;
+  bool single_step, captured;
   bool cache_enabled = false;
 };
 
 constexpr std::array modes{
-    Mode{.name = "synchronous-batch", .staged = false, .single_step = false, .captured = false},
-    Mode{.name = "synchronous-step", .staged = false, .single_step = true, .captured = false},
-    Mode{.name = "staged", .staged = true, .single_step = true, .captured = false},
-    Mode{.name = "captured-pcu", .staged = true, .single_step = true, .captured = true},
-    Mode{.name = "captured-pcu-ce",
-         .staged = true,
-         .single_step = true,
-         .captured = true,
-         .cache_enabled = true}};
+    Mode{.name = "synchronous-batch", .single_step = false, .captured = false},
+    Mode{.name = "synchronous-step", .single_step = true, .captured = false},
+
+    Mode{.name = "captured", .single_step = true, .captured = true},
+    Mode{.name = "captured-ce", .single_step = true, .captured = true, .cache_enabled = true}};
 
 void report(const Workload sample, const std::string_view selected, const unsigned repetitions) {
   for (const auto mode : modes) {
@@ -46,7 +42,7 @@ void report(const Workload sample, const std::string_view selected, const unsign
       const auto measured =
           mode.captured
               ? captured_workload(sample, dsp56300::Backend::automatic, mode.cache_enabled)
-              : workload(sample, dsp56300::Backend::automatic, mode.staged, mode.single_step);
+              : workload(sample, dsp56300::Backend::automatic, mode.single_step);
       result.seconds += measured.seconds;
       result.instructions += measured.instructions;
       result.reads += measured.reads;

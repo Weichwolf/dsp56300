@@ -2,6 +2,7 @@
 // Independent raw-56 comparisons, per-bit complement/status and condition truth table.
 #pragma once
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "support.hpp"
 
 #include <array>

@@ -3,6 +3,7 @@
 
 #include "architecture.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 #include "instruction_boundary.hpp"
 #include "jit_emitter.hpp"

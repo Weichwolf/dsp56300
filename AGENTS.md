@@ -12,7 +12,7 @@
   preserves all effects and precise exits. I/O callbacks are separate from ISA
   interpretation. Do not add a hardware virtualization backend.
 - Keep core/JIT entry points in src/core.cpp and src/jit.cpp, helpers in src/core/
-  and src/jit/, native emission in src/jit/x64/, memory in src/core/memory.cpp.
+  and src/jit/, native emission in src/jit/x64/, borrowed memory in memory.hpp.
 - Publish reviewed increments only to configured origin/main. Keep neighboring
   application sources read-only; coordinate core revisions with consumer pins.
 

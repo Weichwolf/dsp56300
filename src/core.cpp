@@ -5,7 +5,6 @@
 #include "core_impl.hpp"
 #include "dsp56300/memory.hpp"
 #include "execution_guard.hpp"
-#include "hidden_retirement.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
 
@@ -116,12 +115,7 @@ void Core::Impl::fail(const FaultKind kind,
 }
 
 Word Core::Impl::read_memory(const Space space, const Word address) {
-  if (staged_computing()) {
-    if (space == Space::program && cacheable(address) && icache) {
-      if (const auto cached = icache->peek(address)) { return *cached; }
-    }
-    return sample_instruction({.kind = EffectKind::read, .space = space, .address = address});
-  }
+
   if (external) { return read_external(space, address); }
   if (space != Space::program && address >= detail::io_begin) {
     Word value = 0;
@@ -142,16 +136,7 @@ Word Core::Impl::read_memory(const Space space, const Word address) {
 }
 
 void Core::Impl::write_memory(const Space space, const Word address, const Word value) {
-  if (staged_computing()) {
-    static_cast<void>(sample_instruction({.kind = EffectKind::write,
-                                          .space = space,
-                                          .address = address,
-                                          .value = value & word_mask}));
-    if (space == Space::program && cacheable(address) && icache) {
-      icache->write({.address = address, .value = value});
-    }
-    return;
-  }
+
   if (external) {
     write_external(space, address, value);
     return;
@@ -177,7 +162,7 @@ void Core::Impl::write_memory(const Space space, const Word address, const Word 
 }
 
 detail::Instruction Core::Impl::instruction(const Word pc) {
-  if (staged_computing()) { return captured_instruction(pc); }
+
   const auto opcode = fetch_program(pc);
   if (options.backend != Backend::reference && pages[pc / page_words]) {
     const auto &cached = (*pages[pc / page_words])[pc % page_words];
@@ -217,43 +202,37 @@ void Core::Impl::step_decoded(const detail::Instruction &decoded) {
     return;
   }
   current_words = decoded.words;
-  mark_hidden(detail::RetirementField::interrupt_inhibited);
-  mark_pcu_field({.storage = RegisterStorage::pc, .mask = word_mask});
+
   cpu.interrupt_inhibited = false;
   cpu.reg.pc = (current_pc + decoded.words) & word_mask;
-  execute(decoded);
-  publish_pcu();
+  execute_operation(decoded);
+
   synchronize_cache_mode();
   if (fault.kind != FaultKind::none) { return; }
   if (repeating) {
-    mark_hidden(detail::RetirementField::repeat_opcode);
-    mark_hidden(detail::RetirementField::repeated_instruction);
-    mark_hidden(detail::RetirementField::repeat_loaded);
-    mark_hidden(detail::RetirementField::repeat_remaining);
+
     cpu.repeat_opcode = decoded.opcode;
     repeated = decoded;
     cpu.repeat_loaded = true;
     --cpu.repeat_remaining;
     if (cpu.repeat_remaining != 0) {
-      mark_pcu_field({.storage = RegisterStorage::lc, .mask = word_mask});
-      mark_pcu_field({.storage = RegisterStorage::pc, .mask = word_mask});
+
       cpu.reg.lc = cpu.repeat_remaining;
       cpu.reg.pc = current_pc;
-      publish_pcu();
+
       retire_instruction(decoded.cycles);
       return;
     }
-    mark_pcu_field({.storage = RegisterStorage::lc, .mask = word_mask});
-    mark_hidden(detail::RetirementField::repeat_completed);
+
     cpu.reg.lc = cpu.repeat_lc;
     cpu.repeat_completed = true;
     cpu.repeat_loaded = false;
   } else if (!detail::is_repeat(decoded.operation)) {
-    mark_hidden(detail::RetirementField::repeat_completed);
+
     cpu.repeat_completed = false;
   }
   finish_loop();
-  publish_pcu();
+
   if (fault.kind == FaultKind::none) { retire_instruction(decoded.cycles); }
 }
 
@@ -272,9 +251,7 @@ Core::~Core() = default;
 
 void Core::reset() {
   if (impl_->executing) { throw std::logic_error("Reset requires stopped DSP execution"); }
-  impl_->invalidate_effect_tickets();
-  impl_->staged.reset();
-  impl_->last_outcome.reset();
+
   impl_->cpu = {};
   impl_->vector = {};
   impl_->debug_vector = 0;
@@ -339,8 +316,7 @@ std::uint32_t Core::Impl::run_general(const std::uint32_t budget) {
 }
 
 RunResult Core::run(const std::uint32_t instruction_budget) {
-  impl_->validate_staged_mutation();
-  if (instruction_budget != 0) { impl_->last_outcome.reset(); }
+
   const detail::ExecutionGuard guard(impl_->executing);
   impl_->yield_requested = false;
   RunResult result;
@@ -381,7 +357,7 @@ RunResult Core::run(const std::uint32_t instruction_budget) {
 }
 
 bool Core::interruptible() const {
-  if (impl_->staged_active()) { return false; }
+
   if ((impl_->cpu.processing != ProcessingState::running &&
        impl_->cpu.processing != ProcessingState::waiting) ||
       (impl_->cpu.debug_flags & detail::debug_interrupt_pending) != 0 ||

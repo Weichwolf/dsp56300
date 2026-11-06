@@ -2,6 +2,7 @@
 #pragma once
 
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 
 #include <array>
 #include <cstddef>
@@ -67,7 +68,7 @@ struct Timing {
   std::size_t reads;
 };
 
-[[nodiscard]] Timing workload(Workload input, Backend backend, bool staged, bool single_step);
+[[nodiscard]] Timing workload(Workload input, Backend backend, bool single_step);
 [[nodiscard]] Timing captured_workload(Workload input, Backend backend, bool cache_enabled = false);
 void cache_checks();
 void continuation_checks();

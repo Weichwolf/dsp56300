@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 #include "architecture.hpp"
+#include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 
 #include <array>

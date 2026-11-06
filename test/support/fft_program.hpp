@@ -2,6 +2,7 @@
 // Project-authored scaled radix-2 DIF program and reverse-carry output permutation.
 #pragma once
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "fft_twiddles.hpp"
 #include "support.hpp"
 

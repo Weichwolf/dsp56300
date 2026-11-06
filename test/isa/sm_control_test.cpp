@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "dsp56300/core.hpp"
-#include "staged_support.hpp"
+#include "dsp56300/memory.hpp"
+#include "scripted_io.hpp"
 #include "support.hpp"
 
 #include <array>
@@ -10,8 +11,6 @@
 #include <iostream>
 #include <optional>
 #include <span>
-#include <string>
-#include <utility>
 
 namespace dsp56300::test {
 namespace {
@@ -64,7 +63,7 @@ struct Input {
 
 class MemoryBus final : public Io {
 public:
-  MemoryBus(const Buffers buffers, staged_test::Bus &script)
+  MemoryBus(const Buffers buffers, scripted_io::Bus &script)
       : script_(&script), x_(buffers.x), y_(buffers.y) {}
 
   bool read(const Space space, const Word address, const Word pc, Word &value) noexcept override {
@@ -93,7 +92,7 @@ public:
   }
 
 private:
-  staged_test::Bus *script_;
+  scripted_io::Bus *script_;
   std::span<Word> x_;
   std::span<Word> y_;
 };
@@ -115,33 +114,15 @@ Registers seed(const Word status) {
 }
 
 void execute(Core &core, const Input input, const Word extension) {
-  if (input.path == Path::dispatched) {
-    const auto result = core.run(1);
-    require(result.dispatches == 1 && result.fault.kind == FaultKind::none,
-            "MOVEC SR under SM dispatches one complete control transfer");
-    return;
-  }
-  auto result =
-      input.path == Path::owned
-          ? core.begin_fetch(InstructionPublication::pcu_updates)
-          : core.begin_instruction(
+  const auto result =
+      input.path == Path::captured
+          ? core.run_instruction(
                 {.address = start,
                  .opcode = input.form.opcode,
-                 .extension = input.form.words == 2 ? std::optional(extension) : std::nullopt},
-                InstructionPublication::pcu_updates);
-  constexpr unsigned maximum_effects = 16;
-  for (unsigned i = 0; i < maximum_effects && result.pending && !result.retired &&
-                       result.fault.kind == FaultKind::none;
-       ++i) {
-    result = core.advance_instruction(result.pending->ticket);
-  }
-  require(result.retired && result.fault.kind == FaultKind::none,
-          "MOVEC SR under SM retires actual owned/captured effects; opcode=" +
-              std::to_string(input.form.opcode) +
-              " path=" + std::to_string(std::to_underlying(input.path)) +
-              " kind=" + std::to_string(std::to_underlying(result.fault.kind)) +
-              " address=" + std::to_string(result.fault.address) +
-              " value=" + std::to_string(result.fault.value));
+                 .extension = input.form.words == 2 ? std::optional(extension) : std::nullopt})
+          : core.run(1);
+  require(result.dispatches == 1 && result.fault.kind == FaultKind::none,
+          "Dispatched, externally fetched and captured execution retire the real instruction");
 }
 
 void one(const Input input) {
@@ -154,7 +135,7 @@ void one(const Input input) {
   program[start + 1] = extension;
   auto &memory = form.space == Space::x ? x : y;
   memory[form.address] = input.replacement;
-  staged_test::Bus script;
+  scripted_io::Bus script;
   MemoryBus bus({.program = program, .x = x, .y = y}, script);
   script.pc = start;
   if (input.path == Path::owned) {
@@ -164,12 +145,16 @@ void one(const Input input) {
     }
   }
   if (input.path != Path::dispatched && !form.immediate) {
-    script.events.push_back({.kind = form.load ? EffectKind::read : EffectKind::write,
-                             .space = form.space,
-                             .address = form.address,
-                             .value = form.load ? input.replacement : input.previous});
+    script.events.push_back(
+        {.kind = form.load ? scripted_io::Action::read : scripted_io::Action::write,
+         .space = form.space,
+         .address = form.address,
+         .value = form.load ? input.replacement : input.previous});
   }
-  Core core({.program = program, .x = x, .y = y}, &bus, {.backend = input.backend});
+  Core core(input.path == Path::dispatched ? Memory::separate({.program = program, .x = x, .y = y})
+                                           : Memory::external(),
+            &bus,
+            {.backend = input.backend});
   auto expected = seed(input.previous);
   core.set_registers(expected);
   expected.pc += form.words;
@@ -177,7 +162,7 @@ void one(const Input input) {
   execute(core, input, extension);
   require(core.registers() == expected,
           "MOVEC preserves all data/AGU/stack state and replaces SR only on a load");
-  require(core.read(form.space, form.address) == (form.load ? input.replacement : input.previous),
+  require(memory[form.address] == (form.load ? input.replacement : input.previous),
           "MOVEC memory stores the original full SR word without arithmetic limiting");
   const auto fetch_calls = input.path == Path::owned ? form.words : 0U;
   const auto operand_calls = input.path != Path::dispatched && !form.immediate ? 1U : 0U;
@@ -193,7 +178,7 @@ int main() {
     using namespace dsp56300;
     using namespace dsp56300::test;
     for (const auto form : forms) {
-      for (const auto backend : staged_test::backends) {
+      for (const auto backend : scripted_io::backends) {
         for (const auto path : {Path::dispatched, Path::owned, Path::captured}) {
           for (const auto scale : {Word{0}, mode_down, mode_up}) {
             for (const auto ccr : {Word{0}, flag_c | flag_v, status_byte}) {

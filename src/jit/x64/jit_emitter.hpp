@@ -2,6 +2,7 @@
 #pragma once
 #include "architecture.hpp"
 #include "dataflow.hpp"
+#include "dsp56300/memory.hpp"
 #include "jit.hpp"
 #include "native_moves.hpp"
 #include "native_region.hpp"
