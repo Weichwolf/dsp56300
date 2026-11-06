@@ -151,6 +151,7 @@ NativeValueRanges::advance(const NativeOp &operation, const bool native, const b
   }
   if (observer) { reset(); }
   const auto old = widths_;
+  unknown.transfer_widths = old;
   moves(operation.instruction);
   if (operation.instruction.operation == Operation::nop ||
       (operation.instruction.operation == Operation::parallel &&
@@ -168,7 +169,8 @@ NativeValueRanges::advance(const NativeOp &operation, const bool native, const b
     reset();
     return unknown;
   }
-  const auto proof = finish(operation, *result);
+  auto proof = finish(operation, *result);
+  proof.transfer_widths = old;
   if (!result->compare) {
     widths_.at((operation.instruction.opcode & 8U) != 0 ? 1U : 0U) = proof.width;
   }

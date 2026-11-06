@@ -279,7 +279,23 @@ void JitEmitter::multiply(const NativeOp &operation) {
     }
   }
   if ((opcode & 1U) != 0) { round(operation.mode); }
-  saturate(operation.mode, (opcode & 1U) != 0);
+  if ((operation.mode & arithmetic_saturation) != 0 && (opcode & 2U) == 0 &&
+      value_proof_.saturation != SaturationProof::none) {
+    // Fresh signed24 fractional products, including RND, stay in [-2^47,2^47].
+    // Only the positive endpoint needs SM limiting; MAC sums use the general path.
+    constexpr auto boundary = std::uint64_t{1} << (double_word_bits - 1 + padding_bits);
+    constexpr unsigned equal = 0x94;
+    constexpr unsigned move_equal = 0x44;
+    code_.constant(Reg::r11, boundary);
+    code_.binary(op_cmp, {.destination = Reg::ax, .source = Reg::r11});
+    code_.set(equal, Reg::r10);
+    const auto step = std::uint64_t{1} << ((opcode & 1U) != 0 ? main_shift : padding_bits);
+    code_.constant(Reg::r11, boundary - step);
+    code_.move_if(move_equal, {.destination = Reg::ax, .source = Reg::r11});
+
+  } else {
+    saturate(operation.mode, (opcode & 1U) != 0);
+  }
   store_accumulator((opcode & 8U) != 0, Reg::ax);
   arithmetic_flags(operation.mode);
 }

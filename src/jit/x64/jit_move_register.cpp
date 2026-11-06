@@ -55,15 +55,25 @@ void JitEmitter::move_read_register(const Reg value, const NativeMove &move, con
   const unsigned scaling = ((mode & scale_down) != 0 ? 1U : 0U);
   const unsigned up = ((mode & scale_up) != 0 ? 1U : 0U);
   const unsigned growth_shift = aligned_growth_shift + scaling - up;
-  code_.mov({.destination = Reg::r9, .source = value});
-  code_.shift(shift_right, Reg::r9, growth_shift);
-  code_.mov({.destination = Reg::r10, .source = Reg::r9});
-  code_.shift(shift_right, Reg::r10, 1);
-  code_.binary(op_xor, {.destination = Reg::r9, .source = Reg::r10});
-  code_.immediate(group_and, Reg::r9, 1, Width::dword);
-  code_.shift(shift_left, Reg::r9, 7, Width::dword);
-  merge_status(Reg::r9);
+  const auto width = value_proof_.transfer_widths.at(reg == a_register ? 0U : 1U);
+  constexpr unsigned growth_width = aligned_growth_shift - padding_bits + 1;
+  if (width > growth_width + scaling - up) {
+    code_.mov({.destination = Reg::r9, .source = value});
+    code_.shift(shift_right, Reg::r9, growth_shift);
+    code_.mov({.destination = Reg::r10, .source = Reg::r9});
+    code_.shift(shift_right, Reg::r10, 1);
+    code_.binary(op_xor, {.destination = Reg::r9, .source = Reg::r10});
+    code_.immediate(group_and, Reg::r9, 1, Width::dword);
+    code_.shift(shift_left, Reg::r9, 7, Width::dword);
+    merge_status(Reg::r9);
+  }
   code_.shift(shift_arithmetic, value, main_shift + scaling - up);
+  // This is the pre-transfer accumulator width, before any parallel ALU/write.
+  // Growth-S above is independent; a proved signed24 result cannot set limit-L.
+  if (width <= double_word_bits + scaling - up) {
+    code_.immediate(group_and, value, word_mask, Width::dword);
+    return;
+  }
   code_.constant(Reg::r9, static_cast<std::uint64_t>(maximum_word));
   code_.binary(op_cmp, {.destination = value, .source = Reg::r9});
   code_.set(condition_greater, Reg::r10);
