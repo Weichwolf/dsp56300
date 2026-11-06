@@ -10,7 +10,7 @@
 #include "instruction.hpp"
 #include "isa.hpp"
 #include "jit.hpp"
-#include "jit_emitter.hpp"
+#include "jit/emitter.hpp"
 #include "native/direct.hpp"
 #include "native_moves.hpp"
 #include "native_sequence_model.hpp"
@@ -77,7 +77,8 @@ struct Probe {
   unsigned calls = 0;
 };
 
-std::uint32_t forbidden_move(void *const owner, const detail::NativeOp * /*operation*/) noexcept {
+std::uint32_t forbidden_move(void *const owner,
+                             const detail::BlockInstruction * /*operation*/) noexcept {
   ++static_cast<Probe *>(owner)->calls;
   return 0;
 }
@@ -134,11 +135,11 @@ void direct_operands(const native::Direct &code, const Shape shape, const Word f
 }
 
 void direct_shape(const Shape shape) {
-  const std::array operations{detail::NativeOp{
+  const std::array operations{detail::BlockInstruction{
       .instruction = {.opcode = opcode(shape), .operation = detail::Operation::parallel},
       .pc = start,
       .mode = shape.numeric}};
-  detail::JitEmitter emitter({.moves = forbidden_move, .memory = {}});
+  detail::BlockEmitter emitter({.moves = forbidden_move, .memory = {}});
   const native::Direct code(emitter.generate(operations));
   require(!emitter.packed_retirement(),
           "Potential AGU helper fallback retains conservative counter publication");

@@ -4,10 +4,11 @@
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
+#include "isa.hpp"
 #include "jit.hpp"
-#include "jit_emitter.hpp"
+#include "jit/emitter.hpp"
+#include "jit/resident.hpp"
 #include "native/direct.hpp"
-#include "native_region.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
 #include "saturation_model.hpp"
@@ -74,8 +75,9 @@ std::vector<Step> steps(const Word product, const Shape shape) {
   return result;
 }
 
-std::vector<detail::NativeOp> operations(const std::span<const Step> body, const Word mode) {
-  std::vector<detail::NativeOp> result;
+std::vector<detail::BlockInstruction> operations(const std::span<const Step> body,
+                                                 const Word mode) {
+  std::vector<detail::BlockInstruction> result;
   Word pc = start;
   for (const auto step : body) {
     const auto decoded = detail::decode(step.code);
@@ -92,7 +94,8 @@ struct Probe {
   unsigned calls = 0;
 };
 
-std::uint32_t forbidden(void *const owner, const detail::NativeOp * /*operation*/) noexcept {
+std::uint32_t forbidden(void *const owner,
+                        const detail::BlockInstruction * /*operation*/) noexcept {
   ++static_cast<Probe *>(owner)->calls;
   return 0;
 }
@@ -194,15 +197,54 @@ void matrix(const Word mode) {
         for (const auto words : {detail::WordReuseMode::automatic,
                                  detail::WordReuseMode::vectors,
                                  detail::WordReuseMode::disabled}) {
-          detail::JitEmitter emitter({.execute = forbidden, .moves = forbidden, .memory = {}},
-                                     {},
-                                     detail::RegionMode::ordinary,
-                                     detail::LoopResidency::disabled,
-                                     ranges,
-                                     words);
+          detail::BlockEmitter emitter({.execute = forbidden, .moves = forbidden, .memory = {}},
+                                       {},
+                                       detail::RegionMode::ordinary,
+                                       detail::LoopResidency::disabled,
+                                       ranges,
+                                       words);
           const native::Direct code(emitter.generate(ops));
           probes(code, body, mode);
         }
+      }
+    }
+  }
+}
+
+void forwarding(const Word mode) {
+  constexpr auto multiply = isa::opcode<isa::Opcode::mpy_register_a>()[0];
+  constexpr auto transfer = isa::opcode<isa::Opcode::move_register_x0_x1>()[0];
+  constexpr Word register_fields = (31U << source_shift) | (31U << destination_shift);
+  constexpr unsigned register_base = 4;
+  constexpr unsigned other_accumulator = 15;
+  for (unsigned pair = 0; pair < 8; ++pair) {
+    const Word product = multiply | (pair << 4);
+    for (unsigned word = 0; word < 4; ++word) {
+      const unsigned source = register_base + ((word + 1) % 4);
+      std::vector<Step> body(3, {.code = product});
+      // Unrelated transfers retain the cached product words. A later word write
+      // changes only subsequent products; its own ALU still reads the old word.
+      for (const auto destination : {other_accumulator, register_base + word}) {
+        const auto move = (transfer & ~register_fields) | (source << source_shift) |
+                          (destination << destination_shift);
+        body.push_back({.code = move | (product & status_byte),
+                        .move = true,
+                        .source = source,
+                        .destination = destination});
+        body.insert(body.end(), 3, {.code = product});
+      }
+      const auto ops = operations(body, mode);
+      for (const auto words : {detail::WordReuseMode::automatic,
+                               detail::WordReuseMode::vectors,
+                               detail::WordReuseMode::disabled}) {
+        detail::BlockEmitter emitter({.execute = forbidden, .moves = forbidden, .memory = {}},
+                                     {},
+                                     detail::RegionMode::ordinary,
+                                     detail::LoopResidency::disabled,
+                                     detail::RangeMode::disabled,
+                                     words);
+        const native::Direct code(emitter.generate(ops));
+        probes(code, body, mode);
       }
     }
   }
@@ -215,6 +257,8 @@ int main() {
     for (const auto mode : dsp56300::test::modes) {
       dsp56300::test::matrix(mode);
       dsp56300::test::matrix(mode | dsp56300::test::saturation_model::mode);
+      dsp56300::test::forwarding(mode);
+      dsp56300::test::forwarding(mode | dsp56300::test::saturation_model::mode);
     }
     std::cout << dsp56300::test::checks << " independent native product-coordinate checks passed\n";
   } catch (const std::exception &error) {

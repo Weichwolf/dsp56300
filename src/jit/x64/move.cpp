@@ -2,10 +2,10 @@
 #include "architecture.hpp"
 #include "dsp56300/memory.hpp"
 #include "jit.hpp"
-#include "jit_emitter.hpp"
+#include "jit/code.hpp"
+#include "jit/emitter.hpp"
+#include "jit/resident.hpp"
 #include "native_moves.hpp"
-#include "native_region.hpp"
-#include "x64.hpp"
 
 #include <cstdint>
 #include <span>
@@ -18,7 +18,7 @@ using x64::Width;
 constexpr unsigned op_test = 0x85, group_and = 4;
 }
 
-void JitEmitter::general_moves(const NativeOp &operation) {
+void BlockEmitter::general_moves(const BlockInstruction &operation) {
   if (repeat_mode_) {
     code_.jump(exits_.at(dirty_accumulators()));
     return;
@@ -31,7 +31,7 @@ void JitEmitter::general_moves(const NativeOp &operation) {
   restore_inputs();
 }
 
-void JitEmitter::move_capture(const NativeMove &move, const Word mode) {
+void BlockEmitter::move_capture(const NativeMove &move, const Word mode) {
   const auto value = move.space == Space::x ? Reg::si : Reg::di;
   if (move.immediate()) {
     code_.constant(value, move.address.extra);
@@ -50,7 +50,7 @@ void JitEmitter::move_capture(const NativeMove &move, const Word mode) {
   }
 }
 
-void JitEmitter::move_commit(const NativeMove &move) {
+void BlockEmitter::move_commit(const NativeMove &move) {
   const auto value = move.space == Space::x ? Reg::si : Reg::di;
   if (move.load) {
     move_write_register(value, move.reg);
@@ -67,13 +67,13 @@ void JitEmitter::move_commit(const NativeMove &move) {
   }
 }
 
-void JitEmitter::register_move(const NativeRegisterMove &move, const Word mode) {
+void BlockEmitter::register_move(const NativeRegisterMove &move, const Word mode) {
   capture_inputs();
   move_read_register(Reg::si, {.address = {}, .reg = move.source}, mode);
   move_write_register(Reg::si, move.destination);
 }
 
-void JitEmitter::move_guards(const NativeMoves &moves, x64::Label &slow) {
+void BlockEmitter::move_guards(const NativeMoves &moves, x64::Label &slow) {
   if (moves.long_pair) {
     long_guards(moves, slow);
     return;
@@ -81,7 +81,7 @@ void JitEmitter::move_guards(const NativeMoves &moves, x64::Label &slow) {
   for (const auto &move : std::span(moves.transfers).first(moves.count)) { move_guard(move, slow); }
 }
 
-void JitEmitter::move_values(const NativeMoves &moves, const Word mode) {
+void BlockEmitter::move_values(const NativeMoves &moves, const Word mode) {
   const auto transfers = std::span(moves.transfers).first(moves.count);
   capture_inputs();
   if (moves.long_pair) {
@@ -99,7 +99,7 @@ void JitEmitter::move_values(const NativeMoves &moves, const Word mode) {
   }
 }
 
-void JitEmitter::moves(const NativeOp &operation) {
+void BlockEmitter::moves(const BlockInstruction &operation) {
   const auto immediate = plan_address_immediate(operation.instruction);
   if (immediate.valid()) {
     address_immediate(immediate);

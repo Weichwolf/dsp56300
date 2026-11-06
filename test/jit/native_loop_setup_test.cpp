@@ -6,13 +6,13 @@
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
-#include "jit_emitter.hpp"
+#include "jit/code.hpp"
+#include "jit/emitter.hpp"
 #include "native/direct.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
 #include "support.hpp"
 #include "translation.hpp"
-#include "x64.hpp"
 
 #include <array>
 #include <cstddef>
@@ -146,7 +146,8 @@ struct Probe {
   bool observed = false;
 };
 
-std::uint32_t forbidden(void *const owner, const detail::NativeOp * /*operation*/) noexcept {
+std::uint32_t forbidden(void *const owner,
+                        const detail::BlockInstruction * /*operation*/) noexcept {
   auto &probe = *static_cast<Probe *>(owner);
   ++probe.calls;
   probe.observed = probe.cpu->reg == probe.expected &&
@@ -155,8 +156,8 @@ std::uint32_t forbidden(void *const owner, const detail::NativeOp * /*operation*
   return 0;
 }
 
-std::vector<detail::NativeOp> operations(const Shape shape) {
-  std::vector<detail::NativeOp> result;
+std::vector<detail::BlockInstruction> operations(const Shape shape) {
+  std::vector<detail::BlockInstruction> result;
   if (shape.prefix) {
     result.push_back({.instruction = detail::decode(mac_a), .pc = shape.first, .mode = shape.mode});
     result.push_back({.instruction = detail::decode(mac_b),
@@ -212,7 +213,7 @@ void direct_case(const native::Direct &code, const Shape shape, const Input inpu
 
 void direct_shape(const Shape shape) {
   const auto ops = operations(shape);
-  detail::JitEmitter emitter({.execute = forbidden, .moves = forbidden, .memory = {}});
+  detail::BlockEmitter emitter({.execute = forbidden, .moves = forbidden, .memory = {}});
   const native::Direct code(emitter.generate(ops));
   require(!emitter.packed_retirement() && !emitter.cached_status(),
           "DO setup retains conservative full-state accounting before its guarded helper exit");

@@ -3,9 +3,9 @@
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "fields.hpp"
-#include "jit_emitter.hpp"
+#include "jit/code.hpp"
+#include "jit/emitter.hpp"
 #include "native_moves.hpp"
-#include "x64.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -21,7 +21,7 @@ constexpr unsigned move_greater = 0x4f, move_less = 0x4c;
 constexpr unsigned aligned_growth_shift = 53;
 }
 
-void JitEmitter::long_guards(const NativeMoves &moves, x64::Label &slow) {
+void BlockEmitter::long_guards(const NativeMoves &moves, x64::Label &slow) {
   move_effective(moves.transfers[0]);
   // Both buses use one guest EA. Preserve it before a window maps X to a host pointer.
   code_.mov({.destination = Reg::r8, .source = Reg::cx}, Width::dword);
@@ -29,7 +29,7 @@ void JitEmitter::long_guards(const NativeMoves &moves, x64::Label &slow) {
   move_memory_guard(moves.transfers[1], slow);
 }
 
-void JitEmitter::long_capture(const NativeMoves &moves, const Word mode) {
+void BlockEmitter::long_capture(const NativeMoves &moves, const Word mode) {
   const auto source = moves.transfers[0].reg;
   if (moves.transfers[0].load || source != moves.transfers[1].reg) {
     move_capture(moves.transfers[0], mode);
@@ -68,7 +68,7 @@ void JitEmitter::long_capture(const NativeMoves &moves, const Word mode) {
   code_.immediate(group_and, Reg::di, word_mask, Width::dword);
 }
 
-void JitEmitter::long_commit(const NativeMoves &moves) {
+void BlockEmitter::long_commit(const NativeMoves &moves) {
   const auto high = moves.transfers[0].reg;
   const auto low = moves.transfers[1].reg;
   if (high >= a_register && high != low) {

@@ -4,8 +4,8 @@
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "jit.hpp"
-#include "jit_emitter.hpp"
-#include "x64.hpp"
+#include "jit/code.hpp"
+#include "jit/emitter.hpp"
 
 #include <algorithm>
 #include <array>
@@ -23,18 +23,18 @@ constexpr std::array offsets{
 constexpr auto latched_offset = offsetof(NativeContext, runtime) + offsetof(JitRuntime, latched);
 }
 
-bool JitEmitter::admit_cached_inputs(const std::span<const NativeOp> operations) {
+bool BlockEmitter::admit_cached_inputs(const std::span<const BlockInstruction> operations) {
   return std::ranges::any_of(operations, [](const auto &operation) {
     return lowerable(operation) && analyze_dataflow(operation.instruction).old_inputs != 0;
   });
 }
 
-x64::Xmm JitEmitter::input_snapshot(const unsigned index) const {
+x64::Xmm BlockEmitter::input_snapshot(const unsigned index) const {
   if (loop_bank_cache_ && index >= 2) { return index == 2 ? Xmm::x0 : Xmm::x1; }
   return snapshots.at(index);
 }
 
-void JitEmitter::value(const Reg destination, const unsigned index, const bool latched) {
+void BlockEmitter::value(const Reg destination, const unsigned index, const bool latched) {
   if (!latched || (dataflow_.old_inputs & (Word{1} << index)) == 0) {
     current_value(destination, index);
     return;
@@ -47,7 +47,7 @@ void JitEmitter::value(const Reg destination, const unsigned index, const bool l
   code_.load(destination, cached_status_ ? destination : Reg::r14, index * sizeof(std::uint64_t));
 }
 
-void JitEmitter::capture_inputs() {
+void BlockEmitter::capture_inputs() {
   if (dataflow_.old_inputs == 0) { return; }
   if (!cached_inputs_ && cached_status_) { code_.load(Reg::r11, Reg::r13, latched_offset); }
   for (unsigned index = 0; index < snapshots.size(); ++index) {
@@ -66,7 +66,7 @@ void JitEmitter::capture_inputs() {
   }
 }
 
-void JitEmitter::restore_inputs() {
+void BlockEmitter::restore_inputs() {
   if (!cached_inputs_ || dataflow_.old_inputs == 0) { return; }
   code_.load(Reg::r11, Reg::r13, latched_offset);
   for (unsigned index = 0; index < snapshots.size(); ++index) {

@@ -4,13 +4,13 @@
 #include "dsp56300/memory.hpp"
 #include "fields.hpp"
 #include "jit.hpp"
-#include "jit_emitter.hpp"
+#include "jit/code.hpp"
+#include "jit/emitter.hpp"
+#include "jit/resident.hpp"
 #include "native_moves.hpp"
-#include "native_region.hpp"
 #include "region_guards.hpp"
 #include "value_ranges.hpp"
 #include "word_reuse.hpp"
-#include "x64.hpp"
 
 #include <algorithm>
 #include <array>
@@ -29,8 +29,8 @@ constexpr auto r_offset = offsetof(Cpu, reg) + offsetof(Registers, r);
 constexpr std::array<std::uint8_t, 4> landing{0xf3, 0x0f, 0x1e, 0xfa};
 }
 
-std::vector<std::uint8_t> JitEmitter::generate(const std::span<const NativeOp> operations,
-                                               const ExecutionBounds bounds) {
+std::vector<std::uint8_t> BlockEmitter::generate(const std::span<const BlockInstruction> operations,
+                                                 const ExecutionBounds bounds) {
   bounds_ = bounds;
   if (bounds == ExecutionBounds::precise) {
     // Each interior exit needs real flags and ordinary guarded memory effects.
@@ -42,7 +42,7 @@ std::vector<std::uint8_t> JitEmitter::generate(const std::span<const NativeOp> o
   }
   if (region_mode_ == RegionMode::automatic) { return generate_selected(operations); }
   if (region_mode_ == RegionMode::guarded) {
-    region_ = plan_native_region(operations, runtime_.memory, modifiers_);
+    region_ = resident_plan(operations, runtime_.memory, modifiers_);
     if (!region_.valid ||
         !std::ranges::all_of(operations, [](const auto &op) { return lowerable(op); })) {
       throw std::logic_error("Unproved native region");
@@ -56,19 +56,19 @@ std::vector<std::uint8_t> JitEmitter::generate(const std::span<const NativeOp> o
 }
 
 std::vector<std::uint8_t>
-JitEmitter::generate_selected(const std::span<const NativeOp> operations) {
+BlockEmitter::generate_selected(const std::span<const BlockInstruction> operations) {
   region_mode_ = RegionMode::ordinary;
   auto ordinary = generate_body(operations);
   if (!packed_retirement_) { return ordinary; }
-  region_ = plan_native_region(operations, runtime_.memory, modifiers_);
+  region_ = resident_plan(operations, runtime_.memory, modifiers_);
   if (!region_.valid) { return ordinary; }
-  JitEmitter fast(runtime_,
-                  modifiers_,
-                  RegionMode::guarded,
-                  residency_mode_,
-                  range_mode_,
-                  word_mode_,
-                  window_mode_);
+  BlockEmitter fast(runtime_,
+                    modifiers_,
+                    RegionMode::guarded,
+                    residency_mode_,
+                    range_mode_,
+                    word_mode_,
+                    window_mode_);
   const auto guarded = fast.generate(operations);
   x64::Code selector;
   x64::Label fallback;
@@ -83,12 +83,12 @@ JitEmitter::generate_selected(const std::span<const NativeOp> operations) {
 }
 
 // Initial and fallback guards remain read-only for every architectural field.
-void JitEmitter::region_guard(x64::Code &code, const Reg cpu, x64::Label &failed) const {
+void BlockEmitter::region_guard(x64::Code &code, const Reg cpu, x64::Label &failed) const {
   emit_region_loop_guard(code, cpu, region_, failed);
   emit_region_address_guards(code, cpu, region_, failed);
 }
 
-void JitEmitter::region_address(const NativeMove &move) {
+void BlockEmitter::region_address(const NativeMove &move) {
   if (move.immediate()) { return; }
   const auto &form = move.address;
   const auto address = move.space == Space::x ? Reg::cx : Reg::r8;

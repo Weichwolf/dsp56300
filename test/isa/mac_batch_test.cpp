@@ -54,7 +54,7 @@ auto snapshot(const detail::Cpu &cpu) {
 struct Fixture {
   std::array<Word, 128> x{}, y{};
   detail::Cpu cpu;
-  detail::NativeOp operation{
+  detail::BlockInstruction operation{
       .instruction = detail::decode(paired_mac), .pc = start, .loop_address = start};
   bool dirty = false;
   std::array<unsigned, 2> indices{0, 4};

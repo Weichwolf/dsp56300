@@ -32,19 +32,20 @@ add_library(dsp56300_core STATIC
   src/core/transfers.cpp src/core/registers.cpp src/core/agu.cpp src/core/control.cpp src/core/exceptions.cpp
   src/core/bits.cpp src/core/bit_fields.cpp src/core/loops.cpp src/core/products.cpp src/core/iteration.cpp
   src/core/processing.cpp src/core/debugging.cpp src/core/viterbi.cpp src/core/program_cache.cpp src/core/cache_control.cpp
-  src/jit.cpp src/jit/jit_helpers.cpp src/jit/x64/jit_emitter.cpp src/jit/x64/x64.cpp
-  src/jit/x64/jit_addition.cpp src/jit/x64/jit_logic.cpp
-  src/jit/x64/jit_saturation.cpp
-  src/jit/x64/jit_loops.cpp
-  src/jit/x64/jit_flags.cpp
-  src/jit/native_moves.cpp src/jit/native_region.cpp src/jit/dataflow.cpp src/jit/value_ranges.cpp src/jit/word_reuse.cpp src/jit/x64/jit_moves.cpp src/jit/x64/jit_windows.cpp
-  src/jit/x64/jit_regions.cpp
-  src/jit/x64/region_guards.cpp src/jit/x64/jit_window.cpp
-  src/jit/x64/jit_word_reuse.cpp
-  src/jit/x64/jit_move_address.cpp src/jit/x64/jit_move_register.cpp src/jit/x64/jit_long_moves.cpp
-  src/jit/x64/jit_retirement.cpp src/jit/x64/jit_status.cpp
-  src/jit/x64/jit_shifts.cpp src/jit/native_register_moves.cpp src/jit/x64/jit_inputs.cpp
-  src/jit/mac_batch.cpp src/jit/x64/mac_batch_avx2.cpp src/jit/x64/jit_batch.cpp)
+  src/jit.cpp src/core/native.cpp src/jit/x64/emitter.cpp src/jit/code.cpp
+  src/jit/arena.cpp src/jit/block_parse.cpp src/jit/block_emit.cpp src/jit/run.cpp src/jit/index.cpp
+  src/jit/x64/addition.cpp src/jit/x64/logic.cpp
+  src/jit/x64/saturation.cpp
+  src/jit/x64/loop.cpp
+  src/jit/x64/flags.cpp
+  src/jit/native_moves.cpp src/jit/resident_plan.cpp src/jit/dataflow.cpp src/jit/value_ranges.cpp src/jit/word_reuse.cpp src/jit/x64/move.cpp src/jit/x64/memory_windows.cpp
+  src/jit/x64/resident_emit.cpp
+  src/jit/x64/region_guards.cpp src/jit/x64/loop_window.cpp
+  src/jit/x64/values.cpp
+  src/jit/x64/address.cpp src/jit/x64/registers.cpp src/jit/x64/long_move.cpp
+  src/jit/x64/retirement.cpp src/jit/x64/status.cpp
+  src/jit/x64/shifts.cpp src/jit/native_register_moves.cpp src/jit/x64/inputs.cpp
+  src/jit/mac_batch.cpp src/jit/x64/mac_batch_avx2.cpp src/jit/x64/batch.cpp)
 add_library(dsp56300::core ALIAS dsp56300_core)
 target_include_directories(dsp56300_core PUBLIC include)
 target_compile_features(dsp56300_core PUBLIC cxx_std_23)
@@ -70,7 +71,10 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   add_library(dsp56300_codegen_observer STATIC test/support/codegen_observer.cpp)
   target_include_directories(dsp56300_codegen_observer PUBLIC test/support)
   target_link_libraries(dsp56300_codegen_observer PUBLIC dsp56300_quality)
-  target_link_options(dsp56300_codegen_observer INTERFACE -Wl,--wrap=mprotect)
+  # ASan's weak mprotect interceptor does not force static archive extraction.
+  # Require the observer's wrapper even when a test does not read its counters.
+  target_link_options(dsp56300_codegen_observer INTERFACE
+    -Wl,--wrap=mprotect -Wl,--undefined=__wrap_mprotect)
   add_executable(dsp56300_public_api_test test/core/public_api_test.cpp)
   target_link_libraries(dsp56300_public_api_test PRIVATE dsp56300::core)
   add_test(NAME public-api COMMAND dsp56300_public_api_test)
@@ -78,6 +82,14 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   target_link_libraries(dsp56300_memory_api_test PRIVATE dsp56300::core)
   add_test(NAME memory-api COMMAND dsp56300_memory_api_test)
   if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64)$")
+    add_executable(dsp56300_native_run_test test/jit/native_run_test.cpp)
+    target_include_directories(dsp56300_native_run_test PRIVATE src src/core src/jit src/jit/x64 test/support)
+    target_link_libraries(dsp56300_native_run_test PRIVATE dsp56300::core)
+    add_test(NAME native-linked-blocks COMMAND dsp56300_native_run_test)
+    add_executable(dsp56300_native_context_test test/jit/native_context_test.cpp)
+    target_include_directories(dsp56300_native_context_test PRIVATE src src/core src/jit test/support)
+    target_link_libraries(dsp56300_native_context_test PRIVATE dsp56300::core)
+    add_test(NAME native-context-routing COMMAND dsp56300_native_context_test)
     add_executable(dsp56300_memory_windows_bench test/bench/memory_windows_bench.cpp)
     target_link_libraries(dsp56300_memory_windows_bench PRIVATE dsp56300::core)
     add_custom_target(bench-memory-windows
@@ -114,39 +126,39 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
     add_test(NAME native-retirement-boundaries COMMAND dsp56300_native_retirement_test)
     add_executable(dsp56300_native_inputs_test test/jit/native_inputs_test.cpp test/support/native/direct.cpp)
     target_link_libraries(dsp56300_native_inputs_test PRIVATE dsp56300::core)
-    target_include_directories(dsp56300_native_inputs_test PRIVATE src/core src/jit src/jit/x64 test/support)
+    target_include_directories(dsp56300_native_inputs_test PRIVATE src src/core src/jit src/jit/x64 test/support)
     add_test(NAME native-input-snapshots COMMAND dsp56300_native_inputs_test)
     add_executable(dsp56300_native_address_test test/jit/native_address_test.cpp test/support/native/direct.cpp)
     target_link_libraries(dsp56300_native_address_test PRIVATE dsp56300::core)
-    target_include_directories(dsp56300_native_address_test PRIVATE src/core src/jit src/jit/x64 test/support)
+    target_include_directories(dsp56300_native_address_test PRIVATE src src/core src/jit src/jit/x64 test/support)
     add_test(NAME native-address-updates COMMAND dsp56300_native_address_test)
     add_executable(dsp56300_native_reverse_test test/jit/native_reverse_test.cpp test/support/native/direct.cpp)
     target_link_libraries(dsp56300_native_reverse_test PRIVATE dsp56300::core)
-    target_include_directories(dsp56300_native_reverse_test PRIVATE src/core src/jit src/jit/x64 test/support)
+    target_include_directories(dsp56300_native_reverse_test PRIVATE src src/core src/jit src/jit/x64 test/support)
     add_test(NAME native-reverse-addressing COMMAND dsp56300_native_reverse_test)
     add_executable(dsp56300_native_immediate_test test/jit/native_immediate_test.cpp test/support/native/direct.cpp)
     target_link_libraries(dsp56300_native_immediate_test PRIVATE dsp56300::core)
-    target_include_directories(dsp56300_native_immediate_test PRIVATE src/core src/jit src/jit/x64 test/support)
+    target_include_directories(dsp56300_native_immediate_test PRIVATE src src/core src/jit src/jit/x64 test/support)
     add_test(NAME native-address-immediates COMMAND dsp56300_native_immediate_test)
     add_executable(dsp56300_native_loop_setup_test test/jit/native_loop_setup_test.cpp test/support/native/direct.cpp)
     target_link_libraries(dsp56300_native_loop_setup_test PRIVATE dsp56300::core)
-    target_include_directories(dsp56300_native_loop_setup_test PRIVATE src/core src/jit src/jit/x64 test/support)
+    target_include_directories(dsp56300_native_loop_setup_test PRIVATE src src/core src/jit src/jit/x64 test/support)
     add_test(NAME native-loop-setup COMMAND dsp56300_native_loop_setup_test)
     add_executable(dsp56300_native_region_test test/jit/native_region_test.cpp test/support/native/direct.cpp)
     target_link_libraries(dsp56300_native_region_test PRIVATE dsp56300::core)
-    target_include_directories(dsp56300_native_region_test PRIVATE src/core src/jit src/jit/x64 test/support)
+    target_include_directories(dsp56300_native_region_test PRIVATE src src/core src/jit src/jit/x64 test/support)
     add_test(NAME native-ram-regions COMMAND dsp56300_native_region_test)
     add_executable(dsp56300_native_region_constant_test test/jit/native_region_constant_test.cpp test/support/native/direct.cpp)
     target_link_libraries(dsp56300_native_region_constant_test PRIVATE dsp56300::core)
-    target_include_directories(dsp56300_native_region_constant_test PRIVATE src/core src/jit src/jit/x64 test/support)
+    target_include_directories(dsp56300_native_region_constant_test PRIVATE src src/core src/jit src/jit/x64 test/support)
     add_test(NAME native-constant-regions COMMAND dsp56300_native_region_constant_test)
     add_executable(dsp56300_native_accounting_test test/jit/native_accounting_test.cpp test/support/native/direct.cpp)
     target_link_libraries(dsp56300_native_accounting_test PRIVATE dsp56300::core)
-    target_include_directories(dsp56300_native_accounting_test PRIVATE src/core src/jit src/jit/x64 test/support)
+    target_include_directories(dsp56300_native_accounting_test PRIVATE src src/core src/jit src/jit/x64 test/support)
     add_test(NAME native-region-accounting COMMAND dsp56300_native_accounting_test)
     add_executable(dsp56300_value_range_test test/jit/value_range_test.cpp)
     target_link_libraries(dsp56300_value_range_test PRIVATE dsp56300::core)
-    target_include_directories(dsp56300_value_range_test PRIVATE src/core src/jit test/support)
+    target_include_directories(dsp56300_value_range_test PRIVATE src src/core src/jit test/support)
     add_test(NAME native-value-ranges COMMAND dsp56300_value_range_test)
     add_executable(dsp56300_transfer_range_test test/jit/transfer_range_test.cpp)
     target_link_libraries(dsp56300_transfer_range_test PRIVATE dsp56300::core)
@@ -159,27 +171,27 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
     add_test(NAME native-fused-product-flags COMMAND dsp56300_fused_rounding_test)
     add_executable(dsp56300_native_product_test test/jit/native_product_test.cpp test/support/native/direct.cpp)
     target_link_libraries(dsp56300_native_product_test PRIVATE dsp56300::core)
-    target_include_directories(dsp56300_native_product_test PRIVATE src/core src/jit src/jit/x64 test/support)
+    target_include_directories(dsp56300_native_product_test PRIVATE src src/core src/jit src/jit/x64 test/support)
     add_test(NAME native-product-coordinates COMMAND dsp56300_native_product_test)
     add_executable(dsp56300_word_reuse_test test/jit/word_reuse_test.cpp)
     target_link_libraries(dsp56300_word_reuse_test PRIVATE dsp56300::core)
-    target_include_directories(dsp56300_word_reuse_test PRIVATE src/core src/jit test/support)
+    target_include_directories(dsp56300_word_reuse_test PRIVATE src src/core src/jit test/support)
     add_test(NAME native-word-reuse COMMAND dsp56300_word_reuse_test)
     add_executable(dsp56300_loop_window_test test/jit/loop_window_test.cpp test/support/native/direct.cpp)
     target_link_libraries(dsp56300_loop_window_test PRIVATE dsp56300::core)
-    target_include_directories(dsp56300_loop_window_test PRIVATE src/core src/jit src/jit/x64 test/support)
+    target_include_directories(dsp56300_loop_window_test PRIVATE src src/core src/jit src/jit/x64 test/support)
     add_test(NAME native-loop-window COMMAND dsp56300_loop_window_test)
     add_executable(dsp56300_x64_immediate_test test/jit/x64_immediate_test.cpp test/support/native/direct.cpp)
     target_link_libraries(dsp56300_x64_immediate_test PRIVATE dsp56300::core)
-    target_include_directories(dsp56300_x64_immediate_test PRIVATE src/core src/jit src/jit/x64 test/support)
+    target_include_directories(dsp56300_x64_immediate_test PRIVATE src src/core src/jit src/jit/x64 test/support)
     add_test(NAME native-immediate-encodings COMMAND dsp56300_x64_immediate_test)
     add_executable(dsp56300_native_saturation_test test/jit/native_saturation_test.cpp test/support/native/direct.cpp)
     target_link_libraries(dsp56300_native_saturation_test PRIVATE dsp56300::core)
-    target_include_directories(dsp56300_native_saturation_test PRIVATE src/core src/jit src/jit/x64 test/support)
+    target_include_directories(dsp56300_native_saturation_test PRIVATE src src/core src/jit src/jit/x64 test/support)
     add_test(NAME native-saturation-boundaries COMMAND dsp56300_native_saturation_test)
     add_executable(dsp56300_mac_batch_test test/isa/mac_batch_test.cpp)
     target_link_libraries(dsp56300_mac_batch_test PRIVATE dsp56300::core)
-    target_include_directories(dsp56300_mac_batch_test PRIVATE src/core src/jit src/jit/x64 test/support)
+    target_include_directories(dsp56300_mac_batch_test PRIVATE src src/core src/jit src/jit/x64 test/support)
     add_test(NAME guarded-mac-batches COMMAND dsp56300_mac_batch_test)
     add_executable(dsp56300_mac_batch_boundary_test test/isa/mac_batch_boundary_test.cpp)
     target_link_libraries(dsp56300_mac_batch_boundary_test PRIVATE dsp56300::core)
@@ -238,7 +250,7 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   add_test(NAME architectural-cache-integration COMMAND dsp56300_cache_control_test)
   add_executable(dsp56300_cache_storage_test test/core/cache_storage_test.cpp)
   target_link_libraries(dsp56300_cache_storage_test PRIVATE dsp56300::core)
-  target_include_directories(dsp56300_cache_storage_test PRIVATE src/core)
+  target_include_directories(dsp56300_cache_storage_test PRIVATE src src/core)
   add_test(NAME architectural-cache-storage COMMAND dsp56300_cache_storage_test)
   add_executable(dsp56300_debug_test test/core/debug_test.cpp)
   target_link_libraries(dsp56300_debug_test PRIVATE dsp56300::core)
@@ -307,7 +319,7 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   add_test(NAME native-code-lifetime COMMAND dsp56300_native_code_lifetime_test)
   add_executable(dsp56300_native_backedge_test test/jit/native_backedge_test.cpp)
   target_link_libraries(dsp56300_native_backedge_test PRIVATE dsp56300::core)
-  target_include_directories(dsp56300_native_backedge_test PRIVATE src/core src/jit)
+  target_include_directories(dsp56300_native_backedge_test PRIVATE src src/core src/jit)
   add_test(NAME native-backedge-boundaries COMMAND dsp56300_native_backedge_test)
   add_executable(dsp56300_transfer_test test/isa/transfer_test.cpp)
   target_link_libraries(dsp56300_transfer_test PRIVATE dsp56300::core)

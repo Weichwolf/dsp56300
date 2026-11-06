@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "native_region.hpp"
-
 #include "architecture.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "fields.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
+#include "jit/resident.hpp"
 #include "native_moves.hpp"
 
 #include <algorithm>
@@ -18,7 +17,7 @@ namespace dsp56300::detail {
 namespace {
 constexpr Word minimum_transfers = 8;
 
-bool transfer(NativeRegion &region,
+bool transfer(ResidentPlan &region,
               const NativeMove &move,
               const JitMemory &memory,
               const std::array<Word, agu_registers> &modifiers) {
@@ -50,7 +49,7 @@ bool transfer(NativeRegion &region,
   return true;
 }
 
-bool moves(NativeRegion &region,
+bool moves(ResidentPlan &region,
            const Instruction &instruction,
            const std::array<JitMemory, 2> &memory,
            const std::array<Word, agu_registers> &modifiers) {
@@ -86,10 +85,10 @@ bool address_supported(const RegionAddress &address) {
 }
 }
 
-NativeRegion plan_native_region(const std::span<const NativeOp> operations,
-                                const std::array<JitMemory, 2> &memory,
-                                const std::array<Word, agu_registers> &modifiers) {
-  NativeRegion region;
+ResidentPlan resident_plan(const std::span<const BlockInstruction> operations,
+                           const std::array<JitMemory, 2> &memory,
+                           const std::array<Word, agu_registers> &modifiers) {
+  ResidentPlan region;
   if (operations.empty()) { return region; }
   auto pc = operations.front().pc;
   for (std::size_t index = 0; index < operations.size(); ++index) {

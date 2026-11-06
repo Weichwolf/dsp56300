@@ -6,9 +6,10 @@
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
-#include "jit_emitter.hpp"
+#include "jit/code.hpp"
+#include "jit/emitter.hpp"
+#include "jit/resident.hpp"
 #include "native/direct.hpp"
-#include "native_region.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
 #include "saturation_model.hpp"
@@ -16,7 +17,6 @@
 #include "support.hpp"
 #include "value_ranges.hpp"
 #include "word_reuse.hpp"
-#include "x64.hpp"
 
 #include <algorithm>
 #include <array>
@@ -149,9 +149,9 @@ void admission() {
   constexpr Word register_x_to_a_tfr_b = 0x208e09;
   for (const Word opcode : {no_snapshot, load_x_mac, load_a_tfr_b, register_x_to_a_tfr_b}) {
     const std::array operations{
-        detail::NativeOp{.instruction = detail::decode(opcode), .pc = start}};
+        detail::BlockInstruction{.instruction = detail::decode(opcode), .pc = start}};
     {
-      detail::JitEmitter emitter({});
+      detail::BlockEmitter emitter({});
       static_cast<void>(emitter.generate(operations));
       require(emitter.cached_inputs() == (opcode != no_snapshot),
               "SIMD snapshot admission follows overwritten live operands, not application names");
@@ -301,7 +301,7 @@ constexpr std::array<Word, 7> reuse_program{square_mac_y0,
                                             square_mac_y0,
                                             square_mac_y0};
 
-std::uint32_t reuse_helper(void *const owner, const detail::NativeOp *const op) noexcept {
+std::uint32_t reuse_helper(void *const owner, const detail::BlockInstruction *const op) noexcept {
   auto &probe = *static_cast<ReuseProbe *>(owner);
   auto &cpu = *probe.cpu;
   ++probe.calls;
@@ -399,7 +399,7 @@ void helper_reuse() {
   for (const auto mode : modes) {
     for (const bool sm : {false, true}) {
       const auto numeric = mode | (sm ? saturation_model::mode : 0);
-      std::array<detail::NativeOp, reuse_program.size()> ops{};
+      std::array<detail::BlockInstruction, reuse_program.size()> ops{};
       for (std::size_t index = 0; index < ops.size(); ++index) {
         ops[index] = {.instruction = detail::decode(reuse_program[index]),
                       .pc = start + static_cast<Word>(index),
@@ -414,12 +414,12 @@ void helper_reuse() {
                                          .execute = reuse_helper,
                                          .moves = reuse_helper,
                                          .memory = {}};
-        detail::JitEmitter emitter(runtime,
-                                   {},
-                                   detail::RegionMode::ordinary,
-                                   detail::LoopResidency::disabled,
-                                   detail::RangeMode::automatic,
-                                   words);
+        detail::BlockEmitter emitter(runtime,
+                                     {},
+                                     detail::RegionMode::ordinary,
+                                     detail::LoopResidency::disabled,
+                                     detail::RangeMode::automatic,
+                                     words);
         const native::Direct code(emitter.generate(ops));
         require(emitter.word_reuse() == (words != detail::WordReuseMode::disabled),
                 "Both admitted formats actually populate before the tested helper boundary");

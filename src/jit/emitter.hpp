@@ -4,11 +4,11 @@
 #include "dataflow.hpp"
 #include "dsp56300/memory.hpp"
 #include "jit.hpp"
+#include "jit/code.hpp"
+#include "jit/resident.hpp"
 #include "native_moves.hpp"
-#include "native_region.hpp"
 #include "value_ranges.hpp"
 #include "word_reuse.hpp"
-#include "x64.hpp"
 
 #include <array>
 #include <cstddef>
@@ -19,21 +19,21 @@
 namespace dsp56300::detail {
 enum class ExecutionBounds : unsigned char { whole, precise };
 
-class JitEmitter {
+class BlockEmitter {
 public:
-  JitEmitter(JitRuntime runtime,
-             std::array<Word, agu_registers> modifiers = {},
-             RegionMode region = RegionMode::automatic,
-             LoopResidency residency = LoopResidency::automatic,
-             RangeMode ranges = RangeMode::automatic,
-             WordReuseMode words = WordReuseMode::automatic,
-             LoopWindowMode window = LoopWindowMode::automatic);
-  [[nodiscard]] std::vector<std::uint8_t> generate(std::span<const NativeOp> operations,
+  BlockEmitter(JitRuntime runtime,
+               std::array<Word, agu_registers> modifiers = {},
+               RegionMode region = RegionMode::automatic,
+               LoopResidency residency = LoopResidency::automatic,
+               RangeMode ranges = RangeMode::automatic,
+               WordReuseMode words = WordReuseMode::automatic,
+               LoopWindowMode window = LoopWindowMode::automatic);
+  [[nodiscard]] std::vector<std::uint8_t> generate(std::span<const BlockInstruction> operations,
                                                    ExecutionBounds bounds = ExecutionBounds::whole);
 
-  [[nodiscard]] std::vector<std::uint8_t> generate_repeat(const NativeOp &operation);
+  [[nodiscard]] std::vector<std::uint8_t> generate_repeat(const BlockInstruction &operation);
 
-  [[nodiscard]] bool direct_memory(const NativeOp &operation) const;
+  [[nodiscard]] bool direct_memory(const BlockInstruction &operation) const;
 
   [[nodiscard]] bool packed_retirement() const noexcept { return packed_retirement_; }
 
@@ -56,28 +56,30 @@ public:
   [[nodiscard]] bool loop_window() const noexcept { return loop_window_; }
 
 private:
-  [[nodiscard]] static bool lowerable(const NativeOp &operation);
-  [[nodiscard]] static bool saturation_supported(const NativeOp &operation);
-  [[nodiscard]] static bool has_moves(const NativeOp &operation);
-  [[nodiscard]] bool observable_moves(const NativeOp &operation) const;
-  [[nodiscard]] std::vector<std::uint8_t> generate_body(std::span<const NativeOp> operations);
-  [[nodiscard]] std::vector<std::uint8_t> generate_selected(std::span<const NativeOp> operations);
-  void emit_nops(std::span<const NativeOp> operations, bool publish);
-  void emit_operations(std::span<const NativeOp> operations);
+  [[nodiscard]] static bool lowerable(const BlockInstruction &operation);
+  [[nodiscard]] static bool saturation_supported(const BlockInstruction &operation);
+  [[nodiscard]] static bool has_moves(const BlockInstruction &operation);
+  [[nodiscard]] bool observable_moves(const BlockInstruction &operation) const;
+  [[nodiscard]] std::vector<std::uint8_t>
+  generate_body(std::span<const BlockInstruction> operations);
+  [[nodiscard]] std::vector<std::uint8_t>
+  generate_selected(std::span<const BlockInstruction> operations);
+  void emit_nops(std::span<const BlockInstruction> operations, bool publish);
+  void emit_operations(std::span<const BlockInstruction> operations);
   void budget_guard();
   void region_guard(x64::Code &code, x64::Reg cpu, x64::Label &failed) const;
   void region_address(const NativeMove &move);
-  [[nodiscard]] static bool is_addition(const NativeOp &operation);
-  [[nodiscard]] static bool is_right_shift(const NativeOp &operation);
-  void helper(JitHelper function, const NativeOp &operation);
-  void native(const NativeOp &operation);
-  void moves(const NativeOp &operation);
-  void general_moves(const NativeOp &operation);
+  [[nodiscard]] static bool is_addition(const BlockInstruction &operation);
+  [[nodiscard]] static bool is_right_shift(const BlockInstruction &operation);
+  void helper(JitHelper function, const BlockInstruction &operation);
+  void native(const BlockInstruction &operation);
+  void moves(const BlockInstruction &operation);
+  void general_moves(const BlockInstruction &operation);
   void capture_inputs();
   void restore_inputs();
   [[nodiscard]] x64::Xmm input_snapshot(unsigned index) const;
   void materialize_loop_banks();
-  [[nodiscard]] static bool admit_cached_inputs(std::span<const NativeOp> operations);
+  [[nodiscard]] static bool admit_cached_inputs(std::span<const BlockInstruction> operations);
   void register_move(const NativeRegisterMove &move, Word mode);
   void move_guard(const NativeMove &move, x64::Label &slow);
   void move_effective(const NativeMove &move);
@@ -94,7 +96,7 @@ private:
   void mark_window_written(const NativeMove &move);
   void move_profiled_next(const NativeMove &move, Word modifier);
   void move_delta(const NativeMove &move);
-  void address_update(const NativeOp &operation);
+  void address_update(const BlockInstruction &operation);
   void address_immediate(const NativeAddressImmediate &move);
   void move_ring_delta(const NativeMove &move);
   void emit_ring_guards();
@@ -104,17 +106,20 @@ private:
   void move_commit(const NativeMove &move);
   void move_read_register(x64::Reg value, const NativeMove &move, Word mode);
   void move_write_register(x64::Reg value, unsigned reg);
-  void multiply(const NativeOp &operation);
-  [[nodiscard]] bool gpr_product(const NativeOp &operation);
+  void multiply(const BlockInstruction &operation);
+  [[nodiscard]] bool gpr_product(const BlockInstruction &operation);
   void invalidate_word_reuse(const WordReuseStep &step);
-  void
-  product_word(x64::Reg destination, const NativeOp &operation, unsigned selector, bool scaled);
-  [[nodiscard]] std::vector<WordReuseStep> word_effects(std::span<const NativeOp> operations) const;
-  [[nodiscard]] static bool is_logic(const NativeOp &operation);
-  void logic(const NativeOp &operation);
+  void product_word(x64::Reg destination,
+                    const BlockInstruction &operation,
+                    unsigned selector,
+                    bool scaled);
+  [[nodiscard]] std::vector<WordReuseStep>
+  word_effects(std::span<const BlockInstruction> operations) const;
+  [[nodiscard]] static bool is_logic(const BlockInstruction &operation);
+  void logic(const BlockInstruction &operation);
   void logical_flags(x64::Reg word);
-  void addition(const NativeOp &operation);
-  void right_shift(const NativeOp &operation);
+  void addition(const BlockInstruction &operation);
+  void right_shift(const BlockInstruction &operation);
   void round(Word mode);
   void saturate(Word mode, bool rounded = false);
   void saturate_canonical(bool rounded);
@@ -122,14 +127,14 @@ private:
   void merge_flag(x64::Reg value, bool &initialized);
   void zero_negative_flags(bool &initialized);
   void normalization_flags(Word mode, bool &initialized);
-  void prepare_value_proof(const NativeOp &operation, NativeValueRanges &ranges);
+  void prepare_value_proof(const BlockInstruction &operation, NativeValueRanges &ranges);
   [[nodiscard]] bool admit_cached_status() const;
   void initialize_status();
   void materialize_status();
   void read_status(x64::Reg destination);
   void merge_status(x64::Reg source, Word changed = 0, x64::Reg scratch = x64::Reg::ax);
-  [[nodiscard]] std::vector<Word> plan_flags(std::span<const NativeOp> operations) const;
-  [[nodiscard]] static Word written_flags(const NativeOp &operation);
+  [[nodiscard]] std::vector<Word> plan_flags(std::span<const BlockInstruction> operations) const;
+  [[nodiscard]] static Word written_flags(const BlockInstruction &operation);
   void input(x64::Reg destination, unsigned selector, bool destination_b, bool latched);
   void value(x64::Reg destination, unsigned index, bool latched);
   void current_value(x64::Reg destination, unsigned index);
@@ -139,24 +144,25 @@ private:
   void flush_accumulators(Word mask);
   void exit_if(x64::Branch condition);
   void finish();
-  [[nodiscard]] bool admit_packed_retirement(std::span<const NativeOp> operations) const;
+  [[nodiscard]] bool admit_packed_retirement(std::span<const BlockInstruction> operations) const;
   void initialize_retirement();
   void materialize_retirement();
   void materialize_pending_accounting();
-  void retire_progress(const NativeOp &operation);
-  [[nodiscard]] bool publish_pc(std::span<const NativeOp> operations, std::size_t index) const;
-  void loop_guard(const NativeOp &operation);
-  [[nodiscard]] static bool is_loop_setup(const NativeOp &operation);
-  void loop_setup(const NativeOp &operation);
+  void retire_progress(const BlockInstruction &operation);
+  [[nodiscard]] bool publish_pc(std::span<const BlockInstruction> operations,
+                                std::size_t index) const;
+  void loop_guard(const BlockInstruction &operation);
+  [[nodiscard]] static bool is_loop_setup(const BlockInstruction &operation);
+  void loop_setup(const BlockInstruction &operation);
   void loop_push(x64::Reg frame);
   void loop_continue();
   void loop_backedge();
   void initialize_loop_residency();
   void initialize_loop_window();
   void guard_region_header();
-  void batch_entry(std::span<const NativeOp> operations);
-  void retire(const NativeOp &operation, bool publish);
-  void repeat_retire(const NativeOp &operation);
+  void batch_entry(std::span<const BlockInstruction> operations);
+  void retire(const BlockInstruction &operation, bool publish);
+  void repeat_retire(const BlockInstruction &operation);
   x64::Code code_;
 
   struct RingGuard {
@@ -177,7 +183,7 @@ private:
   Word word_valid_ = 0, word_populate_ = 0, word_selected_ = 0;
   bool reused_words_ = false;
   NativeValueProof value_proof_;
-  NativeRegion region_;
+  ResidentPlan region_;
   bool repeat_mode_ = false;
   bool mac_batches_ = false;
   bool packed_retirement_ = false;

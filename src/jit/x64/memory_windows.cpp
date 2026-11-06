@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "dsp56300/memory.hpp"
 #include "jit.hpp"
-#include "jit_emitter.hpp"
+#include "jit/code.hpp"
+#include "jit/emitter.hpp"
 #include "native_moves.hpp"
-#include "x64.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -34,7 +34,7 @@ bool tracks_writes(const std::span<const MemoryWindow> windows) {
 }
 }
 
-bool JitEmitter::direct_memory(const NativeOp &operation) const {
+bool BlockEmitter::direct_memory(const BlockInstruction &operation) const {
   if (!lowerable(operation)) { return false; }
   const auto plan = plan_moves(operation.instruction);
   if (plan.count == 0) { return false; }
@@ -46,9 +46,9 @@ bool JitEmitter::direct_memory(const NativeOp &operation) const {
   });
 }
 
-void JitEmitter::window_known(const NativeMove &move,
-                              const MemoryWindow &window,
-                              x64::Label &slow) {
+void BlockEmitter::window_known(const NativeMove &move,
+                                const MemoryWindow &window,
+                                x64::Label &slow) {
   if (!window.known.empty()) {
     code_.constant(Reg::r9, reinterpret_cast<std::uintptr_t>(window.known.data()));
     code_.binary(op_add, {.destination = Reg::r9, .source = Reg::ax});
@@ -64,9 +64,9 @@ void JitEmitter::window_known(const NativeMove &move,
   }
 }
 
-void JitEmitter::window_candidate(const NativeMove &move,
-                                  const MemoryWindow &window,
-                                  x64::Label &next) {
+void BlockEmitter::window_candidate(const NativeMove &move,
+                                    const MemoryWindow &window,
+                                    x64::Label &next) {
   const auto address = move.space == Space::x ? Reg::cx : Reg::r8;
   code_.mov({.destination = Reg::ax, .source = address}, Width::dword);
   if (window.address != 0) { code_.immediate(group_sub, Reg::ax, window.address, Width::dword); }
@@ -74,7 +74,7 @@ void JitEmitter::window_candidate(const NativeMove &move,
   code_.jump_if(Branch::above_equal, next);
 }
 
-void JitEmitter::window_guard(const NativeMove &move, x64::Label &slow) {
+void BlockEmitter::window_guard(const NativeMove &move, x64::Label &slow) {
   const auto address = move.space == Space::x ? Reg::cx : Reg::r8;
   x64::Label done;
   for (const auto &window : runtime_.windows.at(bank(move))) {
@@ -93,7 +93,7 @@ void JitEmitter::window_guard(const NativeMove &move, x64::Label &slow) {
   code_.bind(done);
 }
 
-void JitEmitter::mark_window_written(const NativeMove &move) {
+void BlockEmitter::mark_window_written(const NativeMove &move) {
   if (!tracks_writes(runtime_.windows.at(bank(move)))) { return; }
   x64::Label done;
   code_.load(Reg::r9, Reg::r13, known_offset(move));

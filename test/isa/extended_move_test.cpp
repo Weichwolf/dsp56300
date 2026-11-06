@@ -2,6 +2,7 @@
 #include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "isa.hpp"
 #include "memory_arena.hpp"
 #include "move_model.hpp"
 #include "native_sequence_model.hpp"
@@ -211,6 +212,8 @@ void extension_wrap(TestCore &core, Form form) {
   core.write(Space::program, word_mask, move_model::opcode(form));
   core.write(Space::program, 0, location);
   core.load(Space::program, 1, tail);
+  core.write(
+      Space::program, 1 + static_cast<Word>(tail.size()), isa::opcode<isa::Opcode::stop>()[0]);
   const move_model::Data data;
   core.write(Space::x, location, data.high);
   core.write(Space::y, location, form.kind == Kind::long_word ? data.low : data.high);
@@ -247,6 +250,7 @@ void ports(const Backend backend) {
   io.core = &core;
   for (const auto form : forms()) {
     core.write(Space::program, start, move_model::opcode(form));
+    core.write(Space::program, start + 1, isa::opcode<isa::Opcode::stop>()[0]);
     for (unsigned fail_at = 0; fail_at <= (form.kind == Kind::long_word ? 2U : 1U); ++fail_at) {
       for (Word port = io_begin; port <= word_mask; ++port) {
         port_case(core, io, form, port, fail_at);

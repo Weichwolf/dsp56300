@@ -8,9 +8,7 @@
 #include "register_model.hpp"
 #include "support.hpp"
 
-#include <algorithm>
 #include <array>
-#include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <iostream>
@@ -54,27 +52,25 @@ struct Expected {
 
 Expected model(const std::span<const Step> body, const Registers &state, const Word budget) {
   Expected result{.state = state};
-  // A short warm entry now uses its independently expected native prefix.
-  // Complete entries retain the guarded whole-body backedge contract.
-  const auto steps = std::min(static_cast<Word>(body.size()), budget);
-  while (steps != 0 && budget - result.retired >= steps) {
-    for (std::size_t index = 0; index < steps; ++index) {
-      const auto step = body[index];
-      const bool ending = index == body.size() - 1;
-      if (ending && result.state.lc <= 1) { return result; }
-      auto old = result.state;
-      if (step.immediate) { old.x = immediate; }
-      sequence_model::alu(result.state, old, step.immediate ? 0x40 : step.opcode);
-      result.state.pc += step.immediate ? 2U : 1U;
-      if (ending) {
-        --result.state.lc;
-        const auto frame = result.state.stack[result.state.sp % stack_entries];
-        result.state.pc = static_cast<Word>(frame >> word_bits);
-      }
-      ++result.retired;
-      result.cycles += step.immediate ? 2U : 1U;
+  // A retained successor also handles a partial final iteration. The loop-end
+  // guard still rejects final/empty frames before executing that instruction.
+  while (result.retired < budget) {
+    const auto index = result.retired % body.size();
+    const auto step = body[index];
+    const bool ending = index + 1 == body.size();
+    if (ending && result.state.lc <= 1) { return result; }
+    auto old = result.state;
+    if (step.immediate) { old.x = immediate; }
+    sequence_model::alu(result.state, old, step.immediate ? 0x40 : step.opcode);
+    result.state.pc += step.immediate ? 2U : 1U;
+    if (ending) {
+      --result.state.lc;
+      const auto frame = result.state.stack[result.state.sp % stack_entries];
+      result.state.pc = static_cast<Word>(frame >> word_bits);
     }
-    if (result.state.pc != state.pc) { return result; }
+    ++result.retired;
+    result.cycles += step.immediate ? 2U : 1U;
+    if (ending && result.state.pc != state.pc) { return result; }
   }
   return result;
 }

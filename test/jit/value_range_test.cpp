@@ -41,7 +41,7 @@ struct OpInput {
   Word opcode, mode;
 };
 
-detail::NativeOp operation(const OpInput input) {
+detail::BlockInstruction operation(const OpInput input) {
   auto decoded = detail::decode(input.opcode);
   return {.instruction = decoded, .pc = start, .mode = input.mode};
 }

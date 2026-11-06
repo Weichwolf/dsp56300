@@ -28,7 +28,8 @@ class NativeValueRanges {
 public:
   void reset() noexcept { widths_.fill(accumulator_bits); }
 
-  [[nodiscard]] NativeValueProof advance(const NativeOp &operation, bool native, bool observer);
+  [[nodiscard]] NativeValueProof
+  advance(const BlockInstruction &operation, bool native, bool observer);
 
 private:
   void moves(const Instruction &instruction);

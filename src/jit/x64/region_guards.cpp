@@ -6,8 +6,8 @@
 #include "dsp56300/memory.hpp"
 #include "fields.hpp"
 #include "jit.hpp"
-#include "native_region.hpp"
-#include "x64.hpp"
+#include "jit/code.hpp"
+#include "jit/resident.hpp"
 
 #include <bit>
 #include <cstddef>
@@ -111,7 +111,7 @@ void repeated_guard(x64::Code &code,
 
 void emit_region_loop_guard(x64::Code &code,
                             const Reg cpu,
-                            const NativeRegion &region,
+                            const ResidentPlan &region,
                             x64::Label &failed) {
   if (!region.loop) { return; }
   code.load(Reg::ax, cpu, lc_offset, Width::dword);
@@ -121,7 +121,7 @@ void emit_region_loop_guard(x64::Code &code,
 
 void emit_region_address_guards(x64::Code &code,
                                 const Reg cpu,
-                                const NativeRegion &region,
+                                const ResidentPlan &region,
                                 x64::Label &failed) {
   for (std::size_t index = 0; index < region.addresses.size(); ++index) {
     const auto &address = region.addresses[index];
@@ -130,7 +130,7 @@ void emit_region_address_guards(x64::Code &code,
 }
 
 void emit_region_window(x64::Code &code,
-                        const NativeRegion &region,
+                        const ResidentPlan &region,
                         const Word operations,
                         x64::Label &failed) {
   if (!region.valid || !region.loop || operations == 0 || operations > maximum_operations) {

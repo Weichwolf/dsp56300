@@ -39,7 +39,7 @@ bool overlaps_cpu(const Cpu &cpu, const Word *const words, const Word count) noe
 
 [[gnu::always_inline]] inline Word batch_count(const Cpu &cpu,
                                                const NativeContext &context,
-                                               const NativeOp &operation,
+                                               const BlockInstruction &operation,
                                                const MacBatchPlan plan) noexcept {
   const auto &reg = cpu.reg;
   if (reg.pc != operation.pc || reg.la != operation.pc || (reg.sr & loop_flag) == 0 ||
@@ -102,7 +102,7 @@ commit(Cpu &cpu, const MacBatchPlan plan, const MacBatchState state, const Word 
 }
 }
 
-std::optional<MacBatchPlan> plan_mac_batch(const NativeOp &operation) {
+std::optional<MacBatchPlan> plan_mac_batch(const BlockInstruction &operation) {
   const auto &decoded = operation.instruction;
   if (decoded.operation != Operation::parallel || decoded.words != 1 || decoded.cycles != 1 ||
       !at_loop_end(operation) || (decoded.opcode & alu_mask) != ordinary_mac ||
@@ -129,7 +129,7 @@ std::optional<MacBatchPlan> plan_mac_batch(const NativeOp &operation) {
 namespace {
 Word execute_mac_batch(Cpu &cpu,
                        NativeContext &context,
-                       const NativeOp &operation,
+                       const BlockInstruction &operation,
                        const Word operands) noexcept {
   const MacBatchPlan plan{
       .indices = {operands & index_mask, (operands >> y_index_shift) & index_mask},
@@ -154,7 +154,7 @@ Word execute_mac_batch(Cpu &cpu,
 }
 }
 
-std::optional<MacBatchCall> compile_mac_batch(const NativeOp &operation) {
+std::optional<MacBatchCall> compile_mac_batch(const BlockInstruction &operation) {
   const auto plan = plan_mac_batch(operation);
   if (!plan) { return std::nullopt; }
   return MacBatchCall{.entry = &execute_mac_batch,

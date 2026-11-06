@@ -7,9 +7,9 @@
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
-#include "jit_emitter.hpp"
+#include "jit/emitter.hpp"
+#include "jit/resident.hpp"
 #include "native/direct.hpp"
-#include "native_region.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
 #include "saturation_model.hpp"
@@ -85,7 +85,7 @@ Word words(const Step step) {
   return step.port ? 1U : 2U;
 }
 
-void number(std::vector<detail::NativeOp> &ops, const bool loop) {
+void number(std::vector<detail::BlockInstruction> &ops, const bool loop) {
   Word pc = start;
   for (auto &operation : ops) {
     operation.pc = pc;
@@ -94,8 +94,8 @@ void number(std::vector<detail::NativeOp> &ops, const bool loop) {
   for (auto &operation : ops) { operation.loop_address = loop ? pc - 1 : detail::inactive_loop; }
 }
 
-std::vector<detail::NativeOp> operations(const Shape shape) {
-  std::vector<detail::NativeOp> result;
+std::vector<detail::BlockInstruction> operations(const Shape shape) {
+  std::vector<detail::BlockInstruction> result;
   for (const auto step : trace(shape)) {
     auto decoded = detail::decode(step.word);
     decoded.extension = step.value;
@@ -192,7 +192,8 @@ struct Probe {
   unsigned calls = 0;
 };
 
-std::uint32_t forbidden(void *const owner, const detail::NativeOp * /*operation*/) noexcept {
+std::uint32_t forbidden(void *const owner,
+                        const detail::BlockInstruction * /*operation*/) noexcept {
   ++static_cast<Probe *>(owner)->calls;
   return 0;
 }
@@ -266,10 +267,10 @@ void direct_shape(const Shape shape, const bool alias, const bool shortened) {
   const auto ops = operations(shape);
   const detail::JitRuntime runtime{
       .execute = forbidden, .moves = forbidden, .memory = banks(memory)};
-  const auto plan = detail::plan_native_region(ops, runtime.memory, modifiers(shape));
+  const auto plan = detail::resident_plan(ops, runtime.memory, modifiers(shape));
   require(plan.valid && plan.addresses[shape.index].constant == (shape.value & word_mask),
           "The proof records the actual 24-bit assignment instead of constraining old R");
-  detail::JitEmitter emitter(runtime, modifiers(shape), detail::RegionMode::guarded);
+  detail::BlockEmitter emitter(runtime, modifiers(shape), detail::RegionMode::guarded);
   const native::Direct code(emitter.generate(ops));
   require(emitter.guarded_region() && emitter.cached_status() && emitter.packed_retirement(),
           "The tested bytes are actual helper-free guarded regions with held status");
@@ -339,23 +340,23 @@ void admission() {
   const auto mods = modifiers({});
   auto changed = ops;
   changed[0].instruction = detail::decode(constant_word(n_base));
-  require(!detail::plan_native_region(changed, banks(memory), mods).valid,
+  require(!detail::resident_plan(changed, banks(memory), mods).valid,
           "Rewriting N cannot silently reuse a stride proof based on its initial value");
   std::swap(changed[0], changed[1]);
   changed[1] = ops[0];
   number(changed, false);
-  require(!detail::plan_native_region(changed, banks(memory), mods).valid,
+  require(!detail::resident_plan(changed, banks(memory), mods).valid,
           "A constant after the first use retains ordinary execution");
   changed = ops;
   changed.insert(changed.begin(), ops[0]);
   changed.front().instruction.extension = 64;
   number(changed, false);
-  const auto result = detail::plan_native_region(changed, banks(memory), mods);
+  const auto result = detail::resident_plan(changed, banks(memory), mods);
   require(result.valid && result.addresses[0].constant == 32,
           "Consecutive pre-use constants use the last actual assignment");
   auto alias = banks(memory);
   alias[0].aliases_program = true;
-  require(!detail::plan_native_region(ops, alias, mods).valid,
+  require(!detail::resident_plan(ops, alias, mods).valid,
           "Constants do not remove program-alias invalidation boundaries");
 }
 

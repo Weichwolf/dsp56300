@@ -6,12 +6,12 @@
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
+#include "jit/code.hpp"
+#include "jit/resident.hpp"
 #include "native/direct.hpp"
-#include "native_region.hpp"
 #include "region_guards.hpp"
 #include "register_model.hpp"
 #include "support.hpp"
-#include "x64.hpp"
 
 #include <algorithm>
 #include <array>
@@ -107,8 +107,8 @@ std::vector<Step> body(const Profile profile) {
   return result;
 }
 
-std::vector<detail::NativeOp> operations(const std::span<const Step> steps) {
-  std::vector<detail::NativeOp> result;
+std::vector<detail::BlockInstruction> operations(const std::span<const Step> steps) {
+  std::vector<detail::BlockInstruction> result;
   Word pc = start;
   for (const auto &step : steps) {
     auto decoded = detail::decode(step.code);
@@ -123,7 +123,7 @@ std::vector<detail::NativeOp> operations(const std::span<const Step> steps) {
   return result;
 }
 
-std::vector<std::uint8_t> proof(const detail::NativeRegion &region, const Word instructions) {
+std::vector<std::uint8_t> proof(const detail::ResidentPlan &region, const Word instructions) {
   using detail::x64::Reg;
   using detail::x64::Width;
   detail::x64::Code code;
@@ -219,7 +219,7 @@ void matrix(const Profile profile) {
   if (profile.pattern == Pattern::paired) { modifiers[4] = profile.modifier; }
   const std::array<detail::JitMemory, 2> memory{
       {{.data = x.data(), .words = x.size()}, {.data = y.data(), .words = y.size()}}};
-  const auto region = detail::plan_native_region(ops, memory, modifiers);
+  const auto region = detail::resident_plan(ops, memory, modifiers);
   if (!region.valid) {
     require(profile.pattern == Pattern::paired && profile.modifier != word_mask &&
                 profile.modifier >= y_words,
@@ -253,7 +253,7 @@ void matrix(const Profile profile) {
 }
 
 void body_lengths() {
-  detail::NativeRegion region;
+  detail::ResidentPlan region;
   region.valid = region.loop = true;
   // No address changes: isolate the real native body-count admission and division.
   for (const Word size : {1U, 256U, 257U, 1012U, static_cast<Word>(address_words), 0x40000000U}) {
@@ -278,7 +278,7 @@ void body_lengths() {
 
 void rejected_ir() {
   for (const Word size : {0U, 0x40000001U, 0x80000000U, maximum}) {
-    detail::NativeRegion region;
+    detail::ResidentPlan region;
     region.valid = region.loop = true;
     detail::x64::Code code;
     detail::x64::Label failed;

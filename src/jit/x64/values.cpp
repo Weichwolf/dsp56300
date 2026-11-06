@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "dsp56300/memory.hpp"
 #include "jit.hpp"
-#include "jit_emitter.hpp"
+#include "jit/code.hpp"
+#include "jit/emitter.hpp"
 #include "native_moves.hpp"
 #include "word_reuse.hpp"
-#include "x64.hpp"
 
 #include <array>
 #include <bit>
@@ -16,15 +16,16 @@ namespace {
 constexpr std::array slots{x64::Xmm::x8, x64::Xmm::x9, x64::Xmm::x10, x64::Xmm::x11};
 constexpr unsigned shift_left = 4, shift_arithmetic = 7;
 constexpr unsigned low_word_shift = 40, high_word_shift = 16, product_shift = 9;
+constexpr unsigned vector_valid_shift = 4;
 }
 
-void JitEmitter::invalidate_word_reuse(const WordReuseStep &step) {
-  word_valid_ &= ~step.writes;
+void BlockEmitter::invalidate_word_reuse(const WordReuseStep &step) {
+  word_valid_ &= ~(step.writes | (step.writes << vector_valid_shift));
   if (step.barrier) { word_valid_ = 0; }
 }
 
 std::vector<WordReuseStep>
-JitEmitter::word_effects(const std::span<const NativeOp> operations) const {
+BlockEmitter::word_effects(const std::span<const BlockInstruction> operations) const {
   std::vector<WordReuseStep> result;
   result.reserve(operations.size());
   for (const auto &operation : operations) {
@@ -33,19 +34,18 @@ JitEmitter::word_effects(const std::span<const NativeOp> operations) const {
                       .barrier = word_mode_ == WordReuseMode::disabled || !lowerable(operation) ||
                                  observable_moves(operation) ||
                                  pure_address_update(operation.instruction) ||
-                                 is_loop_setup(operation) ||
-                                 (word_mode_ == WordReuseMode::automatic && has_moves(operation))});
+                                 is_loop_setup(operation)});
   }
   return result;
 }
 
-void JitEmitter::product_word(const x64::Reg destination,
-                              const NativeOp &operation,
-                              const unsigned selector,
-                              const bool scaled) {
+void BlockEmitter::product_word(const x64::Reg destination,
+                                const BlockInstruction &operation,
+                                const unsigned selector,
+                                const bool scaled) {
   const auto bit = Word{1} << selector;
   const auto slot = slots.at(selector);
-  if (word_mode_ == WordReuseMode::vectors && (word_valid_ & bit) != 0) {
+  if ((word_valid_ & (bit << vector_valid_shift)) != 0) {
     code_.packed_to(destination, slot);
     if (scaled) { code_.shift(shift_left, destination, product_shift); }
     return;
@@ -57,13 +57,13 @@ void JitEmitter::product_word(const x64::Reg destination,
       shift_arithmetic, destination, low_word_shift - (scaled && !populate ? product_shift : 0U));
   if (populate) {
     code_.packed_from<64>(slot, destination);
-    word_valid_ |= bit;
+    word_valid_ |= bit << vector_valid_shift;
     reused_words_ = true;
     if (scaled) { code_.shift(shift_left, destination, product_shift); }
   }
 }
 
-bool JitEmitter::gpr_product(const NativeOp &operation) {
+bool BlockEmitter::gpr_product(const BlockInstruction &operation) {
   if (word_selected_ == 0) { return false; }
   const auto inputs = product_operands(operation.instruction);
   const auto word = static_cast<unsigned>(std::countr_zero(word_selected_));

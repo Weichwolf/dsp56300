@@ -5,13 +5,13 @@
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
-#include "jit_emitter.hpp"
+#include "jit/code.hpp"
+#include "jit/emitter.hpp"
 #include "native/direct.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
 #include "support.hpp"
 #include "translation.hpp"
-#include "x64.hpp"
 
 #include <array>
 #include <cstddef>
@@ -50,9 +50,9 @@ Word ending(const std::span<const Step> steps, const Word first) {
   return (next - 1) & word_mask;
 }
 
-std::vector<detail::NativeOp>
+std::vector<detail::BlockInstruction>
 operations(const std::span<const Step> steps, const Word mode, const Word first, const bool loop) {
-  std::vector<detail::NativeOp> result;
+  std::vector<detail::BlockInstruction> result;
   auto pc = first;
   for (const auto step : steps) {
     auto decoded = detail::decode(step.opcode);
@@ -161,7 +161,7 @@ void generated(const std::span<const Step> steps, const Word mode, const bool lo
       Progress{.instructions = boundary63 - 1, .estimated_cycles = maximum - 3}};
   for (const auto first : {start, word_mask - 1}) {
     const auto ops = operations(steps, mode, first, loop);
-    detail::JitEmitter emitter({});
+    detail::BlockEmitter emitter({});
     const auto bytes = emitter.generate(ops);
     const bool expected_admission = !steps.empty() && (loop || steps.size() >= 4);
     require(emitter.packed_retirement() == expected_admission,
@@ -274,7 +274,7 @@ void nop_shape(const NopShape shape) {
       steps.insert(steps.end(), {immediate, round_a});
     }
     const auto ops = operations(steps, shape.mode, shape.first, false);
-    detail::JitEmitter emitter({});
+    detail::BlockEmitter emitter({});
     const auto bytes = emitter.generate(ops, shape.bounds);
     const native::Direct code(bytes);
     const auto count = static_cast<Word>(steps.size());
@@ -318,9 +318,9 @@ void admission_guards() {
   constexpr Word aliased_store = 0x4460d3;
   const std::array body{mac_a, mac_b, mac_a, mac_b};
   const auto ops = operations(body, 0, start, false);
-  const auto check = [](const std::span<const detail::NativeOp> input,
+  const auto check = [](const std::span<const detail::BlockInstruction> input,
                         const detail::JitRuntime runtime) {
-    detail::JitEmitter emitter(runtime);
+    detail::BlockEmitter emitter(runtime);
     static_cast<void>(emitter.generate(input));
     require(!emitter.packed_retirement(),
             "General helpers, unsupported modes, invalid costs and aliased stores reject packing");

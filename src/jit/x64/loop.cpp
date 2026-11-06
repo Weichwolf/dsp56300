@@ -5,10 +5,10 @@
 #include "fields.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
-#include "jit_emitter.hpp"
-#include "native_region.hpp"
+#include "jit/code.hpp"
+#include "jit/emitter.hpp"
+#include "jit/resident.hpp"
 #include "translation.hpp"
-#include "x64.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -30,12 +30,12 @@ constexpr unsigned group_and = 4, group_sub = 5, group_cmp = 7;
 constexpr unsigned op_sub = 0x29, op_or = 0x09, op_test = 0x85, shift_left = 4, shift_right = 5;
 constexpr Word stack_pointer_mask = 63, relative_bit = 16;
 
-Word setup_count(const NativeOp &operation) {
+Word setup_count(const BlockInstruction &operation) {
   const auto opcode = operation.instruction.opcode;
   return ((opcode >> 8) & byte_mask) | ((opcode & 15U) << 8);
 }
 
-Word setup_end(const NativeOp &operation) {
+Word setup_end(const BlockInstruction &operation) {
   const auto &instruction = operation.instruction;
   return ((instruction.opcode & relative_bit) != 0 ? operation.pc + instruction.extension
                                                    : instruction.extension) &
@@ -43,13 +43,13 @@ Word setup_end(const NativeOp &operation) {
 }
 }
 
-bool JitEmitter::is_loop_setup(const NativeOp &operation) {
+bool BlockEmitter::is_loop_setup(const BlockInstruction &operation) {
   return operation.instruction.operation == Operation::loop_immediate &&
          operation.instruction.words == 2 && setup_count(operation) != 0 &&
          !at_loop_end(operation) && setup_end(operation) != ((operation.pc + 1) & word_mask);
 }
 
-void JitEmitter::loop_push(const Reg frame) {
+void BlockEmitter::loop_push(const Reg frame) {
   code_.load(Reg::cx, Reg::r12, sp_offset, Width::dword);
   code_.immediate(group_add, Reg::cx, 1, Width::dword);
   code_.immediate(group_and, Reg::cx, stack_pointer_mask, Width::dword);
@@ -61,7 +61,7 @@ void JitEmitter::loop_push(const Reg frame) {
       {.base = Reg::r12, .index = Reg::cx, .offset = stack_offset}, frame, Width::qword);
 }
 
-void JitEmitter::loop_setup(const NativeOp &operation) {
+void BlockEmitter::loop_setup(const BlockInstruction &operation) {
   x64::Label slow;
   // A failed second push must retain the general executor's first push and LC.
   // Guard the complete capacity before making any native change.
@@ -83,6 +83,11 @@ void JitEmitter::loop_setup(const NativeOp &operation) {
   code_.store(Reg::r12, sr_offset, Reg::dx, Width::dword);
   code_.store_constant(Reg::r12, la_offset, Width::dword, setup_end(operation));
   code_.store_constant(Reg::r12, lc_offset, Width::dword, setup_count(operation));
+  code_.memory_immediate(group_or,
+                         Reg::r13,
+                         offsetof(NativeContext, boundary),
+                         Width::byte,
+                         static_cast<Word>(NativeBoundary::context));
   retire(operation, true);
   code_.jump(exits_.at(dirty_accumulators()));
   code_.bind(slow);
@@ -93,7 +98,7 @@ void JitEmitter::loop_setup(const NativeOp &operation) {
   code_.jump(exits_[0]);
 }
 
-void JitEmitter::loop_guard(const NativeOp &operation) {
+void BlockEmitter::loop_guard(const BlockInstruction &operation) {
   // A guarded RAM body cannot change LC or the loop stack. Its header already
   // admitted LC>1, so the final instruction cannot enter a stack-pop path.
   if (!at_loop_end(operation) || region_mode_ == RegionMode::guarded) { return; }
@@ -114,7 +119,7 @@ void JitEmitter::loop_guard(const NativeOp &operation) {
   code_.bind(continuing);
 }
 
-void JitEmitter::loop_continue() {
+void BlockEmitter::loop_continue() {
   x64::Label continuing;
   x64::Label complete;
   if (region_mode_ != RegionMode::guarded) {
@@ -150,6 +155,12 @@ void JitEmitter::loop_continue() {
     code_.immediate(group_and, Reg::cx, stack_pointer_mask, Width::dword);
     code_.store(Reg::r12, sp_offset, Reg::cx, Width::dword);
     code_.memory_immediate(group_sub, Reg::r12, sc_offset, Width::dword, 2);
+    // Preserve an earlier helper's owner bit, including code invalidation/yield.
+    code_.memory_immediate(group_or,
+                           Reg::r13,
+                           offsetof(NativeContext, boundary),
+                           Width::byte,
+                           static_cast<Word>(NativeBoundary::context));
     code_.constant(Reg::dx, inactive_loop); // Cannot match a 24-bit loop-start PC.
     code_.jump(complete);
     code_.bind(continuing);
@@ -170,7 +181,7 @@ void JitEmitter::loop_continue() {
   code_.bind(complete);
 }
 
-void JitEmitter::loop_backedge() {
+void BlockEmitter::loop_backedge() {
   // loop_continue() leaves the current saved loop-start PC in EDX. The frame
   // may be unrelated to this block, even when its ending LA is unchanged.
   code_.immediate(group_cmp, Reg::dx, loop_pc_, Width::dword);
@@ -185,7 +196,7 @@ void JitEmitter::loop_backedge() {
   code_.jump(loop_header_);
 }
 
-void JitEmitter::initialize_loop_residency() {
+void BlockEmitter::initialize_loop_residency() {
   if (!loop_residency_) { return; }
   // Initial rejection retains the original zero-dirty exit. Subsequent guards
   // can fail after complete iterations and must publish both initialized slots.
@@ -210,7 +221,7 @@ void JitEmitter::initialize_loop_residency() {
   accumulator_dirty_.fill(true);
 }
 
-void JitEmitter::materialize_loop_banks() {
+void BlockEmitter::materialize_loop_banks() {
   code_.packed_to(Reg::ax, x64::Xmm::x5);
   code_.store(Reg::r12, offsetof(Cpu, reg) + offsetof(Registers, x), Reg::ax);
   code_.packed_to(Reg::ax, x64::Xmm::x6);

@@ -4,9 +4,9 @@
 #include "fields.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
-#include "jit_emitter.hpp"
+#include "jit/code.hpp"
+#include "jit/emitter.hpp"
 #include "value_ranges.hpp"
-#include "x64.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -34,7 +34,7 @@ enum TransferCode : std::uint8_t {
   tfr_y1 = 0x71
 };
 
-bool reads_carry(const NativeOp &operation) {
+bool reads_carry(const BlockInstruction &operation) {
   if (operation.instruction.operation != Operation::parallel) { return false; }
   const auto opcode = operation.instruction.opcode;
   const auto group = (opcode >> 4) & 7U;
@@ -43,7 +43,7 @@ bool reads_carry(const NativeOp &operation) {
 }
 }
 
-Word JitEmitter::written_flags(const NativeOp &operation) {
+Word BlockEmitter::written_flags(const BlockInstruction &operation) {
   if (operation.instruction.operation == Operation::nop ||
       operation.instruction.operation == Operation::jump_short ||
       operation.instruction.operation == Operation::loop_immediate) {
@@ -60,7 +60,8 @@ Word JitEmitter::written_flags(const NativeOp &operation) {
   return arithmetic_changed;
 }
 
-std::vector<Word> JitEmitter::plan_flags(const std::span<const NativeOp> operations) const {
+std::vector<Word>
+BlockEmitter::plan_flags(const std::span<const BlockInstruction> operations) const {
   std::vector<Word> result(operations.size(), observed_flags);
   Word live = observed_flags;
   for (std::size_t i = operations.size(); i != 0; --i) {
@@ -82,7 +83,8 @@ std::vector<Word> JitEmitter::plan_flags(const std::span<const NativeOp> operati
   return result;
 }
 
-void JitEmitter::prepare_value_proof(const NativeOp &operation, NativeValueRanges &ranges) {
+void BlockEmitter::prepare_value_proof(const BlockInstruction &operation,
+                                       NativeValueRanges &ranges) {
   value_proof_ = {};
   if ((operation.mode & arithmetic_saturation) == 0) {
     value_proof_.saturation = SaturationProof::none;
@@ -92,7 +94,7 @@ void JitEmitter::prepare_value_proof(const NativeOp &operation, NativeValueRange
   }
 }
 
-void JitEmitter::merge_flag(const Reg value, bool &initialized) {
+void BlockEmitter::merge_flag(const Reg value, bool &initialized) {
   if (initialized) {
     code_.binary(op_or, {.destination = Reg::r8, .source = value}, Width::dword);
   } else {
@@ -101,7 +103,7 @@ void JitEmitter::merge_flag(const Reg value, bool &initialized) {
   }
 }
 
-void JitEmitter::zero_negative_flags(bool &initialized) {
+void BlockEmitter::zero_negative_flags(bool &initialized) {
   if ((live_flags_ & zero) != 0) {
     if (value_proof_.width == 0) {
       code_.constant(Reg::r8, zero);
@@ -120,7 +122,7 @@ void JitEmitter::zero_negative_flags(bool &initialized) {
   }
 }
 
-void JitEmitter::normalization_flags(const Word mode, bool &initialized) {
+void BlockEmitter::normalization_flags(const Word mode, bool &initialized) {
   const unsigned shift = normal_integer_shift + ((mode & scale_down) != 0 ? 1U : 0U) -
                          ((mode & scale_up) != 0 ? 1U : 0U);
   const auto position = shift - padding_bits;
@@ -150,7 +152,7 @@ void JitEmitter::normalization_flags(const Word mode, bool &initialized) {
   }
 }
 
-void JitEmitter::arithmetic_flags(const Word mode, const bool carry_changed) {
+void BlockEmitter::arithmetic_flags(const Word mode, const bool carry_changed) {
   bool initialized = false;
   zero_negative_flags(initialized);
   normalization_flags(mode, initialized);

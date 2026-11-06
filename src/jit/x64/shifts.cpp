@@ -3,8 +3,8 @@
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
-#include "jit_emitter.hpp"
-#include "x64.hpp"
+#include "jit/code.hpp"
+#include "jit/emitter.hpp"
 
 namespace dsp56300::detail {
 namespace {
@@ -15,7 +15,7 @@ constexpr unsigned arithmetic_right = 7, shift_left = 4;
 constexpr unsigned condition_carry = 0x92, op_xor = 0x31;
 }
 
-void JitEmitter::right_shift(const NativeOp &operation) {
+void BlockEmitter::right_shift(const BlockInstruction &operation) {
   const bool destination_b = (operation.instruction.opcode & 8U) != 0;
   value(Reg::ax, destination_b ? 1U : 0U, has_moves(operation));
   // Shift past padding as well: CF then contains the original DSP bit zero.
@@ -31,7 +31,7 @@ void JitEmitter::right_shift(const NativeOp &operation) {
 }
 
 // Keep lowering admission separable for local matched performance controls.
-bool JitEmitter::is_right_shift(const NativeOp &operation) {
+bool BlockEmitter::is_right_shift(const BlockInstruction &operation) {
   return operation.instruction.operation == Operation::parallel &&
          (operation.instruction.opcode & operation_mask) == right_shift_code;
 }

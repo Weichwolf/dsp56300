@@ -3,8 +3,8 @@
 #include "fields.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
-#include "jit_emitter.hpp"
-#include "x64.hpp"
+#include "jit/code.hpp"
+#include "jit/emitter.hpp"
 
 namespace dsp56300::detail {
 namespace {
@@ -16,7 +16,7 @@ constexpr unsigned op_xor = 0x31;
 constexpr unsigned condition_overflow = 0x90, condition_below = 0x92;
 }
 
-bool JitEmitter::is_addition(const NativeOp &operation) {
+bool BlockEmitter::is_addition(const BlockInstruction &operation) {
   const auto opcode = operation.instruction.opcode;
   const auto kind = opcode & 7U;
   if (operation.instruction.operation == Operation::immediate_alu) {
@@ -31,7 +31,7 @@ bool JitEmitter::is_addition(const NativeOp &operation) {
          (kind == 5 && (group == 0 || group >= 4));
 }
 
-void JitEmitter::addition(const NativeOp &operation) {
+void BlockEmitter::addition(const BlockInstruction &operation) {
   const auto &decoded = operation.instruction;
   const auto opcode = decoded.opcode;
   const auto kind = opcode & 7U;

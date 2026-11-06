@@ -24,10 +24,10 @@ struct MacBatchPlan {
   bool destination_b = false, subtract = false;
 };
 
-using MacBatchEntry = Word (*)(Cpu &, NativeContext &, const NativeOp &, Word) noexcept;
+using MacBatchEntry = Word (*)(Cpu &, NativeContext &, const BlockInstruction &, Word) noexcept;
 
 // Compilation-only value. Generated code embeds these immediates, while the
-// block retains the referenced NativeOp until every active entry returns.
+// block retains the referenced BlockInstruction until every active entry returns.
 struct MacBatchCall {
   MacBatchEntry entry = nullptr;
   Word operands = 0;
@@ -44,8 +44,8 @@ struct MacBatchState {
   bool limited = false, overflowed = false;
 };
 
-[[nodiscard]] std::optional<MacBatchPlan> plan_mac_batch(const NativeOp &operation);
-[[nodiscard]] std::optional<MacBatchCall> compile_mac_batch(const NativeOp &operation);
+[[nodiscard]] std::optional<MacBatchPlan> plan_mac_batch(const BlockInstruction &operation);
+[[nodiscard]] std::optional<MacBatchCall> compile_mac_batch(const BlockInstruction &operation);
 
 namespace mac_batch_math {
 inline constexpr std::int64_t sign = std::int64_t{1} << (accumulator_bits - 1);

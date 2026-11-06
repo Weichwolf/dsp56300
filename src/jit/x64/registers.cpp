@@ -3,9 +3,9 @@
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "fields.hpp"
-#include "jit_emitter.hpp"
+#include "jit/code.hpp"
+#include "jit/emitter.hpp"
 #include "native_moves.hpp"
-#include "x64.hpp"
 
 #include <array>
 #include <cstddef>
@@ -29,7 +29,7 @@ std::size_t bank_offset(const unsigned reg) {
 }
 }
 
-void JitEmitter::move_read_register(const Reg value, const NativeMove &move, const Word mode) {
+void BlockEmitter::move_read_register(const Reg value, const NativeMove &move, const Word mode) {
   const auto reg = move.reg;
   if (reg >= a0_register && reg <= b1_register) {
     constexpr std::array shifts{padding_bits, accumulator_bits, main_shift};
@@ -98,7 +98,7 @@ void JitEmitter::move_read_register(const Reg value, const NativeMove &move, con
   code_.immediate(group_and, value, word_mask, Width::dword);
 }
 
-void JitEmitter::move_write_register(const Reg value, const unsigned reg) {
+void BlockEmitter::move_write_register(const Reg value, const unsigned reg) {
   if (reg >= a_register) {
     code_.mov({.destination = Reg::ax, .source = value});
     code_.shift(shift_left, Reg::ax, low_word_shift);

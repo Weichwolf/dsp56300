@@ -8,7 +8,7 @@
 #include "instruction.hpp"
 #include "isa.hpp"
 #include "jit.hpp"
-#include "jit_emitter.hpp"
+#include "jit/emitter.hpp"
 #include "native/direct.hpp"
 #include "register_model.hpp"
 #include "saturation_model.hpp"
@@ -50,7 +50,8 @@ struct Probe {
   unsigned calls = 0;
 };
 
-std::uint32_t forbidden(void *const owner, const detail::NativeOp * /*operation*/) noexcept {
+std::uint32_t forbidden(void *const owner,
+                        const detail::BlockInstruction * /*operation*/) noexcept {
   ++static_cast<Probe *>(owner)->calls;
   return 0;
 }
@@ -64,8 +65,9 @@ struct Shape {
   bool loop = false;
 };
 
-std::vector<detail::NativeOp> operations(const std::span<const Step> steps, const Shape shape) {
-  std::vector<detail::NativeOp> result;
+std::vector<detail::BlockInstruction> operations(const std::span<const Step> steps,
+                                                 const Shape shape) {
+  std::vector<detail::BlockInstruction> result;
   Word pc = start;
   for (const auto step : steps) {
     auto decoded = detail::decode(step.word);
@@ -246,7 +248,7 @@ void alu_matrix() {
       const std::array steps{Step{.word = parallel_none | alu}};
       const auto ops = operations(steps, {.mode = mode});
       const detail::JitRuntime runtime{.execute = forbidden, .moves = forbidden, .memory = {}};
-      detail::JitEmitter emitter(runtime);
+      detail::BlockEmitter emitter(runtime);
       const native::Direct code(emitter.generate(ops));
       if (!admitted(alu)) {
         rejected(code, mode);
@@ -273,7 +275,7 @@ void extension_matrix() {
       for (const Word destination : {0U, 8U}) {
         const std::array steps{Step{.word = parallel_none | form | destination}};
         const auto ops = operations(steps, {.mode = mode});
-        detail::JitEmitter emitter({.execute = forbidden, .moves = forbidden, .memory = {}});
+        detail::BlockEmitter emitter({.execute = forbidden, .moves = forbidden, .memory = {}});
         const native::Direct code(emitter.generate(ops));
         for (Word extension = 0; extension <= status_byte; ++extension) {
           for (const Word high : {0U, sign24}) {
@@ -303,7 +305,7 @@ void sequences() {
   for (const auto mode : modes) {
     for (const bool loop : {false, true}) {
       const auto ops = operations(steps, {.mode = mode, .loop = loop});
-      detail::JitEmitter emitter({.execute = forbidden, .moves = forbidden, .memory = {}});
+      detail::BlockEmitter emitter({.execute = forbidden, .moves = forbidden, .memory = {}});
       const native::Direct code(emitter.generate(ops));
       require(emitter.packed_retirement() && emitter.cached_status(),
               "SM mixed sequences use the packed counters and held status path");
@@ -329,7 +331,7 @@ void sequences() {
 void immediate_case(const Step step, const Word mode) {
   const std::array steps{step};
   const auto ops = operations(steps, {.mode = mode});
-  detail::JitEmitter emitter({.execute = forbidden, .moves = forbidden, .memory = {}});
+  detail::BlockEmitter emitter({.execute = forbidden, .moves = forbidden, .memory = {}});
   const native::Direct code(emitter.generate(ops));
   for (Word flags = 0; flags <= status_byte; ++flags) {
     for (const auto raw : raw_values) {

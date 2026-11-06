@@ -7,7 +7,7 @@
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
-#include "jit_emitter.hpp"
+#include "jit/emitter.hpp"
 #include "memory_arena.hpp"
 #include "native/direct.hpp"
 #include "native_moves.hpp"
@@ -111,7 +111,8 @@ struct Probe {
   unsigned calls = 0;
 };
 
-std::uint32_t forbidden(void *const owner, const detail::NativeOp * /*operation*/) noexcept {
+std::uint32_t forbidden(void *const owner,
+                        const detail::BlockInstruction * /*operation*/) noexcept {
   ++static_cast<Probe *>(owner)->calls;
   return 0;
 }
@@ -128,11 +129,12 @@ std::vector<Step> body(const Shape input) {
   return {{.word = mac_a}, {.word = mac_b}, {.word = mac_a}, move};
 }
 
-std::vector<detail::NativeOp> operations(const Shape input, const std::span<const Step> steps) {
+std::vector<detail::BlockInstruction> operations(const Shape input,
+                                                 const std::span<const Step> steps) {
   auto ending = input.first;
   for (const auto step : steps) { ending += length(step); }
   ending = (ending - 1) & word_mask;
-  std::vector<detail::NativeOp> result;
+  std::vector<detail::BlockInstruction> result;
   Word cursor = input.first;
   for (const auto step : steps) {
     auto instruction = detail::decode(step.word);
@@ -150,6 +152,19 @@ struct Invocation {
   Word flags = 0, lc = 3, budget = 4;
   bool different_target = false;
 };
+
+void finish_loop(Registers &state) {
+  constexpr Word loop_bits = loop_flag | (1U << 16);
+  constexpr Word pointer_mask = 63;
+  const auto saved = state.stack[state.sp % stack_entries];
+  state.sp = (state.sp + pointer_mask) & pointer_mask;
+  const auto previous = state.stack[state.sp % stack_entries];
+  state.sp = (state.sp + pointer_mask) & pointer_mask;
+  state.sc -= 2;
+  state.sr = (state.sr & ~loop_bits) | (static_cast<Word>(saved) & loop_bits);
+  state.la = static_cast<Word>(previous >> word_bits);
+  state.lc = static_cast<Word>(previous) & word_mask;
+}
 
 void direct_case(const native::Direct &code, const Shape shape, const Invocation input) {
   const auto steps = body(shape);
@@ -174,14 +189,18 @@ void direct_case(const native::Direct &code, const Shape shape, const Invocation
     repeat = false;
     for (std::size_t index = 0; index < steps.size(); ++index) {
       const bool ending = shape.loop && index + 1 == steps.size();
-      if (ending && expected.lc <= 1) { break; }
+      if (ending && (expected.lc == 0 || (expected.lc == 1 && expected.sc < 2))) { break; }
       model(expected, steps[index]);
       ++retired;
       cycles += length(steps[index]);
       if (ending) {
-        --expected.lc;
-        expected.pc = target;
-        repeat = target == shape.first;
+        if (expected.lc == 1) {
+          finish_loop(expected);
+        } else {
+          --expected.lc;
+          expected.pc = target;
+          repeat = target == shape.first;
+        }
       }
     }
   }
@@ -201,7 +220,7 @@ void direct_case(const native::Direct &code, const Shape shape, const Invocation
 void direct_shape(const Shape shape) {
   const auto steps = body(shape);
   const auto ops = operations(shape, steps);
-  detail::JitEmitter emitter(
+  detail::BlockEmitter emitter(
       {.owner = nullptr, .execute = forbidden, .moves = forbidden, .memory = {}});
   const native::Direct code(emitter.generate(ops));
   require(emitter.packed_retirement() == shape.mixed && emitter.cached_status() == shape.mixed,

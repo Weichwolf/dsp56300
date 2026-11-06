@@ -10,7 +10,7 @@
 
 namespace dsp56300 {
 std::uint32_t Core::Impl::jit_execute(void *const owner,
-                                      const detail::NativeOp *const operation) noexcept {
+                                      const detail::BlockInstruction *const operation) noexcept {
   auto &self = *static_cast<Impl *>(owner);
 
   self.step_decoded(operation->instruction);
@@ -30,7 +30,7 @@ std::uint32_t Core::Impl::jit_execute(void *const owner,
 }
 
 std::uint32_t Core::Impl::jit_moves(void *const owner,
-                                    const detail::NativeOp *const operation) noexcept {
+                                    const detail::BlockInstruction *const operation) noexcept {
   auto &self = *static_cast<Impl *>(owner);
 
   self.current_pc = operation->pc;

@@ -4,9 +4,9 @@
 #include "dsp56300/memory.hpp"
 #include "fields.hpp"
 #include "jit.hpp"
-#include "jit_emitter.hpp"
+#include "jit/code.hpp"
+#include "jit/emitter.hpp"
 #include "native_moves.hpp"
-#include "x64.hpp"
 
 #include <algorithm>
 #include <array>
@@ -104,7 +104,7 @@ void reverse_address(x64::Code &code, const NativeMove &move) {
 
 }
 
-void JitEmitter::address_immediate(const NativeAddressImmediate &move) {
+void BlockEmitter::address_immediate(const NativeAddressImmediate &move) {
   const bool offset_register = move.destination >= n_register_base;
   const auto index = move.destination - (offset_register ? n_register_base : r_register_base);
   const auto bank = offset_register ? offsetof(Registers, n) : offsetof(Registers, r);
@@ -113,7 +113,7 @@ void JitEmitter::address_immediate(const NativeAddressImmediate &move) {
 }
 
 // Address generation touches CPU registers only; no RAM/I/O address is dereferenced.
-void JitEmitter::address_update(const NativeOp &operation) {
+void BlockEmitter::address_update(const BlockInstruction &operation) {
   const auto opcode = operation.instruction.opcode;
   const NativeMove update{.address = {.mode = (opcode >> 11) & 3, .index = (opcode >> 8) & 7}};
   const auto offset = update.address.index * sizeof(Word);
@@ -141,7 +141,7 @@ void JitEmitter::address_update(const NativeOp &operation) {
 
 // Keep prospective R updates in SI/DI until every transfer guard has passed.
 // move_update consumes them before those registers capture X/Y data values.
-void JitEmitter::move_delta(const NativeMove &move) {
+void BlockEmitter::move_delta(const NativeMove &move) {
   const auto address = move.space == Space::x ? Reg::cx : Reg::r8;
   const auto next = move.space == Space::x ? Reg::si : Reg::di;
   const auto &form = move.address;
@@ -159,7 +159,7 @@ void JitEmitter::move_delta(const NativeMove &move) {
 }
 
 // AX holds the matching low16 M. Keep both ports prospective until bounds pass.
-void JitEmitter::move_profiled_next(const NativeMove &move, const Word modifier) {
+void BlockEmitter::move_profiled_next(const NativeMove &move, const Word modifier) {
   const auto address = move.space == Space::x ? Reg::cx : Reg::r8;
   const auto next = move.space == Space::x ? Reg::si : Reg::di;
   const auto length = modifier + 1;
@@ -180,7 +180,7 @@ void JitEmitter::move_profiled_next(const NativeMove &move, const Word modifier)
   code_.immediate(group_and, next, word_mask, Width::dword);
 }
 
-void JitEmitter::move_next(const NativeMove &move) {
+void BlockEmitter::move_next(const NativeMove &move) {
   const auto next = move.space == Space::x ? Reg::si : Reg::di;
   const auto offset = move.address.index * sizeof(Word);
   code_.load(Reg::ax, Reg::r12, m_offset + offset, Width::dword);
@@ -201,7 +201,7 @@ void JitEmitter::move_next(const NativeMove &move) {
 }
 
 // Internal leaf: AX >= $8000; return ZF=1 and AX=mask iff valid, preserving port state.
-void JitEmitter::emit_ring_check(x64::Label &entry) {
+void BlockEmitter::emit_ring_check(x64::Label &entry) {
   x64::Label invalid;
   code_.bind(entry);
   code_.immediate(group_cmp, Reg::ax, multiple_wrap_bit | multiple_reserved_bit, Width::dword);
@@ -219,7 +219,7 @@ void JitEmitter::emit_ring_check(x64::Label &entry) {
   code_.raw({op_return});
 }
 
-void JitEmitter::emit_ring_guards() {
+void BlockEmitter::emit_ring_guards() {
   if (ring_guards_.empty()) { return; }
 
   struct Routine {
@@ -284,7 +284,7 @@ void JitEmitter::emit_ring_guards() {
   emit_ring_check(check);
 }
 
-void JitEmitter::move_ring_delta(const NativeMove &move) {
+void BlockEmitter::move_ring_delta(const NativeMove &move) {
   const auto address = move.space == Space::x ? Reg::cx : Reg::r8;
   const auto next = move.space == Space::x ? Reg::si : Reg::di;
   move_delta(move);
@@ -293,13 +293,13 @@ void JitEmitter::move_ring_delta(const NativeMove &move) {
   code_.binary(op_xor, {.destination = next, .source = address}, Width::dword);
 }
 
-void JitEmitter::move_guard(const NativeMove &move, x64::Label &slow) {
+void BlockEmitter::move_guard(const NativeMove &move, x64::Label &slow) {
   if (move.immediate()) { return; }
   move_effective(move);
   move_memory_guard(move, slow);
 }
 
-void JitEmitter::move_effective(const NativeMove &move) {
+void BlockEmitter::move_effective(const NativeMove &move) {
   const auto address = move.space == Space::x ? Reg::cx : Reg::r8;
   const auto &form = move.address;
   const auto offset = form.index * sizeof(Word);
@@ -319,7 +319,7 @@ void JitEmitter::move_effective(const NativeMove &move) {
   }
 }
 
-void JitEmitter::move_memory_guard(const NativeMove &move, x64::Label &slow) {
+void BlockEmitter::move_memory_guard(const NativeMove &move, x64::Label &slow) {
   const auto address = move.space == Space::x ? Reg::cx : Reg::r8;
   if (!runtime_.windows.at(move.space == Space::x ? 0 : 1).empty()) {
     window_guard(move, slow);
@@ -331,7 +331,7 @@ void JitEmitter::move_memory_guard(const NativeMove &move, x64::Label &slow) {
   code_.jump_if(Branch::above_equal, slow);
 }
 
-void JitEmitter::move_update(const NativeMove &move) {
+void BlockEmitter::move_update(const NativeMove &move) {
   const auto &form = move.address;
   if (form.mode == 4 || form.mode == 5 || form.mode == 6) { return; }
   const auto offset = form.index * sizeof(Word);

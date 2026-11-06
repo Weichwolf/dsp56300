@@ -42,7 +42,7 @@ unsigned constant_width(const Word word) {
   return static_cast<unsigned>(std::bit_width(magnitude)) + 1;
 }
 
-std::optional<Result> parallel_result(const NativeOp &operation,
+std::optional<Result> parallel_result(const BlockInstruction &operation,
                                       const std::array<unsigned, 2> old) {
   const auto &instruction = operation.instruction;
   const auto code = instruction.opcode;
@@ -73,7 +73,8 @@ std::optional<Result> parallel_result(const NativeOp &operation,
   return std::nullopt;
 }
 
-std::optional<Result> arithmetic(const NativeOp &operation, const std::array<unsigned, 2> old) {
+std::optional<Result> arithmetic(const BlockInstruction &operation,
+                                 const std::array<unsigned, 2> old) {
   const auto &instruction = operation.instruction;
   const auto code = instruction.opcode;
   const bool immediate = instruction.operation == Operation::immediate_alu;
@@ -97,7 +98,7 @@ std::optional<Result> arithmetic(const NativeOp &operation, const std::array<uns
   return Result{.width = width, .raw_overflow = width > accumulator_bits, .compare = compare};
 }
 
-NativeValueProof finish(const NativeOp &operation, const Result result) {
+NativeValueProof finish(const BlockInstruction &operation, const Result result) {
   NativeValueProof proof{.width = std::min(result.width, accumulator_bits),
                          .raw_overflow = result.raw_overflow,
                          .rounding_overflow = false,
@@ -141,8 +142,9 @@ void NativeValueRanges::moves(const Instruction &instruction) {
   }
 }
 
-NativeValueProof
-NativeValueRanges::advance(const NativeOp &operation, const bool native, const bool observer) {
+NativeValueProof NativeValueRanges::advance(const BlockInstruction &operation,
+                                            const bool native,
+                                            const bool observer) {
   NativeValueProof unknown;
   if ((operation.mode & arithmetic_saturation) == 0) { unknown.saturation = SaturationProof::none; }
   if (!native) {

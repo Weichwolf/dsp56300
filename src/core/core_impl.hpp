@@ -82,13 +82,13 @@ struct Core::Impl {
   void step_decoded(const detail::Instruction &decoded);
   [[nodiscard]] std::optional<detail::Instruction> repeat_instruction() const;
   [[nodiscard]] std::optional<Word> known_program_word(Word address) const;
-  [[nodiscard]] static std::uint32_t jit_execute(void *owner,
-                                                 const detail::NativeOp *operation) noexcept;
+  [[nodiscard]] static std::uint32_t
+  jit_execute(void *owner, const detail::BlockInstruction *operation) noexcept;
   void synchronize_program_view();
   [[nodiscard]] bool bind_memory_windows();
   [[nodiscard]] static std::optional<Word> jit_program(void *owner, Word address) noexcept;
   [[nodiscard]] static std::uint32_t jit_moves(void *owner,
-                                               const detail::NativeOp *operation) noexcept;
+                                               const detail::BlockInstruction *operation) noexcept;
   void execute_operation(const detail::Instruction &decoded);
   void execute_return(const detail::Instruction &decoded);
   void execute_immediate(const detail::Instruction &decoded);

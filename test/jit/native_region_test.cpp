@@ -7,9 +7,9 @@
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
-#include "jit_emitter.hpp"
+#include "jit/emitter.hpp"
+#include "jit/resident.hpp"
 #include "native/direct.hpp"
-#include "native_region.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
 #include "support.hpp"
@@ -196,11 +196,11 @@ void execute(Registers &state, Memory &memory, const Step step) {
   state.pc = (state.pc + 1) & word_mask;
 }
 
-std::vector<detail::NativeOp>
+std::vector<detail::BlockInstruction>
 operations(const Word mode, const bool loop, const Shape shape = Shape::unit) {
   const auto steps = trace(shape);
   const auto last = start + static_cast<Word>(steps.size()) - 1;
-  std::vector<detail::NativeOp> result;
+  std::vector<detail::BlockInstruction> result;
   for (std::size_t index = 0; index < steps.size(); ++index) {
     auto decoded = detail::decode(steps[index].word);
     require(decoded.operation == detail::Operation::parallel && decoded.words == 1 &&
@@ -340,7 +340,7 @@ void direct_shape(
       .memory = {{{.data = memory.bank(false).data(), .words = memory.limits[0]},
                   {.data = memory.bank(true).data(), .words = memory.limits[1]}}}};
   const auto ops = operations(mode, loop, shape);
-  detail::JitEmitter emitter(runtime, modifiers(shape), detail::RegionMode::guarded);
+  detail::BlockEmitter emitter(runtime, modifiers(shape), detail::RegionMode::guarded);
   const native::Direct code(emitter.generate(ops));
   require(emitter.guarded_region() && emitter.cached_status() && emitter.packed_retirement(),
           "Actual guarded bytes qualify held status and helper-free packed retirement");
@@ -398,31 +398,31 @@ void admission() {
       {{.data = memory.bank(false).data(), .words = ram_words},
        {.data = memory.bank(true).data(), .words = ram_words}}};
   auto ops = operations(0, false);
-  require(detail::plan_native_region(ops, banks, modifiers()).valid,
+  require(detail::resident_plan(ops, banks, modifiers()).valid,
           "The generic proof admits the original mixed trace");
   auto changed = ops;
   changed[0].instruction = detail::decode(agu_only);
-  require(!detail::plan_native_region(changed, banks, modifiers()).valid,
+  require(!detail::resident_plan(changed, banks, modifiers()).valid,
           "Unproved pure AGU changes cannot enter a closed region");
   changed = ops;
   ++changed[3].pc;
-  require(!detail::plan_native_region(changed, banks, modifiers()).valid,
+  require(!detail::resident_plan(changed, banks, modifiers()).valid,
           "Noncontiguous metadata cannot hide control changes");
   auto altered = banks;
   altered[0].aliases_program = true;
-  require(!detail::plan_native_region(ops, altered, modifiers()).valid,
+  require(!detail::resident_plan(ops, altered, modifiers()).valid,
           "Every possibly aliased P store retains ordinary invalidation boundaries");
   auto mods = modifiers();
   mods[0] = 0;
-  require(!detail::plan_native_region(ops, banks, mods).valid,
+  require(!detail::resident_plan(ops, banks, mods).valid,
           "Reverse/multiple-wrap updates are outside this region proof");
   const auto stride_ops = operations(0, false, Shape::strided);
-  require(detail::plan_native_region(stride_ops, banks, modifiers()).valid,
+  require(detail::resident_plan(stride_ops, banks, modifiers()).valid,
           "A linear post-N trace admits a runtime range proof without sampling N");
   for (const Word modifier : {0U, 15U, ring, 0x800fU, reserved_modifier}) {
     mods = modifiers();
     mods[0] = modifier;
-    require(!detail::plan_native_region(stride_ops, banks, mods).valid,
+    require(!detail::resident_plan(stride_ops, banks, mods).valid,
             "Post-N modulo, reverse and reserved modes retain the general path");
   }
 }

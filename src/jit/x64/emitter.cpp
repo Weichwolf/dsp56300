@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "jit_emitter.hpp"
+#include "jit/emitter.hpp"
 
 #include "architecture.hpp"
 #include "dataflow.hpp"
@@ -8,12 +8,12 @@
 #include "fields.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
+#include "jit/code.hpp"
+#include "jit/resident.hpp"
 #include "native_moves.hpp"
-#include "native_region.hpp"
 #include "translation.hpp"
 #include "value_ranges.hpp"
 #include "word_reuse.hpp"
-#include "x64.hpp"
 
 #include <algorithm>
 #include <array>
@@ -66,7 +66,7 @@ constexpr Word if_mask = 0xffe000, if_group = 0x202000;
 static_assert(std::is_standard_layout_v<Cpu> && std::is_standard_layout_v<NativeContext>);
 static_assert(offsetof(Cpu, interrupt_inhibited) == offsetof(Cpu, repeat_completed) + 1);
 
-Word nop_count(const std::span<const NativeOp> operations) {
+Word nop_count(const std::span<const BlockInstruction> operations) {
   Word count = 0;
   for (const auto &operation : operations) {
     if (operation.instruction.operation != Operation::nop || operation.instruction.words != 1 ||
@@ -97,13 +97,13 @@ void nop_progress(x64::Code &code, const bool packed) {
 
 }
 
-JitEmitter::JitEmitter(const JitRuntime runtime,
-                       const std::array<Word, agu_registers> modifiers,
-                       const RegionMode region,
-                       const LoopResidency residency,
-                       const RangeMode ranges,
-                       const WordReuseMode words,
-                       const LoopWindowMode window)
+BlockEmitter::BlockEmitter(const JitRuntime runtime,
+                           const std::array<Word, agu_registers> modifiers,
+                           const RegionMode region,
+                           const LoopResidency residency,
+                           const RangeMode ranges,
+                           const WordReuseMode words,
+                           const LoopWindowMode window)
     : runtime_(runtime),
       modifiers_(modifiers),
       region_mode_(region),
@@ -112,18 +112,18 @@ JitEmitter::JitEmitter(const JitRuntime runtime,
       word_mode_(words),
       window_mode_(window) {}
 
-bool JitEmitter::has_moves(const NativeOp &operation) {
+bool BlockEmitter::has_moves(const BlockInstruction &operation) {
   return operation.instruction.operation == Operation::parallel &&
          (operation.instruction.opcode & upper_move_mask) != no_move_group;
 }
 
-bool JitEmitter::observable_moves(const NativeOp &operation) const {
+bool BlockEmitter::observable_moves(const BlockInstruction &operation) const {
   return region_mode_ != RegionMode::guarded && has_moves(operation) &&
          !plan_register_move(operation.instruction).valid() &&
          !plan_address_immediate(operation.instruction).valid();
 }
 
-bool JitEmitter::lowerable(const NativeOp &operation) {
+bool BlockEmitter::lowerable(const BlockInstruction &operation) {
   const auto &decoded = operation.instruction;
   if (at_loop_end(operation) && (operation.mode & compatibility_mode) != 0) { return false; }
   if (decoded.operation == Operation::nop) { return true; }
@@ -158,7 +158,7 @@ bool JitEmitter::lowerable(const NativeOp &operation) {
          operation_code == alu_abs || operation_code == alu_neg || operation_code == alu_round;
 }
 
-void JitEmitter::current_value(const Reg destination, const unsigned index) {
+void BlockEmitter::current_value(const Reg destination, const unsigned index) {
   if (loop_bank_cache_ && index >= accumulator_dirty_.size()) {
     code_.packed_to(destination, index == 2 ? x64::Xmm::x5 : x64::Xmm::x6);
   } else if (index < accumulator_dirty_.size() && accumulator_dirty_.at(index)) {
@@ -168,24 +168,24 @@ void JitEmitter::current_value(const Reg destination, const unsigned index) {
   }
 }
 
-void JitEmitter::store_accumulator(const bool destination_b, const Reg source) {
+void BlockEmitter::store_accumulator(const bool destination_b, const Reg source) {
   const auto index = destination_b ? 1U : 0U;
   code_.mov({.destination = destination_b ? Reg::bx : Reg::bp, .source = source});
   accumulator_dirty_.at(index) = true;
 }
 
-void JitEmitter::invalidate_moved_accumulators() {
+void BlockEmitter::invalidate_moved_accumulators() {
   if (loop_residency_) { return; }
   for (unsigned index = 0; index < accumulator_dirty_.size(); ++index) {
     if ((dataflow_.move_writes & (Word{1} << index)) != 0) { accumulator_dirty_.at(index) = false; }
   }
 }
 
-Word JitEmitter::dirty_accumulators() const {
+Word BlockEmitter::dirty_accumulators() const {
   return (accumulator_dirty_[0] ? 1U : 0U) | (accumulator_dirty_[1] ? 2U : 0U);
 }
 
-void JitEmitter::flush_accumulators(const Word mask) {
+void BlockEmitter::flush_accumulators(const Word mask) {
   for (unsigned index = 0; index < accumulator_dirty_.size(); ++index) {
     if ((mask & (Word{1} << index)) != 0) {
       code_.store(Reg::r12,
@@ -196,11 +196,11 @@ void JitEmitter::flush_accumulators(const Word mask) {
   if (loop_bank_cache_ && mask != 0) { materialize_loop_banks(); }
 }
 
-void JitEmitter::exit_if(const Branch condition) {
+void BlockEmitter::exit_if(const Branch condition) {
   code_.jump_if(condition, exits_.at(dirty_accumulators()));
 }
 
-void JitEmitter::finish() {
+void BlockEmitter::finish() {
   const auto normal = dirty_accumulators();
   code_.bind(exits_.at(normal));
   flush_accumulators(normal);
@@ -223,10 +223,10 @@ void JitEmitter::finish() {
   code_.raw(restore_and_return);
 }
 
-void JitEmitter::input(const Reg destination,
-                       const unsigned selector,
-                       const bool destination_b,
-                       const bool latched) {
+void BlockEmitter::input(const Reg destination,
+                         const unsigned selector,
+                         const bool destination_b,
+                         const bool latched) {
   if (selector < 2) {
     value(destination, destination_b ? 0 : 1, latched);
     return;
@@ -247,7 +247,11 @@ void JitEmitter::input(const Reg destination,
   }
 }
 
-void JitEmitter::helper(const JitHelper function, const NativeOp &operation) {
+void BlockEmitter::helper(const JitHelper function, const BlockInstruction &operation) {
+  code_.store_constant(Reg::r13,
+                       offsetof(NativeContext, boundary),
+                       Width::byte,
+                       static_cast<Word>(NativeBoundary::owner));
   materialize_retirement();
   materialize_status();
   flush_accumulators(dirty_accumulators());
@@ -259,7 +263,7 @@ void JitEmitter::helper(const JitHelper function, const NativeOp &operation) {
   initialize_status();
 }
 
-void JitEmitter::multiply(const NativeOp &operation) {
+void BlockEmitter::multiply(const BlockInstruction &operation) {
   const auto opcode = operation.instruction.opcode;
   if (!gpr_product(operation)) {
     const auto operands = product_operands(operation.instruction);
@@ -301,7 +305,7 @@ void JitEmitter::multiply(const NativeOp &operation) {
   arithmetic_flags(operation.mode);
 }
 
-void JitEmitter::round(const Word mode) {
+void BlockEmitter::round(const Word mode) {
   const unsigned cleared =
       main_shift + ((mode & scale_down) != 0 ? 1U : 0U) - ((mode & scale_up) != 0 ? 1U : 0U);
   const auto half = std::uint64_t{1} << (cleared - 1);
@@ -335,7 +339,7 @@ void JitEmitter::round(const Word mode) {
   code_.shift(shift_left, Reg::ax, cleared);
 }
 
-void JitEmitter::native(const NativeOp &operation) {
+void BlockEmitter::native(const BlockInstruction &operation) {
   constexpr std::array retirement_only{Operation::nop, Operation::jump_short};
   if (std::ranges::find(retirement_only, operation.instruction.operation) !=
       retirement_only.end()) {
@@ -397,7 +401,7 @@ void JitEmitter::native(const NativeOp &operation) {
   arithmetic_flags(operation.mode);
 }
 
-void JitEmitter::retire(const NativeOp &operation, const bool publish) {
+void BlockEmitter::retire(const BlockInstruction &operation, const bool publish) {
   if (repeat_mode_) {
     repeat_retire(operation);
     return;
@@ -431,7 +435,7 @@ void JitEmitter::retire(const NativeOp &operation, const bool publish) {
   }
 }
 
-std::vector<std::uint8_t> JitEmitter::generate_repeat(const NativeOp &operation) {
+std::vector<std::uint8_t> BlockEmitter::generate_repeat(const BlockInstruction &operation) {
   if (operation.loop_address != inactive_loop || operation.instruction.words != 1 ||
       !repeatable(operation.instruction.operation) || !lowerable(operation)) {
     return {};
@@ -442,7 +446,7 @@ std::vector<std::uint8_t> JitEmitter::generate_repeat(const NativeOp &operation)
   return generate_body(operations);
 }
 
-void JitEmitter::repeat_retire(const NativeOp &operation) {
+void BlockEmitter::repeat_retire(const BlockInstruction &operation) {
   constexpr auto lc = offsetof(Cpu, reg) + offsetof(Registers, lc);
   code_.store_constant(
       Reg::r12, offsetof(Cpu, repeat_opcode), Width::dword, operation.instruction.opcode);
@@ -472,14 +476,15 @@ void JitEmitter::repeat_retire(const NativeOp &operation) {
   code_.jump(exits_.at(dirty_accumulators()));
 }
 
-void JitEmitter::budget_guard() {
+void BlockEmitter::budget_guard() {
   materialize_pending_accounting();
   code_.load(Reg::ax, Reg::r13, offsetof(NativeContext, budget), Width::dword);
   code_.binary(op_cmp, {.destination = Reg::r15, .source = Reg::ax}, Width::dword);
   exit_if(Branch::above_equal);
 }
 
-void JitEmitter::emit_nops(const std::span<const NativeOp> operations, const bool publish) {
+void BlockEmitter::emit_nops(const std::span<const BlockInstruction> operations,
+                             const bool publish) {
   const auto count = static_cast<Word>(operations.size());
   if (bounds_ == ExecutionBounds::whole) {
     if (coalesced_accounting_) {
@@ -511,14 +516,20 @@ void JitEmitter::emit_nops(const std::span<const NativeOp> operations, const boo
   exit_if(Branch::not_equal);
 }
 
-void JitEmitter::emit_operations(const std::span<const NativeOp> operations) {
+void BlockEmitter::emit_operations(const std::span<const BlockInstruction> operations) {
   const auto flags = plan_flags(operations);
   const auto effects = word_effects(operations);
-  const auto populations = word_mode_ == WordReuseMode::vectors
+  const auto populations = word_mode_ != WordReuseMode::disabled
                                ? plan_word_reuse(effects)
                                : std::vector<Word>(operations.size());
+  auto gpr_effects = effects;
+  std::ranges::transform(
+      operations, gpr_effects, gpr_effects.begin(), [](const auto &operation, auto effect) {
+        effect.barrier |= has_moves(operation);
+        return effect;
+      });
   const auto selections = word_mode_ == WordReuseMode::automatic
-                              ? plan_gpr_word_reuse(effects)
+                              ? plan_gpr_word_reuse(gpr_effects)
                               : std::vector<Word>(operations.size());
   word_valid_ = 0;
   NativeValueRanges ranges;
@@ -537,8 +548,10 @@ void JitEmitter::emit_operations(const std::span<const NativeOp> operations) {
     dataflow_ = analyze_dataflow(operation.instruction);
     const auto &effect = effects[operation_index];
     if (effect.barrier) { word_valid_ = 0; }
-    word_populate_ = populations[operation_index];
+    // Address generation may overwrite RCX while unaffected SIMD words survive.
+    if (has_moves(operation)) { word_valid_ &= ~Word{15}; }
     word_selected_ = selections[operation_index];
+    word_populate_ = populations[operation_index] & ~word_selected_;
     prepare_value_proof(operation, ranges);
     if (lowerable(operation)) {
       if (is_loop_setup(operation)) {
@@ -559,12 +572,18 @@ void JitEmitter::emit_operations(const std::span<const NativeOp> operations) {
       code_.raw(increment_retired);
       code_.immediate(group_cmp, Reg::ax, 2, Width::dword);
       exit_if(Branch::not_equal);
+      // Return value two certifies sequential PC, context and all event gates.
+      code_.store_constant(Reg::r13,
+                           offsetof(NativeContext, boundary),
+                           Width::byte,
+                           static_cast<Word>(NativeBoundary::none));
     }
     invalidate_word_reuse(effect);
   }
 }
 
-std::vector<std::uint8_t> JitEmitter::generate_body(const std::span<const NativeOp> operations) {
+std::vector<std::uint8_t>
+BlockEmitter::generate_body(const std::span<const BlockInstruction> operations) {
   // Full helpers continue only after checking sequential PC, numeric/loop
   // context, REP state and code validity. The ending itself must be native.
   if (!operations.empty() && at_loop_end(operations.back()) && lowerable(operations.back())) {

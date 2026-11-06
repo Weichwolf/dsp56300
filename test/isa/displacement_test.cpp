@@ -3,6 +3,7 @@
 #include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "isa.hpp"
 #include "memory_arena.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
@@ -108,6 +109,7 @@ void port_case(TestCore &core, Observer &io, const Form form, const Word port, c
   state.m[0] = linear_high;
   core.write(Space::program, start, instruction(form, true));
   if (form.long_form) { core.write(Space::program, start + 1, sign24); }
+  core.write(Space::program, start + word_count(form), isa::opcode<isa::Opcode::stop>()[0]);
   core.set_registers(state);
   io.expected = state;
   io.expected.pc += word_count(form);

@@ -14,16 +14,16 @@
 #include <span>
 
 namespace dsp56300::detail {
-struct NativeOp {
+struct BlockInstruction {
   Instruction instruction;
   Word pc = 0, mode = 0, loop_address = inactive_loop;
 };
 
-constexpr bool at_loop_end(const NativeOp &operation) noexcept {
+constexpr bool at_loop_end(const BlockInstruction &operation) noexcept {
   return operation.loop_address == ((operation.pc + operation.instruction.words - 1) & word_mask);
 }
 
-using JitHelper = std::uint32_t (*)(void *, const NativeOp *) noexcept;
+using JitHelper = std::uint32_t (*)(void *, const BlockInstruction *) noexcept;
 
 struct JitMemory {
   Word *data = nullptr;
@@ -42,11 +42,15 @@ struct JitRuntime {
   bool cacheable_program = true;
 };
 
+enum class NativeBoundary : std::uint8_t { none, owner, context };
+
 struct NativeContext {
   JitRuntime runtime;
   bool *exit_requested = nullptr;
   std::array<std::uint8_t *, 2> write_known{};
   std::uint32_t budget = 0;
+  // Helpers return to the owner; retained loop-context changes may stay native.
+  NativeBoundary boundary = NativeBoundary::none;
 };
 
 class Jit {
@@ -57,8 +61,8 @@ public:
   Jit &operator=(const Jit &) = delete;
   [[nodiscard]] static bool available() noexcept;
   [[nodiscard]] std::uint32_t run(std::uint32_t budget);
-  [[nodiscard]] std::uint32_t run_repeat(NativeOp operation, std::uint32_t budget);
-  [[nodiscard]] std::uint32_t run_captured(NativeOp operation);
+  [[nodiscard]] std::uint32_t run_repeat(BlockInstruction operation, std::uint32_t budget);
+  [[nodiscard]] std::uint32_t run_captured(BlockInstruction operation);
   [[nodiscard]] bool exit_requested() const noexcept;
   void request_yield() noexcept;
   void invalidate() noexcept;

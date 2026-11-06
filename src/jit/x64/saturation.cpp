@@ -4,9 +4,9 @@
 #include "fields.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
-#include "jit_emitter.hpp"
+#include "jit/code.hpp"
+#include "jit/emitter.hpp"
 #include "value_ranges.hpp"
-#include "x64.hpp"
 
 #include <cstdint>
 
@@ -35,7 +35,7 @@ enum Alu : std::uint8_t {
 };
 }
 
-bool JitEmitter::saturation_supported(const NativeOp &operation) {
+bool BlockEmitter::saturation_supported(const BlockInstruction &operation) {
   if (is_logic(operation)) { return true; }
   const auto &decoded = operation.instruction;
   const auto opcode = decoded.opcode;
@@ -52,7 +52,7 @@ bool JitEmitter::saturation_supported(const NativeOp &operation) {
          form == alu_clear || form == alu_round || form == alu_absolute || form == alu_negate;
 }
 
-void JitEmitter::saturate(const Word mode, const bool rounded) {
+void BlockEmitter::saturate(const Word mode, const bool rounded) {
   if ((mode & arithmetic_saturation) == 0) { return; }
   if (value_proof_.saturation == SaturationProof::none) { return; }
   if (value_proof_.saturation == SaturationProof::canonical) {
@@ -76,7 +76,7 @@ void JitEmitter::saturate(const Word mode, const bool rounded) {
   code_.move_if(condition_not_zero, {.destination = Reg::ax, .source = Reg::r11});
 }
 
-void JitEmitter::saturate_canonical(const bool rounded) {
+void BlockEmitter::saturate_canonical(const bool rounded) {
   constexpr unsigned op_cmp = 0x39;
   constexpr unsigned condition_greater = 0x4f;
   constexpr unsigned condition_less = 0x4c;

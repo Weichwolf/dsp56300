@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "x64.hpp"
+#include "jit/code.hpp"
 
 #include <cstddef>
 #include <cstdint>

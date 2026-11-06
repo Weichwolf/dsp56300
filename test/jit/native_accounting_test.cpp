@@ -7,9 +7,9 @@
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
-#include "jit_emitter.hpp"
+#include "jit/emitter.hpp"
+#include "jit/resident.hpp"
 #include "native/direct.hpp"
-#include "native_region.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
 #include "saturation_model.hpp"
@@ -188,8 +188,8 @@ std::vector<Step> steps(const Shape shape) {
   return result;
 }
 
-std::vector<detail::NativeOp> operations(const Shape shape) {
-  std::vector<detail::NativeOp> result;
+std::vector<detail::BlockInstruction> operations(const Shape shape) {
+  std::vector<detail::BlockInstruction> result;
   Word pc = shape.first;
   for (const auto step : steps(shape)) {
     auto decoded = detail::decode(step.word);
@@ -279,7 +279,8 @@ struct Probe {
   unsigned calls = 0;
 };
 
-std::uint32_t forbidden(void *const owner, const detail::NativeOp * /*operation*/) noexcept {
+std::uint32_t forbidden(void *const owner,
+                        const detail::BlockInstruction * /*operation*/) noexcept {
   ++static_cast<Probe *>(owner)->calls;
   return 0;
 }
@@ -394,13 +395,13 @@ void direct_shape(const Shape shape) {
   const auto ops = operations(shape);
   const detail::JitRuntime runtime{
       .execute = forbidden, .moves = forbidden, .memory = banks(memory)};
-  detail::JitEmitter emitter(runtime,
-                             register_model::seed(0).m,
-                             detail::RegionMode::guarded,
-                             shape.residency,
-                             shape.ranges,
-                             shape.word_reuse,
-                             shape.window);
+  detail::BlockEmitter emitter(runtime,
+                               register_model::seed(0).m,
+                               detail::RegionMode::guarded,
+                               shape.residency,
+                               shape.ranges,
+                               shape.word_reuse,
+                               shape.window);
   const native::Direct code(emitter.generate(ops));
   require(emitter.coalesced_accounting() && emitter.guarded_region() &&
               emitter.packed_retirement() && emitter.cached_status(),

@@ -21,13 +21,13 @@ struct RegionAddress {
   bool accessed = false, updated = false;
 };
 
-struct NativeRegion {
+struct ResidentPlan {
   std::array<RegionAddress, agu_registers> addresses;
   Word transfers = 0;
   bool valid = false, loop = false;
 };
 
-[[nodiscard]] NativeRegion plan_native_region(std::span<const NativeOp> operations,
-                                              const std::array<JitMemory, 2> &memory,
-                                              const std::array<Word, agu_registers> &modifiers);
+[[nodiscard]] ResidentPlan resident_plan(std::span<const BlockInstruction> operations,
+                                         const std::array<JitMemory, 2> &memory,
+                                         const std::array<Word, agu_registers> &modifiers);
 } // namespace dsp56300::detail

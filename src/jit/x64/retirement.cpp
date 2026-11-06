@@ -3,10 +3,10 @@
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
-#include "jit_emitter.hpp"
+#include "jit/code.hpp"
+#include "jit/emitter.hpp"
+#include "jit/resident.hpp"
 #include "native_moves.hpp"
-#include "native_region.hpp"
-#include "x64.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -23,14 +23,14 @@ constexpr std::size_t minimum_packed_operations = 4;
 static_assert(offsetof(Cpu, cycles) == offsetof(Cpu, instructions) + sizeof(std::uint64_t));
 }
 
-void JitEmitter::initialize_retirement() {
+void BlockEmitter::initialize_retirement() {
   if (!packed_retirement_ || !retirement_helpers_) { return; }
   code_.packed(Packed::bit_xor, Xmm::x0, Xmm::x0);
   code_.packed(Packed::equal_dword, Xmm::x1, Xmm::x1);
   code_.packed_shift_right(Xmm::x1, lane_sign);
 }
 
-void JitEmitter::materialize_retirement() {
+void BlockEmitter::materialize_retirement() {
   if (!packed_retirement_) { return; }
   if (!retirement_helpers_) {
     // Helper-free regions have no committed prefix inside the call. R15D is
@@ -43,7 +43,7 @@ void JitEmitter::materialize_retirement() {
   code_.packed_store(Reg::r12, offsetof(Cpu, instructions), Xmm::x2);
 }
 
-void JitEmitter::retire_progress(const NativeOp &operation) {
+void BlockEmitter::retire_progress(const BlockInstruction &operation) {
   if (coalesced_accounting_) {
     ++pending_instructions_;
     pending_extra_cycles_ += static_cast<Word>(operation.instruction.cycles) - 1;
@@ -65,7 +65,7 @@ void JitEmitter::retire_progress(const NativeOp &operation) {
       group_add, Reg::r12, offsetof(Cpu, cycles), Width::qword, operation.instruction.cycles);
 }
 
-void JitEmitter::materialize_pending_accounting() {
+void BlockEmitter::materialize_pending_accounting() {
   if (pending_instructions_ != 0) {
     code_.immediate(group_add, Reg::r15, pending_instructions_, Width::dword);
     pending_instructions_ = 0;
@@ -77,8 +77,8 @@ void JitEmitter::materialize_pending_accounting() {
   }
 }
 
-bool JitEmitter::publish_pc(const std::span<const NativeOp> operations,
-                            const std::size_t index) const {
+bool BlockEmitter::publish_pc(const std::span<const BlockInstruction> operations,
+                              const std::size_t index) const {
   if (!packed_retirement_ || index + 1 == operations.size() ||
       observable_moves(operations[index])) {
     return true;
@@ -91,7 +91,8 @@ bool JitEmitter::publish_pc(const std::span<const NativeOp> operations,
 
 // Keep admission separate for independent local performance controls; this
 // changes no CPU/runtime layout or consumer option.
-bool JitEmitter::admit_packed_retirement(const std::span<const NativeOp> operations) const {
+bool BlockEmitter::admit_packed_retirement(
+    const std::span<const BlockInstruction> operations) const {
   if (operations.empty() || (operations.size() < minimum_packed_operations && loop_size_ == 0)) {
     return false;
   }

@@ -2,10 +2,10 @@
 // Independent host bit-circuit/flag expectations for compact native immediates.
 #include "architecture.hpp"
 #include "jit.hpp"
+#include "jit/code.hpp"
 #include "native/direct.hpp"
 #include "register_model.hpp"
 #include "support.hpp"
-#include "x64.hpp"
 
 #include <array>
 #include <bit>

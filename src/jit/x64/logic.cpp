@@ -4,8 +4,8 @@
 #include "fields.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
-#include "jit_emitter.hpp"
-#include "x64.hpp"
+#include "jit/code.hpp"
+#include "jit/emitter.hpp"
 
 #include <cstdint>
 
@@ -21,7 +21,7 @@ constexpr Word complement = 0x17, alu_mask = 0xf7, product_bit = 0x80;
 constexpr Word logical_changed = negative | zero | overflow;
 }
 
-bool JitEmitter::is_logic(const NativeOp &operation) {
+bool BlockEmitter::is_logic(const BlockInstruction &operation) {
   if (operation.instruction.operation != Operation::parallel) { return false; }
   const auto alu = operation.instruction.opcode & byte_mask;
   if ((alu & product_bit) != 0) { return false; }
@@ -30,7 +30,7 @@ bool JitEmitter::is_logic(const NativeOp &operation) {
   return (alu & alu_mask) == complement || (group >= 4 && (kind == 2 || kind == 3 || kind == 6));
 }
 
-void JitEmitter::logical_flags(const Reg word) {
+void BlockEmitter::logical_flags(const Reg word) {
   const auto changed = live_flags_ & logical_changed;
   if (changed == 0) { return; }
   code_.constant(Reg::r8, 0);
@@ -49,7 +49,7 @@ void JitEmitter::logical_flags(const Reg word) {
   merge_status(Reg::r8, changed, Reg::r10);
 }
 
-void JitEmitter::logic(const NativeOp &operation) {
+void BlockEmitter::logic(const BlockInstruction &operation) {
   // RCX may retain a reused product operand across neighboring instructions.
   const auto opcode = operation.instruction.opcode;
   const bool destination_b = (opcode & 8U) != 0;

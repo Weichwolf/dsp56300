@@ -2,9 +2,9 @@
 #include "architecture.hpp"
 #include "dsp56300/core.hpp"
 #include "jit.hpp"
-#include "jit_emitter.hpp"
+#include "jit/code.hpp"
+#include "jit/emitter.hpp"
 #include "mac_batch.hpp"
-#include "x64.hpp"
 
 #include <array>
 #include <bit>
@@ -17,7 +17,7 @@ namespace {
 constexpr std::array<std::uint8_t, 2> call_ax{0xff, 0xd0};
 }
 
-void JitEmitter::batch_entry(const std::span<const NativeOp> operations) {
+void BlockEmitter::batch_entry(const std::span<const BlockInstruction> operations) {
   if (!packed_retirement_ || !retirement_helpers_ || operations.size() != 1) { return; }
   const auto call = compile_mac_batch(operations.front());
   if (!call) { return; }

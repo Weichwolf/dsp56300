@@ -8,7 +8,7 @@
 #include "instruction.hpp"
 #include "isa.hpp"
 #include "jit.hpp"
-#include "jit_emitter.hpp"
+#include "jit/emitter.hpp"
 #include "native/direct.hpp"
 #include "register_model.hpp"
 #include "support.hpp"
@@ -47,7 +47,8 @@ struct Machine {
   unsigned calls = 0;
 };
 
-std::uint32_t forbidden(void *const owner, const detail::NativeOp * /*operation*/) noexcept {
+std::uint32_t forbidden(void *const owner,
+                        const detail::BlockInstruction * /*operation*/) noexcept {
   ++static_cast<Machine *>(owner)->calls;
   return 0;
 }
@@ -131,10 +132,11 @@ void shape(const Shape input) {
       .moves = forbidden,
       .memory = {{{.data = machine.x.data(), .words = machine.x.size()},
                   {.data = machine.y.data(), .words = machine.y.size()}}}};
-  const std::array operations{detail::NativeOp{.instruction = detail::decode(opcode), .pc = start}};
+  const std::array operations{
+      detail::BlockInstruction{.instruction = detail::decode(opcode), .pc = start}};
   std::array<Word, agu_registers> modifiers{};
   modifiers.fill(word_mask);
-  detail::JitEmitter emitter(runtime, modifiers);
+  detail::BlockEmitter emitter(runtime, modifiers);
   const native::Direct code(emitter.generate(operations));
   for (const Word modifier : {0U, high_reverse}) {
     for (const auto cursor : cursors) {
