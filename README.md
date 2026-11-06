@@ -16,6 +16,10 @@ ctest --preset release
 
 The `strict` preset enables ASan/UBSan.
 
+`cmake --build --preset release --target bench-fir-host` compares warm FIR calls
+with independently verified scalar and AVX2 host assembly. Its output states the
+measurement scope and reports each selected case separately.
+
 ## Use
 
 ```cmake

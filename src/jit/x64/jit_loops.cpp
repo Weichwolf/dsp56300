@@ -6,6 +6,7 @@
 #include "instruction.hpp"
 #include "jit.hpp"
 #include "jit_emitter.hpp"
+#include "translation.hpp"
 #include "x64.hpp"
 
 #include <cstddef>
@@ -94,13 +95,60 @@ void JitEmitter::loop_setup(const NativeOp &operation) {
 void JitEmitter::loop_guard(const NativeOp &operation) {
   if (!at_loop_end(operation)) { return; }
   materialize_pending_accounting();
-  // Final iteration and malformed cleanup remain authoritative general execution.
+  // Preserve the original zero/forever and partial-pop fault paths.
+  x64::Label continuing;
   code_.load(Reg::ax, Reg::r12, lc_offset, Width::dword);
+  code_.immediate(group_cmp, Reg::ax, 2, Width::dword);
+  code_.jump_if(Branch::above_equal, continuing);
+  code_.immediate(group_cmp, Reg::ax, 1, Width::dword);
+  exit_if(Branch::not_equal);
+  read_status(Reg::ax);
+  code_.immediate(group_and, Reg::ax, forever_flag, Width::dword);
+  exit_if(Branch::not_equal);
+  code_.load(Reg::ax, Reg::r12, sc_offset, Width::dword);
   code_.immediate(group_cmp, Reg::ax, 1, Width::dword);
   exit_if(Branch::below_equal);
+  code_.bind(continuing);
 }
 
 void JitEmitter::loop_continue() {
+  x64::Label continuing;
+  x64::Label complete;
+  code_.memory_immediate(group_cmp, Reg::r12, lc_offset, Width::dword, 1);
+  code_.jump_if(Branch::not_equal, continuing);
+  // loop_guard admitted this final instruction only with two readable frames.
+  // Guarded regions still reject LC<=1 before any loop-window shortcut.
+  code_.load(Reg::ax, Reg::r12, la_offset, Width::dword);
+  code_.immediate(group_add, Reg::ax, 1, Width::dword);
+  code_.immediate(group_and, Reg::ax, word_mask, Width::dword);
+  code_.store(Reg::r12, pc_offset, Reg::ax, Width::dword);
+  code_.load(Reg::ax, Reg::r12, sp_offset, Width::dword);
+  code_.immediate(group_and, Reg::ax, stack_entries - 1, Width::dword);
+  code_.shift(shift_left, Reg::ax, 1, Width::dword);
+  code_.load_indexed(
+      Reg::dx, {.base = Reg::r12, .index = Reg::ax, .offset = stack_offset}, Width::qword);
+  constexpr Word loop_status = loop_flag | forever_flag;
+  code_.immediate(group_and, Reg::dx, loop_status, Width::dword);
+  merge_status(Reg::dx, loop_status, Reg::cx);
+  code_.load(Reg::cx, Reg::r12, sp_offset, Width::dword);
+  code_.immediate(group_sub, Reg::cx, 1, Width::dword);
+  code_.mov({.destination = Reg::ax, .source = Reg::cx}, Width::dword);
+  code_.immediate(group_and, Reg::ax, stack_entries - 1, Width::dword);
+  code_.shift(shift_left, Reg::ax, 1, Width::dword);
+  code_.load_indexed(
+      Reg::dx, {.base = Reg::r12, .index = Reg::ax, .offset = stack_offset}, Width::qword);
+  code_.mov({.destination = Reg::ax, .source = Reg::dx}, Width::dword);
+  code_.immediate(group_and, Reg::ax, word_mask, Width::dword);
+  code_.store(Reg::r12, lc_offset, Reg::ax, Width::dword);
+  code_.shift(shift_right, Reg::dx, word_bits);
+  code_.store(Reg::r12, la_offset, Reg::dx, Width::dword);
+  code_.immediate(group_sub, Reg::cx, 1, Width::dword);
+  code_.immediate(group_and, Reg::cx, stack_pointer_mask, Width::dword);
+  code_.store(Reg::r12, sp_offset, Reg::cx, Width::dword);
+  code_.memory_immediate(group_sub, Reg::r12, sc_offset, Width::dword, 2);
+  code_.constant(Reg::dx, inactive_loop); // Cannot match a 24-bit loop-start PC.
+  code_.jump(complete);
+  code_.bind(continuing);
   code_.load(Reg::ax, Reg::r12, sp_offset, Width::dword);
   code_.immediate(group_and, Reg::ax, stack_entries - 1, Width::dword);
   // Indexed addresses scale by four; a frame contains two stored host words.
@@ -110,6 +158,7 @@ void JitEmitter::loop_continue() {
   code_.shift(shift_right, Reg::dx, word_bits);
   code_.store(Reg::r12, pc_offset, Reg::dx, Width::dword);
   code_.memory_immediate(group_sub, Reg::r12, lc_offset, Width::dword, 1);
+  code_.bind(complete);
 }
 
 void JitEmitter::loop_backedge() {

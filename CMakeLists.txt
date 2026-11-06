@@ -289,6 +289,9 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   add_executable(dsp56300_native_loop_test test/jit/native_loop_test.cpp)
   target_link_libraries(dsp56300_native_loop_test PRIVATE dsp56300::core)
   add_test(NAME native-loop-boundaries COMMAND dsp56300_native_loop_test)
+  add_executable(dsp56300_native_loop_final_test test/jit/native_loop_final_test.cpp)
+  target_link_libraries(dsp56300_native_loop_final_test PRIVATE dsp56300::core)
+  add_test(NAME native-loop-final-frames COMMAND dsp56300_native_loop_final_test)
   add_executable(dsp56300_native_backedge_test test/jit/native_backedge_test.cpp)
   target_link_libraries(dsp56300_native_backedge_test PRIVATE dsp56300::core)
   target_include_directories(dsp56300_native_backedge_test PRIVATE src/core src/jit)
@@ -474,6 +477,14 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
     -P "${CMAKE_CURRENT_SOURCE_DIR}/test/support/reproduce_fixture.cmake")
   add_test(NAME fir-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/fir.d56")
+  add_executable(dsp56300_fir_host_bench test/bench/fir_host_bench.cpp test/bench/fir_host.cpp
+    test/bench/fir_host_avx2.cpp)
+  target_link_libraries(dsp56300_fir_host_bench PRIVATE dsp56300::core dsp56300_fixture_format)
+  add_test(NAME fir-matched-host-asm COMMAND dsp56300_fir_host_bench
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/fir.d56" --verify)
+  add_custom_target(bench-fir-host
+    COMMAND $<TARGET_FILE:dsp56300_fir_host_bench> "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/fir.d56"
+    DEPENDS dsp56300_fir_host_bench USES_TERMINAL VERBATIM)
   add_test(NAME fir-reproducibility COMMAND "${CMAKE_COMMAND}"
     "-DGENERATOR=$<TARGET_FILE:dsp56300_generate_fir>"
     "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/fir-regenerated.d56"

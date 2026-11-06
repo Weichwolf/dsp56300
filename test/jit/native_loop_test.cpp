@@ -197,6 +197,10 @@ void callback_change(const TestOptions options, const Word count) {
   expected.a = 0;
   expected.x = 1;
   expected.sr = flag_z | flag_u;
+  if (count == 1) {
+    sequence_model::alu(expected, initial, read_x_negate_a);
+    expected.sr &= ~loop_flag;
+  }
   expected.la = old_la;
   expected.lc = old_lc;
   expected.sp = 0;
@@ -236,45 +240,58 @@ void invalid_modes(const TestOptions options) {
   }
 }
 
+void restore_seeded_loop(Registers &state) {
+  state.sr &= ~loop_flag;
+  state.la = old_la;
+  state.lc = old_lc;
+  state.sp = state.sc = 0;
+}
+
 void high_addresses(const TestOptions options) {
   const MemoryArena arena;
   TestCore core(arena.buffers(), nullptr, options);
   constexpr std::array addresses{0U, start, 0x7fffffU, 0xfffffeU, word_mask};
   for (const auto address : addresses) {
     core.write(Space::program, address, mac_a);
-    auto initial = seeded(loop_flag);
-    initial.pc = address;
-    initial.la = address;
-    initial.lc = 2;
-    initial.stack[2] = std::uint64_t{word_mask} << word_bits;
-    auto expected = initial;
-    model(expected, mac_a);
-    expected.pc = word_mask;
-    expected.lc = 1;
-    core.set_registers(initial);
-    require(core.run(1).retired == 1 && core.registers() == expected,
-            "Loop keys, ending words and saved PCs preserve address " + std::to_string(address) +
-                " on " + std::string(backend_name(options.backend)));
+    for (const auto count : {1U, 2U}) {
+      auto initial = seeded(loop_flag);
+      initial.pc = address;
+      initial.la = address;
+      initial.lc = count;
+      initial.stack[2] = std::uint64_t{word_mask} << word_bits;
+      auto expected = initial;
+      model(expected, mac_a);
+      expected.pc = count == 1 ? (address + 1) & word_mask : word_mask;
+      expected.lc = 1;
+      if (count == 1) { restore_seeded_loop(expected); }
+      core.set_registers(initial);
+      require(core.run(1).retired == 1 && core.registers() == expected,
+              "Loop continuations and final cleanup preserve address " + std::to_string(address) +
+                  " on " + std::string(backend_name(options.backend)));
+    }
   }
   constexpr Word immediate_add = 0x0140c0;
   core.write(Space::program, word_mask, immediate_add);
   core.write(Space::program, 0, 1);
-  auto initial = seeded(loop_flag);
-  initial.pc = word_mask;
-  initial.la = 0; // The extension word is the loop's final word.
-  initial.lc = 2;
-  initial.stack[2] = std::uint64_t{word_mask} << word_bits;
-  auto expected = initial;
-  auto operand = initial;
-  operand.x = 1;
-  sequence_model::alu(expected, operand, 0x40);
-  expected.pc = word_mask;
-  expected.lc = 1;
-  core.set_registers(initial);
-  const auto before = core.progress();
-  require(core.run(1).retired == 1 && core.registers() == expected &&
-              core.progress().estimated_cycles == before.estimated_cycles + 2,
-          "A wrapped two-word instruction can end a loop at its extension word");
+  for (const auto count : {1U, 2U}) {
+    auto initial = seeded(loop_flag);
+    initial.pc = word_mask;
+    initial.la = 0; // The extension word is the loop's final word.
+    initial.lc = count;
+    initial.stack[2] = std::uint64_t{word_mask} << word_bits;
+    auto expected = initial;
+    auto operand = initial;
+    operand.x = 1;
+    sequence_model::alu(expected, operand, 0x40);
+    expected.pc = count == 1 ? 1 : word_mask;
+    expected.lc = 1;
+    if (count == 1) { restore_seeded_loop(expected); }
+    core.set_registers(initial);
+    const auto before = core.progress();
+    require(core.run(1).retired == 1 && core.registers() == expected &&
+                core.progress().estimated_cycles == before.estimated_cycles + 2,
+            "A wrapped two-word instruction can continue or finish at its extension word");
+  }
 }
 
 void ending_fault(const TestOptions options) {
@@ -366,6 +383,7 @@ int main() {
         dsp56300::test::warm_contexts(options);
         dsp56300::test::stack_slots(options);
         for (unsigned kind = 0; kind < 5; ++kind) { dsp56300::test::guest_changes(options, kind); }
+        dsp56300::test::callback_change(options, 1);
         dsp56300::test::callback_change(options, 2);
         dsp56300::test::callback_change(options, 4);
         dsp56300::test::invalid_modes(options);

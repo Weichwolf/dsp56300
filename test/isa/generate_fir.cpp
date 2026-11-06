@@ -3,6 +3,7 @@
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "isa.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
 #include "support.hpp"
@@ -20,15 +21,29 @@
 namespace dsp56300::test {
 namespace {
 constexpr Word data_base = 128, coefficient_base = 768, output_address = 16;
-constexpr Word preload_clear = 0xf09813, pipelined_mac = 0xf098d2;
-constexpr Word mac = 0x2000d2, rounded = 0x200011, loop_prefix = 0x060080;
-constexpr Word store_a = 0x560000 | (output_address << 8);
-constexpr std::array<Word, 9> tap_counts{4, 16, 64, 512, 5, 7, 15, 63, 129};
+constexpr Word dual_postincrement_x0_y0 = 0x709800, store_a_fields = 0x120000;
+constexpr Word mac = isa::opcode<isa::Opcode::mac_register_a>()[0] | (5U << 4);
+constexpr Word parallel = isa::opcode<isa::Opcode::move_xy>()[0] | dual_postincrement_x0_y0;
+constexpr Word preload_clear = parallel | (isa::opcode<isa::Opcode::clr_a>()[0] & status_byte);
+constexpr Word pipelined_mac = parallel | (mac & status_byte);
+constexpr Word rounded = isa::opcode<isa::Opcode::rnd_a>()[0];
+constexpr Word loop_prefix = isa::opcode<isa::Opcode::do_immediate>()[0];
+constexpr Word store_a =
+    isa::opcode<isa::Opcode::move_x_absolute_short>()[0] | store_a_fields | (output_address << 8);
+constexpr std::array<Word, 12> tap_counts{4, 16, 64, 512, 5, 7, 15, 63, 129, 6, 255, 256};
 constexpr std::array modes{0U, mode_down, mode_up, mode_rm, mode_rm | mode_down, mode_rm | mode_up};
 constexpr std::array<Word, 2> incoming{0, flag_c | flag_s | flag_l};
 
-enum class Signal : std::uint8_t { impulse, alternating, dc, ramp };
-enum class Coefficient : std::uint8_t { normalized, impulse, alternating, maximum };
+enum class Signal : std::uint8_t {
+  impulse,
+  alternating,
+  dc,
+  ramp,
+  positive_turn,
+  negative_turn,
+  negative_dc
+};
+enum class Coefficient : std::uint8_t { normalized, impulse, alternating, maximum, minimum };
 
 Word signal(const Signal kind, const std::size_t index) {
   constexpr std::size_t ramp_length = 16;
@@ -37,6 +52,15 @@ Word signal(const Signal kind, const std::size_t index) {
     case Signal::impulse: return index == 0 ? sign24 - 1 : 0;
     case Signal::alternating: return index % 2 == 0 ? sign24 - 1 : sign24;
     case Signal::dc: return sign24 - 1;
+    case Signal::negative_dc: return sign24;
+    case Signal::positive_turn:
+    case Signal::negative_turn: {
+      // The 257th full-scale product overflows inside a four-lane group;
+      // opposite products restore a small, unlimited output while L stays set.
+      constexpr std::size_t turning_point = 257;
+      const bool positive = (index < turning_point) == (kind == Signal::positive_turn);
+      return positive ? sign24 - 1 : sign24;
+    }
     case Signal::ramp: {
       const auto value = (static_cast<std::int64_t>(index % ramp_length) - half_ramp) *
                          (static_cast<std::int64_t>(sign24) / half_ramp);
@@ -61,6 +85,7 @@ Word coefficient(const Input input, const std::size_t index) {
       return index % 2 == 0 ? unit
                             : static_cast<Word>(-static_cast<std::int64_t>(unit)) & word_mask;
     case Coefficient::maximum: return sign24 - 1;
+    case Coefficient::minimum: return sign24;
     default: throw std::logic_error("Unknown original FIR coefficient");
   }
 }
@@ -120,6 +145,10 @@ BinaryCase fixture(const Input input) {
   const auto sum = item.expected;
   sequence_model::alu(item.expected, sum, rounded);
   const auto output = register_model::read(item.expected, 14);
+  if (input.signal == Signal::positive_turn || input.signal == Signal::negative_turn) {
+    require((item.expected.sr & flag_l) != 0 && output != sign24 && output != sign24 - 1,
+            "Cancelled intermediate overflow remains observable without output clipping");
+  }
   const auto words = program(input.taps);
   item.expected.pc = start + static_cast<Word>(words.size());
   item.budget = input.taps + 4;
@@ -131,6 +160,30 @@ BinaryCase fixture(const Input input) {
                  {.words = std::move(weights), .address = coefficient_base, .space = Space::y}};
   item.after = {{.words = {output}, .address = output_address, .space = Space::x}};
   return item;
+}
+
+void add_overflow_cases(std::vector<BinaryCase> &cases) {
+  constexpr dsp56300::Word cancellation_taps = 514;
+  for (const auto data : {Signal::positive_turn, Signal::negative_turn}) {
+    for (const auto mode : modes) {
+      for (const auto flags : incoming) {
+        cases.push_back(fixture({.taps = cancellation_taps,
+                                 .mode = mode,
+                                 .flags = flags,
+                                 .signal = data,
+                                 .coefficient = Coefficient::maximum}));
+      }
+    }
+  }
+  for (const auto mode : modes) {
+    for (const auto flags : incoming) {
+      cases.push_back(fixture({.taps = 512,
+                               .mode = mode,
+                               .flags = flags,
+                               .signal = Signal::negative_dc,
+                               .coefficient = Coefficient::minimum}));
+    }
+  }
 }
 } // namespace
 } // namespace dsp56300::test
@@ -158,6 +211,7 @@ int main(const int argc, const char *const *const argv) {
         }
       }
     }
+    add_overflow_cases(cases);
     const auto count = cases.size();
     write_fixture(argv[1], std::move(cases));
     std::cout << count << " independently modeled original FIR cases written\n";
