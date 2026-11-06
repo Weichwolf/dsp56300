@@ -9,16 +9,14 @@
 
 #include <array>
 #include <cstddef>
-#include <cstdint>
 
 namespace dsp56300::detail {
 namespace {
 using x64::Reg;
 using x64::Width;
-constexpr unsigned op_or = 0x09, op_xor = 0x31, op_cmp = 0x39;
-constexpr unsigned group_and = 4, shift_left = 4, shift_right = 5, shift_arithmetic = 7;
-constexpr unsigned condition_greater = 0x9f, condition_less = 0x9c;
-constexpr unsigned move_greater = 0x4f, move_less = 0x4c;
+constexpr unsigned op_or = 0x09, op_xor = 0x31;
+constexpr unsigned group_add = 0, group_and = 4, group_xor = 6, group_cmp = 7;
+constexpr unsigned shift_left = 4, shift_right = 5, shift_arithmetic = 7;
 constexpr unsigned aligned_growth_shift = 53, low_word_shift = 40;
 
 std::size_t bank_offset(const unsigned reg) {
@@ -74,17 +72,20 @@ void JitEmitter::move_read_register(const Reg value, const NativeMove &move, con
     code_.immediate(group_and, value, word_mask, Width::dword);
     return;
   }
-  code_.constant(Reg::r9, static_cast<std::uint64_t>(maximum_word));
-  code_.binary(op_cmp, {.destination = value, .source = Reg::r9});
-  code_.set(condition_greater, Reg::r10);
-  code_.move_if(move_greater, {.destination = value, .source = Reg::r9});
-  code_.constant(Reg::r9, static_cast<std::uint64_t>(std::int64_t{minimum_word}));
-  code_.binary(op_cmp, {.destination = value, .source = Reg::r9});
-  code_.set(condition_less, Reg::r11);
-  code_.move_if(move_less, {.destination = value, .source = Reg::r9});
-  code_.binary(op_or, {.destination = Reg::r10, .source = Reg::r11}, Width::dword);
-  code_.shift(shift_left, Reg::r10, 6, Width::dword);
+  x64::Label fits;
+  // Unsigned (value + 2^23) <= 2^24-1 tests both signed24 bounds at once.
+  // Only a clipped transfer changes sticky L; the fitting path needs no merge.
+  code_.mov({.destination = Reg::r9, .source = value});
+  code_.immediate(group_add, Reg::r9, sign24_bit);
+  code_.immediate(group_cmp, Reg::r9, word_mask);
+  code_.jump_if(x64::Branch::below_equal, fits);
+  code_.mov({.destination = Reg::r9, .source = value});
+  code_.shift(shift_arithmetic, Reg::r9, host_sign_bit);
+  code_.immediate(group_xor, Reg::r9, static_cast<Word>(maximum_word));
+  code_.mov({.destination = value, .source = Reg::r9});
+  code_.constant(Reg::r10, limit);
   merge_status(Reg::r10);
+  code_.bind(fits);
   code_.immediate(group_and, value, word_mask, Width::dword);
 }
 
