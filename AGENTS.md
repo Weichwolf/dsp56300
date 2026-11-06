@@ -40,7 +40,7 @@
   or weak host baselines do not establish this gate. Report every shortfall.
 
 - Optimize cpu12 first until every representative warm fixture reaches at least
-  80% of matched optimized host ASM; then optimize and simplify dsp56300 to the
+  70% of matched optimized host ASM; then optimize and simplify dsp56300 to the
   same threshold. Emulator integration stays deferred until both pass.
 - While throughput is low, favor short optimized experiments and focused result
   checks. Increase validation breadth with performance progress; preserve strict

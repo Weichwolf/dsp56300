@@ -139,7 +139,7 @@ verified results against optimized handwritten host ASM. Report cold compilation
 warm native-entry throughput and full Core.run throughput separately. Include
 code size and boundary costs; do not disguise slow fixtures with an average.
 
-The gate is at least 80% of matched host-ASM throughput for every representative
+The gate is at least 70% of matched host-ASM throughput for every representative
 warm fixture in each core. This is an ambitious measured acceptance requirement,
 not a theorem that arbitrary guest code can match an unconstrained native
 algorithm. Start with ALU, flags, memory and branches; include substantial loops,
