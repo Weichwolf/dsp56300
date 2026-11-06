@@ -3,6 +3,7 @@
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
+#include "isa.hpp"
 #include "jit.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
@@ -73,6 +74,10 @@ void witness(detail::NativeValueRanges ranges, const Registers &old, const Word 
   const auto proof =
       ranges.advance(operation({.opcode = parallel_none | code, .mode = old.sr}), true, false);
   const auto raw = (code & 8U) != 0 ? expected.b : expected.a;
+  const auto prior = (code & 8U) != 0 ? old.b : old.a;
+  require(proof.input_zero_bits <= accumulator_bits &&
+              (prior & ((std::uint64_t{1} << proof.input_zero_bits) - 1)) == 0,
+          "Low-bit certificates describe the independent pre-transfer accumulator");
   if (proof.zero_addend) {
     require((code & accumulate_mask) == accumulate_mask && ((code & 8U) != 0 ? old.b : old.a) == 0,
             "A product zero-addend certificate describes the old accumulator before moves");
@@ -146,13 +151,13 @@ void barriers() {
   const auto sm = saturation_model::mode;
   const auto after_helper =
       ranges.advance(operation({.opcode = add_zero, .mode = sm}), true, false);
-  require(after_helper.width == accumulator_bits &&
+  require(after_helper.input_zero_bits == 0 && after_helper.width == accumulator_bits &&
               after_helper.saturation == detail::SaturationProof::general,
           "A helper erases facts before a later arithmetic operation");
   static_cast<void>(ranges.advance(operation({.opcode = clear_a, .mode = 0}), true, true));
   const auto after_observer =
       ranges.advance(operation({.opcode = add_zero, .mode = sm}), true, false);
-  require(after_observer.width == accumulator_bits &&
+  require(after_observer.input_zero_bits == 0 && after_observer.width == accumulator_bits &&
               after_observer.saturation == detail::SaturationProof::general,
           "Observable transfers erase facts after independently bounded current arithmetic");
   detail::NativeValueRanges fresh;
@@ -254,11 +259,47 @@ void immediate_forms(const Word value, const Word mode) {
     }
   }
 }
+
+void rounded_domains() {
+  using enum isa::Opcode;
+  constexpr std::array body{tfr_x0_a,
+                            add_y0_a,
+                            asr_a,
+                            rnd_a,
+                            tfr_x1_b,
+                            sub_y1_b,
+                            asr_b,
+                            rnd_b,
+                            mpy_register_a,
+                            rnd_a,
+                            mac_register_b,
+                            rnd_b};
+  for (const auto mode : modes) {
+    for (const auto left : words) {
+      for (const auto right : words) {
+        detail::NativeValueRanges ranges;
+        auto state = register_model::seed(mode);
+        state.sr = mode | status_byte;
+        state.x = left | (std::uint64_t{right} << word_bits);
+        state.y = right | (std::uint64_t{left} << word_bits);
+        for (const auto opcode : body) {
+          const auto code = static_cast<Word>(opcode) & status_byte;
+          witness(ranges, state, code);
+          static_cast<void>(ranges.advance(
+              operation({.opcode = parallel_none | code, .mode = mode}), true, false));
+          sequence_model::alu(state, state, code);
+          probes(ranges, state, mode);
+        }
+      }
+    }
+  }
+}
 } // namespace
 } // namespace dsp56300::test
 
 int main() {
   try {
+    dsp56300::test::rounded_domains();
     dsp56300::test::barriers();
     dsp56300::test::old_parallel();
     for (const auto mode : dsp56300::test::modes) {

@@ -32,6 +32,10 @@ constexpr std::array comparison{tfr_x0_a, cmp_y0_a, tfr_x1_b, add_y1_b};
 constexpr std::array overflow{add_y0_a, clr_b, add_x0_b};
 constexpr std::array carry_chain{tfr_x0_a, add_y0_a, rnd_a, clr_b, adc_x_b};
 constexpr std::array unary{tfr_x0_a, neg_a, tfr_y0_b, abs_b, add_x1_a, add_y1_b};
+constexpr std::array aligned_shifts{tfr_x0_a, add_y0_a, asr_a, asr_a, asr_a, rnd_a, rnd_a, adc_x_b};
+constexpr std::array aligned_rounds{tfr_x0_a, rnd_a, rnd_a, tfr_y0_b, rnd_b, add_a_b};
+constexpr std::array rounded_difference{tfr_x0_a, sub_y0_a, asr_a, rnd_a};
+constexpr std::array raw_shifts{asr_a, asr_b, rnd_a, adc_x_b};
 constexpr std::array fresh_products{mpy_register_a, mpyr_register_b, rnd_a, add_a_b};
 constexpr std::array zero_products{clr_a, mac_register_a, clr_b, macr_register_b, adc_x_a};
 constexpr std::array accumulating_products{
@@ -149,6 +153,10 @@ int main() {
     matrix(overflow);
     matrix(carry_chain);
     matrix(unary);
+    matrix(aligned_shifts);
+    matrix(aligned_rounds);
+    matrix(rounded_difference);
+    matrix(raw_shifts);
     matrix(fresh_products);
     matrix(zero_products);
     matrix(accumulating_products);

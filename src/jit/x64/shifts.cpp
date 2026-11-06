@@ -19,11 +19,12 @@ void BlockEmitter::right_shift(const BlockInstruction &operation) {
   const bool destination_b = (operation.instruction.opcode & 8U) != 0;
   const auto result = result_register(operation);
   value(result, destination_b ? 1U : 0U, has_moves(operation));
-  // Shift past padding as well: CF then contains the original DSP bit zero.
-  // Restore alignment afterwards, discarding every newly shifted padding bit.
-  code_.shift(arithmetic_right, result, padding_bits + 1);
+  // A proved zero guest LSB keeps the padding canonical after SAR 1.
+  // Otherwise shift past padding, capture guest C and restore alignment.
+  const bool aligned = value_proof_.input_zero_bits != 0;
+  code_.shift(arithmetic_right, result, aligned ? 1U : padding_bits + 1);
   if ((live_flags_ & carry) != 0) { code_.set(condition_carry, Reg::dx); }
-  code_.shift(shift_left, result, padding_bits);
+  if (!aligned) { code_.shift(shift_left, result, padding_bits); }
   if (value_proof_.overflow_value()) {
     code_.binary(op_xor, {.destination = Reg::r10, .source = Reg::r10}, Width::dword);
   }

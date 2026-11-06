@@ -314,6 +314,7 @@ void BlockEmitter::multiply(const BlockInstruction &operation) {
 void BlockEmitter::round(const Word mode, const Reg result) {
   const unsigned cleared =
       main_shift + ((mode & scale_down) != 0 ? 1U : 0U) - ((mode & scale_up) != 0 ? 1U : 0U);
+  if (value_proof_.rounding_zero_bits >= cleared - padding_bits) { return; }
   const auto half = std::uint64_t{1} << (cleared - 1);
   if ((mode & rounding_mode) != 0) {
     constexpr auto maximum_immediate_half = std::uint64_t{1} << 31;
