@@ -46,7 +46,8 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
     src/jit/a64/conditional.cpp src/jit/a64/registers.cpp src/jit/a64/data_registers.cpp
     src/jit/a64/transfer.cpp src/jit/a64/move.cpp src/jit/a64/address.cpp
     src/jit/a64/memory.cpp src/jit/a64/memory_windows.cpp src/jit/a64/bus.cpp
-    src/jit/a64/memory_move.cpp src/jit/a64/peripheral.cpp)
+    src/jit/a64/memory_move.cpp src/jit/a64/peripheral.cpp src/jit/a64/long_move.cpp
+    src/jit/a64/paired_move.cpp src/jit/a64/mixed_move.cpp)
 endif()
 add_library(dsp56300_core STATIC
   src/core.cpp src/captured.cpp src/repeat.cpp src/memory_windows.cpp src/external_memory.cpp src/state.cpp
@@ -164,6 +165,8 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
     target_link_libraries(dsp56300_a64_memory_fixture_test PRIVATE dsp56300::core dsp56300_fixture_format)
     add_test(NAME a64-memory-transfer-fixtures COMMAND dsp56300_a64_memory_fixture_test
       "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/transfers.d56")
+    add_test(NAME a64-parallel-move-fixtures COMMAND dsp56300_a64_memory_fixture_test
+      "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/parallel-moves.d56")
     add_executable(dsp56300_a64_memory_test test/jit/a64_memory_test.cpp)
     target_include_directories(dsp56300_a64_memory_test PRIVATE src src/jit test/support)
     target_link_libraries(dsp56300_a64_memory_test PRIVATE dsp56300::core)
@@ -172,6 +175,18 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
     target_include_directories(dsp56300_a64_bus_test PRIVATE src src/jit test/support)
     target_link_libraries(dsp56300_a64_bus_test PRIVATE dsp56300::core)
     add_test(NAME a64-bus-semantics COMMAND dsp56300_a64_bus_test)
+    add_executable(dsp56300_a64_extended_move_test test/jit/a64_extended_move_test.cpp)
+    target_include_directories(dsp56300_a64_extended_move_test PRIVATE src src/jit test/support)
+    target_link_libraries(dsp56300_a64_extended_move_test PRIVATE dsp56300::core)
+    add_test(NAME a64-extended-move-semantics COMMAND dsp56300_a64_extended_move_test)
+    add_executable(dsp56300_a64_paired_move_test test/jit/a64_paired_move_test.cpp)
+    target_include_directories(dsp56300_a64_paired_move_test PRIVATE src src/jit test/support)
+    target_link_libraries(dsp56300_a64_paired_move_test PRIVATE dsp56300::core)
+    add_test(NAME a64-paired-move-semantics COMMAND dsp56300_a64_paired_move_test)
+    add_executable(dsp56300_a64_extended_bus_test test/jit/a64_extended_bus_test.cpp)
+    target_include_directories(dsp56300_a64_extended_bus_test PRIVATE src src/jit test/support)
+    target_link_libraries(dsp56300_a64_extended_bus_test PRIVATE dsp56300::core)
+    add_test(NAME a64-extended-bus-semantics COMMAND dsp56300_a64_extended_bus_test)
   endif()
   add_executable(dsp56300_a64_code_test test/jit/a64_code_test.cpp)
   target_include_directories(dsp56300_a64_code_test PRIVATE src)

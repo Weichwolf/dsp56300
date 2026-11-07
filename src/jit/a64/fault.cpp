@@ -11,6 +11,11 @@
 namespace dsp56300::detail::a64 {
 void Emitter::fault(const BlockInstruction &operation, const FaultKind kind, const Reg value) {
   constexpr auto failure = offsetof(NativeContext, failure);
+  Label recorded;
+  if (failure_ != nullptr) {
+    code_.load(Reg::x17, context, failure + offsetof(Fault, kind), Access::byte);
+    code_.branch_zero_far(Reg::x17, recorded, Width::w32, true);
+  }
   code_.store(value, context, failure + offsetof(Fault, value));
   code_.constant(Reg::x17, static_cast<std::uint8_t>(kind));
   code_.store(Reg::x17, context, failure + offsetof(Fault, kind), Access::byte);
@@ -21,6 +26,7 @@ void Emitter::fault(const BlockInstruction &operation, const FaultKind kind, con
   code_.store(Reg::x17, context, failure + offsetof(Fault, pc));
   code_.constant(Reg::x17, static_cast<std::uint8_t>(NativeBoundary::owner));
   code_.store(Reg::x17, context, offsetof(NativeContext, boundary), Access::byte);
-  code_.branch(done_);
+  code_.bind(recorded);
+  code_.branch(failure_ == nullptr ? done_ : *failure_);
 }
 }

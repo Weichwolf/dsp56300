@@ -38,8 +38,11 @@ and register/immediate MOVEC forms are implemented. Memory emission now covers o
 parallel X/Y moves, class-II moves, displaced/control/program/peripheral transfers,
 direct RAM, guarded external windows and separate actual-bus callbacks. Native tests
 check full-width RAM/I/O priority, initialized-word grants, callback-visible state,
-same-instruction remapping and exact executable-alias exits. Long, paired and class-I
-mixed transfers, remaining instruction families and complete owner integration remain open.
+same-instruction remapping and exact executable-alias exits. Long, paired X/Y and
+class-I mixed transfers now preserve captured inputs, scaled bus limits, partial
+fault effects and first-fault priority. Paired external accesses stop after a fault;
+ordinary flat-memory partial effects follow the existing implementation. Remaining
+instruction families and complete owner integration remain open.
 Complete ARM64 Core execution and qualification remain in progress. The production
 Core still reports an unsupported host on ARM64.
 

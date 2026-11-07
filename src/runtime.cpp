@@ -12,6 +12,7 @@ namespace dsp56300 {
 void Core::Impl::jit_access(void *const owner, detail::NativeAccess &access) noexcept {
   auto &self = *static_cast<Impl *>(owner);
   self.current_pc = access.pc;
+  if (self.fault.kind == FaultKind::none) { self.fault = access.failure; }
   if (access.action == detail::BusAction::read) {
     access.value = self.read_memory(access.space, access.address);
   } else {

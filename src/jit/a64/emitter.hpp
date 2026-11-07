@@ -51,7 +51,8 @@ struct ShiftOperation {
 enum class Flow : std::uint8_t { sequential, control, context, owner };
 
 struct Frame {
-  static constexpr std::size_t address = 40, value = 48, secondary = 64, access = 80;
+  static constexpr std::size_t address = 40, other_address = 44, value = 48, other_value = 56,
+                               secondary = 64, access = 80;
   static constexpr std::size_t pairs = (access + sizeof(NativeAccess) + 15) / 16;
 };
 
@@ -86,6 +87,15 @@ private:
   void register_move(const BlockInstruction &operation);
   void memory_move(const BlockInstruction &operation);
   void class_two_move(const BlockInstruction &operation);
+  void long_move(const BlockInstruction &operation);
+  void long_capture(const BlockInstruction &operation, unsigned selector);
+  void long_commit(unsigned selector);
+  void transfer_long(Reg value, Word mode);
+  void mixed_move(const BlockInstruction &operation);
+  void paired_move(const BlockInstruction &operation);
+  void paired_address(const BlockInstruction &operation, AddressForm form, std::size_t offset);
+  void paired_capture(const BlockInstruction &operation, unsigned reg, BusOperand operand);
+  void paired_commit(const BlockInstruction &operation, unsigned reg, BusOperand operand);
   void memory(const BlockInstruction &operation, BusOperand operand);
   void memory_windows(BusOperand operand, MemoryLabels labels);
   void memory_flat(BusOperand operand, MemoryLabels labels);
@@ -146,5 +156,6 @@ private:
   Code code_;
   Label done_;
   Flow flow_ = Flow::sequential;
+  Label *failure_ = nullptr;
 };
 }

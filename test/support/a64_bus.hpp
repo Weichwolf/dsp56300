@@ -15,10 +15,13 @@ namespace dsp56300::test::a64 {
 struct BusEvent {
   Registers state{};
   Fault failure{};
+  Fault prior_failure{};
   Space space = Space::x;
   Word address = 0, pc = start, value = 0;
   std::uint64_t instructions = 0, cycles = 0;
   bool write = false;
+  const Word *observed = nullptr;
+  Word observed_value = 0;
 };
 
 class Bus {
@@ -65,11 +68,12 @@ private:
              request.pc == expected.pc &&
              (request.action == detail::BusAction::write) == expected.write &&
              request.value == (expected.write ? expected.value : 0U) &&
-             request.failure.kind == FaultKind::none && cpu.reg == physical &&
+             request.failure == expected.prior_failure && cpu.reg == physical &&
              cpu.instructions == wrapped(expected.instructions) &&
              cpu.cycles == wrapped(expected.cycles) && !cpu.interrupt_inhibited &&
              cpu.repeat_completed == (expected.instructions == 0) &&
-             cpu.processing == ExecutionState::running;
+             cpu.processing == ExecutionState::running &&
+             (expected.observed == nullptr || *expected.observed == expected.observed_value);
     if (!expected.write) { request.value = expected.value; }
     request.failure = expected.failure;
     if (next_ == 1 && remapped_ != nullptr) {

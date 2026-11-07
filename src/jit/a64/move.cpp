@@ -5,8 +5,6 @@
 #include "jit/a64/code.hpp"
 #include "jit/a64/emitter.hpp"
 
-#include <stdexcept>
-
 namespace dsp56300::detail::a64 {
 void Emitter::register_move(const BlockInstruction &operation) {
   const auto opcode = operation.instruction.opcode;
@@ -35,17 +33,27 @@ void Emitter::register_move(const BlockInstruction &operation) {
 
 void Emitter::moves(const BlockInstruction &operation) {
   const auto opcode = operation.instruction.opcode;
+  constexpr unsigned pair_bit = 23;
   if ((opcode & upper_move_mask) == no_move_group) { return; }
   if ((opcode & update_group_mask) == update_group) {
     effective(operation, {.mode = (opcode >> 11) & 3U, .index = (opcode >> 8) & 7U});
   } else if ((opcode & parallel_group_mask) == immediate_group) {
     register_move(operation);
-  } else if ((opcode & memory_group_mask) == memory_group && (opcode & long_selector_mask) != 0) {
-    memory_move(operation);
+  } else if ((opcode & (1U << pair_bit)) != 0) {
+    paired_move(operation);
+  } else if ((opcode & memory_group_mask) == memory_group) {
+    if ((opcode & long_selector_mask) == 0) {
+      long_move(operation);
+    } else {
+      memory_move(operation);
+    }
+  } else if ((opcode & pair_group_mask) == pair_group) {
+    mixed_move(operation);
   } else if ((opcode & class_two_mask) == class_two) {
     class_two_move(operation);
   } else {
-    throw std::invalid_argument("A64 DSP parallel memory transfer lowering is incomplete");
+    code_.constant(Reg::x0, opcode);
+    fault(operation, FaultKind::unsupported_instruction, Reg::x0);
   }
 }
 }
