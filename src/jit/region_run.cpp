@@ -112,11 +112,6 @@ bool cursors(const Registers &reg, const NativeContext &context, NativeRegion &r
     cursor.step_bytes =
         static_cast<std::int64_t>(stride * region.lanes * sizeof(Word)) -
         static_cast<std::int64_t>(cursor.inner_step_bytes * region.inner_iterations);
-    for (unsigned lane = 0; lane < cursor.indices.size(); ++lane) {
-      const auto displacement = (lane % region.lanes) * stride;
-      if (displacement > word_mask) { return false; }
-      cursor.indices[lane] = static_cast<std::uint32_t>(displacement);
-    }
     const auto &ram = context.runtime.memory[root.space == Space::x ? 0 : 1];
     if (first >= std::min(ram.words, std::size_t{io_begin})) { return false; }
     cursor.pointer = ram.data + first;

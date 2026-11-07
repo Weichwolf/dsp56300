@@ -27,7 +27,7 @@ constexpr unsigned value_registers = 12, group_add = 0, group_and = 4, group_sub
 constexpr unsigned op_add = 0x01, push_register = 0x50, pop_register = 0x58, high_rex = 0x41;
 constexpr unsigned growth_position = 45, canonical_signs = 0xa0, canonical_high = 0xaa;
 constexpr std::array<std::uint8_t, 4> landing{0xf3, 0x0f, 0x1e, 0xfa};
-constexpr unsigned return_opcode = 0xc3;
+constexpr unsigned return_opcode = 0xc3, repeat_word_pair = 0x44;
 constexpr std::array root_registers{Reg::bx, Reg::bp, Reg::r12, Reg::r13, Reg::r14, Reg::r15};
 
 std::size_t cursor_offset(const std::size_t root, const std::size_t member) {
@@ -67,6 +67,7 @@ private:
   void shift(const GraphNode &node, Xmm result);
   void publish(GraphValue value, ValueOutput output);
   void outputs(unsigned lane, bool preceding);
+  [[nodiscard]] bool advance_known(std::size_t root, bool inner);
   void advance(bool inner);
   void push(Reg reg);
   void pop(Reg reg);
@@ -248,13 +249,20 @@ void RegionEmitter::load(const Xmm result, const unsigned stream) {
   } else if (lanes_ == 4 && delta.units == 1 && delta.offsets == 0) {
     code_.vector_load(result, {.base = Reg::r10}, false);
   } else {
-    code_.vector_load(
-        first_scratch,
-        {.base = Reg::di, .offset = cursor_offset(root, offsetof(RegionCursor, indices))},
-        false);
-    code_.vector(VectorOp::equal_dword,
-                 {.destination = second_scratch, .left = second_scratch, .right = second_scratch});
-    code_.vector_gather(result, first_scratch, second_scratch, Reg::r10);
+    code_.load(Reg::r8, Reg::di, cursor_offset(root, offsetof(RegionCursor, stride)));
+    code_.mov({.destination = Reg::dx, .source = Reg::r8});
+    code_.vector_load_dword(result, {.base = Reg::r10});
+    code_.vector_insert_dword(result, {.base = Reg::r10, .index = Reg::dx}, 1);
+    if (lanes_ == 2) {
+      code_.vector_immediate(VectorOp::shuffle_dword,
+                             {.destination = result, .left = Xmm::x0, .right = result},
+                             repeat_word_pair);
+    } else {
+      for (unsigned lane = 2; lane < lanes_; ++lane) {
+        code_.binary(op_add, {.destination = Reg::dx, .source = Reg::r8});
+        code_.vector_insert_dword(result, {.base = Reg::r10, .index = Reg::dx}, lane);
+      }
+    }
   }
   code_.vector_shift(result, result, VectorShift::left, padding_bits, true);
   code_.vector_shift(result, result, VectorShift::arithmetic, padding_bits, true);
@@ -279,12 +287,18 @@ void RegionEmitter::store(const GraphValue value, const unsigned stream) {
     }
     return;
   }
+  auto words = source;
+  if (lanes_ == 4) {
+    code_.vector_shift(first_scratch, source, VectorShift::left, padding_bits, true);
+    code_.vector_shift(first_scratch, first_scratch, VectorShift::right, padding_bits, true);
+    words = first_scratch;
+  }
   code_.load(Reg::r8, Reg::di, cursor_offset(root, offsetof(RegionCursor, stride)));
   code_.mov({.destination = Reg::dx, .source = Reg::r8});
   for (unsigned lane = 0; lane < lanes_; ++lane) {
-    if (lane == 2) { code_.vector_extract(second_scratch, source, 1); }
-    code_.vector_scalar(Reg::ax, lane < 2 ? source : second_scratch, lane & 1U);
-    code_.immediate(group_and, Reg::ax, word_mask, Width::dword);
+    if (lane == 2) { code_.vector_extract(second_scratch, words, 1); }
+    code_.vector_scalar(Reg::ax, lane < 2 ? words : second_scratch, lane & 1U);
+    if (lanes_ != 4) { code_.immediate(group_and, Reg::ax, word_mask, Width::dword); }
     if (lane == 0) {
       code_.store(Reg::r10, 0, Reg::ax, Width::dword);
     } else {
@@ -323,9 +337,11 @@ void RegionEmitter::round(const GraphNode &node, const Xmm result) {
     broadcast(first_scratch, 1);
     code_.vector(VectorOp::bit_and,
                  {.destination = second_scratch, .left = second_scratch, .right = first_scratch});
-    broadcast(first_scratch, half - 1);
-    code_.vector(VectorOp::add,
-                 {.destination = second_scratch, .left = second_scratch, .right = first_scratch});
+    if (half != 1) {
+      broadcast(first_scratch, half - 1);
+      code_.vector(VectorOp::add,
+                   {.destination = second_scratch, .left = second_scratch, .right = first_scratch});
+    }
     code_.vector(VectorOp::add, {.destination = result, .left = result, .right = second_scratch});
   }
   code_.vector_shift(result, result, VectorShift::right, bits);
@@ -437,9 +453,28 @@ void RegionEmitter::outputs(const unsigned lane, const bool preceding) {
   }
 }
 
+bool RegionEmitter::advance_known(const std::size_t root, const bool inner) {
+  const auto address = region_.roots[root].address;
+  const auto &delta = inner ? region_.inner_addresses[address] : region_.graph.addresses[address];
+  if (delta.offsets != 0 || (!inner && region_.nested)) { return false; }
+  const auto bytes = std::uint64_t{delta.units} * sizeof(Word) * (inner ? 1 : lanes_);
+  if (bytes == 0) { return true; }
+  if (root < root_registers.size()) {
+    code_.immediate(group_add, root_registers[root], static_cast<Word>(bytes));
+  } else {
+    code_.memory_immediate(group_add,
+                           Reg::di,
+                           cursor_offset(root, offsetof(RegionCursor, pointer)),
+                           Width::qword,
+                           static_cast<Word>(bytes));
+  }
+  return true;
+}
+
 void RegionEmitter::advance(const bool inner) {
   for (std::size_t root = 0; root < region_.roots.size(); ++root) {
     if (inner && !region_.nested) { continue; }
+    if (advance_known(root, inner)) { continue; }
     const auto member =
         inner ? offsetof(RegionCursor, inner_step_bytes) : offsetof(RegionCursor, step_bytes);
     code_.load(Reg::ax, Reg::di, cursor_offset(root, member));

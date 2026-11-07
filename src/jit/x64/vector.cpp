@@ -19,9 +19,8 @@ enum EncodingByte : std::uint8_t {
   pack_words = 0xc6,
   extract = 0x39,
   extract_scalar = 0x16,
-  gather = 0x90,
-  sib_displacement = 0x40,
-  sib_scale = 0x80,
+  load_dword = 0x6e,
+  insert_dword = 0x22,
   short_vex = 0xc5,
   unused_vex = 0xf8,
   clear_upper = 0x77
@@ -127,16 +126,23 @@ void Code::vector_scalar(const Reg destination, const Xmm source, const unsigned
   byte(lane);
 }
 
-void Code::vector_gather(const Xmm destination, const Xmm indices, const Xmm mask, const Reg base) {
-  vex({.map = 2, .wide = false},
+void Code::vector_load_dword(const Xmm destination, const VectorAddress address) {
+  vex({.wide = false}, {.destination = number(destination), .base = number(address.base)});
+  byte(load_dword);
+  memory(number(destination), address.base, address.offset);
+}
+
+void Code::vector_insert_dword(const Xmm destination,
+                               const IndexedAddress address,
+                               const unsigned lane) {
+  vex({.map = 3, .wide = false},
       {.destination = number(destination),
-       .left = number(mask),
-       .base = number(base),
-       .index = number(indices)});
-  byte(gather);
-  byte(sib_displacement | ((number(destination) & register_mask) << 3) | 4);
-  byte(sib_scale | ((number(indices) & register_mask) << 3) | (number(base) & register_mask));
-  byte(0);
+       .left = number(destination),
+       .base = number(address.base),
+       .index = number(address.index)});
+  byte(insert_dword);
+  indexed(number(destination), address);
+  byte(lane);
 }
 
 void Code::vector_finish() {

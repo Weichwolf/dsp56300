@@ -254,7 +254,7 @@ void shapes(const bool shared) {
   }
 }
 
-void tail_guard() {
+void tail_guard(const bool load_fault) {
   constexpr std::size_t extent = 64;
   constexpr Word count = 4;
   std::array<Word, memory_words> program{};
@@ -264,9 +264,12 @@ void tail_guard() {
   constexpr Word y_guard = 0x2468ac;
   x.fill(x_guard);
   y.fill(y_guard);
-  for (Word index = 0; index < count; ++index) {
-    x[input_base + index] = 1;
-    y[input_base + index] = sign24 / 2;
+  const Word source = load_fault ? extent - 3 : input_base;
+  const Word target = load_fault ? 16U : extent - 3;
+  const Word available = count - static_cast<Word>(load_fault);
+  for (Word index = 0; index < available; ++index) {
+    x[source + index] = 1;
+    y[source + index] = sign24 / 2;
   }
   std::ranges::copy(body, program.begin() + start);
   auto initial = initial_state();
@@ -276,22 +279,24 @@ void tail_guard() {
   initial.lc = count;
   initial.sp = initial.sc = 2;
   initial.stack[2] = std::uint64_t{start} << word_bits;
-  initial.r[0] = initial.r[4] = input_base;
-  initial.r[1] = initial.r[5] = extent - 3;
+  initial.r[0] = initial.r[4] = source;
+  initial.r[1] = initial.r[5] = target;
   Core core(Memory::separate(
       {.program = program, .x = std::span(x).first(extent), .y = std::span(y).first(extent)}));
   core.set_registers(initial);
   const Word budget = count * body.size();
   const auto result = core.run(budget);
-  require(result.retired == budget - 1 &&
-              result.progress ==
-                  Progress{.instructions = budget - 1, .estimated_cycles = budget - 1} &&
-              result.fault.kind == FaultKind::memory_write && result.fault.space == Space::x &&
-              result.fault.address == extent && result.fault.pc == initial.la &&
-              x[extent] == x_guard && y[extent] == y_guard,
-          "A packet crossing its RAM extent retains the precise first failed write and untouched "
+  const Word retired = budget - (load_fault ? static_cast<Word>(body.size()) : 1U);
+  const auto kind = load_fault ? FaultKind::memory_read : FaultKind::memory_write;
+  const auto pc = load_fault ? start : initial.la;
+  require(result.retired == retired &&
+              result.progress == Progress{.instructions = retired, .estimated_cycles = retired} &&
+              result.fault.kind == kind && result.fault.space == Space::x &&
+              result.fault.address == extent && result.fault.pc == pc && x[extent] == x_guard &&
+              y[extent] == y_guard,
+          "A packet crossing its RAM extent retains the precise first failed access and untouched "
           "host guards");
-  for (std::size_t index = extent - 3; index < extent; ++index) {
+  for (std::size_t index = target; index < target + 3; ++index) {
     require(x[index] == 0 && y[index] == sign24,
             "Completed writes before the RAM fault remain committed");
   }
@@ -524,7 +529,8 @@ void nested_cases() {
 
 void cases() {
   nested_cases();
-  tail_guard();
+  tail_guard(false);
+  tail_guard(true);
   root_spills();
   for (const bool shared : {false, true}) {
     shapes(shared);

@@ -83,17 +83,14 @@ enum class VectorOp : std::uint16_t {
   subtract = 0x01fb,
   multiply = 0x0228,
   bit_and = 0x01db,
-  bit_and_not = 0x01df,
   bit_or = 0x01eb,
   bit_xor = 0x01ef,
-  equal_dword = 0x0176,
   greater_qword = 0x0237,
   minimum_dword = 0x0239,
   maximum_dword = 0x023d,
   blend_dword = 0x0302,
   shuffle_dword = 0x0170,
-  extend_dword = 0x0225,
-  broadcast_qword = 0x0259
+  extend_dword = 0x0225
 };
 
 struct VectorOperands {
@@ -185,7 +182,8 @@ public:
   void vector_pack(Xmm destination, Xmm low, Xmm high);
   void vector_extract(Xmm destination, Xmm source, unsigned lane);
   void vector_scalar(Reg destination, Xmm source, unsigned lane);
-  void vector_gather(Xmm destination, Xmm indices, Xmm mask, Reg base);
+  void vector_load_dword(Xmm destination, VectorAddress address);
+  void vector_insert_dword(Xmm destination, IndexedAddress address, unsigned lane);
   void vector_finish();
 
   [[nodiscard]] const std::vector<std::uint8_t> &bytes() const noexcept { return bytes_; }

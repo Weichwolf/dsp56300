@@ -19,7 +19,6 @@ struct alignas(16) RegionCursor {
   Word *pointer = nullptr;
   std::uint64_t stride = 0, inner_stride = 0, inner_step_bytes = 0;
   std::int64_t step_bytes = 0;
-  std::array<std::uint32_t, 4> indices{};
 };
 
 struct alignas(32) RegionVector {
