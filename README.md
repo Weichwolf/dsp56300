@@ -22,7 +22,8 @@ Core still reports an unsupported host on ARM64.
 
 The `strict` preset enables ASan/UBSan. On macOS 26.4 and later, LLVM 19's
 original sanitizer runtime deadlocks during dyld initialization. Build the same
-19.1.7 runtime with the [upstream fix](https://github.com/llvm/llvm-project/commit/2e7d07a33725a82ecfc514e27f047ece3ff13d4c):
+19.1.7 runtime with upstream fixes for [allocation-free shadow checks](https://github.com/llvm/llvm-project/commit/6a89439423351be2d63e13e191acd4cb33e0aaff)
+and [dyld lookup](https://github.com/llvm/llvm-project/commit/2e7d07a33725a82ecfc514e27f047ece3ff13d4c):
 
 ```sh
 export LLVM19_RESOURCE_DIR="$(python3 tools/darwin_runtime.py)"

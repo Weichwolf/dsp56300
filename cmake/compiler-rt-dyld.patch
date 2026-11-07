@@ -1,5 +1,77 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-# Backport LLVM 2e7d07a33725a82ecfc514e27f047ece3ff13d4c to compiler-rt 19.1.7.
+# Backport LLVM 6a89439423351be2d63e13e191acd4cb33e0aaff and
+# 2e7d07a33725a82ecfc514e27f047ece3ff13d4c to compiler-rt 19.1.7.
+--- a/lib/sanitizer_common/sanitizer_common.h
++++ b/lib/sanitizer_common/sanitizer_common.h
+@@ -475,0 +476,8 @@
++
++inline bool IntervalsAreSeparate(uptr start1, uptr end1,
++                                        uptr start2, uptr end2) {
++  CHECK(start1 <= end1);
++  CHECK(start2 <= end2);
++  return (end1 < start2) || (end2 < start1);
++}
++
+--- a/lib/sanitizer_common/sanitizer_posix.cpp
++++ b/lib/sanitizer_common/sanitizer_posix.cpp
+@@ -228,7 +228,2 @@
+-static inline bool IntervalsAreSeparate(uptr start1, uptr end1,
+-                                        uptr start2, uptr end2) {
+-  CHECK(start1 <= end1);
+-  CHECK(start2 <= end2);
+-  return (end1 < start2) || (end2 < start1);
+-}
+-
++
++#if !SANITIZER_APPLE
+@@ -254 +248,0 @@
+-#if !SANITIZER_APPLE
+--- a/lib/sanitizer_common/sanitizer_mac.cpp
++++ b/lib/sanitizer_common/sanitizer_mac.cpp
+@@ -105,0 +106 @@
++  extern const void *_dyld_get_shared_cache_range(size_t *length);
+@@ -1295,0 +1297,41 @@
++// Shadow availability must not allocate during sanitizer initialization.
++bool MemoryRangeIsAvailable(uptr range_start, uptr range_end) {
++  mach_vm_size_t vmsize = 0;
++  natural_t depth = 0;
++  vm_region_submap_short_info_data_64_t vminfo;
++  mach_msg_type_number_t count = VM_REGION_SUBMAP_SHORT_INFO_COUNT_64;
++  mach_vm_address_t address = range_start;
++
++  // First, check if the range is already mapped.
++  kern_return_t kr =
++      mach_vm_region_recurse(mach_task_self(), &address, &vmsize, &depth,
++                             (vm_region_info_t)&vminfo, &count);
++
++  if (kr == KERN_DENIED) {
++    Report(
++        "WARN: mach_vm_region_recurse returned KERN_DENIED when checking "
++        "whether an address is mapped.\n");
++    Report("HINT: Is mach_vm_region_recurse allowed by sandbox?\n");
++  }
++
++  if (kr == KERN_SUCCESS && !IntervalsAreSeparate(address, address + vmsize - 1,
++                                                  range_start, range_end)) {
++    // Overlaps with already-mapped memory
++    return false;
++  }
++
++  size_t cacheLength;
++  uptr cacheStart = (uptr)_dyld_get_shared_cache_range(&cacheLength);
++
++  if (cacheStart &&
++      !IntervalsAreSeparate(cacheStart, cacheStart + cacheLength - 1,
++                            range_start, range_end)) {
++    // Overlaps with shared cache region
++    return false;
++  }
++
++  // We believe this address is available.
++  return true;
++}
++
++
 --- a/lib/sanitizer_common/sanitizer_procmaps_mac.cpp
 +++ b/lib/sanitizer_common/sanitizer_procmaps_mac.cpp
 @@ -126 +126 @@

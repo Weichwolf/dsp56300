@@ -40,14 +40,23 @@ def prepare(root, recipe, project):
             run(["tar", "-xf", archive, "-C", root])
     source = root / f"compiler-rt-{version}.src"
     patch = project / "cmake/compiler-rt-dyld.patch"
-    applied = subprocess.run(
-        ["patch", "--dry-run", "--batch", "-R", "-p1", "-i", str(patch)],
-        cwd=source,
-        capture_output=True,
-        check=False,
-    )
-    if applied.returncode:
+
+    def matches(state):
+        return all(
+            hashlib.sha256((source / name).read_bytes()).hexdigest() == identity[state]
+            for name, identity in recipe["patched_files"].items()
+        )
+
+    if not matches("patched"):
+        if not matches("original"):
+            raise RuntimeError(
+                "Compiler-rt sources match neither original nor qualified backport"
+            )
         run(["patch", "--batch", "--forward", "-p1", "-i", patch], cwd=source)
+        if not matches("patched"):
+            raise RuntimeError(
+                "Compiler-rt backport differs from qualified source hashes"
+            )
     return source
 
 
@@ -117,6 +126,54 @@ def resource_directory(root, llvm, patched):
     return resource
 
 
+def verify(llvm, resource):
+    source = resource.parent / "sanitizer-probe.cpp"
+    executable = resource.parent / "sanitizer-probe"
+    source.write_text(
+        "int main(int argc, char **) { "
+        "if (argc > 2) { volatile unsigned value = ~0U; value = value + 1; return int(value); } "
+        "auto *p = new char[8]{}; volatile int offset = argc > 1 ? 9 : 0; "
+        "p[offset] = 1; volatile char observed = p[0]; (void)observed; delete[] p; }\n"
+    )
+    run(
+        [
+            llvm / "bin/clang++",
+            f"-resource-dir={resource}",
+            "-fsanitize=address,undefined,unsigned-integer-overflow,implicit-conversion,float-divide-by-zero",
+            "-fno-sanitize-recover=all",
+            "-O1",
+            source,
+            "-o",
+            executable,
+        ]
+    )
+    for arguments, marker in (
+        ([], None),
+        (["overflow"], "AddressSanitizer: heap-buffer-overflow"),
+        (["overflow", "unsigned"], "unsigned integer overflow"),
+    ):
+        result = subprocess.run(
+            [str(executable), *arguments],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        valid = (
+            result.returncode == 0
+            if marker is None
+            else result.returncode != 0 and marker in result.stderr
+        )
+        if not valid:
+            raise RuntimeError(
+                f"Sanitizer contract failed for {arguments}: {result.stderr}"
+            )
+    print(
+        "ASan startup, heap-overflow detection and UBSan arithmetic detection passed.",
+        file=sys.stderr,
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Build LLVM 19 sanitizer runtimes with the upstream dyld fix"
@@ -142,11 +199,19 @@ def main():
     version = subprocess.check_output([str(llvm / "bin/clang"), "--version"], text=True)
     if "version 19." not in version:
         parser.error("The runtime must be built with LLVM 19")
-    root = (args.root or project / "build/local/llvm19-runtime").resolve()
+    storage = (args.root or project / "build/local/llvm19-runtime").resolve()
+    identity = hashlib.sha256(
+        (project / "cmake/compiler-rt.json").read_bytes()
+        + (project / "cmake/compiler-rt-dyld.patch").read_bytes()
+        + str(llvm.resolve()).encode()
+    ).hexdigest()[:16]
+    root = storage / identity
     root.mkdir(parents=True, exist_ok=True)
     source = prepare(root, recipe, project)
     patched = build(root, source, llvm.resolve(), recipe["version"], args.jobs)
-    print(resource_directory(root, llvm.resolve(), patched))
+    resource = resource_directory(root, llvm.resolve(), patched)
+    verify(llvm.resolve(), resource)
+    print(resource)
 
 
 if __name__ == "__main__":

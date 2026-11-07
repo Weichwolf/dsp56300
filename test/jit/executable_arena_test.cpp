@@ -17,11 +17,16 @@
 #include <fstream>
 #include <string>
 #elif defined(__APPLE__)
+#include <libproc.h>
+#include <mach/vm_prot.h>
 #include <pthread.h>
+#include <sys/proc_info.h>
+#include <unistd.h>
 #endif
 
 namespace {
 using dsp56300::detail::ExecutableArena;
+using dsp56300::detail::WriteProtection;
 extern "C" std::uint32_t dsp56300_executable_arena_test_enter(const void *) noexcept;
 #if defined(__x86_64__) && defined(__linux__)
 asm(".pushsection .text\n"
@@ -88,8 +93,10 @@ auto return_code(const std::uint32_t value) {
 #endif
 }
 
-void mapping_permissions() {
+void mapping_permissions(const void *const entry, const WriteProtection protection) {
 #if defined(__linux__)
+  static_cast<void>(entry);
+  static_cast<void>(protection);
   std::ifstream mappings("/proc/self/maps");
   require(mappings.is_open(), "Cannot inspect executable mappings on this Linux host");
   unsigned writable = 0;
@@ -106,16 +113,28 @@ void mapping_permissions() {
   require(writable == 2 && executable == 2,
           "Two arenas own exactly two writable and two executable mappings");
 #elif defined(__APPLE__)
-  require(pthread_jit_write_protect_supported_np() != 0,
-          "Apple silicon must enforce thread-local JIT write protection");
+  if (protection == WriteProtection::automatic && pthread_jit_write_protect_supported_np() != 0) {
+    return;
+  }
+  proc_regioninfo region{};
+  const auto bytes = proc_pidinfo(getpid(),
+                                  PROC_PIDREGIONINFO,
+                                  reinterpret_cast<std::uint64_t>(entry),
+                                  &region,
+                                  static_cast<int>(sizeof(region)));
+  require(bytes == static_cast<int>(sizeof(region)) &&
+              region.pri_protection == static_cast<unsigned>(VM_PROT_READ | VM_PROT_EXECUTE),
+          "Execution-owner publication must seal the actual mapping RX without write permission");
 #endif
 }
 
-void packing_and_growth() {
+void packing_and_growth(const WriteProtection protection = WriteProtection::automatic) {
+  const auto initial = dsp56300::test::codegen::publications();
+  dsp56300::test::codegen::track_images();
   constexpr unsigned entries = 512;
   constexpr std::size_t arena_bytes = std::size_t{64} << 10;
   constexpr std::uintptr_t alignment = 16;
-  ExecutableArena arena;
+  ExecutableArena arena(protection);
   std::array<const void *, entries> functions{};
   for (unsigned index = 0; index < entries; ++index) {
     functions[index] = arena.append(return_code(index));
@@ -135,16 +154,17 @@ void packing_and_growth() {
     require(dsp56300_executable_arena_test_enter(functions[index]) == index,
             "Every previous entry remains unchanged and executable after arena growth");
   }
-  mapping_permissions();
+  mapping_permissions(functions[0], protection);
   bool rejected = false;
   try {
     static_cast<void>(arena.append({}));
   } catch (const std::invalid_argument &) { rejected = true; }
   require(rejected, "Empty code must be refused");
   const auto published = dsp56300::test::codegen::publications();
-  require(published.count == entries + 1, "Observe every successful publication exactly once");
+  require(published.count == initial.count + entries + 1,
+          "Observe every successful publication exactly once");
   const auto images = dsp56300::test::codegen::published_images();
-  require(images.size() == published.count && images.back().entry == large_function &&
+  require(images.size() == entries + 1 && images.back().entry == large_function &&
               images.back().bytes == large.size(),
           "Publication observation retains the actual executable entry and image size");
 }
@@ -154,6 +174,9 @@ int main() {
   try {
     dsp56300::test::codegen::track_images();
     packing_and_growth();
+#if defined(__APPLE__)
+    packing_and_growth(WriteProtection::owner);
+#endif
     std::cout << "Aligned compact immutable native entries, growth and W^X aliases passed.\n";
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';

@@ -41,12 +41,15 @@ std::size_t allocation_size(const std::size_t requested) {
 
 class ExecutableArena::Segment {
 public:
-  explicit Segment(const std::size_t requested) : size_(allocation_size(requested)) {
+  Segment(const std::size_t requested, const WriteProtection protection)
+      : size_(allocation_size(requested)) {
 #if defined(__APPLE__)
+    thread_protected_ =
+        protection == WriteProtection::automatic && pthread_jit_write_protect_supported_np() != 0;
     writable_ = mmap(nullptr,
                      size_,
-                     PROT_READ | PROT_WRITE | PROT_EXEC,
-                     MAP_PRIVATE | MAP_ANON | MAP_JIT,
+                     PROT_READ | PROT_WRITE | (thread_protected_ ? PROT_EXEC : 0),
+                     MAP_PRIVATE | MAP_ANON | (thread_protected_ ? MAP_JIT : 0),
                      -1,
                      0);
     if (writable_ == MAP_FAILED) {
@@ -54,6 +57,7 @@ public:
     }
     executable_ = writable_;
 #else
+    static_cast<void>(protection);
     const auto descriptor = memfd_create("dsp56300-jit", MFD_CLOEXEC);
     if (descriptor < 0) { throw std::system_error(errno, std::generic_category(), "JIT memfd"); }
     if (ftruncate(descriptor, static_cast<off_t>(size_)) != 0) {
@@ -85,17 +89,17 @@ public:
   Segment(const Segment &) = delete;
   Segment &operator=(const Segment &) = delete;
 
-  [[nodiscard]] const void *append(const std::span<const std::uint8_t> bytes) noexcept {
+  [[nodiscard]] const void *append(const std::span<const std::uint8_t> bytes) {
     const auto padding = (entry_alignment - (used_ % entry_alignment)) % entry_alignment;
     if (size_ - used_ < padding || size_ - used_ - padding < bytes.size()) { return nullptr; }
     const auto offset = used_ + padding;
     auto *destination = static_cast<std::uint8_t *>(writable_) + offset;
 #if defined(__APPLE__)
-    pthread_jit_write_protect_np(0);
+    protect(PROT_WRITE);
 #endif
     std::memcpy(destination, bytes.data(), bytes.size());
 #if defined(__APPLE__)
-    pthread_jit_write_protect_np(1);
+    protect(PROT_EXEC);
     sys_icache_invalidate(destination, bytes.size());
 #elif defined(__aarch64__)
     __builtin___clear_cache(reinterpret_cast<char *>(destination),
@@ -108,12 +112,24 @@ public:
   }
 
 private:
+#if defined(__APPLE__)
+  void protect(const int permission) {
+    if (thread_protected_) {
+      pthread_jit_write_protect_np(permission == PROT_EXEC ? 1 : 0);
+    } else if (mprotect(writable_, size_, PROT_READ | permission) != 0) {
+      throw std::system_error(errno, std::generic_category(), "JIT execution-owner mprotect");
+    }
+  }
+
+  bool thread_protected_ = false;
+#endif
   void *writable_ = nullptr;
   void *executable_ = nullptr;
   std::size_t size_ = 0, used_ = 0;
 };
 
-ExecutableArena::ExecutableArena() = default;
+ExecutableArena::ExecutableArena(const WriteProtection protection) : protection_(protection) {}
+
 ExecutableArena::~ExecutableArena() = default;
 
 #if defined(DSP56300_TEST_PUBLICATIONS)
@@ -125,7 +141,7 @@ const void *ExecutableArena::append(const std::span<const std::uint8_t> bytes) {
   if (!segments_.empty()) {
     if (const auto *entry = segments_.back()->append(bytes)) { return entry; }
   }
-  auto segment = std::make_unique<Segment>(bytes.size());
+  auto segment = std::make_unique<Segment>(bytes.size(), protection_);
   const auto *entry = segment->append(bytes);
   segments_.push_back(std::move(segment));
   return entry;

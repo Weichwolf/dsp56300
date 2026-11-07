@@ -1,6 +1,5 @@
 {
   "version": "19.1.7",
-  "fix": "https://github.com/llvm/llvm-project/commit/2e7d07a33725a82ecfc514e27f047ece3ff13d4c",
   "license": "Apache-2.0 WITH LLVM-exception",
   "archives": {
     "compiler-rt": {
@@ -12,6 +11,32 @@
       "source": "https://github.com/llvm/llvm-project/releases/download/llvmorg-19.1.7/cmake-19.1.7.src.tar.xz",
       "bytes": 9300,
       "sha256": "11c5a28f90053b0c43d0dec3d0ad579347fc277199c005206b963c19aae514e3"
+    }
+  },
+  "fixes": [
+    "https://github.com/llvm/llvm-project/commit/6a89439423351be2d63e13e191acd4cb33e0aaff",
+    "https://github.com/llvm/llvm-project/commit/2e7d07a33725a82ecfc514e27f047ece3ff13d4c"
+  ],
+  "patched_files": {
+    "lib/sanitizer_common/sanitizer_common.h": {
+      "original": "fdf5b26bdc73132e5cbed627f2f68ca2ed06e1bfc045599a6a846ea4a60e856f",
+      "patched": "19d8164fa6940967bb5eb343b8ec4d4df214da5cfcf94dc2a902732837a36d27"
+    },
+    "lib/sanitizer_common/sanitizer_posix.cpp": {
+      "original": "989de443622d16089128f1c8714cbf679bb39ee489f04c6a4937279bff5680d7",
+      "patched": "51d6df89dab81d5343dbde51c0671e7ad4e0630a7df83362a7e1b27e3ddb030d"
+    },
+    "lib/sanitizer_common/sanitizer_mac.cpp": {
+      "original": "8b1f099a9257e1ab614862c84490d66634a9126cae39143d91a926af48777465",
+      "patched": "24731e7599cdb3c5245ef8a327ca17c82f3e0f65b00346270adc247956983e2c"
+    },
+    "lib/sanitizer_common/sanitizer_procmaps_mac.cpp": {
+      "original": "3433ffc92d8442ebac13c6114db37c7853d64e7559af7cfb4fde2e595220fb49",
+      "patched": "8c1410ae962671a4421d181db9e5c8009d9948fdf39a70f95708708b4f00d059"
+    },
+    "lib/sanitizer_common/weak_symbols.txt": {
+      "original": "ee806275ed320a06a48a20953a91580d4c161e11728bc2aec23aea604ac97737",
+      "patched": "13b06fc2d1f9998aaee4f1f04360255f6d1bbd7990305991adbac214ea73715c"
     }
   }
 }
