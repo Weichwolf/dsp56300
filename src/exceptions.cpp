@@ -5,9 +5,16 @@
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
+#if !defined(__aarch64__)
 #include "vector_instruction.hpp"
+#endif
 
 #include <array>
+#if defined(__aarch64__)
+#include "jit.hpp"
+
+#include <cassert>
+#endif
 
 namespace dsp56300 {
 using namespace detail;
@@ -80,6 +87,13 @@ void Core::Impl::step_vector() {
   const auto decoded = vector_instruction();
   if (fault.kind != FaultKind::none) { return; }
   current_words = decoded.words;
+#if defined(__aarch64__)
+  const auto retired = jit->run_vector(
+      {.instruction = decoded, .pc = current_pc, .mode = cpu.reg.sr & numeric_mode_mask});
+  assert(retired == 1 || fault.kind != FaultKind::none);
+  if (retired != 0) { synchronize_cache_mode(); }
+  synchronize_program_view();
+#else
   // The inserted vector contains exactly two words (FM 2.3.2.5/2.3.2.7).
   // A second-slot two-word call must not consume an invented zero extension.
   if (decoded.words == 2 && vector.phase == VectorPhase::second) {
@@ -109,5 +123,6 @@ void Core::Impl::step_vector() {
 
   synchronize_cache_mode();
   if (fault.kind == FaultKind::none) { retire_instruction(decoded.cycles); }
+#endif
 }
 } // namespace dsp56300

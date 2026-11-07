@@ -4,10 +4,12 @@
 #include "a64_loop_state.hpp"
 #include "architecture.hpp"
 #include "codegen_observer.hpp"
+#include "control_byte_model.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
+#include "jit/block.hpp"
 #include "loop_control_model.hpp"
 #include "register_model.hpp"
 #include "support.hpp"
@@ -137,6 +139,42 @@ void complete_blocks() {
   whole.expect(expected);
   require(latest().bytes == image.bytes,
           "Cold grants of one and a complete block publish identical native bytes");
+}
+
+void semantic_boundaries() {
+  using byte_model::Field;
+  const std::array opcodes{
+      Word{1},
+      Word{2},
+      Word{3},
+      Word{0x0be081},
+      Word{0x0ae081},
+      Word{0x84},
+      Word{0x077084},
+      byte_model::opcode({.field = Field::mr, .immediate = 0, .inclusive_or = true}),
+      byte_model::opcode({.field = Field::com, .immediate = 1, .inclusive_or = true}),
+      byte_model::opcode({.field = Field::eom, .immediate = 1, .inclusive_or = true})};
+  const auto initial = seed(status_byte);
+  a64::Machine machine(initial);
+  machine.program().fill(0);
+  for (const auto opcode : opcodes) {
+    machine.program()[start] = opcode;
+    const auto block = detail::parse_block(machine.program(), initial.reg, {.memory = {}});
+    require(block.size() == 1 && block.front().instruction.opcode == opcode,
+            "Actual cache, program-write and control owner boundaries terminate complete blocks");
+  }
+  for (const Word opcode : {0x44e000U, 0xf09800U, 0x044480U}) {
+    machine.program()[start] = opcode;
+    const auto block = detail::parse_block(machine.program(), initial.reg, {.memory = {}}, true);
+    require(block.size() == 1 && block.front().instruction.opcode == opcode,
+            "A possible memory callback terminates its complete owner block");
+    require(detail::parse_block(machine.program(), initial.reg, {.memory = {}}).size() > 1,
+            "Direct memory without callbacks remains in a complete multi-instruction block");
+  }
+  machine.program()[start] = 0;
+  require(detail::parse_block(machine.program(), initial.reg, {.memory = {}}, true).size() ==
+              machine.program().size() - start,
+          "Callback ownership never imposes an instruction-count limit on a NOP block");
 }
 
 void versions() {
@@ -338,6 +376,7 @@ int main() {
     using namespace dsp56300::test;
     codegen::track_images();
     complete_blocks();
+    semantic_boundaries();
     versions();
     captured_versions();
     repeat_versions();

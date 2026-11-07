@@ -8,6 +8,9 @@
 #include "jit.hpp"
 #include "translation.hpp"
 
+#if defined(__aarch64__)
+#include <cassert>
+#endif
 #include <optional>
 #include <stdexcept>
 
@@ -75,11 +78,17 @@ RunResult Core::run_instruction(const InstructionWords words) {
                                   .loop_address = detail::active_loop_address(impl_->cpu.reg)});
     if (result.retired != 0 && repeating) { impl_->repeated = decoded; }
   }
+#if defined(__aarch64__)
+  assert(result.retired == 1 || impl_->fault.kind != FaultKind::none);
+  impl_->synchronize_cache_mode();
+  impl_->synchronize_program_view();
+#else
   if (result.retired == 0 && impl_->fault.kind == FaultKind::none) {
     impl_->step_decoded(decoded);
     impl_->synchronize_program_view();
     if (impl_->fault.kind == FaultKind::none) { result.retired = 1; }
   }
+#endif
   result.progress = progress();
   result.fault = fault();
   result.state = processing_state();

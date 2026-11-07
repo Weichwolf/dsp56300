@@ -5,6 +5,9 @@
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
+#if defined(__aarch64__)
+#include "translation.hpp"
+#endif
 
 #include <algorithm>
 #include <cstdint>
@@ -44,16 +47,19 @@ std::uint32_t Core::Impl::run_repeat_native(const std::uint32_t instructions) {
     return 0;
   }
   auto count = std::min(instructions, cpu.repeat_remaining);
+#if !defined(__aarch64__)
   // REP completion at a DO ending must perform genuine frame cleanup. Keep
   // that last instruction in the owner until native cleanup is qualified.
   if ((cpu.reg.sr & detail::loop_flag) != 0 && cpu.reg.pc == cpu.reg.la) {
     count = std::min(count, cpu.repeat_remaining - 1);
   }
-  const auto retired = jit->run_repeat(
-      {.instruction = *decoded, .pc = cpu.reg.pc, .mode = cpu.reg.sr & detail::numeric_mode_mask},
-      count);
-  // The native guard may reject before its first effect. Only a retired body
-  // latches the decoded opcode; subsequent owner fallback must see that latch.
+#endif
+  detail::BlockInstruction operation{
+      .instruction = *decoded, .pc = cpu.reg.pc, .mode = cpu.reg.sr & detail::numeric_mode_mask};
+#if defined(__aarch64__)
+  operation.loop_address = detail::active_loop_address(cpu.reg);
+#endif
+  const auto retired = jit->run_repeat(operation, count);
   if (retired != 0) { repeated = *decoded; }
   return retired;
 }

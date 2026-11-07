@@ -138,8 +138,15 @@ Timing workload(const Workload input, const Backend backend, const bool single_s
       "Independent raw56 arithmetic/bit expectations include every register, flag and retirement");
   require(bus.reads == count && bus.writes == 0 && bus.bits == 0 && bus.resets == 0,
           "Each uncached opcode has one real P read and no fabricated data/peripheral operations");
+#if defined(__aarch64__)
+  const auto translated = codegen::publications();
+  require(translated.count == published.count + count && translated.bytes > published.bytes,
+          "Each actual uninspectable opcode has one captured native translation; unknown source "
+          "cannot bypass its real fetch or publish speculative fragments");
+#else
   require(codegen::publications() == published,
           "An uninspectable program publishes no native code");
+#endif
   return {.seconds = seconds, .instructions = count, .reads = bus.reads};
 }
 

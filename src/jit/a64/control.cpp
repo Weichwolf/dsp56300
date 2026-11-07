@@ -45,6 +45,17 @@ void Emitter::control_byte(const BlockInstruction &operation) {
   code_.constant(Reg::x17, conjunction ? value | ~mask : value);
   code_.alu(conjunction ? Alu::bit_and : Alu::bit_or, target, target, Reg::x17);
   if (field >= 2) { code_.store(target, cpu, offsetof(Registers, omr)); }
+  if (field >= 2) {
+    Label local;
+    code_.load(Reg::x9,
+               context,
+               offsetof(NativeContext, bus) + offsetof(NativeBus, external),
+               Access::byte);
+    code_.branch_zero_far(Reg::x9, local);
+    code_.constant(Reg::x17, static_cast<std::uint8_t>(NativeBoundary::owner));
+    code_.store(Reg::x17, context, offsetof(NativeContext, boundary), Access::byte);
+    code_.bind(local);
+  }
   if (field == 0) { boundary(NativeBoundary::context); }
 }
 

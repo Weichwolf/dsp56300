@@ -38,7 +38,7 @@ Buffers validate(const Buffers buffers, const bool external) {
     throw std::invalid_argument("Invalid DSP instruction cache interval or sector size");
   }
   if (!detail::Jit::available()) {
-    throw std::invalid_argument("Native translation requires Linux x86-64");
+    throw std::invalid_argument("Native translation requires macOS ARM64 or Linux x86-64");
   }
   return buffers;
 }
@@ -54,8 +54,10 @@ Core::Impl::Impl(const Buffers supplied, Io *const host_io, const bool external_
       buffers.program,
       detail::JitRuntime{.owner = this,
                          .latched = &latched,
+#if !defined(__aarch64__)
                          .execute = jit_execute,
                          .moves = jit_moves,
+#endif
                          .program = external ? jit_program : nullptr,
                          .memory = {{{.data = buffers.x.data(),
                                       .words = buffers.x.size(),
@@ -177,6 +179,9 @@ void Core::Impl::step() {
 }
 
 void Core::Impl::step_decoded(const detail::Instruction &decoded) {
+#if defined(__aarch64__)
+  step_native(decoded);
+#else
   current_pc = cpu.reg.pc;
   const bool repeating = cpu.repeat_remaining != 0;
   if (repeating && (decoded.words != 1 || !detail::repeatable(decoded.operation))) {
@@ -216,6 +221,7 @@ void Core::Impl::step_decoded(const detail::Instruction &decoded) {
   finish_loop();
 
   if (fault.kind == FaultKind::none) { retire_instruction(decoded.cycles); }
+#endif
 }
 
 Core::Core(const Memory memory, Io *const io)
@@ -294,6 +300,10 @@ RunResult Core::run(const std::uint32_t instruction_budget) {
       const auto retired = impl_->cpu.repeat_remaining != 0 ? impl_->run_repeat_native(remaining)
                                                             : impl_->jit->run(remaining);
       result.retired += retired;
+#if defined(__aarch64__)
+      impl_->synchronize_cache_mode();
+      impl_->synchronize_program_view();
+#endif
       if (retired != 0 || fault().kind != FaultKind::none) { continue; }
     }
     impl_->step();

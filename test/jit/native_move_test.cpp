@@ -310,7 +310,7 @@ void ring_matrix() {
   }
 }
 
-void ordinary_reuse(Machine &machine, RingInput input) {
+void ordinary_reuse(Machine &machine, RingInput input, const std::uint64_t expected_publications) {
   const auto published = codegen::publications();
   const auto profiled = input.modifier;
   constexpr Word ignored_high = 0xab0000;
@@ -335,7 +335,12 @@ void ordinary_reuse(Machine &machine, RingInput input) {
       }
     }
   }
-  require(codegen::publications().count == published.count + 1,
+  const auto translated = codegen::publications().count - published.count;
+  if (translated != expected_publications) {
+    std::cerr << "modifier=" << profiled << " register=" << input.index << " y=" << input.y
+              << " store=" << input.store << " publications=" << translated << '\n';
+  }
+  require(translated == expected_publications,
           "M/R/N mutations reuse the same full/checked paths and exact runtime admission guard");
 }
 
@@ -343,6 +348,12 @@ void profiled_modulo() {
   constexpr std::array<Word, 7> modifiers{1, 2, 3, 19, 31, 255, 32767};
   Machine machine;
   for (const auto modifier : modifiers) {
+#if defined(__aarch64__)
+    // ARM64 reads every modifier dynamically in the same retained translation.
+    const std::uint64_t expected_publications = modifier == modifiers.front() ? 1 : 0;
+#else
+    constexpr std::uint64_t expected_publications = 1;
+#endif
     for (unsigned index = 0; index < agu_registers; ++index) {
       for (const bool y : {false, true}) {
         for (const bool store : {false, true}) {
@@ -350,7 +361,8 @@ void profiled_modulo() {
           const auto base = (store ? store_x0 : load_x0) | (y ? 0x0a0000U : 0U);
           machine.core.write(Space::program, start, base | (3U << 11) | (index << 8));
           ordinary_reuse(machine,
-                         {.mode = 3, .index = index, .modifier = modifier, .y = y, .store = store});
+                         {.mode = 3, .index = index, .modifier = modifier, .y = y, .store = store},
+                         expected_publications);
         }
       }
     }

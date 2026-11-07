@@ -1,8 +1,8 @@
 # dsp56300
 
-Independent DSP56300 emulator with an x86-64 JIT.
+Independent DSP56300 emulator with native x86-64 and ARM64 JITs.
 
-C++23 · Linux x86-64 with AVX2 · GPL-3.0-only
+C++23 · Linux x86-64 with AVX2 · macOS ARM64 · GPL-3.0-only
 
 ## Build
 
@@ -16,8 +16,7 @@ ctest --preset release
 
 On macOS, install the matching tools with `brew install llvm@19 ninja ccache`.
 Presets discover the Homebrew LLVM 19 installation without replacing system tools.
-ARM64 contains private instruction emitters and component tests; the public
-`Core` reports an unsupported host on ARM64.
+The public `Core` selects the native backend for the host architecture.
 
 The `strict` preset enables ASan/UBSan. On macOS 26.4 and later, LLVM 19's
 original sanitizer runtime deadlocks during dyld initialization. Build the same

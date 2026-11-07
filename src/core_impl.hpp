@@ -81,6 +81,9 @@ struct Core::Impl {
   [[nodiscard]] detail::Instruction instruction(Word pc);
   void step();
   void step_decoded(const detail::Instruction &decoded);
+#if defined(__aarch64__)
+  void step_native(const detail::Instruction &decoded);
+#endif
   [[nodiscard]] std::optional<detail::Instruction> repeat_instruction() const;
   [[nodiscard]] std::optional<Word> known_program_word(Word address) const;
   [[nodiscard]] static std::uint32_t

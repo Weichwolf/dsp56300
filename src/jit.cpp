@@ -88,7 +88,12 @@ struct Jit::Impl {
 
 Block *Jit::Impl::compile() {
   auto block = std::make_unique<Block>();
-  block->operations = parse_block(program, cpu.reg, context.runtime);
+#if defined(__aarch64__)
+  const bool callbacks = context.events.io != nullptr || context.bus.external;
+#else
+  constexpr bool callbacks = false;
+#endif
+  block->operations = parse_block(program, cpu.reg, context.runtime, callbacks);
   if (block->operations.empty()) { return nullptr; }
 #if defined(__aarch64__)
   if (auto *existing = reuse(block->operations, EntryKind::ordinary)) { return existing; }
@@ -143,6 +148,8 @@ Jit::~Jit() = default;
 bool Jit::available() noexcept {
 #if defined(__x86_64__) && defined(__linux__)
   return native_mac_available();
+#elif defined(__aarch64__) && defined(__APPLE__)
+  return true;
 #else
   return false;
 #endif

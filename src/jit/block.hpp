@@ -19,8 +19,10 @@ using NativeDirectory = NativePage;
 using NativeIndex = NativePage;
 using NativeCatalog = NativePage;
 
-[[nodiscard]] std::vector<BlockInstruction>
-parse_block(std::span<const Word> program, const Registers &state, const JitRuntime &runtime);
+[[nodiscard]] std::vector<BlockInstruction> parse_block(std::span<const Word> program,
+                                                        const Registers &state,
+                                                        const JitRuntime &runtime,
+                                                        bool callback_boundaries = false);
 [[nodiscard]] std::vector<std::uint8_t>
 emit_block(std::span<const BlockInstruction> operations,
            const JitRuntime &runtime,
