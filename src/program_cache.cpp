@@ -12,18 +12,18 @@
 #include <stdexcept>
 
 namespace dsp56300::detail {
-ProgramCache::ProgramCache(const unsigned sector_words) : sector_words_(sector_words) {
+ProgramCache::ProgramCache(const unsigned sector_words) : state_{.sector_words = sector_words} {
   if (sector_words != 128 && sector_words != maximum_sector_words) {
     throw std::invalid_argument("DSP instruction cache sectors require 128 or 256 words");
   }
-  words_.resize(sector_count * sector_words_);
+  words_.resize(sector_count * state_.sector_words);
   flush(false);
 }
 
 std::size_t ProgramCache::find(const Word address) const {
-  const Word tag = address / sector_words_;
+  const Word tag = address / state_.sector_words;
   for (std::size_t slot = 0; slot < sector_count; ++slot) {
-    if (sectors_[slot].tag == tag) { return slot; }
+    if (state_.sectors[slot].tag == tag) { return slot; }
   }
   return sector_count;
 }
@@ -32,10 +32,10 @@ std::size_t ProgramCache::acquire(const Word address) {
   const auto found = find(address);
   if (found != sector_count) { return found; }
   for (std::size_t position = sector_count; position > 0; --position) {
-    const auto slot = order_[position - 1];
-    auto &sector = sectors_[slot];
+    const auto slot = state_.order[position - 1];
+    auto &sector = state_.sectors[slot];
     if (sector.locked) { continue; }
-    sector.tag = address / sector_words_;
+    sector.tag = address / state_.sector_words;
     sector.valid.reset();
     return slot;
   }
@@ -44,18 +44,18 @@ std::size_t ProgramCache::acquire(const Word address) {
 
 void ProgramCache::touch(const std::size_t slot) {
   for (std::size_t position = 0; position < sector_count; ++position) {
-    if (order_[position] != slot) { continue; }
-    for (; position > 0; --position) { order_[position] = order_[position - 1]; }
-    order_[0] = slot;
+    if (state_.order[position] != slot) { continue; }
+    for (; position > 0; --position) { state_.order[position] = state_.order[position - 1]; }
+    state_.order[0] = slot;
     return;
   }
 }
 
 std::optional<Word> ProgramCache::peek(const Word address) const {
   const auto slot = find(address);
-  const auto offset = address % sector_words_;
-  if (slot == sector_count || !sectors_[slot].valid.test(offset)) { return std::nullopt; }
-  return words_[(slot * sector_words_) + offset];
+  const auto offset = address % state_.sector_words;
+  if (slot == sector_count || !state_.sectors[slot].valid.test(offset)) { return std::nullopt; }
+  return words_[(slot * state_.sector_words) + offset];
 }
 
 std::optional<Word> ProgramCache::fetch(const Word address,
@@ -83,62 +83,62 @@ std::optional<Word> ProgramCache::fetch(const Word address,
     return value ? std::optional(*value & word_mask) : std::nullopt;
   }
   touch(slot);
-  auto &sector = sectors_[slot];
-  const auto offset = address % sector_words_;
-  if (sector.valid.test(offset)) { return words_[(slot * sector_words_) + offset]; }
+  auto &sector = state_.sectors[slot];
+  const auto offset = address % state_.sector_words;
+  if (sector.valid.test(offset)) { return words_[(slot * state_.sector_words) + offset]; }
   const auto count = burst ? 4U - (address % 4) : 1U;
   const auto end =
       std::ranges::min(std::array<std::size_t, 3>{address + count, size, cacheable_end});
   for (std::size_t next = address; next < end; ++next) {
-    const auto word = next % sector_words_;
+    const auto word = next % state_.sector_words;
     const auto value = reader(context, static_cast<Word>(next));
     if (!value) { return std::nullopt; }
-    words_[(slot * sector_words_) + word] = *value & word_mask;
+    words_[(slot * state_.sector_words) + word] = *value & word_mask;
     sector.valid.set(word);
   }
-  return words_[(slot * sector_words_) + offset];
+  return words_[(slot * state_.sector_words) + offset];
 }
 
 void ProgramCache::write(const Write transfer) {
   const auto address = transfer.address;
   const auto slot = find(address);
   if (slot == sector_count) { return; }
-  const auto offset = address % sector_words_;
-  words_[(slot * sector_words_) + offset] = transfer.value & word_mask;
-  sectors_[slot].valid.set(offset);
+  const auto offset = address % state_.sector_words;
+  words_[(slot * state_.sector_words) + offset] = transfer.value & word_mask;
+  state_.sectors[slot].valid.set(offset);
 }
 
 void ProgramCache::lock(const Word address, const bool locked) {
   const auto slot = acquire(address);
   if (slot == sector_count) { return; }
-  sectors_[slot].locked = locked;
+  state_.sectors[slot].locked = locked;
   touch(slot);
 }
 
 void ProgramCache::free() {
-  for (auto &sector : sectors_) { sector.locked = false; }
+  for (auto &sector : state_.sectors) { sector.locked = false; }
 }
 
 void ProgramCache::flush(const bool unlocked_only) {
-  for (auto &sector : sectors_) {
+  for (auto &sector : state_.sectors) {
     if (unlocked_only && sector.locked) { continue; }
     sector.valid.reset();
-    sector.tag = word_mask / sector_words_;
+    sector.tag = word_mask / state_.sector_words;
     sector.locked = false;
   }
-  std::ranges::copy(std::views::iota(std::size_t{0}, order_.size()), order_.begin());
+  std::ranges::copy(std::views::iota(std::size_t{0}, state_.order.size()), state_.order.begin());
 }
 
 const std::array<ProgramCache::Sector, ProgramCache::sector_count> &
 ProgramCache::sectors() const noexcept {
-  return sectors_;
+  return state_.sectors;
 }
 
 std::span<const Word> ProgramCache::contents(const std::size_t slot) const noexcept {
-  return std::span(words_).subspan(slot * sector_words_, sector_words_);
+  return std::span(words_).subspan(slot * state_.sector_words, state_.sector_words);
 }
 
 const std::array<std::size_t, ProgramCache::sector_count> &ProgramCache::order() const noexcept {
-  return order_;
+  return state_.order;
 }
 } // namespace dsp56300::detail

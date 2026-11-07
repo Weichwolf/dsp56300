@@ -134,6 +134,7 @@ void Emitter::operation(const BlockInstruction &operation) {
   if (instruction.operation == Operation::nop) { return; }
   if (control(operation)) { return; }
   if (event(operation)) { return; }
+  if (cache_control(operation)) { return; }
   if (loop(operation)) { return; }
   if (transfer(operation)) { return; }
   if (integer(operation)) { return; }

@@ -79,9 +79,16 @@ struct NativeBus {
   bool external = false;
 };
 
+struct CacheState;
+
+[[nodiscard]] bool reset_io(Io *io, Word pc) noexcept;
+
 struct NativeEvents {
   VectorState *vector = nullptr;
   Word *debug_vector = nullptr;
+  Io *io = nullptr;
+  void *cache_owner = nullptr;
+  CacheState *(*cache)(void *) noexcept = nullptr;
 };
 
 struct NativeContext {

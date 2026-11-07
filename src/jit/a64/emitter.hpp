@@ -133,6 +133,11 @@ private:
   void finish_loop(const BlockInstruction &operation);
   [[nodiscard]] bool event(const BlockInstruction &operation);
   void debug_request();
+  void reset_peripherals(const BlockInstruction &operation);
+  [[nodiscard]] bool cache_control(const BlockInstruction &operation);
+  void cache_flush(bool unlocked_only);
+  void cache_lock(bool locked);
+  void cache_touch();
   void exception_request(const BlockInstruction &operation);
   void control_byte(const BlockInstruction &operation);
   void jump(const BlockInstruction &operation);

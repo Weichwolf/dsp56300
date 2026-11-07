@@ -74,6 +74,13 @@ public:
     context_.bus = bus;
   }
 
+  void peripherals(Io *const io) { context_.events.io = io; }
+
+  void cache(void *const owner, detail::CacheState *(*storage)(void *) noexcept) {
+    context_.events.cache_owner = owner;
+    context_.events.cache = storage;
+  }
+
   [[nodiscard]] const detail::Cpu &cpu() const { return cpu_; }
 
   Word run(const a64::Program &program, const Word budget) {

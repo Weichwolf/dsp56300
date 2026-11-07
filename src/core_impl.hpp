@@ -32,6 +32,7 @@ struct Core::Impl {
            vector.phase == VectorPhase::none;
   }
 
+  [[nodiscard]] static detail::CacheState *jit_cache(void *owner) noexcept;
   void request_debug(bool software);
   void execute_debug(const detail::Instruction &decoded);
   void admit_debug();

@@ -47,6 +47,24 @@ void Emitter::debug_request() {
   code_.bind(complete);
 }
 
+void Emitter::reset_peripherals(const BlockInstruction &operation) {
+  boundary(NativeBoundary::owner);
+  publish();
+  code_.load(Reg::x0,
+             context,
+             offsetof(NativeContext, events) + offsetof(NativeEvents, io),
+             Access::doubleword);
+  code_.constant(Reg::x1, operation.pc);
+  code_.constant(Reg::x16, reinterpret_cast<std::uintptr_t>(&reset_io));
+  code_.call(Reg::x16);
+  mask(Reg::x0, Reg::x0, 1, Width::w32);
+  Label accepted;
+  code_.branch_zero_far(Reg::x0, accepted, Width::w32, true);
+  code_.constant(Reg::x0, operation.instruction.opcode);
+  fault(operation, FaultKind::host_event, Reg::x0);
+  code_.bind(accepted);
+}
+
 void Emitter::exception_request(const BlockInstruction &operation) {
   code_.load(Reg::x2,
              context,
@@ -77,6 +95,10 @@ void Emitter::exception_request(const BlockInstruction &operation) {
 
 bool Emitter::event(const BlockInstruction &operation) {
   const auto kind = operation.instruction.operation;
+  if (kind == Operation::reset_peripherals) {
+    reset_peripherals(operation);
+    return true;
+  }
   const bool debug = kind == Operation::debug || kind == Operation::conditional_debug;
   if (!debug && kind != Operation::illegal && kind != Operation::trap &&
       kind != Operation::conditional_trap) {

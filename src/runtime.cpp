@@ -4,12 +4,17 @@
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "jit.hpp"
+#include "program_cache.hpp"
 #include "translation.hpp"
 
 #include <array>
 #include <cstdint>
 
 namespace dsp56300::detail {
+bool reset_io(Io *const io, const Word pc) noexcept {
+  return io != nullptr && io->reset_peripherals(pc);
+}
+
 void access_bit_io(Io *const io, NativeAccess &access) noexcept {
   constexpr std::array actions{
       BitAction::test, BitAction::clear, BitAction::set, BitAction::change};
@@ -30,6 +35,10 @@ void access_bit_io(Io *const io, NativeAccess &access) noexcept {
 }
 
 namespace dsp56300 {
+detail::CacheState *Core::Impl::jit_cache(void *const owner) noexcept {
+  return &static_cast<Impl *>(owner)->program_cache().state();
+}
+
 void Core::Impl::jit_access(void *const owner, detail::NativeAccess &access) noexcept {
   auto &self = *static_cast<Impl *>(owner);
   self.current_pc = access.pc;
