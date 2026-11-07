@@ -7,8 +7,7 @@
       "binaryDir": "${sourceDir}/build/strict",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_C_COMPILER": "clang-19",
-        "CMAKE_CXX_COMPILER": "clang++-19",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/LLVM19.cmake",
         "DSP56300_SANITIZER": "address-undefined"
       }
     },
@@ -18,8 +17,7 @@
       "binaryDir": "${sourceDir}/build/release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_C_COMPILER": "clang-19",
-        "CMAKE_CXX_COMPILER": "clang++-19",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/LLVM19.cmake",
         "DSP56300_SANITIZER": "none"
       }
     },
@@ -29,8 +27,7 @@
       "binaryDir": "${sourceDir}/build/thread",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_C_COMPILER": "clang-19",
-        "CMAKE_CXX_COMPILER": "clang++-19",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/LLVM19.cmake",
         "DSP56300_SANITIZER": "thread"
       }
     }

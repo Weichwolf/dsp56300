@@ -1,0 +1,17 @@
+{
+  "version": "19.1.7",
+  "fix": "https://github.com/llvm/llvm-project/commit/2e7d07a33725a82ecfc514e27f047ece3ff13d4c",
+  "license": "Apache-2.0 WITH LLVM-exception",
+  "archives": {
+    "compiler-rt": {
+      "source": "https://github.com/llvm/llvm-project/releases/download/llvmorg-19.1.7/compiler-rt-19.1.7.src.tar.xz",
+      "bytes": 2530008,
+      "sha256": "c12b6e764202c615c1a3af9a13d477846878757ae0e29e5f8979215a6958fffc"
+    },
+    "cmake": {
+      "source": "https://github.com/llvm/llvm-project/releases/download/llvmorg-19.1.7/cmake-19.1.7.src.tar.xz",
+      "bytes": 9300,
+      "sha256": "11c5a28f90053b0c43d0dec3d0ad579347fc277199c005206b963c19aae514e3"
+    }
+  }
+}

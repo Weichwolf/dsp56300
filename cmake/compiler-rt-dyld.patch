@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+# Backport LLVM 2e7d07a33725a82ecfc514e27f047ece3ff13d4c to compiler-rt 19.1.7.
+--- a/lib/sanitizer_common/sanitizer_procmaps_mac.cpp
++++ b/lib/sanitizer_common/sanitizer_procmaps_mac.cpp
+@@ -126 +126 @@
+-static mach_header *dyld_hdr = 0;
++static const mach_header *dyld_hdr = 0;
+@@ -192,0 +193 @@
++SANITIZER_WEAK_IMPORT const struct mach_header *_dyld_get_dyld_header(void);
+@@ -195 +196 @@
+-static mach_header *GetDyldImageHeaderViaSharedCache() {
++static const mach_header *GetDyldImageHeaderViaSharedCache() {
+@@ -199,0 +201,3 @@
++
++  if (&_dyld_get_dyld_header != nullptr)
++    return _dyld_get_dyld_header();
+--- a/lib/sanitizer_common/weak_symbols.txt
++++ b/lib/sanitizer_common/weak_symbols.txt
+@@ -11,0 +12 @@
++__dyld_get_dyld_header

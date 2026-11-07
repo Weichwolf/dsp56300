@@ -16,7 +16,7 @@ struct PublishedImage {
   std::size_t bytes = 0;
 };
 
-// Linker wrappers observe successful append calls, outside the core. Bytes count
+// Test linkage observes successful append calls, outside the core. Bytes count
 // actual published instructions and literals, independently of reserved pages.
 [[nodiscard]] Publications publications() noexcept;
 // Lifetime checks opt in to exact image spans; benchmarks need no image log.

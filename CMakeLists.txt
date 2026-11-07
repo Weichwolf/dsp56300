@@ -17,12 +17,26 @@ foreach(language C CXX)
 endforeach()
 include(cmake/Quality.cmake)
 set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
-find_program(DSP56300_CLANG_TIDY NAMES clang-tidy-19 REQUIRED)
-find_program(DSP56300_CLANG_FORMAT NAMES clang-format-19 REQUIRED)
+get_filename_component(DSP56300_LLVM_BIN "${CMAKE_CXX_COMPILER}" DIRECTORY)
+find_program(DSP56300_CLANG_TIDY NAMES clang-tidy-19 clang-tidy
+  HINTS "${DSP56300_LLVM_BIN}" REQUIRED)
+find_program(DSP56300_CLANG_FORMAT NAMES clang-format-19 clang-format
+  HINTS "${DSP56300_LLVM_BIN}" REQUIRED)
+foreach(tool IN ITEMS DSP56300_CLANG_TIDY DSP56300_CLANG_FORMAT)
+  execute_process(COMMAND "${${tool}}" --version OUTPUT_VARIABLE tool_version
+    COMMAND_ERROR_IS_FATAL ANY)
+  if(NOT tool_version MATCHES "version 19\\.")
+    message(FATAL_ERROR "${tool} must be LLVM 19")
+  endif()
+endforeach()
 option(DSP56300_BUILD_TESTING "Build DSP library tests" ${PROJECT_IS_TOP_LEVEL})
 
 set(CMAKE_CXX_CLANG_TIDY "${DSP56300_CLANG_TIDY};--warnings-as-errors=*")
 
+set(dsp56300_mac_source src/jit/x64/mac_batch_avx2.cpp)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
+  set(dsp56300_mac_source src/jit/a64/mac_batch_neon.cpp)
+endif()
 add_library(dsp56300_core STATIC
   src/core.cpp src/captured.cpp src/repeat.cpp src/memory_windows.cpp src/external_memory.cpp src/state.cpp
              src/instruction_shape.cpp
@@ -45,15 +59,21 @@ add_library(dsp56300_core STATIC
   src/jit/x64/address.cpp src/jit/x64/registers.cpp src/jit/x64/long_move.cpp
   src/jit/x64/retirement.cpp src/jit/x64/status.cpp
   src/jit/x64/shifts.cpp src/jit/registers.cpp src/jit/x64/inputs.cpp
-  src/jit/mac_batch.cpp src/jit/x64/mac_batch_avx2.cpp src/jit/x64/batch.cpp
+  src/jit/mac_batch.cpp ${dsp56300_mac_source} src/jit/x64/batch.cpp
   src/jit/value_graph.cpp src/jit/resident_region_run.cpp src/jit/resident_region_plan.cpp
   src/jit/x64/vector.cpp src/jit/x64/resident_region_emit.cpp)
 add_library(dsp56300::core ALIAS dsp56300_core)
 target_include_directories(dsp56300_core PUBLIC include)
 target_compile_features(dsp56300_core PUBLIC cxx_std_23)
 target_link_libraries(dsp56300_core PUBLIC dsp56300_quality)
-target_compile_options(dsp56300_core PUBLIC $<$<CONFIG:Release>:-march=native>)
-target_link_options(dsp56300_core PUBLIC -fuse-ld=lld)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
+  target_compile_options(dsp56300_core PUBLIC $<$<CONFIG:Release>:-mcpu=native>)
+else()
+  target_compile_options(dsp56300_core PUBLIC $<$<CONFIG:Release>:-march=native>)
+endif()
+if(NOT APPLE)
+  target_link_options(dsp56300_core PUBLIC -fuse-ld=lld)
+endif()
 target_include_directories(dsp56300_core PRIVATE src src/jit src/jit/x64)
 
 file(GLOB_RECURSE DSP56300_OWN_FILES CONFIGURE_DEPENDS
@@ -70,14 +90,29 @@ add_custom_target(${DSP56300_FORMAT_TARGET}
   VERBATIM)
 
 if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
+  add_executable(dsp56300_executable_arena_test test/jit/executable_arena_test.cpp)
+  target_include_directories(dsp56300_executable_arena_test PRIVATE src)
+  target_link_libraries(dsp56300_executable_arena_test PRIVATE dsp56300::core)
+  add_test(NAME executable-arena COMMAND dsp56300_executable_arena_test)
+  add_executable(dsp56300_host_mac_test test/jit/host_mac_test.cpp)
+  target_include_directories(dsp56300_host_mac_test PRIVATE src src/jit)
+  target_link_libraries(dsp56300_host_mac_test PRIVATE dsp56300::core)
+  add_test(NAME host-mac-products COMMAND dsp56300_host_mac_test)
+  set_tests_properties(host-mac-products executable-arena PROPERTIES TIMEOUT 30)
   add_library(dsp56300_codegen_observer STATIC test/support/codegen_observer.cpp)
   target_include_directories(dsp56300_codegen_observer PUBLIC test/support)
   target_link_libraries(dsp56300_codegen_observer PUBLIC dsp56300_quality)
   # Observe real image publication independently of the arena's mapping strategy.
   set(dsp56300_append_symbol "_ZN8dsp563006detail15ExecutableArena6appendESt4spanIKhLm18446744073709551615EE")
-  target_link_options(dsp56300_codegen_observer INTERFACE
-    "-Wl,--wrap=${dsp56300_append_symbol}"
-    "-Wl,--undefined=__wrap_${dsp56300_append_symbol}")
+  if(APPLE)
+    set_source_files_properties(src/jit/arena.cpp PROPERTIES
+      COMPILE_DEFINITIONS DSP56300_TEST_PUBLICATIONS)
+    target_include_directories(dsp56300_codegen_observer PRIVATE src)
+  else()
+    target_link_options(dsp56300_codegen_observer INTERFACE
+      "-Wl,--wrap=${dsp56300_append_symbol}"
+      "-Wl,--undefined=__wrap_${dsp56300_append_symbol}")
+  endif()
   add_executable(dsp56300_deadline_test test/core/deadline_test.cpp)
   target_link_libraries(dsp56300_deadline_test PRIVATE dsp56300::core dsp56300_codegen_observer)
   add_test(NAME execution-deadlines COMMAND dsp56300_deadline_test)
@@ -864,7 +899,8 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   foreach(core_test_target IN LISTS core_test_targets)
     get_target_property(core_test_sources ${core_test_target} SOURCES)
     get_target_property(core_test_libraries ${core_test_target} LINK_LIBRARIES)
-    if(core_test_libraries MATCHES "dsp56300::core")
+    if(core_test_libraries MATCHES "dsp56300::core" AND
+       NOT core_test_libraries MATCHES "dsp56300_codegen_observer")
       target_link_libraries(${core_test_target} PRIVATE dsp56300_codegen_observer)
     endif()
     if(core_test_sources MATCHES "test/")

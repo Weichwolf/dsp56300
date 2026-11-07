@@ -14,7 +14,25 @@ cmake --build --preset release
 ctest --preset release
 ```
 
-The `strict` preset enables ASan/UBSan.
+On macOS, install the matching tools with `brew install llvm@19 ninja ccache`.
+Presets discover the Homebrew LLVM 19 installation without replacing system tools.
+ARM64 executable storage and NEON MAC products are implemented;
+complete ARM64 Core execution and qualification remain in progress. The production
+Core still reports an unsupported host on ARM64.
+
+The `strict` preset enables ASan/UBSan. On macOS 26.4 and later, LLVM 19's
+original sanitizer runtime deadlocks during dyld initialization. Build the same
+19.1.7 runtime with the [upstream fix](https://github.com/llvm/llvm-project/commit/2e7d07a33725a82ecfc514e27f047ece3ff13d4c):
+
+```sh
+export LLVM19_RESOURCE_DIR="$(python3 tools/darwin_runtime.py)"
+cmake --preset strict
+cmake --build --preset strict
+```
+
+This keeps the LLVM 19 compiler and headers, verifies source identities and retains
+all sanitizers. Sources and runtime artifacts remain under ignored `build/local/`.
+A second core checkout can use the same `LLVM19_RESOURCE_DIR`.
 
 ## Use
 

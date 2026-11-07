@@ -6,8 +6,8 @@
 #include <vector>
 
 namespace dsp56300::detail {
-// Append-only dual mappings: published bytes and entry addresses remain valid
-// until destruction. Only private storage is writable; callers receive RX addresses.
+// Append-only code; published entry addresses remain valid until destruction.
+// Linux uses RW/RX aliases; Apple silicon uses thread-local MAP_JIT write protection.
 class ExecutableArena {
 public:
   ExecutableArena();
@@ -17,6 +17,7 @@ public:
   [[nodiscard]] const void *append(std::span<const std::uint8_t> bytes);
 
 private:
+  [[nodiscard]] const void *publish(std::span<const std::uint8_t> bytes);
   class Segment;
   std::vector<std::unique_ptr<Segment>> segments_;
 };

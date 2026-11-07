@@ -103,6 +103,6 @@ inline void consume_mac_products(MacBatchState &state,
   state.accumulator = mac_batch_math::wrap(fourth);
 }
 
-void avx2_mac_batch(MacBatchState &state, const MacBatchInput &input) noexcept;
-[[nodiscard]] bool avx2_mac_available() noexcept;
+void native_mac_batch(MacBatchState &state, const MacBatchInput &input) noexcept;
+[[nodiscard]] bool native_mac_available() noexcept;
 } // namespace dsp56300::detail

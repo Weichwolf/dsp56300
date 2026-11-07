@@ -11,7 +11,7 @@
 #include <cstring>
 
 namespace dsp56300::detail {
-bool avx2_mac_available() noexcept {
+bool native_mac_available() noexcept {
 #if defined(__x86_64__)
   return __builtin_cpu_supports("avx2");
 #else
@@ -72,8 +72,8 @@ reduce(MacBatchState &state, const MacBatchInput &input, const unsigned count) n
 }
 }
 
-[[gnu::target("avx2"), gnu::aligned(64)]] void avx2_mac_batch(MacBatchState &state,
-                                                              const MacBatchInput &input) noexcept {
+[[gnu::target("avx2"), gnu::aligned(64)]] void
+native_mac_batch(MacBatchState &state, const MacBatchInput &input) noexcept {
   auto current = state;
   const auto streams = input;
   for (std::size_t index = 0; index < streams.x.size();) {
@@ -97,10 +97,6 @@ reduce(MacBatchState &state, const MacBatchInput &input, const unsigned count) n
     current.y = streams.y[index - 1] & word_mask;
   }
   state = current;
-}
-#else
-void avx2_mac_batch(MacBatchState &state, const MacBatchInput &input) noexcept {
-  scalar_mac_batch(state, input);
 }
 #endif
 } // namespace dsp56300::detail

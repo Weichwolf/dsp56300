@@ -9,7 +9,6 @@
 #include "jit/emitter.hpp"
 #include "jit/index.hpp"
 #include "jit/resident_region.hpp"
-#include "mac_batch.hpp"
 #include "translation.hpp"
 
 #include <array>
@@ -21,6 +20,9 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#if defined(__x86_64__) && defined(__linux__)
+#include "mac_batch.hpp"
+#endif
 
 namespace dsp56300::detail {
 namespace {
@@ -94,7 +96,7 @@ Jit::~Jit() = default;
 
 bool Jit::available() noexcept {
 #if defined(__x86_64__) && defined(__linux__)
-  return avx2_mac_available();
+  return native_mac_available();
 #else
   return false;
 #endif

@@ -148,7 +148,7 @@ Word execute_mac_batch(Cpu &cpu,
                       .x = static_cast<Word>(reg.x) & word_mask,
                       .y = static_cast<Word>(reg.y) & word_mask,
                       .limited = (reg.sr & limit) != 0};
-  avx2_mac_batch(state, input);
+  native_mac_batch(state, input);
   commit(cpu, plan, state, count);
   return count;
 }

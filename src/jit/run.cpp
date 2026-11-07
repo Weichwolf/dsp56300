@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "architecture.hpp"
-#include "dsp56300/core.hpp"
 #include "jit.hpp"
 #include "jit/block.hpp"
 #include "jit/resident_region.hpp"
 
 #include <cstddef>
 #include <cstdint>
+#if defined(__x86_64__) && defined(__linux__)
+#include "dsp56300/core.hpp"
+#endif
 
 #define DSP56300_RUN_PC_OFFSET 128
 #define DSP56300_RUN_SR_OFFSET 132

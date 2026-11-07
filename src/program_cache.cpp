@@ -6,8 +6,8 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
-#include <numeric>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <stdexcept>
 
@@ -126,7 +126,7 @@ void ProgramCache::flush(const bool unlocked_only) {
     sector.tag = word_mask / sector_words_;
     sector.locked = false;
   }
-  std::ranges::iota(order_, std::size_t{0});
+  std::ranges::copy(std::views::iota(std::size_t{0}, order_.size()), order_.begin());
 }
 
 const std::array<ProgramCache::Sector, ProgramCache::sector_count> &
