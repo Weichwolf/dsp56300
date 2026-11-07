@@ -36,23 +36,16 @@
 
 ## Performance priority
 
-- Before further integration or optimization in blofeld-emu, bring both cores
-  close to matched host-ASM throughput on representative warm workloads. Use the
-  same inputs, relevant ISA semantics and verified outputs; trivial-only cases
-  or weak host baselines do not establish this gate. Report every shortfall.
-
-- Optimize cpu12 first until every representative warm fixture reaches at least
-  70% of matched optimized host ASM on realistic sustained scenarios, then
-  optimize and simplify dsp56300 likewise. Tiny reset/run/inspect microfixtures
-  diagnose overhead and do not establish or block this target. Require real-time
-  processing even when a packet discovers and compiles new code; report the
-  assumed device rate, worst packet and missed deadlines, not just averages.
-- While throughput is low, favor short optimized experiments and focused result
-  checks. Increase validation breadth with performance progress; preserve strict
-  check definitions and independent ISA coverage.
-- Keep only code needed for correct behavior or demonstrated performance. Remove
-  unnecessary DSP implementation/API during its optimization stage, preserving
-  implemented ISA and the independent tests required to qualify it.
+- Prioritize complete Blofeld instrument integration. Fix and optimize the
+  responsible core when connected execution exposes a generic defect or a
+  measured throughput/latency bottleneck; keep both libraries generally usable.
+- Retain >=70% of matched host-ASM throughput per representative warm scenario
+  as an optimization reference, not an integration gate. Preserve identical
+  inputs, relevant ISA effects and independent results. Report every slow case,
+  cold translation and packet deadline miss; do not hide failures in averages.
+- Use scalar or SIMD lowering according to measured benefit; SIMD is optional.
+  Keep code small and qualified. Preserve independent ISA tests and strict checks;
+  use focused validation for targeted changes and broaden it when justified.
 
 ## Working rules
 

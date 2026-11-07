@@ -2,7 +2,8 @@
 
 This is the design target, not a statement of implementation completeness.
 The same execution architecture applies to cpu12 and dsp56300; their ISA lowering,
-register allocation and memory semantics differ. Optimize CPU12 first, then DSP.
+register allocation and memory semantics differ. Prioritize instrument integration;
+fix and optimize the responsible core when a connected workload exposes a need.
 
 ```text
 consumer: borrowed memory, peripherals, events and virtual time
@@ -161,14 +162,15 @@ verified results against optimized handwritten host ASM. Report cold compilation
 warm native-entry throughput and full Core.run throughput separately. Include
 code size and boundary costs; do not disguise slow fixtures with an average.
 
-The gate is at least 70% of matched host-ASM throughput for every representative
-warm fixture in each core. This is an ambitious measured acceptance requirement,
-not a theorem that arbitrary guest code can match an unconstrained native
-algorithm. Start with ALU, flags, memory and branches; include substantial loops,
-Mandelbrot/FFT and architecture-appropriate instrument workloads before declaring
-the set representative. Both cores must pass before further emulator integration.
-Then establish the complete instrument and at least 4x sustained offline realtime
-under representative high load. No current performance or completion is implied.
+Retain at least 70% of matched host-ASM throughput on representative warm
+fixtures as an optimization reference, not an integration gate. Complete the
+instrument and use connected firmware failures and measured whole-device
+bottlenecks to select targeted core work. Keep broad ALU, flags, memory, branch,
+Mandelbrot/FFT and instrument-workload coverage; report every shortfall. Scalar
+and SIMD lowering are options selected by measured benefit. Establish at least
+4x sustained offline instrument throughput under representative high load while
+preserving correct guest time and bounded live latency. No current performance
+or completion is implied.
 
 ## DSP56300 lowering
 

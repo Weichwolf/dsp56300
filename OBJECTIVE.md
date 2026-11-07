@@ -131,18 +131,19 @@ must not add work to the execution path. Only JIT execution belongs in productio
 future host architectures provide new implementations of the host-JIT concept.
 Preserve every implemented instruction, including operations unused by Blofeld.
 
-Before further emulator integration or optimization, both CPU12 and DSP56300
-must approach matched host-ASM throughput on representative warmed workloads.
-The complete instrument objective remains unchanged. Optimize native blocks,
-loops, register/flag liveness and code layout in the cores, validate equivalent
-results and report per-workload JIT/host percentages. Passing correctness tests
-alone do not establish the performance gate.
+Prioritize the complete Blofeld instrument and connected firmware execution.
+Fix and optimize CPU12 or DSP56300 when integration exposes a generic core defect
+or a measured throughput or latency bottleneck. Keep the cores independent and
+generally usable; manufacturer firmware remains outside their source and tests.
 
-Sequence: optimize CPU12 first, then optimize and simplify DSP56300. Target >=70%
-of matched optimized host throughput on each realistic sustained warm scenario;
-short reset/run/inspect microfixtures remain diagnostics and do not establish or
-block that target. Use identical inputs, relevant ISA semantics and independent
-result checks. Report each scenario rather than hiding weak cases in an average.
+Retain >=70% of matched optimized host-ASM throughput on representative warm
+workloads as an optimization reference, not a prerequisite for emulator
+integration. Instrument correctness, measured whole-device throughput and live
+latency determine application progress. Compare identical inputs and relevant
+ISA semantics with independently verified results; report every slow scenario
+and first-use deadline miss. Tiny microfixtures and averages cannot establish
+sustained performance. Use scalar or SIMD lowering according to measured benefit;
+SIMD is optional. No current performance or completion is implied.
 
 Provide a `bench` command under the tests that reports assumed hardware throughput
 (target >=1x) and warm JIT/host throughput, with clock/cost assumptions and the
@@ -154,6 +155,6 @@ it as necessary to avoid first-use underruns.
 
 Use focused validation during slow-core iteration and broaden it as performance
 improves. Keep code small, with complexity justified by correctness or measured
-speed. Subsequent complete Blofeld integration must sustain >=4x offline real-time
+speed. Complete Blofeld integration must sustain >=4x offline real-time
 throughput on this host under representative high load while retaining correct
 guest time and bounded live latency.
