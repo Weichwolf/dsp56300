@@ -30,7 +30,12 @@ modulo and multiple-wrap updates, including updates on untaken conditional jumps
 Conditional emission covers Tcc accumulator/address/dual transfers and all IFcc
 ALU bytes, preserving optional SR updates and the different mode-fault ordering.
 Independent native matrices cover every scalar ALU byte without a parallel transfer;
-general parallel memory/register transfers and complete owner integration remain open.
+register/immediate parallel transfers and address updates preserve pre-transfer ALU
+inputs and post-transfer partial accumulators. Native register-bus emission covers
+partial/full accumulators, sticky transfer flags, R/N/M and control registers,
+including SSH/SSL stack effects and precise bounds faults. LRA/LUA address calculations
+and register/immediate MOVEC forms are implemented. General parallel memory transfers,
+remaining instruction families and complete owner integration remain open.
 Complete ARM64 Core execution and qualification remain in progress. The production
 Core still reports an unsupported host on ARM64.
 

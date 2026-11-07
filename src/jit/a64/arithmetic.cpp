@@ -133,6 +133,7 @@ void Emitter::operation(const BlockInstruction &operation) {
   const auto &instruction = operation.instruction;
   if (instruction.operation == Operation::nop) { return; }
   if (control(operation)) { return; }
+  if (transfer(operation)) { return; }
   constexpr Word condition_mask = 0xffe000;
   constexpr Word condition_group = 0x202000;
   if (instruction.operation == Operation::parallel &&
@@ -151,10 +152,7 @@ void Emitter::operation(const BlockInstruction &operation) {
                               : !immediate || kind == 0 || kind == 4 || kind == 5 || kind == 2 ||
                                     kind == 3 || kind == 6;
   if (!numeric_mode(operation, saturating)) { return; }
-  if (instruction.operation == Operation::parallel &&
-      (instruction.opcode & upper_move_mask) != no_move_group) {
-    throw std::invalid_argument("A64 DSP parallel transfer lowering is incomplete");
-  }
+  if (instruction.operation == Operation::parallel) { moves(operation); }
   if (shifting(instruction)) {
     shift(operation);
     return;

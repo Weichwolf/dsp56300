@@ -28,9 +28,9 @@ enum Byte : std::uint8_t {
   arithmetic_left = 0x32
 };
 
-inline void magnitude_compare(Registers &state, const Word code) {
-  const auto destination = signed56((code & 8U) != 0 ? state.b : state.a);
-  const auto source = sequence_model::source(state, code);
+inline void magnitude_compare(Registers &state, const Registers &old, const Word code) {
+  const auto destination = signed56((code & 8U) != 0 ? old.b : old.a);
+  const auto source = sequence_model::source(old, code);
   const auto left = destination < 0 ? -destination : destination;
   const auto right = source < 0 ? -source : source;
   const auto difference = left - right;
@@ -43,7 +43,7 @@ inline void magnitude_compare(Registers &state, const Word code) {
                          .carry = left < right});
 }
 
-inline void bfu(Registers &state, const Word code) {
+inline void bfu(Registers &state, const Registers &old, const Word code) {
   const auto kind = code & 0xf7U;
   bfu_model::Input input{.destination_b = (code & 8U) != 0};
   if (kind == complement) {
@@ -64,22 +64,28 @@ inline void bfu(Registers &state, const Word code) {
     constexpr std::array indices{0U, 2U, 1U, 3U};
     input.source = indices.at(((code >> 4) & 7U) - 4);
   }
-  const auto old = state;
+  const auto post_transfer = input.destination_b ? state.b : state.a;
   bfu_model::apply(state, old, input);
+  constexpr auto middle = std::uint64_t{word_mask} << word_bits;
+  auto &destination = input.destination_b ? state.b : state.a;
+  destination = (post_transfer & ~middle) | (destination & middle);
 }
 
-inline void apply(Registers &state, const Word code) {
+inline void apply(Registers &state, const Registers &old, const Word code) {
   const auto kind = code & 0xf7U;
   if (code == selection_model::magnitude_code || code == selection_model::max_code) {
     selection_model::select(state,
-                            state,
+                            old,
                             code == selection_model::max_code ? selection_model::Kind::maximum
                                                               : selection_model::Kind::magnitude);
   } else if (kind == add_right || kind == subtract_right || kind == add_left ||
              kind == subtract_left) {
-    static_cast<void>(shifted_model::apply(state, code));
+    auto shifted = old;
+    shifted.sr = state.sr;
+    static_cast<void>(shifted_model::apply(shifted, code));
+    ((code & 8U) != 0 ? state.b : state.a) = (code & 8U) != 0 ? shifted.b : shifted.a;
+    state.sr = shifted.sr;
   } else if (kind == arithmetic_right || kind == arithmetic_left) {
-    const auto old = state;
     const bool destination_b = (code & 8U) != 0;
     shift_model::apply(state,
                        old,
@@ -90,12 +96,16 @@ inline void apply(Registers &state, const Word code) {
                               kind == rotate_right || kind == rotate_left ||
                               (((code >> 4) & 7U) >= 4 &&
                                ((code & 7U) == 2 || (code & 7U) == 3 || (code & 7U) == 6)))) {
-    bfu(state, code);
+    bfu(state, old, code);
   } else if (code < 0x80U && (code & 7U) == 7) {
-    magnitude_compare(state, code);
+    magnitude_compare(state, old, code);
   } else {
-    const auto old = state;
     saturation_model::alu(state, old, code);
   }
+}
+
+inline void apply(Registers &state, const Word code) {
+  const auto old = state;
+  apply(state, old, code);
 }
 }
