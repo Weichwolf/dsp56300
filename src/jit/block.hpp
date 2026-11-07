@@ -25,6 +25,10 @@ parse_block(std::span<const Word> program, const Registers &state, const JitRunt
 emit_block(std::span<const BlockInstruction> operations,
            const JitRuntime &runtime,
            const std::array<Word, agu_registers> &modifiers);
+[[nodiscard]] std::vector<std::uint8_t>
+emit_repeat(const BlockInstruction &operation,
+            const JitRuntime &runtime,
+            const std::array<Word, agu_registers> &modifiers);
 [[nodiscard]] std::uint32_t
 enter_block(const void *entry, Cpu &cpu, NativeContext &context) noexcept;
 [[nodiscard]] std::uint32_t enter_blocks(const void *entry,

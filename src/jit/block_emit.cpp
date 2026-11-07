@@ -3,19 +3,40 @@
 #include "dsp56300/memory.hpp"
 #include "jit.hpp"
 #include "jit/block.hpp"
+#if defined(__aarch64__)
+#include "jit/a64/emitter.hpp"
+#else
 #include "jit/code.hpp"
 #include "jit/emitter.hpp"
 #include "jit/resident.hpp"
+#endif
 
 #include <array>
-#include <cstddef>
 #include <cstdint>
 #include <span>
+#include <vector>
+#if !defined(__aarch64__)
+#include <cstddef>
 #include <stdexcept>
 #include <utility>
-#include <vector>
+#endif
 
 namespace dsp56300::detail {
+#if defined(__aarch64__)
+std::vector<std::uint8_t> emit_block(const std::span<const BlockInstruction> operations,
+                                     const JitRuntime & /*runtime*/,
+                                     const std::array<Word, agu_registers> & /*modifiers*/) {
+  a64::Emitter emitter;
+  return emitter.generate(operations);
+}
+
+std::vector<std::uint8_t> emit_repeat(const BlockInstruction &operation,
+                                      const JitRuntime & /*runtime*/,
+                                      const std::array<Word, agu_registers> & /*modifiers*/) {
+  a64::Emitter emitter;
+  return emitter.generate_repeat(operation);
+}
+#else
 std::vector<std::uint8_t> emit_block(const std::span<const BlockInstruction> operations,
                                      const JitRuntime &runtime,
                                      const std::array<Word, agu_registers> &modifiers) {
@@ -46,4 +67,13 @@ std::vector<std::uint8_t> emit_block(const std::span<const BlockInstruction> ope
   code.raw(checked);
   return code.bytes();
 }
+
+std::vector<std::uint8_t> emit_repeat(const BlockInstruction &operation,
+                                      const JitRuntime &runtime,
+                                      const std::array<Word, agu_registers> &modifiers) {
+  BlockEmitter emitter(runtime, modifiers);
+  return emitter.generate_repeat(operation);
+}
+#endif
+
 }

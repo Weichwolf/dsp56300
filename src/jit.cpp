@@ -6,9 +6,7 @@
 #include "dsp56300/memory.hpp"
 #include "jit/arena.hpp"
 #include "jit/block.hpp"
-#include "jit/emitter.hpp"
 #include "jit/index.hpp"
-#include "jit/resident_region.hpp"
 #include "translation.hpp"
 
 #include <array>
@@ -21,8 +19,12 @@
 #include <utility>
 #include <vector>
 #if defined(__aarch64__)
+#include <algorithm>
 #include <cstddef>
 #include <exception>
+#endif
+#if defined(__x86_64__)
+#include "jit/resident_region.hpp"
 #endif
 #if defined(__x86_64__) && defined(__linux__)
 #include "mac_batch.hpp"
@@ -37,10 +39,16 @@ struct Mapping {
   NativeTable table{3};
 };
 
+enum class EntryKind : std::uint8_t { ordinary, repeat };
+
 struct Block {
   std::vector<BlockInstruction> operations;
   const void *entry = nullptr;
+#if defined(__aarch64__)
+  EntryKind kind = EntryKind::ordinary;
+#else
   std::unique_ptr<ResidentRegion> region;
+#endif
 };
 }
 
@@ -55,7 +63,10 @@ struct Jit::Impl {
         context{
             .runtime = runtime, .exit_requested = &exit_requested, .bus = bus, .events = events} {}
 
-  [[nodiscard]] std::unique_ptr<Block> compile();
+  [[nodiscard]] Block *compile();
+#if defined(__aarch64__)
+  [[nodiscard]] Block *reuse(std::span<const BlockInstruction> operations, EntryKind kind) const;
+#endif
   [[nodiscard]] Block *retain(std::unique_ptr<Block> block);
   [[nodiscard]] const void *prepare();
   [[nodiscard]] std::uint32_t enter(const Block &block, Word budget);
@@ -75,11 +86,15 @@ struct Jit::Impl {
   std::array<std::vector<NativeWindow>, 2> windows;
 };
 
-std::unique_ptr<Block> Jit::Impl::compile() {
+Block *Jit::Impl::compile() {
   auto block = std::make_unique<Block>();
   block->operations = parse_block(program, cpu.reg, context.runtime);
   if (block->operations.empty()) { return nullptr; }
+#if defined(__aarch64__)
+  if (auto *existing = reuse(block->operations, EntryKind::ordinary)) { return existing; }
+#endif
   auto bytes = emit_block(block->operations, context.runtime, cpu.reg.m);
+#if defined(__x86_64__)
   block->region = resident_region_plan(program, cpu.reg, context.runtime, block->operations);
   if (block->region) {
     auto &region = *block->region;
@@ -96,9 +111,25 @@ std::unique_ptr<Block> Jit::Impl::compile() {
     }
     bytes = select_resident_region(region, bytes);
   }
+#endif
   block->entry = arena.append(bytes);
-  return block;
+  return retain(std::move(block));
 }
+
+#if defined(__aarch64__)
+Block *Jit::Impl::reuse(const std::span<const BlockInstruction> operations,
+                        const EntryKind kind) const {
+  for (const auto &block : storage) {
+    if (block->kind != kind) { continue; }
+    const auto equal = [](const BlockInstruction &left, const BlockInstruction &right) {
+      return left.instruction == right.instruction && left.pc == right.pc &&
+             left.mode == right.mode && left.loop_address == right.loop_address;
+    };
+    if (std::ranges::equal(block->operations, operations, equal)) { return block.get(); }
+  }
+  return nullptr;
+}
+#endif
 
 Jit::Jit(Cpu &cpu,
          const std::span<const Word> program,
@@ -200,9 +231,8 @@ const void *Jit::Impl::prepare() {
     }
   }
   if (const auto *entry = current->table.find(cpu.reg.pc)) { return entry; }
-  auto block = compile();
-  if (!block) { return nullptr; }
-  const auto *retained = retain(std::move(block));
+  const auto *retained = compile();
+  if (retained == nullptr) { return nullptr; }
   current->table.insert(cpu.reg.pc, retained->entry);
   return retained->entry;
 }
@@ -262,10 +292,18 @@ std::uint32_t Jit::run_repeat(const BlockInstruction operation, const std::uint3
   // later REP must still distinguish its genuine new opcode from that latch.
   if (found == self.blocks.end() ||
       found->second->operations.front().instruction != operation.instruction) {
+#if defined(__aarch64__)
+    if (auto *existing = self.reuse(std::span(&operation, 1), EntryKind::repeat)) {
+      self.blocks.insert_or_assign(key, existing);
+      return self.enter(*existing, budget);
+    }
+#endif
     auto block = std::make_unique<Block>();
     block->operations.push_back(operation);
-    BlockEmitter emitter(self.context.runtime, self.cpu.reg.m);
-    const auto bytes = emitter.generate_repeat(block->operations.front());
+#if defined(__aarch64__)
+    block->kind = EntryKind::repeat;
+#endif
+    const auto bytes = emit_repeat(block->operations.front(), self.context.runtime, self.cpu.reg.m);
     if (bytes.empty()) {
       self.rejected_repeat = operation;
       return 0;
@@ -282,9 +320,11 @@ std::uint32_t Jit::run_repeat(const BlockInstruction operation, const std::uint3
 std::uint32_t Jit::run_captured(BlockInstruction operation) {
   auto &self = *impl_;
   if (self.cpu.repeat_remaining != 0) {
+#if !defined(__aarch64__)
     // The final REP at a DO endpoint still needs the genuine frame cleanup.
     if (at_loop_end(operation) && self.cpu.repeat_remaining == 1) { return 0; }
     operation.loop_address = inactive_loop;
+#endif
     return run_repeat(operation, 1);
   }
   if (self.invalidated) {
@@ -301,10 +341,15 @@ std::uint32_t Jit::run_captured(BlockInstruction operation) {
   auto found = self.blocks.find(key);
   if (found == self.blocks.end() ||
       found->second->operations.front().instruction != operation.instruction) {
+#if defined(__aarch64__)
+    if (auto *existing = self.reuse(std::span(&operation, 1), EntryKind::ordinary)) {
+      self.blocks.insert_or_assign(key, existing);
+      return self.enter(*existing, 1);
+    }
+#endif
     auto block = std::make_unique<Block>();
     block->operations.push_back(operation);
-    BlockEmitter emitter(self.context.runtime, self.cpu.reg.m);
-    const auto bytes = emitter.generate(block->operations);
+    const auto bytes = emit_block(block->operations, self.context.runtime, self.cpu.reg.m);
     block->entry = self.arena.append(bytes);
 
     self.blocks.insert_or_assign(key, self.retain(std::move(block)));
