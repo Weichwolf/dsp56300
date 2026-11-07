@@ -41,8 +41,13 @@ check full-width RAM/I/O priority, initialized-word grants, callback-visible sta
 same-instruction remapping and exact executable-alias exits. Long, paired X/Y and
 class-I mixed transfers now preserve captured inputs, scaled bus limits, partial
 fault effects and first-fault priority. Paired external accesses stop after a fault;
-ordinary flat-memory partial effects follow the existing implementation. Remaining
-instruction families and complete owner integration remain open.
+ordinary flat-memory partial effects follow the existing implementation. Integer
+emission covers raw-LSB INC/DEC and low-48 unsigned CMPU. DIV preserves
+the raw quotient carry and unaffected CCR bits across SM limiting. NORM supports
+flags-selected shifts and compatibility-mode exponent wrapping; NORMF checks
+signed register counts and bypasses SM limiting. Native state matrices and
+mixed instruction sequences check these effects and exact budget/fault exits.
+Other instruction families and complete owner integration remain open.
 Complete ARM64 Core execution and qualification remain in progress. The production
 Core still reports an unsupported host on ARM64.
 

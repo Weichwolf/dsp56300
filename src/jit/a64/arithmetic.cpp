@@ -134,6 +134,7 @@ void Emitter::operation(const BlockInstruction &operation) {
   if (instruction.operation == Operation::nop) { return; }
   if (control(operation)) { return; }
   if (transfer(operation)) { return; }
+  if (integer(operation)) { return; }
   constexpr Word condition_mask = 0xffe000;
   constexpr Word condition_group = 0x202000;
   if (instruction.operation == Operation::parallel &&

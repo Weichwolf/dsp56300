@@ -132,6 +132,13 @@ private:
   void multiple_address(const BlockInstruction &operation);
   void source(Reg value, unsigned selector, bool destination_b);
   void product_word(Reg value, unsigned selector);
+  [[nodiscard]] bool integer(const BlockInstruction &operation);
+  void unit(const BlockInstruction &operation);
+  void compare_unsigned(const BlockInstruction &operation);
+  void divide_iteration(const BlockInstruction &operation);
+  void normalize_iteration(const BlockInstruction &operation);
+  void normalize_fast(const BlockInstruction &operation);
+  void normalize_step(const BlockInstruction &operation, int count);
   void arithmetic(const BlockInstruction &operation);
   void shifted_arithmetic(const BlockInstruction &operation);
   void compare_magnitude(const BlockInstruction &operation);
