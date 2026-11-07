@@ -76,6 +76,10 @@ private:
   [[nodiscard]] static bool is_right_shift(const BlockInstruction &operation);
   void helper(JitHelper function, const BlockInstruction &operation);
   void native(const BlockInstruction &operation);
+  [[nodiscard]] static bool is_control_flow(const BlockInstruction &operation);
+  [[nodiscard]] bool control_flow(const BlockInstruction &operation);
+  void control_condition(unsigned selector, x64::Label &untaken);
+  void control_pop();
   void moves(const BlockInstruction &operation);
   void general_moves(const BlockInstruction &operation);
   void capture_inputs();

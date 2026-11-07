@@ -44,7 +44,7 @@ bool reads_carry(const BlockInstruction &operation) {
 }
 
 Word BlockEmitter::written_flags(const BlockInstruction &operation) {
-  if (operation.instruction.operation == Operation::nop ||
+  if (is_control_flow(operation) || operation.instruction.operation == Operation::nop ||
       operation.instruction.operation == Operation::jump_short ||
       operation.instruction.operation == Operation::loop_immediate) {
     return 0;

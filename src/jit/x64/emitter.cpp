@@ -128,7 +128,7 @@ bool BlockEmitter::observable_moves(const BlockInstruction &operation) const {
 bool BlockEmitter::lowerable(const BlockInstruction &operation) {
   const auto &decoded = operation.instruction;
   if (at_loop_end(operation) && (operation.mode & compatibility_mode) != 0) { return false; }
-  if (decoded.operation == Operation::nop) { return true; }
+  if (decoded.operation == Operation::nop || is_control_flow(operation)) { return true; }
   if (decoded.operation == Operation::jump_short && !at_loop_end(operation)) { return true; }
   if ((operation.mode & unsupported_modes) != 0 ||
       (operation.mode & (scale_up | scale_down)) == (scale_up | scale_down) ||
@@ -561,10 +561,7 @@ void BlockEmitter::emit_operations(const std::span<const BlockInstruction> opera
     word_populate_ = populations[operation_index] & ~word_selected_;
     prepare_value_proof(operation, ranges);
     if (lowerable(operation)) {
-      if (is_loop_setup(operation)) {
-        loop_setup(operation);
-        continue;
-      }
+      if (control_flow(operation)) { continue; }
       loop_guard(operation);
       if (has_moves(operation)) { moves(operation); }
       invalidate_moved_accumulators();

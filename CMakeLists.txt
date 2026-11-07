@@ -66,7 +66,7 @@ add_library(dsp56300_core STATIC
   src/jit/a64/code.cpp ${dsp56300_a64_sources}
   src/jit/x64/addition.cpp src/jit/x64/logic.cpp
   src/jit/x64/saturation.cpp
-  src/jit/x64/loop.cpp
+  src/jit/x64/loop.cpp src/jit/x64/control.cpp
   src/jit/x64/flags.cpp
   src/jit/move.cpp src/jit/resident_plan.cpp src/jit/dataflow.cpp src/jit/value_ranges.cpp src/jit/word_reuse.cpp src/jit/x64/move.cpp src/jit/x64/memory_windows.cpp
   src/jit/x64/resident_emit.cpp
@@ -256,6 +256,10 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   target_link_libraries(dsp56300_native_context_test PRIVATE dsp56300::core)
   add_test(NAME native-context-routing COMMAND dsp56300_native_context_test)
   if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64)$")
+    add_executable(dsp56300_native_control_test test/jit/native_control_test.cpp)
+    target_include_directories(dsp56300_native_control_test PRIVATE src src/jit test/support)
+    target_link_libraries(dsp56300_native_control_test PRIVATE dsp56300::core dsp56300_codegen_observer)
+    add_test(NAME native-control-flow COMMAND dsp56300_native_control_test)
     add_executable(dsp56300_native_run_test test/jit/native_run_test.cpp)
     target_include_directories(dsp56300_native_run_test PRIVATE src src/jit src/jit/x64 test/support)
     target_link_libraries(dsp56300_native_run_test PRIVATE dsp56300::core)
