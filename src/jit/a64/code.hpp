@@ -104,6 +104,7 @@ public:
                Width width = Width::w32,
                bool sign = false);
   void shift(Shift operation, Reg target, Reg source, unsigned count, Width width = Width::w32);
+  void shift(Shift operation, Reg target, Reg source, Reg count, Width width = Width::w32);
   void reverse_half(Reg target, Reg source);
   void load(Reg target, Reg base, std::size_t offset, Access access = Access::word);
   void store(Reg source, Reg base, std::size_t offset, Access access = Access::word);

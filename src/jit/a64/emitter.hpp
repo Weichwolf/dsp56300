@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
+#include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "jit.hpp"
 #include "jit/a64/code.hpp"
@@ -25,7 +26,18 @@ enum AluByte : std::uint8_t {
   alu_y0 = 0x51,
   alu_x1 = 0x61,
   alu_y1 = 0x71,
+  alu_asr = 0x22,
+  alu_asl = 0x32,
+  alu_lsr = 0x23,
+  alu_lsl = 0x33,
+  alu_ror = 0x27,
+  alu_rol = 0x37,
   alu_mask = 0xf7
+};
+
+struct ShiftOperation {
+  Reg target;
+  bool left = false, saturate = false;
 };
 
 class Emitter {
@@ -44,6 +56,11 @@ private:
   void multiply(const BlockInstruction &operation);
   void unary(const BlockInstruction &operation);
   void logic(const BlockInstruction &operation);
+  void shift(const BlockInstruction &operation);
+  void shift_count(const BlockInstruction &operation, bool arithmetic);
+  void arithmetic_shift(Word mode, ShiftOperation operation);
+  void logical_shift(ShiftOperation operation, bool rotate);
+  void fault(const BlockInstruction &operation, FaultKind kind, Reg value);
   void round(Word mode);
   void saturate(Word mode, bool rounded);
   void arithmetic_flags(Word mode, bool carry_changed);

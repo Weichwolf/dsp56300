@@ -117,6 +117,13 @@ void Code::shift(const Shift operation,
   }
 }
 
+void Code::shift(
+    const Shift operation, const Reg target, const Reg source, const Reg count, const Width width) {
+  constexpr std::uint32_t opcode = 0x1ac02000;
+  word(wide(width) | opcode | (static_cast<unsigned>(operation) << immediate_shift) |
+       (reg(count) << operand_shift) | (reg(source) << register_shift) | reg(target));
+}
+
 void Code::reverse_half(const Reg target, const Reg source) {
   constexpr std::uint32_t opcode = 0x5ac00400;
   word(opcode | (reg(source) << register_shift) | reg(target));

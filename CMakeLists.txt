@@ -40,7 +40,7 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
   set(dsp56300_mac_source src/jit/a64/mac_batch_neon.cpp)
   set(dsp56300_run_source src/jit/a64/run.cpp)
   set(dsp56300_a64_sources src/jit/a64/emitter.cpp src/jit/a64/flags.cpp
-    src/jit/a64/arithmetic.cpp src/jit/a64/unary.cpp)
+    src/jit/a64/arithmetic.cpp src/jit/a64/unary.cpp src/jit/a64/shifts.cpp src/jit/a64/fault.cpp)
 endif()
 add_library(dsp56300_core STATIC
   src/core.cpp src/captured.cpp src/repeat.cpp src/memory_windows.cpp src/external_memory.cpp src/state.cpp
@@ -133,6 +133,11 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
     target_include_directories(dsp56300_a64_arithmetic_test PRIVATE src src/jit test/support)
     target_link_libraries(dsp56300_a64_arithmetic_test PRIVATE dsp56300::core)
     add_test(NAME a64-arithmetic-semantics COMMAND dsp56300_a64_arithmetic_test)
+    add_executable(dsp56300_a64_shift_test test/jit/a64_shift_test.cpp)
+    target_include_directories(dsp56300_a64_shift_test PRIVATE src src/jit test/support)
+    target_link_libraries(dsp56300_a64_shift_test PRIVATE dsp56300::core)
+    add_test(NAME a64-shift-semantics COMMAND dsp56300_a64_shift_test)
+
   endif()
   add_executable(dsp56300_a64_code_test test/jit/a64_code_test.cpp)
   target_include_directories(dsp56300_a64_code_test PRIVATE src)

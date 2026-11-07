@@ -51,6 +51,7 @@ struct NativeContext {
   std::uint32_t budget = 0;
   // Helpers return to the owner; retained loop-context changes may stay native.
   NativeBoundary boundary = NativeBoundary::none;
+  Fault failure{};
 };
 
 class Jit {

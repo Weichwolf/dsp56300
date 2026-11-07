@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "architecture.hpp"
+#include "dsp56300/core.hpp"
 #include "fields.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
@@ -31,6 +32,19 @@ bool logical(const Instruction &instruction) {
   if ((opcode & alu_mask) == alu_complement) { return true; }
   return (kind == 2 || kind == 3 || kind == 6) &&
          (instruction.operation == Operation::immediate_alu || ((opcode >> 4) & 7U) >= 4);
+}
+
+bool shifting(const Instruction &instruction) {
+  const auto kind = instruction.operation;
+  if (kind == Operation::arithmetic_shift_immediate ||
+      kind == Operation::arithmetic_shift_register || kind == Operation::logical_shift_immediate ||
+      kind == Operation::logical_shift_register) {
+    return true;
+  }
+  if (kind != Operation::parallel) { return false; }
+  const auto code = instruction.opcode & alu_mask;
+  return code == alu_asr || code == alu_asl || code == alu_lsr || code == alu_lsl ||
+         code == alu_ror || code == alu_rol;
 }
 }
 
@@ -119,7 +133,12 @@ void Emitter::operation(const BlockInstruction &operation) {
   if (instruction.operation == Operation::nop) { return; }
   if ((operation.mode & (compatibility_mode | multiply_mode | arithmetic_16)) != 0 ||
       (operation.mode & (scale_up | scale_down)) == (scale_up | scale_down)) {
-    throw std::invalid_argument("Unsupported DSP numeric mode requires its native fault exit");
+    fault(operation, FaultKind::unsupported_mode, status);
+    return;
+  }
+  if (shifting(instruction)) {
+    shift(operation);
+    return;
   }
   const bool immediate = instruction.operation == Operation::immediate_alu;
   if (!immediate && (instruction.operation != Operation::parallel ||

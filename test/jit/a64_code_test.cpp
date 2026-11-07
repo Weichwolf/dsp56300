@@ -11,6 +11,7 @@
 #include "jit/arena.hpp"
 
 #include <bit>
+#include <type_traits>
 #endif
 
 namespace {
@@ -65,6 +66,27 @@ void encodings() {
   }
 }
 
+void barrel_encodings() {
+  Code code;
+  for (const auto width : {Width::w32, Width::x64}) {
+    for (const auto operation : {Shift::left, Shift::right, Shift::arithmetic, Shift::rotate}) {
+      code.shift(operation, Reg::x0, Reg::x1, Reg::x2, width);
+    }
+  }
+  constexpr std::array<std::uint32_t, 8> expected{0x1ac22020,
+                                                  0x1ac22420,
+                                                  0x1ac22820,
+                                                  0x1ac22c20,
+                                                  0x9ac22020,
+                                                  0x9ac22420,
+                                                  0x9ac22820,
+                                                  0x9ac22c20};
+  for (std::size_t index = 0; index < expected.size(); ++index) {
+    require(instruction(code, index) == expected[index],
+            "A64 variable-shift encoding differs from ISA");
+  }
+}
+
 void fixups() {
   Code code;
   Label begin;
@@ -109,6 +131,45 @@ asm(".text\n"
     "br x16\n");
 #endif
 
+template <class Integer>
+Integer reference_shift(const Shift operation, const Integer value, const unsigned count) {
+  constexpr unsigned bits = sizeof(Integer) * 8;
+  const auto amount = count % bits;
+  switch (operation) {
+    case Shift::left: return value << amount;
+    case Shift::right: return value >> amount;
+    case Shift::arithmetic:
+      return std::bit_cast<Integer>(std::bit_cast<std::make_signed_t<Integer>>(value) >> amount);
+    case Shift::rotate: return std::rotr(value, static_cast<int>(amount));
+    default: throw std::logic_error("Unknown A64 test shift");
+  }
+}
+
+void execute_barrels() {
+  dsp56300::detail::ExecutableArena arena;
+  constexpr std::array<std::uint64_t, 6> values{
+      0, 1, 0x80000000, 0xffffffff, 0x8000000000000000, 0xffffffffffffffff};
+  constexpr std::array<unsigned, 9> counts{0, 1, 7, 31, 32, 63, 64, 65, 127};
+  for (const auto width : {Width::w32, Width::x64}) {
+    for (const auto operation : {Shift::left, Shift::right, Shift::arithmetic, Shift::rotate}) {
+      Code code;
+      code.shift(operation, Reg::x0, Reg::x0, Reg::x1, width);
+      code.return_();
+      const auto *entry = arena.append(code.bytes());
+      for (const auto value : values) {
+        for (const auto count : counts) {
+          const auto expected = width == Width::x64
+                                    ? reference_shift(operation, value, count)
+                                    : std::uint64_t{reference_shift(
+                                          operation, static_cast<std::uint32_t>(value), count)};
+          require(dsp56300_a64_test_enter(entry, value, count) == expected,
+                  "A64 variable shifts must preserve width, signedness and modulo counts");
+        }
+      }
+    }
+  }
+}
+
 void execute() {
   dsp56300::detail::ExecutableArena arena;
   Code code;
@@ -145,8 +206,10 @@ int main() {
   try {
     encodings();
     fixups();
+    barrel_encodings();
 #if defined(__aarch64__)
     execute();
+    execute_barrels();
 #endif
     std::cout << "A64 encoding and branch checks passed.\n";
   } catch (const std::exception &error) {

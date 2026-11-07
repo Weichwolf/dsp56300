@@ -20,7 +20,9 @@ ARM64 executable storage, typed instruction emission, native ABI entry/context
 routing, NEON MAC products and the scalar arithmetic emitter are implemented
 and independently tested. Native arithmetic covers add/subtract with carry,
 comparison, signed multiply/MAC, rounding, SM saturation, ALU TFR forms and
-logical operations in parallel/immediate instruction forms against independent raw-width models;
+logical operations in parallel/immediate instruction forms against independent raw-width models.
+Shift/rotate emission covers immediate and register counts, with precise native
+invalid-count and numeric-mode fault exits;
 complete ARM64 Core execution and qualification remain in progress. The production
 Core still reports an unsupported host on ARM64.
 

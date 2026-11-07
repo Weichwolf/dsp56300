@@ -79,7 +79,6 @@ void Emitter::retire(const BlockInstruction &operation) {
     code_.store(Reg::x9, cpu, offset, Access::doubleword);
   }
   code_.store(Reg::zr, cpu, offsetof(Cpu, repeat_completed), Access::byte);
-  code_.store(Reg::zr, cpu, offsetof(Cpu, interrupt_inhibited), Access::byte);
 }
 
 std::vector<std::uint8_t> Emitter::generate(const std::span<const BlockInstruction> operations) {
@@ -90,6 +89,7 @@ std::vector<std::uint8_t> Emitter::generate(const std::span<const BlockInstructi
       throw std::invalid_argument("A64 DSP hardware-loop lowering is incomplete");
     }
     code_.branch_zero_far(remaining, done_);
+    code_.store(Reg::zr, cpu, offsetof(Cpu, interrupt_inhibited), Access::byte);
     snapshot();
     operation(item);
     retire(item);

@@ -110,7 +110,8 @@ void check(const void *const entry, const Case point, const Invocation input) {
   require(cpu.instructions == (input.admitted ? 0 : maximum) &&
               cpu.cycles == (input.admitted ? words(point) - 1 : maximum) &&
               cpu.repeat_completed != input.admitted && cpu.interrupt_inhibited != input.admitted &&
-              context.boundary == detail::NativeBoundary::none && cpu.repeat_remaining == 0 &&
+              context.boundary == detail::NativeBoundary::none &&
+              context.failure.kind == FaultKind::none && cpu.repeat_remaining == 0 &&
               !cpu.repeat_loaded && cpu.processing == ExecutionState::running &&
               cpu.debug_flags == 0,
           "A64 arithmetic must retain exact grants, wrapping progress and non-arithmetic state");
