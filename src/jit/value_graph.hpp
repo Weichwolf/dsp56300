@@ -67,6 +67,13 @@ struct ValueGraph {
   Word instructions = 0, changed_registers = 0, invariant_registers = 0;
 };
 
+struct GraphBounds {
+  std::int64_t low = 0, high = 0;
+};
+
+// Signed integer coordinates before each edge's binary-point scaling.
+[[nodiscard]] std::vector<GraphBounds> graph_bounds(const ValueGraph &graph, Word mode);
+
 // Compile-time graph construction. Unproved arithmetic or iteration dependencies
 // leave the existing scalar native lowering responsible for the whole region.
 [[nodiscard]] std::optional<ValueGraph> value_graph(std::span<const BlockInstruction> operations);

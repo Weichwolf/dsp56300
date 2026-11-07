@@ -180,6 +180,14 @@ sources in the graph; a move and its ALU operation consume the architecturally
 required versions even when their destinations overlap. Materialize canonical
 architectural values only at an actual observation or exit.
 
+Propagate signed integer intervals through the value graph during translation,
+accounting for edge scales and the selected rounding rule. Start from complete
+architectural input ranges, including both signed endpoints. Remove each lower
+or upper conversion clamp only when the entire converted interval proves it
+unnecessary; preserve growth and limiting events and noncanonical representations.
+Discard this proof metadata before execution. Fold copies into native three-operand
+operations when their input lifetimes permit it.
+
 Plan affine memory streams across complete loop nests, including nested loop
 setup, cursor resets and outer address steps. Batch independent iterations only
 after proving their physical read/write dependencies, bounds and address updates.

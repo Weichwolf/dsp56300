@@ -11,15 +11,78 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <utility>
+#include <vector>
 
 namespace dsp56300::detail {
 namespace {
 constexpr unsigned accumulator_slot = 4, graph_slots = 6;
 constexpr Word product_bit = 0x80, operation_mask = 0xf7;
 constexpr Word clear_code = 0x13, shift_code = 0x22, round_code = 0x11;
+
+GraphBounds aligned_bounds(GraphBounds bounds, const unsigned shift) {
+  const auto factor = std::int64_t{1} << shift;
+  bounds.low *= factor;
+  bounds.high *= factor;
+  return bounds;
+}
+
+std::int64_t rounded_bound(const std::int64_t value, const unsigned bits, const Word mode) {
+  const auto half = std::int64_t{1} << (bits - 1);
+  const auto odd = static_cast<std::int64_t>(static_cast<std::uint64_t>(value >> bits) & 1);
+  return (value + half - ((mode & rounding_mode) != 0 ? 0 : 1 - odd)) >> bits;
+}
+
+GraphBounds
+node_bounds(const GraphNode &node, const std::vector<GraphBounds> &bounds, const Word mode) {
+  const auto input = [&](const unsigned index) { return bounds.at(node.inputs.at(index).node); };
+  switch (node.operation) {
+    case GraphOp::load: return {.low = minimum_word, .high = maximum_word};
+    case GraphOp::invariant: {
+      const auto sign = std::int64_t{1}
+                        << (node.parameter < 4 ? word_bits - 1 : accumulator_bits - 1);
+      return {.low = -sign, .high = sign - 1};
+    }
+    case GraphOp::zero:
+    case GraphOp::store: return {};
+    case GraphOp::add:
+    case GraphOp::subtract: {
+      const auto scale = std::min(node.inputs[0].scale, node.inputs[1].scale);
+      const auto left = aligned_bounds(input(0), node.inputs[0].scale - scale);
+      const auto right = aligned_bounds(input(1), node.inputs[1].scale - scale);
+      return node.operation == GraphOp::add
+                 ? GraphBounds{.low = left.low + right.low, .high = left.high + right.high}
+                 : GraphBounds{.low = left.low - right.high, .high = left.high - right.low};
+    }
+    case GraphOp::multiply: {
+      const auto left = input(0);
+      const auto right = input(1);
+      const std::array products{left.low * right.low,
+                                left.low * right.high,
+                                left.high * right.low,
+                                left.high * right.high};
+      const auto [low, high] = std::ranges::minmax(products);
+      return {.low = low, .high = high};
+    }
+    case GraphOp::negate: return {.low = -input(0).high, .high = -input(0).low};
+    case GraphOp::shift: return {.low = input(0).low >> 1, .high = input(0).high >> 1};
+    case GraphOp::round:
+      return {.low = rounded_bound(input(0).low, node.parameter, mode),
+              .high = rounded_bound(input(0).high, node.parameter, mode)};
+    case GraphOp::word: {
+      const auto shift = word_bits - node.inputs[0].scale;
+      return {.low = std::clamp(
+                  input(0).low >> shift, std::int64_t{minimum_word}, std::int64_t{maximum_word}),
+              .high = std::clamp(
+                  input(0).high >> shift, std::int64_t{minimum_word}, std::int64_t{maximum_word})};
+    }
+    default: throw std::logic_error("Unknown graph interval operation");
+  }
+}
 
 struct AluOperands {
   Word code;
@@ -319,4 +382,12 @@ ValueGraphBuilder::build(const std::span<const BlockInstruction> operations) {
 std::optional<ValueGraph> value_graph(const std::span<const BlockInstruction> operations) {
   return ValueGraphBuilder{}.build(operations);
 }
+
+std::vector<GraphBounds> graph_bounds(const ValueGraph &graph, const Word mode) {
+  std::vector<GraphBounds> bounds;
+  bounds.reserve(graph.nodes.size());
+  for (const auto &node : graph.nodes) { bounds.push_back(node_bounds(node, bounds, mode)); }
+  return bounds;
+}
+
 } // namespace dsp56300::detail

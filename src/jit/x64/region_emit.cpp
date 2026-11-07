@@ -89,6 +89,7 @@ private:
   unsigned lanes_;
   bool inner_vector_;
   std::size_t current_ = 0;
+  std::vector<GraphBounds> bounds_;
   std::vector<bool> needed_;
   std::vector<std::size_t> last_, locations_, spill_slots_;
   std::array<std::size_t, value_registers> owners_{};
@@ -99,6 +100,7 @@ RegionEmitter::RegionEmitter(NativeRegion &region, const unsigned lanes)
     : region_(region),
       lanes_(region.nested && lanes == 1 ? 4U : lanes),
       inner_vector_(region.nested && lanes == 1),
+      bounds_(graph_bounds(region.graph, region.mode)),
       needed_(region.graph.nodes.size()),
       last_(region.graph.nodes.size()),
       locations_(region.graph.nodes.size(), no_value),
@@ -456,14 +458,18 @@ void RegionEmitter::binary(const GraphNode &node, const Xmm result) {
 }
 
 void RegionEmitter::round(const GraphNode &node, const Xmm result) {
-  canonical(result, node.inputs[0]);
+  auto source = read(node.inputs[0]);
+  if (!node.inputs[0].canonical) {
+    canonical(result, node.inputs[0]);
+    source = result;
+  }
   const auto bits = node.parameter;
   const auto half = std::uint64_t{1} << (bits - 1);
   if ((region_.mode & rounding_mode) != 0) {
     broadcast(first_scratch, half);
-    code_.vector(VectorOp::add, {.destination = result, .left = result, .right = first_scratch});
+    code_.vector(VectorOp::add, {.destination = result, .left = source, .right = first_scratch});
   } else {
-    code_.vector_shift(second_scratch, result, VectorShift::right, bits);
+    code_.vector_shift(second_scratch, source, VectorShift::right, bits);
     broadcast(first_scratch, 1);
     code_.vector(VectorOp::bit_and,
                  {.destination = second_scratch, .left = second_scratch, .right = first_scratch});
@@ -472,7 +478,7 @@ void RegionEmitter::round(const GraphNode &node, const Xmm result) {
       code_.vector(VectorOp::add,
                    {.destination = second_scratch, .left = second_scratch, .right = first_scratch});
     }
-    code_.vector(VectorOp::add, {.destination = result, .left = result, .right = second_scratch});
+    code_.vector(VectorOp::add, {.destination = result, .left = source, .right = second_scratch});
   }
   code_.vector_shift(result, result, VectorShift::right, bits);
 }
@@ -490,19 +496,31 @@ void RegionEmitter::word(const GraphNode &node, const Xmm result) {
                  {.destination = growth_register, .left = growth_register, .right = first_scratch});
   }
   const auto bits = word_bits - value.scale;
+  const auto &bounds = bounds_[value.node];
+  const bool lower = (bounds.low >> bits) < minimum_word;
+  const bool upper = (bounds.high >> bits) > maximum_word;
+  auto clamped = source;
   if (bits != 0) {
     canonical(result, value);
     code_.vector_shift(result, result, VectorShift::right, bits);
-  } else {
-    code_.vector_unary(VectorOp::copy, result, source);
+    clamped = result;
   }
-  code_.vector_unary(VectorOp::copy, second_scratch, result);
-  broadcast(first_scratch, static_cast<std::uint64_t>(static_cast<std::int64_t>(minimum_word)));
-  code_.vector(VectorOp::maximum_dword,
-               {.destination = result, .left = result, .right = first_scratch});
-  broadcast(first_scratch, static_cast<std::uint64_t>(maximum_word));
-  code_.vector(VectorOp::minimum_dword,
-               {.destination = result, .left = result, .right = first_scratch});
+  if (!lower && !upper) {
+    if (bits == 0) { code_.vector_unary(VectorOp::copy, result, source); }
+    return;
+  }
+  code_.vector_unary(VectorOp::copy, second_scratch, clamped);
+  if (lower) {
+    broadcast(first_scratch, static_cast<std::uint64_t>(static_cast<std::int64_t>(minimum_word)));
+    code_.vector(VectorOp::maximum_dword,
+                 {.destination = result, .left = clamped, .right = first_scratch});
+    clamped = result;
+  }
+  if (upper) {
+    broadcast(first_scratch, static_cast<std::uint64_t>(maximum_word));
+    code_.vector(VectorOp::minimum_dword,
+                 {.destination = result, .left = clamped, .right = first_scratch});
+  }
   code_.vector(VectorOp::bit_xor,
                {.destination = second_scratch, .left = second_scratch, .right = result});
   code_.vector(VectorOp::bit_or,
