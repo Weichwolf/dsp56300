@@ -86,11 +86,11 @@ file(GLOB_RECURSE DSP56300_OWN_FILES CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/test/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/test/*.hpp")
-if(PROJECT_IS_TOP_LEVEL)
-  set(DSP56300_FORMAT_TARGET format-check)
-else()
-  set(DSP56300_FORMAT_TARGET dsp56300-format-check)
+set(DSP56300_TOOL_PREFIX "")
+if(NOT PROJECT_IS_TOP_LEVEL)
+  set(DSP56300_TOOL_PREFIX "dsp56300-")
 endif()
+set(DSP56300_FORMAT_TARGET "${DSP56300_TOOL_PREFIX}format-check")
 add_custom_target(${DSP56300_FORMAT_TARGET}
   COMMAND "${DSP56300_CLANG_FORMAT}" --dry-run --Werror ${DSP56300_OWN_FILES}
   VERBATIM)
@@ -170,7 +170,7 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
     add_test(NAME native-reverse-streams COMMAND dsp56300_reverse_stream_test)
     add_executable(dsp56300_memory_windows_bench test/bench/memory_windows_bench.cpp)
     target_link_libraries(dsp56300_memory_windows_bench PRIVATE dsp56300::core)
-    add_custom_target(bench-memory-windows
+    add_custom_target(${DSP56300_TOOL_PREFIX}bench-memory-windows
       COMMAND $<TARGET_FILE:dsp56300_memory_windows_bench> all
       DEPENDS dsp56300_memory_windows_bench USES_TERMINAL VERBATIM)
     add_executable(dsp56300_memory_windows_test test/core/memory_windows_test.cpp)
@@ -181,7 +181,7 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
     add_test(NAME native-cached-prefixes COMMAND dsp56300_native_prefix_test)
     add_executable(dsp56300_native_repeat_bench test/bench/native_repeat_bench.cpp)
     target_link_libraries(dsp56300_native_repeat_bench PRIVATE dsp56300::core)
-    add_custom_target(bench-native-repeat
+    add_custom_target(${DSP56300_TOOL_PREFIX}bench-native-repeat
       COMMAND $<TARGET_FILE:dsp56300_native_repeat_bench> all
       DEPENDS dsp56300_native_repeat_bench USES_TERMINAL VERBATIM)
     add_executable(dsp56300_native_repeat_test test/jit/native_repeat_test.cpp)
@@ -301,12 +301,12 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
     add_test(NAME native-long-loads COMMAND dsp56300_native_long_load_test)
     add_executable(dsp56300_native_long_load_bench test/bench/native_long_load_bench.cpp)
     target_link_libraries(dsp56300_native_long_load_bench PRIVATE dsp56300_native_long_load_fixture)
-    add_custom_target(bench-native-long-loads
+    add_custom_target(${DSP56300_TOOL_PREFIX}bench-native-long-loads
       COMMAND $<TARGET_FILE:dsp56300_native_long_load_bench> all
       DEPENDS dsp56300_native_long_load_bench USES_TERMINAL VERBATIM)
     add_executable(dsp56300_native_long_store_bench test/bench/native_long_store_bench.cpp)
     target_link_libraries(dsp56300_native_long_store_bench PRIVATE dsp56300_native_long_store_fixture)
-    add_custom_target(bench-native-long-stores
+    add_custom_target(${DSP56300_TOOL_PREFIX}bench-native-long-stores
       COMMAND $<TARGET_FILE:dsp56300_native_long_store_bench> all
       DEPENDS dsp56300_native_long_store_bench USES_TERMINAL VERBATIM)
     add_library(dsp56300_native_partial_store_fixture STATIC test/support/native_partial_store_fixture.cpp)
@@ -316,7 +316,7 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
     add_test(NAME native-partial-stores COMMAND dsp56300_native_partial_store_test)
     add_executable(dsp56300_native_partial_store_bench test/bench/native_partial_store_bench.cpp)
     target_link_libraries(dsp56300_native_partial_store_bench PRIVATE dsp56300_native_partial_store_fixture)
-    add_custom_target(bench-native-partial-stores
+    add_custom_target(${DSP56300_TOOL_PREFIX}bench-native-partial-stores
       COMMAND $<TARGET_FILE:dsp56300_native_partial_store_bench> all
       DEPENDS dsp56300_native_partial_store_bench USES_TERMINAL VERBATIM)
   endif()
@@ -605,7 +605,7 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   target_link_libraries(dsp56300_fir_host_bench PRIVATE dsp56300::core dsp56300_fixture_format)
   add_test(NAME fir-matched-host-asm COMMAND dsp56300_fir_host_bench
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/fir.d56" --verify)
-  add_custom_target(bench-fir-host
+  add_custom_target(${DSP56300_TOOL_PREFIX}bench-fir-host
     COMMAND $<TARGET_FILE:dsp56300_fir_host_bench> "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/fir.d56"
     DEPENDS dsp56300_fir_host_bench USES_TERMINAL VERBATIM)
   add_test(NAME fir-reproducibility COMMAND "${CMAKE_COMMAND}"

@@ -27,7 +27,7 @@ set(bench_selection)
 if(NOT DSP56300_BENCH_FILTER STREQUAL "")
   list(APPEND bench_selection -R "${DSP56300_BENCH_FILTER}")
 endif()
-add_custom_target(bench
+add_custom_target(${DSP56300_TOOL_PREFIX}bench
   COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${bench_directory}"
     --parallel 1 --no-tests=error --verbose ${bench_selection}
   DEPENDS dsp56300_continuous_bench
@@ -41,7 +41,7 @@ set_property(CACHE DSP56300_EXTERNAL_BENCH_CASE PROPERTY STRINGS all audio-mac i
 if(NOT DSP56300_EXTERNAL_BENCH_CASE MATCHES "^(all|audio-mac|image-add|communications-xor)$")
   message(FATAL_ERROR "Unknown authored external-bus benchmark workload")
 endif()
-add_custom_target(bench-external-io
+add_custom_target(${DSP56300_TOOL_PREFIX}bench-external-io
   COMMAND $<TARGET_FILE:dsp56300_external_run_bench> "${DSP56300_EXTERNAL_BENCH_CASE}"
   DEPENDS dsp56300_external_run_bench
   USES_TERMINAL
