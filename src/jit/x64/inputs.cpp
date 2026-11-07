@@ -29,18 +29,13 @@ bool BlockEmitter::admit_cached_inputs(const std::span<const BlockInstruction> o
   });
 }
 
-x64::Xmm BlockEmitter::input_snapshot(const unsigned index) const {
-  if (loop_bank_cache_ && index >= 2) { return index == 2 ? Xmm::x0 : Xmm::x1; }
-  return snapshots.at(index);
-}
-
 void BlockEmitter::value(const Reg destination, const unsigned index, const bool latched) {
   if (!latched || (dataflow_.old_inputs & (Word{1} << index)) == 0) {
     current_value(destination, index);
     return;
   }
   if (cached_inputs_) {
-    code_.packed_to(destination, input_snapshot(index));
+    code_.packed_to(destination, snapshots.at(index));
     return;
   }
   if (cached_status_) { code_.load(destination, Reg::r13, latched_offset); }
@@ -52,14 +47,12 @@ void BlockEmitter::capture_inputs() {
   if (!cached_inputs_ && cached_status_) { code_.load(Reg::r11, Reg::r13, latched_offset); }
   for (unsigned index = 0; index < snapshots.size(); ++index) {
     if ((dataflow_.old_inputs & (Word{1} << index)) == 0) { continue; }
-    const auto snapshot = input_snapshot(index);
+    const auto snapshot = snapshots.at(index);
     if (!cached_inputs_) {
       current_value(Reg::ax, index);
       code_.store(cached_status_ ? Reg::r11 : Reg::r14, index * sizeof(std::uint64_t), Reg::ax);
     } else if (index < accumulator_dirty_.size() && accumulator_dirty_.at(index)) {
       code_.packed_from<64>(snapshot, index == 0 ? Reg::bp : Reg::bx);
-    } else if (loop_bank_cache_ && index >= 2) {
-      code_.packed(x64::Packed::copy, snapshot, index == 2 ? Xmm::x5 : Xmm::x6);
     } else {
       code_.packed_load_lane<64>(snapshot, Reg::r12, offsetof(Cpu, reg) + offsets.at(index));
     }
@@ -71,7 +64,7 @@ void BlockEmitter::restore_inputs() {
   code_.load(Reg::r11, Reg::r13, latched_offset);
   for (unsigned index = 0; index < snapshots.size(); ++index) {
     if ((dataflow_.old_inputs & (Word{1} << index)) != 0) {
-      code_.packed_load_lane<64>(input_snapshot(index), Reg::r11, index * sizeof(std::uint64_t));
+      code_.packed_load_lane<64>(snapshots.at(index), Reg::r11, index * sizeof(std::uint64_t));
     }
   }
 }

@@ -11,7 +11,7 @@
 
 namespace dsp56300::detail {
 enum class RegionMode : unsigned char { automatic, ordinary, guarded };
-enum class LoopResidency : unsigned char { automatic, vectors, disabled };
+enum class LoopResidency : unsigned char { automatic, disabled };
 enum class LoopWindowMode : unsigned char { automatic, disabled };
 
 struct RegionAddress {

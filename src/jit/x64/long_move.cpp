@@ -83,13 +83,9 @@ void BlockEmitter::long_commit(const NativeMoves &moves) {
   code_.binary(op_or, {.destination = Reg::ax, .source = Reg::di});
   if (high == x1_register || high == y1_register) {
     const bool x = high == x1_register;
-    if (loop_bank_cache_) {
-      code_.packed_from<64>(x ? x64::Xmm::x5 : x64::Xmm::x6, Reg::ax);
-    } else {
-      code_.store(Reg::r12,
-                  offsetof(Cpu, reg) + (x ? offsetof(Registers, x) : offsetof(Registers, y)),
-                  Reg::ax);
-    }
+    code_.store(Reg::r12,
+                offsetof(Cpu, reg) + (x ? offsetof(Registers, x) : offsetof(Registers, y)),
+                Reg::ax);
     return;
   }
   const bool partial = high == a1_register || high == b1_register;

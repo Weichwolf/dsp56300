@@ -449,9 +449,6 @@ void direct_shape(const Shape shape) {
   require(emitter.loop_residency() ==
               (shape.loop && shape.residency != detail::LoopResidency::disabled),
           "Only admitted closed loops seed authoritative accumulator slots across backedges");
-  require(emitter.loop_bank_cache() ==
-              (shape.loop && shape.residency == detail::LoopResidency::vectors),
-          "Only helper-free resident loops hold X/Y separately from old parallel snapshots");
   require(emitter.loop_window() == (shape.loop && shape.window != detail::LoopWindowMode::disabled),
           "Only bounded closed RAM loops emit whole-call window preflights");
   if (shape.pattern == Pattern::reused) {
@@ -498,9 +495,8 @@ void residency_patterns(const Word mode) {
                              Pattern::only_a,
                              Pattern::only_b,
                              Pattern::reused}) {
-    for (const auto residency : {detail::LoopResidency::automatic,
-                                 detail::LoopResidency::vectors,
-                                 detail::LoopResidency::disabled}) {
+    for (const auto residency :
+         {detail::LoopResidency::automatic, detail::LoopResidency::disabled}) {
       for (const bool alias : {false, true}) {
         direct_shape({.mode = mode,
                       .first = word_mask - 5,

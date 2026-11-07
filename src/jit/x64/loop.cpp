@@ -225,17 +225,8 @@ void BlockEmitter::initialize_loop_residency() {
     code_.shift(shift_right, Reg::dx, word_bits);
     code_.packed_from(x64::Xmm::x13, Reg::dx);
   }
-  if (loop_bank_cache_) {
-    code_.packed_load_lane<64>(x64::Xmm::x5, Reg::r12, offsetof(Cpu, reg) + offsetof(Registers, x));
-    code_.packed_load_lane<64>(x64::Xmm::x6, Reg::r12, offsetof(Cpu, reg) + offsetof(Registers, y));
-  }
+
   accumulator_dirty_.fill(true);
 }
 
-void BlockEmitter::materialize_loop_banks() {
-  code_.packed_to(Reg::ax, x64::Xmm::x5);
-  code_.store(Reg::r12, offsetof(Cpu, reg) + offsetof(Registers, x), Reg::ax);
-  code_.packed_to(Reg::ax, x64::Xmm::x6);
-  code_.store(Reg::r12, offsetof(Cpu, reg) + offsetof(Registers, y), Reg::ax);
-}
 } // namespace dsp56300::detail

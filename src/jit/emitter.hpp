@@ -54,8 +54,6 @@ public:
 
   [[nodiscard]] bool loop_residency() const noexcept { return loop_residency_; }
 
-  [[nodiscard]] bool loop_bank_cache() const noexcept { return loop_bank_cache_; }
-
   [[nodiscard]] bool word_reuse() const noexcept { return reused_words_; }
 
   [[nodiscard]] bool loop_window() const noexcept { return loop_window_; }
@@ -82,8 +80,6 @@ private:
   void general_moves(const BlockInstruction &operation);
   void capture_inputs();
   void restore_inputs();
-  [[nodiscard]] x64::Xmm input_snapshot(unsigned index) const;
-  void materialize_loop_banks();
   [[nodiscard]] static bool admit_cached_inputs(std::span<const BlockInstruction> operations);
   void register_move(const NativeRegisterMove &move, Word mode);
   void move_guard(const NativeMove &move, x64::Label &slow);
@@ -198,7 +194,6 @@ private:
   bool cached_inputs_ = false;
   bool coalesced_accounting_ = false;
   bool loop_residency_ = false;
-  bool loop_bank_cache_ = false;
   bool entry_admitted_ = false;
   unsigned deferred_growth_shift_ = 0;
   Word pending_instructions_ = 0, pending_extra_cycles_ = 0;

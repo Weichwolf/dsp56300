@@ -33,9 +33,10 @@ using x64::Width;
 constexpr auto pc_offset = offsetof(Cpu, reg) + offsetof(Registers, pc);
 constexpr std::array register_offsets{
     offsetof(Registers, a), offsetof(Registers, b), offsetof(Registers, x), offsetof(Registers, y)};
-constexpr unsigned op_add = 0x01, op_adc = 0x11, op_sub = 0x29, op_xor = 0x31, op_cmp = 0x39;
+constexpr unsigned op_add = 0x01, op_adc = 0x11, op_sub = 0x29, op_xor = 0x31, op_cmp = 0x39,
+                   op_and = 0x21;
 constexpr unsigned group_add = 0, group_adc = 2, group_and = 4, group_sub = 5, group_cmp = 7;
-constexpr unsigned shift_left = 4, shift_right = 5, shift_arithmetic = 7;
+constexpr unsigned shift_left = 4, shift_arithmetic = 7;
 constexpr unsigned condition_overflow = 0x90;
 constexpr unsigned low_word_shift = 40, high_word_shift = 16, aligned_shift = 8;
 constexpr unsigned product_shift = padding_bits + 1;
@@ -160,9 +161,7 @@ bool BlockEmitter::lowerable(const BlockInstruction &operation) {
 }
 
 void BlockEmitter::current_value(const Reg destination, const unsigned index) {
-  if (loop_bank_cache_ && index >= accumulator_dirty_.size()) {
-    code_.packed_to(destination, index == 2 ? x64::Xmm::x5 : x64::Xmm::x6);
-  } else if (index < accumulator_dirty_.size() && accumulator_dirty_.at(index)) {
+  if (index < accumulator_dirty_.size() && accumulator_dirty_.at(index)) {
     const auto source = index == 0 ? Reg::bp : Reg::bx;
     if (destination != source) { code_.mov({.destination = destination, .source = source}); }
   } else {
@@ -196,7 +195,6 @@ void BlockEmitter::flush_accumulators(const Word mask) {
                   index == 0 ? Reg::bp : Reg::bx);
     }
   }
-  if (loop_bank_cache_ && mask != 0) { materialize_loop_banks(); }
 }
 
 void BlockEmitter::exit_if(const Branch condition) {
@@ -343,8 +341,8 @@ void BlockEmitter::round(const Word mode, const Reg result) {
     // The two opposite signed wraps cancel in the fused rounded result.
     code_.binary(op_xor, {.destination = Reg::r10, .source = Reg::dx}, Width::dword);
   }
-  code_.shift(shift_right, result, cleared);
-  code_.shift(shift_left, result, cleared);
+  code_.constant(Reg::r11, ~std::uint64_t{0} << cleared);
+  code_.binary(op_and, {.destination = result, .source = Reg::r11});
 }
 
 void BlockEmitter::native(const BlockInstruction &operation) {
@@ -613,8 +611,6 @@ BlockEmitter::generate_body(const std::span<const BlockInstruction> operations) 
   cached_inputs_ = admit_cached_inputs(operations);
   loop_residency_ = region_mode_ == RegionMode::guarded && loop_size_ != 0 && packed_retirement_ &&
                     residency_mode_ != LoopResidency::disabled;
-  loop_bank_cache_ =
-      loop_residency_ && !retirement_helpers_ && residency_mode_ == LoopResidency::vectors;
   if (coalesced_accounting_ && !retirement_helpers_) {
     const auto mode = operations.front().mode;
     constexpr unsigned aligned_growth_shift = 53;
