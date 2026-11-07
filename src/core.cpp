@@ -20,6 +20,27 @@ namespace dsp56300 {
 
 namespace {
 
+class DeadlineScope {
+public:
+  DeadlineScope(std::uint64_t &limit, detail::Jit &jit, const std::uint64_t deadline)
+      : limit_(limit), jit_(jit) {
+    limit_ = deadline;
+    jit_.set_cycle_deadline(deadline);
+  }
+
+  ~DeadlineScope() {
+    limit_ = std::numeric_limits<std::uint64_t>::max();
+    jit_.set_cycle_deadline(limit_);
+  }
+
+  DeadlineScope(const DeadlineScope &) = delete;
+  DeadlineScope &operator=(const DeadlineScope &) = delete;
+
+private:
+  std::uint64_t &limit_;
+  detail::Jit &jit_;
+};
+
 Buffers bind_memory(const Memory memory, Io *const io) {
   if (memory.storage().program.empty() && io == nullptr) {
     throw std::invalid_argument("External DSP memory requires an I/O owner");
@@ -292,8 +313,9 @@ RunResult Core::run(const std::uint32_t instruction_budget) {
 
   impl_->synchronize_program_view();
   impl_->yield_requested = false;
-  while (result.retired < instruction_budget && !impl_->yield_requested &&
-         fault().kind == FaultKind::none && impl_->cpu.processing == ExecutionState::running) {
+  while (result.retired < instruction_budget && impl_->cpu.cycles < impl_->cycle_deadline &&
+         !impl_->yield_requested && fault().kind == FaultKind::none &&
+         impl_->cpu.processing == ExecutionState::running) {
     if (impl_->vector.phase == Impl::VectorPhase::none && !impl_->instruction_cache_active() &&
         (impl_->cpu.debug_flags & detail::debug_interrupt_pending) == 0) {
       const auto remaining = instruction_budget - result.retired;
@@ -304,7 +326,10 @@ RunResult Core::run(const std::uint32_t instruction_budget) {
       impl_->synchronize_cache_mode();
       impl_->synchronize_program_view();
 #endif
-      if (retired != 0 || fault().kind != FaultKind::none) { continue; }
+      if (retired != 0 || fault().kind != FaultKind::none ||
+          impl_->cpu.cycles >= impl_->cycle_deadline) {
+        continue;
+      }
     }
     impl_->step();
     impl_->synchronize_program_view();
@@ -323,21 +348,11 @@ RunResult Core::run_until(const std::uint64_t base_cycle_deadline) {
   if (base_cycle_deadline > std::numeric_limits<std::uint64_t>::max() - (bound - 1U)) {
     throw std::overflow_error("DSP deadline leaves no representable instruction boundary");
   }
-  RunResult result{.state = processing_state(), .progress = progress(), .fault = fault()};
-  while (result.progress.estimated_cycles < base_cycle_deadline &&
-         result.fault.kind == FaultKind::none && result.state == ExecutionState::running &&
-         result.retired != std::numeric_limits<std::uint32_t>::max()) {
-    const auto remaining = base_cycle_deadline - result.progress.estimated_cycles;
-    const auto available = std::numeric_limits<std::uint32_t>::max() - result.retired;
-    const auto count = static_cast<std::uint32_t>(
-        std::min<std::uint64_t>(available, std::max<std::uint64_t>(1, remaining / bound)));
-    const auto retired = result.retired;
-    result = run(count);
-    const bool stopped = result.retired == 0 || result.yielded;
-    result.retired += retired;
-    if (stopped) { break; }
+  if (impl_->cpu.cycles >= base_cycle_deadline) {
+    return {.state = processing_state(), .progress = progress(), .fault = fault()};
   }
-  return result;
+  const DeadlineScope scope(impl_->cycle_deadline, *impl_->jit, base_cycle_deadline);
+  return run(std::numeric_limits<std::uint32_t>::max());
 }
 
 bool Core::interrupt_ready() const {

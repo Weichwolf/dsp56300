@@ -117,7 +117,7 @@ Block *Jit::Impl::compile() {
     bytes = select_resident_region(region, bytes);
   }
 #endif
-  block->entry = arena.append(bytes);
+  block->entry = arena.append(admit_cycles(bytes));
   return retain(std::move(block));
 }
 
@@ -275,6 +275,10 @@ std::uint32_t Jit::run(const std::uint32_t budget) {
       entry, self.cpu, self.context, budget, self.current->table.index(), &self.catalog.index()));
 }
 
+void Jit::set_cycle_deadline(const std::uint64_t deadline) noexcept {
+  impl_->context.cycle_deadline = deadline;
+}
+
 std::uint32_t Jit::run_repeat(const BlockInstruction operation, const std::uint32_t budget) {
   auto &self = *impl_;
   if (budget == 0 || self.cpu.repeat_remaining == 0) { return 0; }
@@ -315,7 +319,7 @@ std::uint32_t Jit::run_repeat(const BlockInstruction operation, const std::uint3
       self.rejected_repeat = operation;
       return 0;
     }
-    block->entry = self.arena.append(bytes);
+    block->entry = self.arena.append(admit_cycles(bytes));
 
     self.blocks.insert_or_assign(key, self.retain(std::move(block)));
 
@@ -357,7 +361,7 @@ std::uint32_t Jit::run_captured(BlockInstruction operation) {
     auto block = std::make_unique<Block>();
     block->operations.push_back(operation);
     const auto bytes = emit_block(block->operations, self.context.runtime, self.cpu.reg.m);
-    block->entry = self.arena.append(bytes);
+    block->entry = self.arena.append(admit_cycles(bytes));
 
     self.blocks.insert_or_assign(key, self.retain(std::move(block)));
 
@@ -388,7 +392,7 @@ std::uint32_t Jit::run_vector(const BlockInstruction operation) {
       auto created = std::make_unique<Block>();
       created->kind = EntryKind::vector;
       created->operations.push_back(operation);
-      created->entry = self.arena.append(emit_vector(operation));
+      created->entry = self.arena.append(admit_cycles(emit_vector(operation)));
       block = self.retain(std::move(created));
     }
     found = self.blocks.insert_or_assign(key, block).first;

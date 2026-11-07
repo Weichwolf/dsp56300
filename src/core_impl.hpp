@@ -14,6 +14,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -183,6 +184,7 @@ struct Core::Impl {
   bool external = false;
   bool yield_requested = false;
   bool windows_bound = false;
+  std::uint64_t cycle_deadline = std::numeric_limits<std::uint64_t>::max();
   std::uint64_t program_revision = 0;
   Word program_omr = 0;
 };

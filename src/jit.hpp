@@ -10,6 +10,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -102,6 +103,7 @@ struct NativeContext {
   NativeBus bus{};
   bool program_written = false;
   NativeEvents events{};
+  std::uint64_t cycle_deadline = std::numeric_limits<std::uint64_t>::max();
 };
 
 class Jit {
@@ -123,6 +125,7 @@ public:
 #endif
   [[nodiscard]] bool exit_requested() const noexcept;
   void request_yield() noexcept;
+  void set_cycle_deadline(std::uint64_t deadline) noexcept;
   void invalidate() noexcept;
   [[nodiscard]] bool bind_windows(std::array<std::span<const MemoryWindow>, 2> windows) noexcept;
   void reset();

@@ -12,6 +12,7 @@
 #include <iostream>
 #include <limits>
 #include <stdexcept>
+#include <vector>
 
 namespace dsp56300::test {
 namespace {
@@ -52,6 +53,62 @@ void loop_deadlines() {
               core.state().registers == previous.registers &&
               core.state().progress == previous.progress,
           "Reached and past deadlines perform no guest instruction or state replacement");
+}
+
+void long_block_deadlines() {
+  constexpr Word body = 257;
+  constexpr Word period = body + 3;
+  std::vector<Word> ram(body + 1, nop);
+  ram.back() = jump;
+  Core core(Memory::unified(ram));
+  for (std::uint64_t deadline = 1; deadline < std::uint64_t{period} * 4; ++deadline) {
+    const auto result = core.run_until(deadline);
+    const auto remainder = deadline % period;
+    const auto cycles = deadline + (remainder > body ? period - remainder : 0);
+    const auto pc = cycles % period;
+    require(result.fault.kind == FaultKind::none && core.registers().pc == pc &&
+                result.progress == Progress{.instructions = ((cycles / period) * (body + 1)) + pc,
+                                            .estimated_cycles = cycles},
+            "Long retained logical blocks preserve exact deadlines at every interior offset");
+  }
+  const auto before = core.progress();
+  require(core.run(body + 1).retired == body + 1 &&
+              core.progress().estimated_cycles == before.estimated_cycles + period,
+          "Untimed execution after a deadline has no stale admission limit");
+  const auto target = core.progress().estimated_cycles + (std::uint64_t{period} * 100);
+  require(core.run_until(target).progress.estimated_cycles == target && core.registers().pc == 0,
+          "Warm deadline execution resumes across long native blocks after an untimed run");
+}
+
+void hardware_loop_deadlines() {
+  constexpr Word count = 67;
+  constexpr Word body = 31;
+  constexpr Word setup_cycles = 5;
+  constexpr Word body_cycles = count * body;
+  constexpr Word end_cycles = setup_cycles + body_cycles;
+  std::vector<Word> ram(body + 3, nop);
+  ram[0] = isa::opcode<isa::Opcode::do_immediate>().front() | (count << 8);
+  ram[1] = body + 1;
+  ram.back() = isa::stop.front();
+  Core core(Memory::unified(ram));
+  constexpr std::array<Word, 9> deadlines{1, 6, 35, 36, 37, 1000, 2000, end_cycles, end_cycles + 1};
+  for (const auto deadline : deadlines) {
+    const auto result = core.run_until(deadline);
+    const auto stopped = deadline > end_cycles;
+    const auto cycles = stopped ? end_cycles + 10 : std::max(deadline, setup_cycles);
+    const auto retired_body = std::min(cycles - setup_cycles, body_cycles);
+    const auto finished = retired_body == body_cycles;
+    auto pc = 2 + (retired_body % body);
+    if (finished) { pc = body + 2; }
+    if (stopped) { pc = body + 3; }
+    require(result.fault.kind == FaultKind::none && core.registers().pc == pc &&
+                core.registers().lc == (finished ? 0 : count - (retired_body / body)) &&
+                core.registers().sc == (finished ? 0U : 2U) &&
+                result.progress ==
+                    Progress{.instructions = 1 + retired_body + static_cast<unsigned>(stopped),
+                             .estimated_cycles = cycles},
+            "Deadlines retain DO counters and stack frames across batched iterations and STOP");
+  }
 }
 
 void jump_and_repeat_deadlines() {
@@ -183,6 +240,8 @@ void sleep_and_overflow() {
 int main() {
   try {
     dsp56300::test::loop_deadlines();
+    dsp56300::test::long_block_deadlines();
+    dsp56300::test::hardware_loop_deadlines();
     dsp56300::test::jump_and_repeat_deadlines();
     dsp56300::test::effect_exit();
     dsp56300::test::sleep_and_overflow();
