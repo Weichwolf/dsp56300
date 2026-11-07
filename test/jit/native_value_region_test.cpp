@@ -302,21 +302,24 @@ void tail_guard(const bool load_fault) {
   }
 }
 
-void root_spills() {
+void root_spills(const bool repeated) {
   constexpr Word count = 8;
   constexpr Word base = 16;
   constexpr Word separation = 16;
-  constexpr std::array code{body[0],
-                            body[0] | (1U << 8) | (1U << 13),
-                            body[0] | (2U << 8) | (2U << 13),
-                            body[0] | (3U << 8) | (3U << 13),
-                            product,
-                            rounding,
-                            pair | postincrements | store_registers};
+  const std::array code{body[0],
+                        body[0] | (1U << 8) | (1U << 13),
+                        body[0] | (2U << 8) | (2U << 13),
+                        body[0] | (3U << 8) | (3U << 13),
+                        repeated ? body[0] | (3U << 8) | (3U << 13)
+                                 : static_cast<Word>(isa::Opcode::nop),
+                        product,
+                        rounding,
+                        pair | postincrements | store_registers};
   std::array<Word, memory_words> program{};
   Data x{};
   Data y{};
-  for (Word index = 0; index < count; ++index) {
+  const Word stride = repeated ? 2U : 1U;
+  for (Word index = 0; index < count * stride; ++index) {
     x[base + (3 * separation) + index] = index + 1;
     y[base + (3 * separation) + index] = sign24 / 2;
   }
@@ -335,8 +338,9 @@ void root_spills() {
   }
   auto expected = initial;
   for (Word index = 0; index < count; ++index) {
-    expected.x = x[base + (3 * separation) + index];
-    expected.y = y[base + (3 * separation) + index];
+    const auto input = base + (3 * separation) + (index * stride) + stride - 1;
+    expected.x = x[input];
+    expected.y = y[input];
     auto old = expected;
     sequence_model::alu(expected, old, product);
     old = expected;
@@ -345,7 +349,8 @@ void root_spills() {
     expected_y[base + 1 + (2 * index)] = register_model::bus_word(expected, expected.b);
   }
   for (unsigned index = 0; index < agu_registers; ++index) {
-    expected.r[index] += count * ((index == 0 || index == 4) ? 2U : 1U);
+    const auto read_advances = (index == 3 || index == 7) ? stride : 1U;
+    expected.r[index] += count * ((index == 0 || index == 4) ? 2U : read_advances);
   }
   expected.pc = start + static_cast<Word>(code.size());
   expected.la = previous_end;
@@ -602,7 +607,8 @@ void cases() {
   }
   tail_guard(false);
   tail_guard(true);
-  root_spills();
+  root_spills(false);
+  root_spills(true);
   for (const bool shared : {false, true}) {
     shapes(shared);
     Machine machine(shared);

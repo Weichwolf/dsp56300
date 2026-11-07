@@ -208,6 +208,13 @@ Keep ordinary whole-block execution for blocks without such admission. Preserve
 canonical callback state, exact faults and retained instruction boundaries; avoid
 compiling a third ordinary copy inside an already guarded block.
 
+Address constant stream offsets directly from retained root registers. Encode
+static byte displacements in native loads/stores instead of copying a root to a
+scratch register and adding a constant before each access. Frame-backed roots
+use the same displacement contract; dynamic offset tables and reverse streams
+retain the scratch base required by their existing lowering. Never change a
+retained root while preparing an individual memory operation.
+
 Plan affine memory streams across complete loop nests, including nested loop
 setup, cursor resets and outer address steps. Batch independent iterations only
 after proving their physical read/write dependencies, bounds and address updates.
