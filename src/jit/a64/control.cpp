@@ -36,6 +36,10 @@ void Emitter::control_byte(const BlockInstruction &operation) {
 bool Emitter::control(const BlockInstruction &operation) {
   const auto &instruction = operation.instruction;
   const auto kind = instruction.operation;
+  if (kind == Operation::conditional_transfer) {
+    conditional_transfer(operation);
+    return true;
+  }
   if (kind == Operation::relative_branch) {
     branch(operation);
     return true;

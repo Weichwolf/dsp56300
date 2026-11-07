@@ -36,6 +36,7 @@ void Emitter::begin() {
   }
   code_.push(Reg::zr, Reg::x17);
   code_.push(Reg::zr, Reg::x17);
+  code_.push(Reg::zr, Reg::x17);
   code_.move(cpu, Reg::x0);
   code_.move(context, Reg::x1);
   for (const auto &[reg, offset] : held) { code_.load(reg, cpu, offset, Access::doubleword); }
@@ -105,6 +106,7 @@ std::vector<std::uint8_t> Emitter::generate(const std::span<const BlockInstructi
   code_.bind(done_);
   publish();
   code_.move(Reg::x0, retired, Width::w32);
+  code_.pop(Reg::zr, Reg::x17);
   code_.pop(Reg::zr, Reg::x17);
   code_.pop(Reg::zr, Reg::x17);
   for (const auto reg : std::views::reverse(saved)) {

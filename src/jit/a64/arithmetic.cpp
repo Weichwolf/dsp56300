@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "architecture.hpp"
 #include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
 #include "fields.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
@@ -132,31 +133,69 @@ void Emitter::operation(const BlockInstruction &operation) {
   const auto &instruction = operation.instruction;
   if (instruction.operation == Operation::nop) { return; }
   if (control(operation)) { return; }
+  constexpr Word condition_mask = 0xffe000;
+  constexpr Word condition_group = 0x202000;
+  if (instruction.operation == Operation::parallel &&
+      (instruction.opcode & condition_mask) == condition_group) {
+    conditional_alu(operation);
+    return;
+  }
   const bool numeric = instruction.operation == Operation::parallel ||
                        instruction.operation == Operation::immediate_alu || shifting(instruction);
   if (!numeric) { throw std::invalid_argument("A64 DSP operation lowering is incomplete"); }
 
-  if ((operation.mode & (compatibility_mode | multiply_mode | arithmetic_16)) != 0 ||
-      (operation.mode & (scale_up | scale_down)) == (scale_up | scale_down)) {
-    fault(operation, FaultKind::unsupported_mode, status);
-    return;
+  const bool immediate = instruction.operation == Operation::immediate_alu;
+  const auto kind = instruction.opcode & 7U;
+  const bool saturating = instruction.operation == Operation::parallel
+                              ? supported_alu(instruction.opcode & byte_mask)
+                              : !immediate || kind == 0 || kind == 4 || kind == 5 || kind == 2 ||
+                                    kind == 3 || kind == 6;
+  if (!numeric_mode(operation, saturating)) { return; }
+  if (instruction.operation == Operation::parallel &&
+      (instruction.opcode & upper_move_mask) != no_move_group) {
+    throw std::invalid_argument("A64 DSP parallel transfer lowering is incomplete");
   }
   if (shifting(instruction)) {
     shift(operation);
     return;
   }
-  const bool immediate = instruction.operation == Operation::immediate_alu;
-  if (!immediate && (instruction.operation != Operation::parallel ||
-                     (instruction.opcode & upper_move_mask) != no_move_group)) {
-    throw std::invalid_argument("A64 DSP operation lowering is incomplete");
+  if (immediate) {
+    if (logical(instruction)) {
+      logic(operation);
+    } else if (addition(instruction)) {
+      arithmetic(operation);
+    } else {
+      code_.constant(Reg::x0, instruction.opcode);
+      fault(operation, FaultKind::invalid_instruction, Reg::x0);
+    }
+    return;
   }
+  alu(operation);
+}
+
+void Emitter::alu(const BlockInstruction &operation) {
+  const auto &instruction = operation.instruction;
   const auto opcode = instruction.opcode & byte_mask;
-  if (!immediate && (opcode & 0x80U) != 0) {
+  if (!supported_alu(opcode)) {
+    code_.constant(Reg::x0, opcode);
+    fault(operation,
+          opcode == 8 ? FaultKind::invalid_instruction : FaultKind::unsupported_instruction,
+          Reg::x0);
+  } else if ((opcode & 0x80U) != 0) {
     multiply(operation);
+  } else if (opcode == alu_maximum || opcode == alu_maximum_magnitude) {
+    maximum(opcode);
+  } else if (shifting(instruction)) {
+    shift(operation);
   } else if (logical(instruction)) {
     logic(operation);
   } else if (addition(instruction)) {
     arithmetic(operation);
+  } else if ((opcode & 7U) == 7 && (((opcode >> 4) & 7U) == 0 || ((opcode >> 4) & 7U) >= 4)) {
+    compare_magnitude(operation);
+  } else if ((opcode & alu_mask) == alu_add_right || (opcode & alu_mask) == alu_subtract_right ||
+             (opcode & alu_mask) == alu_add_left || (opcode & alu_mask) == alu_subtract_left) {
+    shifted_arithmetic(operation);
   } else {
     unary(operation);
   }

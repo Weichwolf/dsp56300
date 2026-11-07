@@ -42,7 +42,8 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
   set(dsp56300_a64_sources src/jit/a64/emitter.cpp src/jit/a64/flags.cpp
     src/jit/a64/arithmetic.cpp src/jit/a64/unary.cpp src/jit/a64/shifts.cpp src/jit/a64/fault.cpp
     src/jit/a64/conditions.cpp src/jit/a64/control.cpp src/jit/a64/branch.cpp
-    src/jit/a64/stack.cpp src/jit/a64/agu.cpp)
+    src/jit/a64/stack.cpp src/jit/a64/agu.cpp src/jit/a64/selection.cpp
+    src/jit/a64/conditional.cpp)
 endif()
 add_library(dsp56300_core STATIC
   src/core.cpp src/captured.cpp src/repeat.cpp src/memory_windows.cpp src/external_memory.cpp src/state.cpp
@@ -143,6 +144,10 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
     target_include_directories(dsp56300_a64_control_test PRIVATE src src/jit test/support)
     target_link_libraries(dsp56300_a64_control_test PRIVATE dsp56300::core)
     add_test(NAME a64-control-semantics COMMAND dsp56300_a64_control_test)
+    add_executable(dsp56300_a64_conditional_test test/jit/a64_conditional_test.cpp)
+    target_include_directories(dsp56300_a64_conditional_test PRIVATE src src/jit test/support)
+    target_link_libraries(dsp56300_a64_conditional_test PRIVATE dsp56300::core)
+    add_test(NAME a64-conditional-semantics COMMAND dsp56300_a64_conditional_test)
   endif()
   add_executable(dsp56300_a64_code_test test/jit/a64_code_test.cpp)
   target_include_directories(dsp56300_a64_code_test PRIVATE src)

@@ -33,6 +33,12 @@ enum AluByte : std::uint8_t {
   alu_lsl = 0x33,
   alu_ror = 0x27,
   alu_rol = 0x37,
+  alu_add_right = 0x02,
+  alu_subtract_right = 0x06,
+  alu_add_left = 0x12,
+  alu_subtract_left = 0x16,
+  alu_maximum = 0x1d,
+  alu_maximum_magnitude = 0x15,
   alu_mask = 0xf7
 };
 
@@ -53,6 +59,11 @@ private:
   void publish();
   void retire(const BlockInstruction &operation);
   void operation(const BlockInstruction &operation);
+  [[nodiscard]] bool numeric_mode(const BlockInstruction &operation, bool saturating);
+  [[nodiscard]] static bool supported_alu(Word opcode);
+  void alu(const BlockInstruction &operation);
+  void conditional_alu(const BlockInstruction &operation);
+  void conditional_transfer(const BlockInstruction &operation);
   [[nodiscard]] bool control(const BlockInstruction &operation);
   void condition(Reg result, unsigned selector);
   void boundary(NativeBoundary state);
@@ -70,6 +81,10 @@ private:
   void source(Reg value, unsigned selector, bool destination_b);
   void product_word(Reg value, unsigned selector);
   void arithmetic(const BlockInstruction &operation);
+  void shifted_arithmetic(const BlockInstruction &operation);
+  void compare_magnitude(const BlockInstruction &operation);
+  void maximum(Word opcode);
+  void magnitude(Reg value, Reg temporary);
   void multiply(const BlockInstruction &operation);
   void unary(const BlockInstruction &operation);
   void logic(const BlockInstruction &operation);
