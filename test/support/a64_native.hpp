@@ -9,6 +9,7 @@
 #include "jit/arena.hpp"
 #include "jit/block.hpp"
 #include "support.hpp"
+#include "translation.hpp"
 
 #include <array>
 #include <cstdint>
@@ -18,16 +19,21 @@
 #include <vector>
 
 namespace dsp56300::test::a64 {
+enum class Emission : std::uint8_t { block, repeat };
+
 struct Instruction {
   Word opcode = 0, extension = 0, pc = start, mode = 0;
   unsigned words = 1, cycles = 1;
+  Word loop_address = detail::inactive_loop;
 };
 
 class Program {
 public:
-  explicit Program(const Instruction input) : Program(std::span<const Instruction>(&input, 1)) {}
+  explicit Program(const Instruction input, const Emission mode = Emission::block)
+      : Program(std::span<const Instruction>(&input, 1), mode) {}
 
-  explicit Program(const std::span<const Instruction> inputs) {
+  explicit Program(const std::span<const Instruction> inputs,
+                   const Emission mode = Emission::block) {
     std::vector<detail::BlockInstruction> operations;
     operations.reserve(inputs.size());
     for (const auto input : inputs) {
@@ -42,10 +48,17 @@ public:
       }
       require(decoded.words == input.words && decoded.cycles == input.cycles,
               "Authored instruction length/base cost differs from its independent expectation");
-      operations.push_back({.instruction = decoded, .pc = input.pc, .mode = input.mode});
+      operations.push_back({.instruction = decoded,
+                            .pc = input.pc,
+                            .mode = input.mode,
+                            .loop_address = input.loop_address});
     }
     detail::a64::Emitter emitter;
-    entry_ = arena_.append(emitter.generate(operations));
+    if (mode == Emission::repeat) {
+      require(operations.size() == 1, "A repeat entry has one complete logical body");
+    }
+    entry_ = arena_.append(mode == Emission::repeat ? emitter.generate_repeat(operations.front())
+                                                    : emitter.generate(operations));
   }
 
   [[nodiscard]] const void *entry() const noexcept { return entry_; }

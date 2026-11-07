@@ -7,7 +7,6 @@
 #include "instruction.hpp"
 #include "jit.hpp"
 #include "jit/a64/code.hpp"
-#include "translation.hpp"
 
 #include <array>
 #include <cstddef>
@@ -76,28 +75,46 @@ void Emitter::retire(const BlockInstruction &operation) {
     code_.add(Reg::x9, Reg::x9, static_cast<std::uint16_t>(count), Width::x64);
     code_.store(Reg::x9, cpu, offset, Access::doubleword);
   }
-  code_.store(Reg::zr, cpu, offsetof(Cpu, repeat_completed), Access::byte);
+}
+
+void Emitter::finish_instruction(const BlockInstruction &operation) {
+  if (repeat_mode_) {
+    finish_repeat(operation);
+    return;
+  }
+  if (!is_repeat(operation.instruction.operation)) {
+    code_.store(Reg::zr, cpu, offsetof(Cpu, repeat_completed), Access::byte);
+  }
+  finish_loop(operation);
+  retire(operation);
 }
 
 std::vector<std::uint8_t> Emitter::generate(const std::span<const BlockInstruction> operations) {
   if (operations.empty()) { throw std::invalid_argument("Cannot emit an empty A64 DSP block"); }
   begin();
   for (const auto &item : operations) {
-    if (item.loop_address != inactive_loop) {
-      throw std::invalid_argument("A64 DSP hardware-loop lowering is incomplete");
-    }
+    if (repeat_mode_) { code_.bind(repeat_header_); }
     code_.branch_zero_far(remaining, done_);
+    if (repeat_mode_) {
+      code_.load(Reg::x17, cpu, offsetof(Cpu, repeat_remaining));
+      code_.branch_zero_far(Reg::x17, done_);
+      if (item.instruction.words != 1 || !repeatable(item.instruction.operation)) {
+        code_.constant(Reg::x0, item.instruction.opcode);
+        fault(item, FaultKind::invalid_instruction, Reg::x0);
+        continue;
+      }
+    }
     code_.constant(pc, (item.pc + item.instruction.words) & word_mask);
     code_.store(Reg::zr, cpu, offsetof(Cpu, interrupt_inhibited), Access::byte);
     snapshot();
     flow_ = Flow::sequential;
     operation(item);
-    retire(item);
+    finish_instruction(item);
     code_.load(Reg::x17, context, offsetof(NativeContext, boundary), Access::byte);
     code_.branch_zero_far(Reg::x17, done_, Width::w32, true);
     if (flow_ == Flow::owner || flow_ == Flow::context) {
       code_.branch(done_);
-    } else if (flow_ == Flow::control) {
+    } else {
       code_.constant(Reg::x17, (item.pc + item.instruction.words) & word_mask);
       code_.compare(pc, Reg::x17);
       code_.branch_far(Condition::not_equal, done_);
@@ -113,5 +130,10 @@ std::vector<std::uint8_t> Emitter::generate(const std::span<const BlockInstructi
   code_.pop(Reg::fp, Reg::lr);
   code_.return_();
   return code_.bytes();
+}
+
+std::vector<std::uint8_t> Emitter::generate_repeat(const BlockInstruction &operation) {
+  repeat_mode_ = true;
+  return generate(std::span<const BlockInstruction>(&operation, 1));
 }
 }

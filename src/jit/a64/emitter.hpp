@@ -70,12 +70,15 @@ struct MemoryLabels {
 class Emitter {
 public:
   [[nodiscard]] std::vector<std::uint8_t> generate(std::span<const BlockInstruction> operations);
+  [[nodiscard]] std::vector<std::uint8_t> generate_repeat(const BlockInstruction &operation);
 
 private:
   void begin();
   void snapshot();
   void publish();
   void retire(const BlockInstruction &operation);
+  void finish_instruction(const BlockInstruction &operation);
+  void finish_repeat(const BlockInstruction &operation);
   void operation(const BlockInstruction &operation);
   [[nodiscard]] bool numeric_mode(const BlockInstruction &operation, bool saturating);
   [[nodiscard]] bool numeric_mode(const BlockInstruction &operation, Word ignored_modes);
@@ -121,6 +124,13 @@ private:
   [[nodiscard]] bool control(const BlockInstruction &operation);
   void condition(Reg result, unsigned selector);
   void boundary(NativeBoundary state);
+  void context_boundary();
+  [[nodiscard]] bool loop(const BlockInstruction &operation);
+  void loop_count(const BlockInstruction &operation);
+  void loop_setup(const BlockInstruction &operation);
+  void loop_restore(const BlockInstruction &operation);
+  void loop_pop(const BlockInstruction &operation);
+  void finish_loop(const BlockInstruction &operation);
   void control_byte(const BlockInstruction &operation);
   void jump(const BlockInstruction &operation);
   void branch(const BlockInstruction &operation);
@@ -182,7 +192,9 @@ private:
   [[nodiscard]] static Reg destination(Word opcode);
   Code code_;
   Label done_;
+  Label repeat_header_;
   Flow flow_ = Flow::sequential;
   Label *failure_ = nullptr;
+  bool repeat_mode_ = false;
 };
 }

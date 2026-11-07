@@ -13,8 +13,23 @@
 namespace dsp56300::detail::a64 {
 void Emitter::boundary(const NativeBoundary state) {
   flow_ = state == NativeBoundary::owner ? Flow::owner : Flow::context;
+  if (state == NativeBoundary::context) {
+    context_boundary();
+    return;
+  }
   code_.constant(Reg::x17, static_cast<std::uint8_t>(state));
   code_.store(Reg::x17, context, offsetof(NativeContext, boundary), Access::byte);
+}
+
+void Emitter::context_boundary() {
+  code_.load(Reg::x9, context, offsetof(NativeContext, boundary), Access::byte);
+  code_.constant(Reg::x17, static_cast<std::uint8_t>(NativeBoundary::owner));
+  code_.compare(Reg::x9, Reg::x17);
+  Label complete;
+  code_.branch_far(Condition::equal, complete);
+  code_.constant(Reg::x17, static_cast<std::uint8_t>(NativeBoundary::context));
+  code_.store(Reg::x17, context, offsetof(NativeContext, boundary), Access::byte);
+  code_.bind(complete);
 }
 
 void Emitter::control_byte(const BlockInstruction &operation) {
