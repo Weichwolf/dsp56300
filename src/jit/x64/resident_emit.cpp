@@ -16,6 +16,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <vector>
@@ -81,6 +82,33 @@ BlockEmitter::generate_selected(const std::span<const BlockInstruction> operatio
   selector.align_entry();
   selector.bind(fallback);
   selector.raw(ordinary);
+  return selector.bytes();
+}
+
+std::optional<std::vector<std::uint8_t>>
+BlockEmitter::generate_guarded(const std::span<const BlockInstruction> operations,
+                               const std::span<const std::uint8_t> checked) {
+  if (operations.empty() || checked.empty()) { return std::nullopt; }
+  region_ = resident_plan(operations, runtime_.memory, modifiers_);
+  if (!region_.valid) { return std::nullopt; }
+  loop_size_ = at_loop_end(operations.back()) ? static_cast<Word>(operations.size()) : 0;
+  if (!admit_packed_retirement(operations)) { return std::nullopt; }
+  region_mode_ = RegionMode::guarded;
+  entry_admitted_ = true;
+  const auto guarded = generate_body(operations);
+  x64::Code selector;
+  x64::Label fallback;
+  constexpr unsigned compare = 7;
+  selector.raw(landing);
+  selector.load(x64::Reg::ax, x64::Reg::si, offsetof(NativeContext, budget), Width::dword);
+  selector.immediate(compare, x64::Reg::ax, static_cast<Word>(operations.size() - 1), Width::dword);
+  selector.jump_if(x64::Branch::below_equal, fallback);
+  region_guard(selector, Reg::di, fallback);
+  selector.align_entry();
+  selector.raw(guarded);
+  selector.align_entry();
+  selector.bind(fallback);
+  selector.raw(checked);
   return selector.bytes();
 }
 

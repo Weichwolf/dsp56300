@@ -13,6 +13,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -30,6 +31,10 @@ public:
                LoopWindowMode window = LoopWindowMode::automatic);
   [[nodiscard]] std::vector<std::uint8_t> generate(std::span<const BlockInstruction> operations,
                                                    ExecutionBounds bounds = ExecutionBounds::whole);
+
+  [[nodiscard]] std::optional<std::vector<std::uint8_t>>
+  generate_guarded(std::span<const BlockInstruction> operations,
+                   std::span<const std::uint8_t> checked);
 
   [[nodiscard]] std::vector<std::uint8_t> generate_repeat(const BlockInstruction &operation);
 

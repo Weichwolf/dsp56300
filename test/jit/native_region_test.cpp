@@ -2,6 +2,7 @@
 // Original mixed RAM traces and independent ordered transfer/arithmetic expectations.
 #include "address_model.hpp"
 #include "architecture.hpp"
+#include "codegen_observer.hpp"
 #include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
@@ -455,10 +456,12 @@ std::vector<Word> program(const Shape shape = Shape::unit) {
 void prefixes(const Backend backend, const Word mode, const Shape shape) {
   Memory memory;
   std::array<Word, memory_words> p{};
-  TestCore core({.program = p, .x = memory.bank(false), .y = memory.bank(true)},
+  const auto words = program(shape);
+  TestCore core({.program = std::span(p).first(start + words.size()),
+                 .x = memory.bank(false),
+                 .y = memory.bank(true)},
                 nullptr,
                 {.backend = backend});
-  const auto words = program(shape);
   core.load(Space::program, start, words);
   const auto state = initial(mode, shape);
   const auto steps = trace(shape);
@@ -466,6 +469,7 @@ void prefixes(const Backend backend, const Word mode, const Shape shape) {
   core.set_registers(state);
   require(core.run(static_cast<Word>(steps.size())).retired == steps.size(),
           "Warm the original trace before testing exact call prefixes");
+  const auto publications = codegen::publications();
   for (Word budget = 0; budget <= steps.size(); ++budget) {
     memory.initialize();
     auto expected_memory = memory;
@@ -481,16 +485,21 @@ void prefixes(const Backend backend, const Word mode, const Shape shape) {
                 run.progress == Progress{.instructions = base.instructions + budget,
                                          .estimated_cycles = base.estimated_cycles + budget},
             "Every warm API budget exposes exact full state, sticky flags and all RAM");
+    require(codegen::publications() == publications,
+            "Whole and partial memory-region grants retain the same published translations");
   }
 }
 
 void changed_offsets(const Backend backend, const Word mode, const Shape shape) {
   Memory memory;
   std::array<Word, memory_words> p{};
-  TestCore core({.program = p, .x = memory.bank(false), .y = memory.bank(true)},
+  const auto words = program(shape);
+  TestCore core({.program = std::span(p).first(start + words.size()),
+                 .x = memory.bank(false),
+                 .y = memory.bank(true)},
                 nullptr,
                 {.backend = backend});
-  core.load(Space::program, start, program(shape));
+  core.load(Space::program, start, words);
   const auto steps = trace(shape);
   for (const Word offset : {1U, 0U, 2U, word_mask, 1U}) {
     auto state = initial(mode, shape);

@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "jit/code.hpp"
 
+#include <array>
+#include <bit>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
@@ -40,13 +43,20 @@ std::uint32_t immediate_opcode(const Width width, const std::uint32_t value) {
                                                                          : alu_immediate;
 }
 
+template <std::unsigned_integral Integer> void literal(Code &code, Integer value) {
+  if constexpr (std::endian::native == std::endian::big) { value = std::byteswap(value); }
+  const auto bytes = std::bit_cast<std::array<std::uint8_t, sizeof(value)>>(value);
+  code.raw(bytes);
+}
+
 void immediate_value(Code &code, const Width width, const std::uint32_t value, const bool compact) {
-  code.byte(value & low_byte_mask);
-  if (compact) { return; }
-  code.byte((value >> byte_bits) & low_byte_mask);
-  if (width == Width::word) { return; }
-  code.byte((value >> (2 * byte_bits)) & low_byte_mask);
-  code.byte((value >> (3 * byte_bits)) & low_byte_mask);
+  if (compact) {
+    code.byte(value & low_byte_mask);
+  } else if (width == Width::word) {
+    literal(code, static_cast<std::uint16_t>(value));
+  } else {
+    code.u32(value);
+  }
 }
 }
 
@@ -64,15 +74,11 @@ void Code::align_entry() {
 }
 
 void Code::u32(const std::uint32_t value) {
-  for (unsigned shift = 0; shift < sizeof(value) * byte_bits; shift += byte_bits) {
-    byte((value >> shift) & low_byte_mask);
-  }
+  literal(*this, value);
 }
 
 void Code::u64(const std::uint64_t value) {
-  for (unsigned shift = 0; shift < sizeof(value) * byte_bits; shift += byte_bits) {
-    byte(static_cast<std::uint32_t>((value >> shift) & low_byte_mask));
-  }
+  literal(*this, value);
 }
 
 void Code::raw(const std::span<const std::uint8_t> bytes) {
@@ -264,8 +270,7 @@ void Code::store_constant(const Reg base,
   if (width == Width::byte) {
     byte(value);
   } else if (width == Width::word) {
-    byte(value & low_byte_mask);
-    byte((value >> byte_bits) & low_byte_mask);
+    literal(*this, static_cast<std::uint16_t>(value));
   } else {
     u32(value);
   }

@@ -195,6 +195,12 @@ normalized representation. Skip host loop-counter initialization when the compil
 loop has no corresponding counted backedge. These are translation decisions,
 independent of actual input amplitudes or the incoming sticky-flag values.
 
+For an admitted resident RAM block, combine its whole-grant entry and memory
+guards with one exact native fallback shared by short grants and failed guards.
+Keep ordinary whole-block execution for blocks without such admission. Preserve
+canonical callback state, exact faults and retained instruction boundaries; avoid
+compiling a third ordinary copy inside an already guarded block.
+
 Plan affine memory streams across complete loop nests, including nested loop
 setup, cursor resets and outer address steps. Batch independent iterations only
 after proving their physical read/write dependencies, bounds and address updates.

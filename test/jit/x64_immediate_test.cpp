@@ -296,6 +296,30 @@ void memory() {
   }
 }
 
+void growing_literals() {
+  constexpr std::uint32_t dword = 0x12345678;
+  constexpr std::uint64_t qword = 0x0123456789abcdef;
+  constexpr std::array<std::uint8_t, 24> expected{0x78, 0x56, 0x34, 0x12, 0xef, 0xcd, 0xab, 0x89,
+                                                  0x67, 0x45, 0x23, 0x01, 0x00, 0x00, 0x00, 0x00,
+                                                  0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+  constexpr unsigned placements = 64;
+  for (unsigned prefix = 0; prefix < placements; ++prefix) {
+    Code code;
+    std::vector<std::uint8_t> bytes(prefix, marker);
+    for (unsigned index = 0; index < prefix; ++index) { code.byte(marker); }
+    code.u32(dword);
+    code.u64(qword);
+    code.u32(0);
+    code.u64(maximum);
+    code.byte(marker);
+    bytes.insert(bytes.end(), expected.begin(), expected.end());
+    bytes.push_back(marker);
+    require(
+        code.bytes() == bytes,
+        "Growing byte buffers retain independent little-endian 32/64-bit literals and neighbors");
+  }
+}
+
 void literal() {
   Code code;
   code.constant(Reg::ax, maximum_short);
@@ -326,6 +350,7 @@ void literal() {
 int main() {
   try {
     dsp56300::test::literal();
+    dsp56300::test::growing_literals();
     dsp56300::test::registers();
     dsp56300::test::memory();
     std::cout << dsp56300::test::checks << " independent compact-x64 checks passed\n";
