@@ -14,12 +14,25 @@
 #include <algorithm>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <utility>
 
 namespace dsp56300::detail {
 namespace {
 constexpr Word relative_end_bit = 16;
+
+unsigned growth_shift(const ValueGraph &graph) {
+  std::optional<unsigned> common;
+  for (const auto &node : graph.nodes) {
+    if (node.operation != GraphOp::word) { continue; }
+    const auto position = (double_word_bits - 3) - node.inputs[0].scale;
+    if (node.inputs[0].width <= position + 1) { continue; }
+    if (common && *common != position) { return 0; }
+    common = position;
+  }
+  return common.value_or(0);
+}
 
 bool nested(const std::span<const Word> program,
             const Registers &state,
@@ -125,6 +138,7 @@ std::unique_ptr<NativeRegion> plan_region(const std::span<const Word> program,
     if (!graph) { return nullptr; }
     region->graph = std::move(*graph);
   }
+  region->growth_shift = growth_shift(region->graph);
   if (!roots(*region, state)) { return nullptr; }
   return region;
 }

@@ -74,7 +74,7 @@ struct Point {
   Word count = 1, prefix = 0, mode = 0, pointer = 0, output = output_base, saved = 0,
        modifier = word_mask, stack_count = 2;
   std::uint64_t accumulator_b = register_model::seed_accumulator_b;
-  bool shared = false;
+  bool shared = false, mirrored = false;
 };
 
 struct Model {
@@ -390,6 +390,7 @@ struct NestedModel {
   NestedData x;
   NestedData y;
   NestedShape shape = NestedShape::reset;
+  bool mirrored = false;
 };
 
 Word nested_step(NestedModel &model, const Word child) {
@@ -425,7 +426,7 @@ Word nested_step(NestedModel &model, const Word child) {
     sequence_model::alu(state, old, offset == 7 ? product : rounding);
   } else if (offset == 9) {
     model.x[state.r[1]] = register_model::bus_word(state, state.a);
-    model.y[state.r[5]] = register_model::bus_word(state, state.b);
+    model.y[state.r[5]] = register_model::bus_word(state, model.mirrored ? state.a : state.b);
     state.r[1] += model.shape == NestedShape::strided ? state.n[1] : 1U;
     state.r[5] += model.shape == NestedShape::strided ? state.n[5] : 1U;
   } else {
@@ -453,9 +454,9 @@ void nested_case(const Word child,
     return immediate | ((reg & 7U) << 16) | ((reg & high_mask) << high_shift);
   };
   const Word update = static_cast<Word>(isa::Opcode::move_address_update) | (1U << 11);
-  const Word store = shape == NestedShape::strided
-                         ? (body[3] & ~postincrements) | (1U << 11) | (1U << 20)
-                         : body[3];
+  constexpr Word post_offsets = (1U << 11) | (1U << 20);
+  Word store = shape == NestedShape::strided ? (body[3] & ~postincrements) | post_offsets : body[3];
+  if (point.mirrored) { store &= ~(Word{1} << 16); }
   const std::array code{address_word(setup_x),
                         input_base,
                         address_word(setup_y),
@@ -509,7 +510,8 @@ void nested_case(const Word child,
       if (child > 8 && position > 6 && position < parent_size - 6 && position != parent_size / 2) {
         continue;
       }
-      NestedModel expected{.state = initial, .x = seed_x, .y = seed_y, .shape = shape};
+      NestedModel expected{
+          .state = initial, .x = seed_x, .y = seed_y, .shape = shape, .mirrored = point.mirrored};
       Word cycles = 0;
       for (Word index = 0; index < prefix; ++index) { cycles += nested_step(expected, child); }
       x = seed_x;
@@ -547,9 +549,41 @@ void nested_cases() {
   }
 }
 
+void mixed_positions(Machine &machine, const bool shared) {
+  constexpr std::array<std::uint64_t, 2> accumulators{std::uint64_t{1} << 21,
+                                                      std::uint64_t{1} << 45};
+  for (const auto accumulator : accumulators) {
+    for (const Word count : {1U, 4U, 5U}) {
+      prefixes(machine, {.count = count, .accumulator_b = accumulator, .shared = shared});
+    }
+  }
+}
+
+void mirrored_nested_cases() {
+  constexpr Word advancing_output_base = 1536;
+  for (const auto shape : {NestedShape::reset, NestedShape::independent, NestedShape::strided}) {
+    for (const Word child : {1U, 2U, 4U, 8U, 64U, 128U, 512U}) {
+      if (child > 128 && shape != NestedShape::reset) { continue; }
+      for (const Word parents : {2U, 3U, 4U, 5U}) {
+        const Word output = child > 128 && (parents & 1U) != 0 ? 1280U : advancing_output_base;
+        for (const Word mode : {0U, mode_rm, flag_s, mode_rm | flag_s}) {
+          nested_case(child,
+                      {.count = parents,
+                       .mode = mode,
+                       .pointer = pointer_mask,
+                       .output = output,
+                       .mirrored = true},
+                      shape);
+        }
+      }
+    }
+  }
+}
+
 void cases() {
   constexpr Word advancing_output_base = 1536;
   nested_cases();
+  mirrored_nested_cases();
   for (const auto shape : {NestedShape::independent, NestedShape::feedback, NestedShape::strided}) {
     for (const Word child : {4U, 8U, 16U, 64U, 128U}) {
       for (const Word parents : {2U, 3U, 4U, 5U}) {
@@ -572,6 +606,7 @@ void cases() {
   for (const bool shared : {false, true}) {
     shapes(shared);
     Machine machine(shared);
+    mixed_positions(machine, shared);
     for (const Word mode : {0U, mode_rm, mode_down, mode_up}) {
       placements(machine, {.mode = mode, .shared = shared});
     }

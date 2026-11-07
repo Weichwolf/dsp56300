@@ -63,7 +63,7 @@ struct NativeRegion {
   Word reverse_addresses = 0;
   bool nested = false;
   std::array<const void *, 3> native{};
-  unsigned lanes = 4;
+  unsigned lanes = 4, growth_shift = 0;
 };
 
 [[nodiscard]] std::unique_ptr<NativeRegion>

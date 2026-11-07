@@ -311,7 +311,8 @@ Word flags(const std::array<std::uint64_t, 3> &values, const ValueGraph &graph) 
   return result | carry_value;
 }
 
-Word sticky(const RegionVector &growth_events,
+Word sticky(const NativeRegion &region,
+            const RegionVector &growth_events,
             const RegionVector &limit_events,
             const unsigned lanes) {
   std::uint64_t changed = 0;
@@ -320,15 +321,15 @@ Word sticky(const RegionVector &growth_events,
     changed |= growth_events.words[index];
     limited |= limit_events.words[index];
   }
-  return ((changed & 1) != 0 ? growth : 0U) |
+  return (((changed >> region.growth_shift) & 1) != 0 ? growth : 0U) |
          ((limited & std::numeric_limits<Word>::max()) != 0 ? limit : 0U);
 }
 
 void stack(Registers &reg, const NativeRegion &region, const Word changed) {
   const auto &frame = region.frame;
   if (region.nested) {
-    const auto preceding = sticky(frame.preceding_growth, frame.preceding_limits, 4) |
-                           sticky(frame.growth, frame.limits, region.lanes - 1);
+    const auto preceding = sticky(region, frame.preceding_growth, frame.preceding_limits, 4) |
+                           sticky(region, frame.growth, frame.limits, region.lanes - 1);
     const auto before =
         (reg.sr & ~changed) | preceding | flags(frame.preceding_flags, region.graph);
     reg.stack[(reg.sp + 1) & (stack_entries - 1)] = (std::uint64_t{region.last} << word_bits) | 1;
@@ -355,7 +356,7 @@ void commit(Cpu &cpu, NativeContext &context, const NativeRegion &region) {
   reg.lc -= frame.iterations;
   stack(reg, region, changed);
   const auto loop_bits = reg.sr & loop_status;
-  reg.sr = (reg.sr & ~changed) | sticky(frame.growth, frame.limits, 4) |
+  reg.sr = (reg.sr & ~changed) | sticky(region, frame.growth, frame.limits, 4) |
            flags(frame.flags, region.graph);
   reg.sr = (reg.sr & ~loop_status) | loop_bits;
   for (unsigned index = 0; index < region.graph.registers.size(); ++index) {

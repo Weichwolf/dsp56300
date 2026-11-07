@@ -31,7 +31,7 @@ using Program = std::array<Word, body_words>;
 
 enum class Shape : std::uint8_t { sum, difference, product, negative_product, mac, negative_mac };
 
-Program program(const Shape shape, const unsigned shifts, const bool rounded) {
+Program program(const Shape shape, const unsigned shifts, const bool rounded, const bool mirrored) {
   constexpr Word nop = static_cast<Word>(isa::Opcode::nop);
   Program code{pair | post | loads,
                static_cast<Word>(isa::Opcode::tfr_x0_a),
@@ -53,6 +53,7 @@ Program program(const Shape shape, const unsigned shifts, const bool rounded) {
   for (unsigned index = 0; index < shifts; ++index) {
     code[3 + index] = static_cast<Word>(isa::Opcode::asr_a);
   }
+  if (mirrored) { code.back() &= ~(Word{1} << 16); }
   return code;
 }
 
@@ -64,6 +65,7 @@ struct Point {
 struct Model {
   Registers registers;
   Data x, y;
+  bool mirrored = false;
 };
 
 void step(Model &model, const Program &code) {
@@ -74,7 +76,7 @@ void step(Model &model, const Program &code) {
     state.y = (state.y & ~std::uint64_t{word_mask}) | (model.y.at(state.r[4]++) & word_mask);
   } else if (index + 1 == body_words) {
     model.x.at(state.r[1]++) = register_model::bus_word(state, state.a);
-    model.y.at(state.r[5]++) = register_model::bus_word(state, state.b);
+    model.y.at(state.r[5]++) = register_model::bus_word(state, model.mirrored ? state.a : state.b);
   } else {
     const auto before = state;
     sequence_model::alu(state, before, code.at(index));
@@ -98,8 +100,9 @@ void step(Model &model, const Program &code) {
 
 class Machine {
 public:
-  Machine(const Shape shape, const unsigned shifts, const bool rounded)
-      : code_(program(shape, shifts, rounded)),
+  Machine(const Shape shape, const unsigned shifts, const bool rounded, const bool mirrored)
+      : code_(program(shape, shifts, rounded, mirrored)),
+        mirrored_(mirrored),
         core_(Memory::separate({.program = p_, .x = x_, .y = y_})) {
     std::ranges::copy(code_, p_.begin() + start);
   }
@@ -124,7 +127,7 @@ public:
         (std::uint64_t{start} << word_bits) | (initial.sr & ~loop_bits);
     initial.stack[(pointer_mask - 1) % stack_entries] =
         (std::uint64_t{previous_end} << word_bits) | previous_count;
-    Model model{.registers = initial, .x = x_, .y = y_};
+    Model model{.registers = initial, .x = x_, .y = y_, .mirrored = mirrored_};
     const auto original_program = p_;
     core_.set_registers(initial);
     const Word total = point.count * body_words;
@@ -153,6 +156,7 @@ public:
 
 private:
   const Program code_;
+  bool mirrored_;
   std::array<Word, memory_words> p_{};
   Data x_{}, y_{};
   Core core_;
@@ -190,8 +194,10 @@ int main() {
                               Shape::negative_mac}) {
       for (unsigned shifts = 0; shifts <= 2; ++shifts) {
         for (const bool rounded : {false, true}) {
-          Machine machine(shape, shifts, rounded);
-          cases(machine);
+          for (const bool mirrored : {false, true}) {
+            Machine machine(shape, shifts, rounded, mirrored);
+            cases(machine);
+          }
         }
       }
     }

@@ -28,7 +28,8 @@ constexpr unsigned value_registers = 12, group_add = 0, group_and = 4, group_sub
                    group_compare = 7;
 constexpr unsigned op_add = 0x01, op_and = 0x21, push_register = 0x50, pop_register = 0x58,
                    high_rex = 0x41;
-constexpr unsigned growth_position = 45, canonical_signs = 0xa0, canonical_high = 0xaa;
+constexpr unsigned growth_position = double_word_bits - 3, canonical_signs = 0xa0,
+                   canonical_high = 0xaa;
 constexpr std::array<std::uint8_t, 4> landing{0xf3, 0x0f, 0x1e, 0xfa};
 constexpr unsigned return_opcode = 0xc3, repeat_word_pair = 0x44;
 constexpr std::array root_registers{Reg::bx, Reg::bp, Reg::r12, Reg::r13, Reg::r14, Reg::r15};
@@ -488,10 +489,16 @@ void RegionEmitter::word(const GraphNode &node, const Xmm result) {
   const auto source = read(value);
   const auto position = growth_position - value.scale;
   if (value.width > position + 1) {
-    code_.vector_shift(first_scratch, source, VectorShift::right, position);
-    code_.vector_shift(second_scratch, source, VectorShift::right, position + 1);
-    code_.vector(VectorOp::bit_xor,
-                 {.destination = first_scratch, .left = first_scratch, .right = second_scratch});
+    if (region_.growth_shift != 0) {
+      code_.vector_shift(first_scratch, source, VectorShift::right, 1);
+      code_.vector(VectorOp::bit_xor,
+                   {.destination = first_scratch, .left = first_scratch, .right = source});
+    } else {
+      code_.vector_shift(first_scratch, source, VectorShift::right, position);
+      code_.vector_shift(second_scratch, source, VectorShift::right, position + 1);
+      code_.vector(VectorOp::bit_xor,
+                   {.destination = first_scratch, .left = first_scratch, .right = second_scratch});
+    }
     code_.vector(VectorOp::bit_or,
                  {.destination = growth_register, .left = growth_register, .right = first_scratch});
   }
@@ -676,6 +683,7 @@ void RegionEmitter::pop(const Reg reg) {
 std::vector<std::uint8_t> RegionEmitter::generate() {
   code_.raw(landing);
   const auto saved = std::min(root_registers.size(), region_.roots.size());
+  const auto inner_trips = region_.inner_iterations / (inner_vector_ ? lanes_ : 1U);
   for (std::size_t index = 0; index < saved; ++index) {
     push(root_registers[index]);
     code_.load(
@@ -699,7 +707,7 @@ std::vector<std::uint8_t> RegionEmitter::generate() {
                        limit_register);
     code_.bind(continuing);
   }
-  code_.constant(Reg::cx, region_.inner_iterations / (inner_vector_ ? lanes_ : 1U));
+  if (inner_trips > 1) { code_.constant(Reg::cx, inner_trips); }
   code_.bind(inner);
   for (current_ = 0; current_ < region_.graph.nodes.size(); ++current_) {
     for (auto &node : owners_) {
@@ -711,7 +719,7 @@ std::vector<std::uint8_t> RegionEmitter::generate() {
     if (needed_[current_]) { emit(region_.graph.nodes[current_]); }
   }
   advance(true);
-  if (region_.inner_iterations > (inner_vector_ ? lanes_ : 1U)) {
+  if (inner_trips > 1) {
     code_.immediate(group_subtract, Reg::cx, 1, Width::dword);
     code_.jump_if(x64::Branch::not_equal, inner);
   }

@@ -188,6 +188,13 @@ unnecessary; preserve growth and limiting events and noncanonical representation
 Discard this proof metadata before execution. Fold copies into native three-operand
 operations when their input lifetimes permit it.
 
+When all growth events in a region use the same integer bit position, aggregate
+their adjacent-bit XORs before normalizing the sticky S flag at the region boundary.
+Retain per-lane events and preceding-parent snapshots; mixed positions keep the
+normalized representation. Skip host loop-counter initialization when the compiled
+loop has no corresponding counted backedge. These are translation decisions,
+independent of actual input amplitudes or the incoming sticky-flag values.
+
 Plan affine memory streams across complete loop nests, including nested loop
 setup, cursor resets and outer address steps. Batch independent iterations only
 after proving their physical read/write dependencies, bounds and address updates.
