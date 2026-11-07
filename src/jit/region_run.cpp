@@ -176,6 +176,51 @@ bool streams(const Registers &reg, const NativeContext &context, NativeRegion &r
   return true;
 }
 
+bool admit_inner(const NativeRegion &region, const bool parent_available) {
+  std::size_t inner_cost = 0;
+  std::size_t parent_cost = 0;
+  for (std::size_t index = 0; index < region.graph.streams.size(); ++index) {
+    const auto &cursor = region.frame.cursors[region.stream_roots[index]];
+    inner_cost += cursor.inner_stride <= 1 ? 1U : 4U;
+    parent_cost += cursor.stride <= 1 ? 1U : 4U;
+  }
+  // Prefer the existing parent kernel when changing axes saves no memory work.
+  if (parent_available && inner_cost >= parent_cost) { return false; }
+  for (std::size_t index = 0; index < region.graph.streams.size(); ++index) {
+    const auto &stream = region.graph.streams[index];
+    const auto &cursor = region.frame.cursors[region.stream_roots[index]];
+    if (stream.write && cursor.inner_stride == 0) { return false; }
+    auto left = region.footprints[index];
+    left.bytes = left.inner_span + sizeof(Word);
+    left.stride = cursor.inner_stride * sizeof(Word);
+    left.inner_span = 0;
+    for (std::size_t other = 0; other < index; ++other) {
+      if (!stream.write && !region.graph.streams[other].write) { continue; }
+      auto right = region.footprints[other];
+      right.bytes = right.inner_span + sizeof(Word);
+      right.stride = region.frame.cursors[region.stream_roots[other]].inner_stride * sizeof(Word);
+      right.inner_span = 0;
+      if (!independent(left, right)) { return false; }
+    }
+  }
+  return true;
+}
+
+bool select_lanes(NativeRegion &region, const Word count) {
+  region.lanes = 4;
+  if (count < 4) { region.lanes = 2; }
+  if (count < 2) { region.lanes = 1; }
+  if (region.nested) {
+    if (region.native[0] != nullptr && count >= 2) {
+      region.lanes = 1;
+    } else {
+      if ((count & 1U) != 0) { return false; }
+      region.lanes = count % 4 == 0 ? 4U : 2U;
+    }
+  }
+  return true;
+}
+
 void invariants(const Registers &reg, NativeRegion &region) {
   for (unsigned index = 0; index < region.frame.invariants.size(); ++index) {
     if ((region.graph.invariant_registers & (Word{1} << index)) == 0) { continue; }
@@ -301,13 +346,7 @@ std::uint32_t
 run_region(Cpu *const cpu, NativeContext *const context, NativeRegion *const region) noexcept {
   if (!header(*cpu, *context, *region) || !memory(*cpu, *context, *region)) { return 0; }
   const auto count = std::min(cpu->reg.lc, context->budget / region->graph.instructions);
-  region->lanes = 4;
-  if (count < 4) { region->lanes = 2; }
-  if (count < 2) { region->lanes = 1; }
-  if (region->nested) {
-    if ((count & 1U) != 0) { return 0; }
-    region->lanes = count % 4 == 0 ? 4U : 2U;
-  }
+  if (!select_lanes(*region, count)) { return 0; }
   region->frame.iterations = count - (count % region->lanes);
   if (region->frame.iterations == 0 || region->native[region->lanes / 2] == nullptr ||
       (region->frame.iterations == cpu->reg.lc && cpu->reg.sc < 2) ||
@@ -315,6 +354,16 @@ run_region(Cpu *const cpu, NativeContext *const context, NativeRegion *const reg
        (region->frame.iterations != cpu->reg.lc || cpu->reg.sc >= stack_entries - 2)) ||
       !cursors(cpu->reg, *context, *region) || !streams(cpu->reg, *context, *region)) {
     return 0;
+  }
+  if (region->nested && region->lanes == 1) {
+    const Word parent_lanes = count % 4 == 0 ? 4U : 2U;
+    const bool parent_available = (count & 1U) == 0 && region->native[parent_lanes / 2] != nullptr;
+    if (!admit_inner(*region, parent_available)) {
+      // A child recurrence may still be independent across separate parents.
+      if (!parent_available) { return 0; }
+      region->lanes = parent_lanes;
+      if (!cursors(cpu->reg, *context, *region)) { return 0; }
+    }
   }
   invariants(cpu->reg, *region);
   region->frame.constants = region->constants.data();

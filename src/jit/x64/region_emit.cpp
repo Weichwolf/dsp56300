@@ -23,7 +23,8 @@ using x64::Width;
 using x64::Xmm;
 constexpr Xmm growth_register = Xmm::x12, limit_register = Xmm::x13;
 constexpr Xmm first_scratch = Xmm::x14, second_scratch = Xmm::x15;
-constexpr unsigned value_registers = 12, group_add = 0, group_and = 4, group_subtract = 5;
+constexpr unsigned value_registers = 12, group_add = 0, group_and = 4, group_subtract = 5,
+                   group_compare = 7;
 constexpr unsigned op_add = 0x01, push_register = 0x50, pop_register = 0x58, high_rex = 0x41;
 constexpr unsigned growth_position = 45, canonical_signs = 0xa0, canonical_high = 0xaa;
 constexpr std::array<std::uint8_t, 4> landing{0xf3, 0x0f, 0x1e, 0xfa};
@@ -32,6 +33,10 @@ constexpr std::array root_registers{Reg::bx, Reg::bp, Reg::r12, Reg::r13, Reg::r
 
 std::size_t cursor_offset(const std::size_t root, const std::size_t member) {
   return offsetof(RegionFrame, cursors) + (root * sizeof(RegionCursor)) + member;
+}
+
+bool possible_unit_stride(const GraphAddress delta) {
+  return delta.units <= 1 && (delta.units == 1 || delta.offsets == 1);
 }
 
 struct ValueOutput {
@@ -59,6 +64,8 @@ private:
   void pointer(unsigned stream);
   void load(Xmm result, unsigned stream);
   void store(GraphValue value, unsigned stream);
+  void store_packed(Xmm source);
+  void store_strided(Xmm source, std::size_t root, bool stride_loaded);
   void input(Xmm result, unsigned slot);
   void emit(const GraphNode &node);
   void binary(const GraphNode &node, Xmm result);
@@ -74,6 +81,7 @@ private:
   NativeRegion &region_;
   x64::Code code_;
   unsigned lanes_;
+  bool inner_vector_;
   std::size_t current_ = 0;
   std::vector<bool> needed_;
   std::vector<std::size_t> last_, locations_, spill_slots_;
@@ -83,7 +91,8 @@ private:
 
 RegionEmitter::RegionEmitter(NativeRegion &region, const unsigned lanes)
     : region_(region),
-      lanes_(lanes),
+      lanes_(region.nested && lanes == 1 ? 4U : lanes),
+      inner_vector_(region.nested && lanes == 1),
       needed_(region.graph.nodes.size()),
       last_(region.graph.nodes.size()),
       locations_(region.graph.nodes.size(), no_value),
@@ -242,14 +251,29 @@ void RegionEmitter::pointer(const unsigned stream) {
 void RegionEmitter::load(const Xmm result, const unsigned stream) {
   const auto root = region_.stream_roots[stream];
   const auto &address = region_.roots[root];
-  const auto &delta = region_.graph.addresses[address.address];
+  const auto &delta = inner_vector_ ? region_.inner_addresses[address.address]
+                                    : region_.graph.addresses[address.address];
   pointer(stream);
-  if (lanes_ == 1 || region_.prefix[address.address] || (delta.units == 0 && delta.offsets == 0)) {
+  if (lanes_ == 1 || (!inner_vector_ && region_.prefix[address.address]) ||
+      (delta.units == 0 && delta.offsets == 0)) {
     code_.vector_broadcast(result, {.base = Reg::r10}, true);
   } else if (lanes_ == 4 && delta.units == 1 && delta.offsets == 0) {
     code_.vector_load(result, {.base = Reg::r10}, false);
   } else {
-    code_.load(Reg::r8, Reg::di, cursor_offset(root, offsetof(RegionCursor, stride)));
+    code_.load(Reg::r8,
+               Reg::di,
+               cursor_offset(root,
+                             inner_vector_ ? offsetof(RegionCursor, inner_stride)
+                                           : offsetof(RegionCursor, stride)));
+    x64::Label strided;
+    x64::Label loaded;
+    if (lanes_ == 4 && possible_unit_stride(delta)) {
+      code_.immediate(group_compare, Reg::r8, 1);
+      code_.jump_if(x64::Branch::not_equal, strided);
+      code_.vector_load(result, {.base = Reg::r10}, false);
+      code_.jump(loaded);
+      code_.bind(strided);
+    }
     code_.mov({.destination = Reg::dx, .source = Reg::r8});
     code_.vector_load_dword(result, {.base = Reg::r10});
     code_.vector_insert_dword(result, {.base = Reg::r10, .index = Reg::dx}, 1);
@@ -263,6 +287,7 @@ void RegionEmitter::load(const Xmm result, const unsigned stream) {
         code_.vector_insert_dword(result, {.base = Reg::r10, .index = Reg::dx}, lane);
       }
     }
+    code_.bind(loaded);
   }
   code_.vector_shift(result, result, VectorShift::left, padding_bits, true);
   code_.vector_shift(result, result, VectorShift::arithmetic, padding_bits, true);
@@ -272,28 +297,62 @@ void RegionEmitter::load(const Xmm result, const unsigned stream) {
 void RegionEmitter::store(const GraphValue value, const unsigned stream) {
   const auto source = read(value);
   const auto root = region_.stream_roots[stream];
-  const auto &delta = region_.graph.addresses[region_.roots[root].address];
+  const auto address = region_.roots[root].address;
+  const auto &delta =
+      inner_vector_ ? region_.inner_addresses[address] : region_.graph.addresses[address];
   pointer(stream);
-  if (lanes_ >= 2 && delta.units == 1 && delta.offsets == 0) {
-    code_.vector_extract(second_scratch, source, 1);
-    code_.vector_pack(first_scratch, source, second_scratch);
-    code_.vector_shift(first_scratch, first_scratch, VectorShift::left, padding_bits, true);
-    code_.vector_shift(first_scratch, first_scratch, VectorShift::right, padding_bits, true);
-    if (lanes_ == 4) {
-      code_.vector_store({.base = Reg::r10}, first_scratch, false);
-    } else {
-      code_.vector_scalar(Reg::ax, first_scratch, 0);
-      code_.store(Reg::r10, 0, Reg::ax);
-    }
-    return;
+  const bool fixed_unit = delta.units == 1 && delta.offsets == 0;
+  const bool probe_unit = lanes_ >= 2 && !fixed_unit && possible_unit_stride(delta);
+  x64::Label strided;
+  x64::Label stored;
+  if (probe_unit) {
+    code_.load(Reg::r8,
+               Reg::di,
+               cursor_offset(root,
+                             inner_vector_ ? offsetof(RegionCursor, inner_stride)
+                                           : offsetof(RegionCursor, stride)));
+    code_.immediate(group_compare, Reg::r8, 1);
+    code_.jump_if(x64::Branch::not_equal, strided);
   }
+  if (lanes_ >= 2 && (fixed_unit || probe_unit)) {
+    store_packed(source);
+    if (fixed_unit) { return; }
+    code_.jump(stored);
+    code_.bind(strided);
+  }
+  store_strided(source, root, probe_unit);
+  code_.bind(stored);
+}
+
+void RegionEmitter::store_packed(const Xmm source) {
+  code_.vector_extract(second_scratch, source, 1);
+  code_.vector_pack(first_scratch, source, second_scratch);
+  code_.vector_shift(first_scratch, first_scratch, VectorShift::left, padding_bits, true);
+  code_.vector_shift(first_scratch, first_scratch, VectorShift::right, padding_bits, true);
+  if (lanes_ == 4) {
+    code_.vector_store({.base = Reg::r10}, first_scratch, false);
+  } else {
+    code_.vector_scalar(Reg::ax, first_scratch, 0);
+    code_.store(Reg::r10, 0, Reg::ax);
+  }
+}
+
+void RegionEmitter::store_strided(const Xmm source,
+                                  const std::size_t root,
+                                  const bool stride_loaded) {
   auto words = source;
   if (lanes_ == 4) {
     code_.vector_shift(first_scratch, source, VectorShift::left, padding_bits, true);
     code_.vector_shift(first_scratch, first_scratch, VectorShift::right, padding_bits, true);
     words = first_scratch;
   }
-  code_.load(Reg::r8, Reg::di, cursor_offset(root, offsetof(RegionCursor, stride)));
+  if (!stride_loaded) {
+    code_.load(Reg::r8,
+               Reg::di,
+               cursor_offset(root,
+                             inner_vector_ ? offsetof(RegionCursor, inner_stride)
+                                           : offsetof(RegionCursor, stride)));
+  }
   code_.mov({.destination = Reg::dx, .source = Reg::r8});
   for (unsigned lane = 0; lane < lanes_; ++lane) {
     if (lane == 2) { code_.vector_extract(second_scratch, words, 1); }
@@ -427,18 +486,24 @@ void RegionEmitter::emit(const GraphNode &node) {
 }
 
 void RegionEmitter::publish(const GraphValue value, const ValueOutput output) {
-  const auto offset = output.offset;
-  const auto lane = output.lane;
   if (!value.valid()) { return; }
-  inputs_ = {value.node, no_value};
-  const auto source = read(value);
-  auto selected = source;
-  if (lane >= 2) {
-    code_.vector_extract(second_scratch, source, 1);
-    selected = second_scratch;
+  const auto lane = output.lane;
+  const auto location = locations_[value.node];
+  if (location == no_value) {
+    const auto slot = spill_slots_[value.node];
+    if (slot == no_value) { throw std::logic_error("Undefined published graph value"); }
+    code_.load(Reg::ax, Reg::di, offsetof(RegionFrame, spills));
+    code_.load(Reg::ax, Reg::ax, (slot * sizeof(RegionVector)) + (lane * sizeof(std::uint64_t)));
+  } else {
+    const auto source = static_cast<Xmm>(location);
+    auto selected = source;
+    if (lane >= 2) {
+      code_.vector_extract(second_scratch, source, 1);
+      selected = second_scratch;
+    }
+    code_.vector_scalar(Reg::ax, selected, lane & 1U);
   }
-  code_.vector_scalar(Reg::ax, selected, lane & 1U);
-  code_.store(Reg::di, offset, Reg::ax);
+  code_.store(Reg::di, output.offset, Reg::ax);
 }
 
 void RegionEmitter::outputs(const unsigned lane, const bool preceding) {
@@ -457,7 +522,8 @@ bool RegionEmitter::advance_known(const std::size_t root, const bool inner) {
   const auto address = region_.roots[root].address;
   const auto &delta = inner ? region_.inner_addresses[address] : region_.graph.addresses[address];
   if (delta.offsets != 0 || (!inner && region_.nested)) { return false; }
-  const auto bytes = std::uint64_t{delta.units} * sizeof(Word) * (inner ? 1 : lanes_);
+  const auto bytes =
+      std::uint64_t{delta.units} * sizeof(Word) * (inner && !inner_vector_ ? 1U : lanes_);
   if (bytes == 0) { return true; }
   if (root < root_registers.size()) {
     code_.immediate(group_add, root_registers[root], static_cast<Word>(bytes));
@@ -478,6 +544,7 @@ void RegionEmitter::advance(const bool inner) {
     const auto member =
         inner ? offsetof(RegionCursor, inner_step_bytes) : offsetof(RegionCursor, step_bytes);
     code_.load(Reg::ax, Reg::di, cursor_offset(root, member));
+    if (inner && inner_vector_) { code_.shift(4, Reg::ax, 2); }
     if (root < root_registers.size()) {
       code_.binary(op_add, {.destination = root_registers[root], .source = Reg::ax});
     } else {
@@ -516,9 +583,8 @@ std::vector<std::uint8_t> RegionEmitter::generate() {
   x64::Label inner;
   x64::Label complete;
   code_.bind(outer);
-  if (region_.nested) {
+  if (region_.nested && !inner_vector_) {
     x64::Label continuing;
-    constexpr unsigned group_compare = 7;
     code_.immediate(group_compare, Reg::si, lanes_, Width::dword);
     code_.jump_if(x64::Branch::not_equal, continuing);
     code_.vector_store({.base = Reg::di, .offset = offsetof(RegionFrame, preceding_growth)},
@@ -527,7 +593,7 @@ std::vector<std::uint8_t> RegionEmitter::generate() {
                        limit_register);
     code_.bind(continuing);
   }
-  code_.constant(Reg::cx, region_.inner_iterations);
+  code_.constant(Reg::cx, region_.inner_iterations / (inner_vector_ ? lanes_ : 1U));
   code_.bind(inner);
   for (current_ = 0; current_ < region_.graph.nodes.size(); ++current_) {
     for (auto &node : owners_) {
@@ -539,11 +605,23 @@ std::vector<std::uint8_t> RegionEmitter::generate() {
     if (needed_[current_]) { emit(region_.graph.nodes[current_]); }
   }
   advance(true);
-  if (region_.inner_iterations > 1) {
+  if (region_.inner_iterations > (inner_vector_ ? lanes_ : 1U)) {
     code_.immediate(group_subtract, Reg::cx, 1, Width::dword);
     code_.jump_if(x64::Branch::not_equal, inner);
   }
-  code_.immediate(group_subtract, Reg::si, lanes_, Width::dword);
+  if (inner_vector_) {
+    // The final parent's inner DO saves the previous parent's final status.
+    x64::Label continuing;
+    code_.immediate(group_compare, Reg::si, 2, Width::dword);
+    code_.jump_if(x64::Branch::not_equal, continuing);
+    code_.vector_store({.base = Reg::di, .offset = offsetof(RegionFrame, preceding_growth)},
+                       growth_register);
+    code_.vector_store({.base = Reg::di, .offset = offsetof(RegionFrame, preceding_limits)},
+                       limit_register);
+    outputs(lanes_ - 1, true);
+    code_.bind(continuing);
+  }
+  code_.immediate(group_subtract, Reg::si, inner_vector_ ? 1U : lanes_, Width::dword);
   code_.jump_if(x64::Branch::equal, complete);
   advance(false);
   code_.jump(outer);
@@ -557,7 +635,7 @@ std::vector<std::uint8_t> RegionEmitter::generate() {
     }
   }
   outputs(lanes_ - 1, false);
-  if (region_.nested) { outputs(lanes_ - 2, true); }
+  if (region_.nested && !inner_vector_) { outputs(lanes_ - 2, true); }
   code_.vector_store({.base = Reg::di, .offset = offsetof(RegionFrame, growth)}, growth_register);
   code_.vector_store({.base = Reg::di, .offset = offsetof(RegionFrame, limits)}, limit_register);
   for (auto index = saved; index != 0; --index) { pop(root_registers[index - 1]); }

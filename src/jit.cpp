@@ -73,9 +73,10 @@ std::unique_ptr<Block> Jit::Impl::compile() {
     const auto full_width = 1U << (region.native.size() - 1);
     for (unsigned index = 0; index < region.native.size(); ++index) {
       const unsigned lanes = 1U << index;
-      // Long child loops amortize gathers when the parent cohort fills SIMD.
-      if (region.nested &&
-          (lanes == 1 || (lanes < full_width && region.inner_iterations > full_width))) {
+      // Slot zero batches child columns; the other slots batch parents.
+      if (region.nested && ((lanes == 1 && (region.inner_iterations < full_width ||
+                                            region.inner_iterations % full_width != 0)) ||
+                            (lanes == 2 && region.inner_iterations > full_width))) {
         continue;
       }
       region.native[index] = arena.append(emit_region(region, lanes));

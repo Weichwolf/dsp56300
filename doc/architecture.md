@@ -191,6 +191,17 @@ saved before the last iteration. Admission must fit the execution grant and
 preserve every event and partial-execution boundary; vector width and unrolling
 choices do not limit translation coverage.
 
+Retain both useful SIMD axes of a loop nest. Batching neighboring child iterations
+permits packed memory transfers; batching parents preserves sequential feedback
+inside each child loop. Admit the child axis only after proving independence in
+both axes over the physical mappings, including in-place and shifted aliases.
+An unsafe child axis keeps the qualified parent kernel. Prefer the parent axis
+when it is available and changing axes saves no memory work. Preserve the status saved
+by the final inner DO from the preceding parent's final child, including sticky
+events and spilled values. Publishing a pinned value must not change allocation
+across a conditional native edge. A unit-stride transfer may use a packed load or
+store only after proving its static step or checking the admitted dynamic step.
+
 Use measured SSE/AVX register packing where it reduces native instructions and
 spills. Keep accumulators and hot AGU state resident. SIMD is an implementation
 tool, not permission to change fixed-point results or operation order. Lower the

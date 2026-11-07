@@ -383,10 +383,13 @@ void nested_finish(Registers &state, const Word last) {
 
 using NestedData = std::array<Word, 4096>;
 
+enum class NestedShape : unsigned char { reset, independent, feedback, strided };
+
 struct NestedModel {
   Registers state;
   NestedData x;
   NestedData y;
+  NestedShape shape = NestedShape::reset;
 };
 
 Word nested_step(NestedModel &model, const Word child) {
@@ -395,7 +398,10 @@ Word nested_step(NestedModel &model, const Word child) {
   Word words = 1;
   Word cycles = 1;
   if (offset == 0 || offset == 2) {
-    state.r[offset == 0 ? 0 : 4] = input_base;
+    constexpr std::array inputs{0U, 4U};
+    constexpr std::array unused{6U, 7U};
+    const auto index = offset / 2;
+    state.r[model.shape != NestedShape::reset ? unused[index] : inputs[index]] = input_base;
     words = cycles = 2;
   } else if (offset == 4) {
     const auto push = [&](const Word high, const Word low) {
@@ -418,8 +424,10 @@ Word nested_step(NestedModel &model, const Word child) {
     const auto old = state;
     sequence_model::alu(state, old, offset == 7 ? product : rounding);
   } else if (offset == 9) {
-    model.x[state.r[1]++] = register_model::bus_word(state, state.a);
-    model.y[state.r[5]++] = register_model::bus_word(state, state.b);
+    model.x[state.r[1]] = register_model::bus_word(state, state.a);
+    model.y[state.r[5]] = register_model::bus_word(state, state.b);
+    state.r[1] += model.shape == NestedShape::strided ? state.n[1] : 1U;
+    state.r[5] += model.shape == NestedShape::strided ? state.n[5] : 1U;
   } else {
     constexpr std::array<unsigned, 4> post{0, 4, 1, 5};
     const auto index = post.at(offset - 10);
@@ -431,21 +439,26 @@ Word nested_step(NestedModel &model, const Word child) {
   return cycles;
 }
 
-void nested_case(const Word child, const Point point) {
+void nested_case(const Word child,
+                 const Point point,
+                 const NestedShape shape = NestedShape::reset) {
   constexpr Word immediate = static_cast<Word>(isa::Opcode::move_long) | (6U << 11) | (4U << 8) |
                              (Word{1} << 14) | (Word{1} << 15);
   constexpr Word low_count_mask = 255;
-  constexpr Word r0 = 16;
-  constexpr Word r4 = 20;
+  const Word setup_x = shape != NestedShape::reset ? 22U : 16U;
+  const Word setup_y = shape != NestedShape::reset ? 23U : 20U;
   constexpr unsigned high_mask = 24;
   constexpr unsigned high_shift = 17;
   const auto address_word = [](const Word reg) {
     return immediate | ((reg & 7U) << 16) | ((reg & high_mask) << high_shift);
   };
   const Word update = static_cast<Word>(isa::Opcode::move_address_update) | (1U << 11);
-  const std::array code{address_word(r0),
+  const Word store = shape == NestedShape::strided
+                         ? (body[3] & ~postincrements) | (1U << 11) | (1U << 20)
+                         : body[3];
+  const std::array code{address_word(setup_x),
                         input_base,
-                        address_word(r4),
+                        address_word(setup_y),
                         input_base,
                         static_cast<Word>(isa::Opcode::do_immediate) |
                             ((child & low_count_mask) << 8) | (child >> 8),
@@ -453,7 +466,7 @@ void nested_case(const Word child, const Point point) {
                         (body[0] & ~postincrements) | (1U << 11) | (1U << 20),
                         product,
                         rounding,
-                        body[3],
+                        store,
                         update,
                         update | (4U << 8),
                         update | (1U << 8),
@@ -475,9 +488,14 @@ void nested_case(const Word child, const Point point) {
   initial.lc = point.count;
   initial.sp = point.pointer;
   initial.sc = 2;
-  initial.r[1] = initial.r[5] = output_base;
+  initial.r[1] = initial.r[5] = point.output;
   initial.n.fill(1);
-  initial.n[4] = 2;
+  initial.n[4] = shape == NestedShape::feedback ? 1U : 2U;
+  if (shape == NestedShape::strided) {
+    for (const unsigned index : {0U, 1U, 4U, 5U}) { initial.n[index] = 2; }
+  }
+  if (shape != NestedShape::reset) { initial.r[0] = initial.r[4] = input_base; }
+  if (shape == NestedShape::feedback) { initial.r[1] = initial.r[5] = input_base + 1; }
   initial.stack[point.pointer % stack_entries] = std::uint64_t{start} << word_bits;
   initial.stack[(point.pointer + pointer_mask) % stack_entries] =
       (std::uint64_t{previous_end} << word_bits) | previous_count;
@@ -491,7 +509,7 @@ void nested_case(const Word child, const Point point) {
       if (child > 8 && position > 6 && position < parent_size - 6 && position != parent_size / 2) {
         continue;
       }
-      NestedModel expected{.state = initial, .x = seed_x, .y = seed_y};
+      NestedModel expected{.state = initial, .x = seed_x, .y = seed_y, .shape = shape};
       Word cycles = 0;
       for (Word index = 0; index < prefix; ++index) { cycles += nested_step(expected, child); }
       x = seed_x;
@@ -517,10 +535,12 @@ void nested_case(const Word child, const Point point) {
 
 void nested_cases() {
   for (const Word child : {1U, 2U, 4U, 8U, 16U, 32U, 64U, 128U, 256U, 512U}) {
-    for (const Word parents : {2U, 4U}) {
+    for (const Word parents : {2U, 3U, 4U, 5U}) {
       for (const Word pointer : {0U, 14U, pointer_mask}) {
         for (const Word mode : {0U, mode_rm}) {
-          nested_case(child, {.count = parents, .mode = mode, .pointer = pointer});
+          const Word output = (parents & 1U) != 0 ? 1280U : output_base;
+          nested_case(child,
+                      {.count = parents, .mode = mode, .pointer = pointer, .output = output});
         }
       }
     }
@@ -528,7 +548,24 @@ void nested_cases() {
 }
 
 void cases() {
+  constexpr Word advancing_output_base = 1536;
   nested_cases();
+  for (const auto shape : {NestedShape::independent, NestedShape::feedback, NestedShape::strided}) {
+    for (const Word child : {4U, 8U, 16U, 64U, 128U}) {
+      for (const Word parents : {2U, 3U, 4U, 5U}) {
+        for (const Word pointer : {0U, pointer_mask}) {
+          for (const Word mode : {0U, mode_rm}) {
+            nested_case(child,
+                        {.count = parents,
+                         .mode = mode,
+                         .pointer = pointer,
+                         .output = advancing_output_base},
+                        shape);
+          }
+        }
+      }
+    }
+  }
   tail_guard(false);
   tail_guard(true);
   root_spills();
