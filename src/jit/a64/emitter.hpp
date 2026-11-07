@@ -132,6 +132,10 @@ private:
   void multiple_address(const BlockInstruction &operation);
   void source(Reg value, unsigned selector, bool destination_b);
   void product_word(Reg value, unsigned selector);
+  [[nodiscard]] bool product(const BlockInstruction &operation);
+  void ordinary_product(const BlockInstruction &operation);
+  void mixed_product(const BlockInstruction &operation);
+  void product_complete(const BlockInstruction &operation);
   [[nodiscard]] bool integer(const BlockInstruction &operation);
   void unit(const BlockInstruction &operation);
   void compare_unsigned(const BlockInstruction &operation);

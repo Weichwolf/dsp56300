@@ -47,6 +47,11 @@ the raw quotient carry and unaffected CCR bits across SM limiting. NORM supports
 flags-selected shifts and compatibility-mode exponent wrapping; NORMF checks
 signed register counts and bypasses SM limiting. Native state matrices and
 mixed instruction sequences check these effects and exact budget/fault exits.
+Extended product emission covers immediate and power coefficients, signed/unsigned
+mixed products and double-precision accumulation. Native matrices check every
+source pair, product variant, scale, rounding mode and SM saturation/bypass rule,
+including signed discarded fractions, rounded overflow and precise reserved-field
+faults. Mixed product sequences preserve current accumulator inputs and budgets.
 Other instruction families and complete owner integration remain open.
 Complete ARM64 Core execution and qualification remain in progress. The production
 Core still reports an unsupported host on ARM64.

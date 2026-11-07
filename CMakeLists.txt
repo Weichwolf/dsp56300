@@ -48,7 +48,7 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
     src/jit/a64/memory.cpp src/jit/a64/memory_windows.cpp src/jit/a64/bus.cpp
     src/jit/a64/memory_move.cpp src/jit/a64/peripheral.cpp src/jit/a64/long_move.cpp
     src/jit/a64/paired_move.cpp src/jit/a64/mixed_move.cpp src/jit/a64/integer.cpp
-    src/jit/a64/iteration.cpp)
+    src/jit/a64/iteration.cpp src/jit/a64/products.cpp)
 endif()
 add_library(dsp56300_core STATIC
   src/core.cpp src/captured.cpp src/repeat.cpp src/memory_windows.cpp src/external_memory.cpp src/state.cpp
@@ -196,6 +196,10 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
     target_include_directories(dsp56300_a64_iteration_test PRIVATE src src/jit test/support)
     target_link_libraries(dsp56300_a64_iteration_test PRIVATE dsp56300::core)
     add_test(NAME a64-iteration-semantics COMMAND dsp56300_a64_iteration_test)
+    add_executable(dsp56300_a64_product_test test/jit/a64_product_test.cpp)
+    target_include_directories(dsp56300_a64_product_test PRIVATE src src/jit test/support)
+    target_link_libraries(dsp56300_a64_product_test PRIVATE dsp56300::core)
+    add_test(NAME a64-product-semantics COMMAND dsp56300_a64_product_test)
   endif()
   add_executable(dsp56300_a64_code_test test/jit/a64_code_test.cpp)
   target_include_directories(dsp56300_a64_code_test PRIVATE src)
