@@ -50,7 +50,7 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
     src/jit/a64/paired_move.cpp src/jit/a64/mixed_move.cpp src/jit/a64/integer.cpp
     src/jit/a64/iteration.cpp src/jit/a64/products.cpp src/jit/a64/bit_fields.cpp
     src/jit/a64/viterbi.cpp src/jit/a64/bits.cpp src/jit/a64/bit_memory.cpp
-    src/jit/a64/loop.cpp src/jit/a64/repeat.cpp src/jit/a64/events.cpp src/jit/a64/cache.cpp)
+    src/jit/a64/loop.cpp src/jit/a64/repeat.cpp src/jit/a64/events.cpp src/jit/a64/cache.cpp src/jit/a64/vector.cpp)
 endif()
 add_library(dsp56300_core STATIC
   src/core.cpp src/captured.cpp src/repeat.cpp src/memory_windows.cpp src/external_memory.cpp src/state.cpp
@@ -222,6 +222,10 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
     target_include_directories(dsp56300_a64_loop_test PRIVATE src src/jit test/support)
     target_link_libraries(dsp56300_a64_loop_test PRIVATE dsp56300::core)
     add_test(NAME a64-loop-semantics COMMAND dsp56300_a64_loop_test)
+    add_executable(dsp56300_a64_vector_test test/jit/a64_vector_test.cpp)
+    target_include_directories(dsp56300_a64_vector_test PRIVATE src src/jit test/support)
+    target_link_libraries(dsp56300_a64_vector_test PRIVATE dsp56300::core dsp56300_codegen_observer)
+    add_test(NAME a64-vector-semantics COMMAND dsp56300_a64_vector_test)
     add_executable(dsp56300_a64_factory_test test/jit/a64_factory_test.cpp)
     target_include_directories(dsp56300_a64_factory_test PRIVATE src src/jit test/support)
     target_link_libraries(dsp56300_a64_factory_test PRIVATE dsp56300::core dsp56300_codegen_observer)

@@ -36,6 +36,12 @@ std::vector<std::uint8_t> emit_repeat(const BlockInstruction &operation,
   a64::Emitter emitter;
   return emitter.generate_repeat(operation);
 }
+
+std::vector<std::uint8_t> emit_vector(const BlockInstruction &operation) {
+  a64::Emitter emitter;
+  return emitter.generate_vector(operation);
+}
+
 #else
 std::vector<std::uint8_t> emit_block(const std::span<const BlockInstruction> operations,
                                      const JitRuntime &runtime,

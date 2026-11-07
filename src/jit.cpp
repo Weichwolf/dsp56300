@@ -39,7 +39,7 @@ struct Mapping {
   NativeTable table{3};
 };
 
-enum class EntryKind : std::uint8_t { ordinary, repeat };
+enum class EntryKind : std::uint8_t { ordinary, repeat, vector };
 
 struct Block {
   std::vector<BlockInstruction> operations;
@@ -358,5 +358,36 @@ std::uint32_t Jit::run_captured(BlockInstruction operation) {
   }
   return self.enter(*found->second, 1);
 }
+
+#if defined(__aarch64__)
+std::uint32_t Jit::run_vector(const BlockInstruction operation) {
+  auto &self = *impl_;
+  if (self.invalidated) {
+    self.blocks.clear();
+    self.mappings.clear();
+    self.catalog.clear();
+    self.current = nullptr;
+    self.invalidated = false;
+  }
+  self.exit_requested = false;
+  constexpr auto vector_tag = std::uint64_t{1} << 61;
+  const auto key =
+      (translation_key(self.cpu.reg) & ~std::uint64_t{word_mask}) | operation.pc | vector_tag;
+  auto found = self.blocks.find(key);
+  if (found == self.blocks.end() ||
+      found->second->operations.front().instruction != operation.instruction) {
+    auto *block = self.reuse(std::span(&operation, 1), EntryKind::vector);
+    if (block == nullptr) {
+      auto created = std::make_unique<Block>();
+      created->kind = EntryKind::vector;
+      created->operations.push_back(operation);
+      created->entry = self.arena.append(emit_vector(operation));
+      block = self.retain(std::move(created));
+    }
+    found = self.blocks.insert_or_assign(key, block).first;
+  }
+  return self.enter(*found->second, 1);
+}
+#endif
 
 } // namespace dsp56300::detail

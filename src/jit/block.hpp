@@ -29,6 +29,9 @@ emit_block(std::span<const BlockInstruction> operations,
 emit_repeat(const BlockInstruction &operation,
             const JitRuntime &runtime,
             const std::array<Word, agu_registers> &modifiers);
+#if defined(__aarch64__)
+[[nodiscard]] std::vector<std::uint8_t> emit_vector(const BlockInstruction &operation);
+#endif
 [[nodiscard]] std::uint32_t
 enter_block(const void *entry, Cpu &cpu, NativeContext &context) noexcept;
 [[nodiscard]] std::uint32_t enter_blocks(const void *entry,

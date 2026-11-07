@@ -83,6 +83,8 @@ public:
 
   [[nodiscard]] const detail::Cpu &cpu() const { return cpu_; }
 
+  [[nodiscard]] const detail::VectorState &vector() const { return vector_; }
+
   Word run(const a64::Program &program, const Word budget) {
     require(context_.failure.kind == FaultKind::none, "A failed native run cannot be resumed");
     context_.budget = budget;

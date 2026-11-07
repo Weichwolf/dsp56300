@@ -19,7 +19,7 @@
 #include <vector>
 
 namespace dsp56300::test::a64 {
-enum class Emission : std::uint8_t { block, repeat };
+enum class Emission : std::uint8_t { block, repeat, vector };
 
 struct Instruction {
   Word opcode = 0, extension = 0, pc = start, mode = 0;
@@ -54,11 +54,15 @@ public:
                             .loop_address = input.loop_address});
     }
     detail::a64::Emitter emitter;
-    if (mode == Emission::repeat) {
-      require(operations.size() == 1, "A repeat entry has one complete logical body");
+    if (mode != Emission::block) {
+      require(operations.size() == 1, "A specialized entry has one complete logical instruction");
     }
-    entry_ = arena_.append(mode == Emission::repeat ? emitter.generate_repeat(operations.front())
-                                                    : emitter.generate(operations));
+    if (mode == Emission::vector) {
+      entry_ = arena_.append(emitter.generate_vector(operations.front()));
+    } else {
+      entry_ = arena_.append(mode == Emission::repeat ? emitter.generate_repeat(operations.front())
+                                                      : emitter.generate(operations));
+    }
   }
 
   [[nodiscard]] const void *entry() const noexcept { return entry_; }

@@ -78,7 +78,13 @@ void Emitter::retire(const BlockInstruction &operation) {
 }
 
 void Emitter::finish_instruction(const BlockInstruction &operation) {
-  if (repeat_mode_) {
+  if (entry_ == Entry::vector) {
+    finish_vector(operation);
+    retire(operation);
+    code_.branch(done_);
+    return;
+  }
+  if (entry_ == Entry::repeat) {
     finish_repeat(operation);
     return;
   }
@@ -89,26 +95,36 @@ void Emitter::finish_instruction(const BlockInstruction &operation) {
   retire(operation);
 }
 
+bool Emitter::prepare_instruction(const BlockInstruction &operation) {
+  if (entry_ == Entry::repeat) { code_.bind(repeat_header_); }
+  code_.branch_zero_far(remaining, done_);
+  if (entry_ == Entry::repeat) {
+    code_.load(Reg::x17, cpu, offsetof(Cpu, repeat_remaining));
+    code_.branch_zero_far(Reg::x17, done_);
+    if (operation.instruction.words != 1 || !repeatable(operation.instruction.operation)) {
+      code_.constant(Reg::x0, operation.instruction.opcode);
+      fault(operation, FaultKind::invalid_instruction, Reg::x0);
+      return false;
+    }
+  }
+  if (entry_ == Entry::vector) { return prepare_vector(operation); }
+  code_.constant(pc, (operation.pc + operation.instruction.words) & word_mask);
+  code_.store(Reg::zr, cpu, offsetof(Cpu, interrupt_inhibited), Access::byte);
+  return true;
+}
+
 std::vector<std::uint8_t> Emitter::generate(const std::span<const BlockInstruction> operations) {
   if (operations.empty()) { throw std::invalid_argument("Cannot emit an empty A64 DSP block"); }
   begin();
   for (const auto &item : operations) {
-    if (repeat_mode_) { code_.bind(repeat_header_); }
-    code_.branch_zero_far(remaining, done_);
-    if (repeat_mode_) {
-      code_.load(Reg::x17, cpu, offsetof(Cpu, repeat_remaining));
-      code_.branch_zero_far(Reg::x17, done_);
-      if (item.instruction.words != 1 || !repeatable(item.instruction.operation)) {
-        code_.constant(Reg::x0, item.instruction.opcode);
-        fault(item, FaultKind::invalid_instruction, Reg::x0);
-        continue;
-      }
-    }
-    code_.constant(pc, (item.pc + item.instruction.words) & word_mask);
-    code_.store(Reg::zr, cpu, offsetof(Cpu, interrupt_inhibited), Access::byte);
+    if (!prepare_instruction(item)) { continue; }
     snapshot();
     flow_ = Flow::sequential;
-    operation(item);
+    if (entry_ == Entry::vector) {
+      vector_operation(item);
+    } else {
+      operation(item);
+    }
     finish_instruction(item);
     code_.load(Reg::x17, context, offsetof(NativeContext, boundary), Access::byte);
     code_.branch_zero_far(Reg::x17, done_, Width::w32, true);
@@ -133,7 +149,12 @@ std::vector<std::uint8_t> Emitter::generate(const std::span<const BlockInstructi
 }
 
 std::vector<std::uint8_t> Emitter::generate_repeat(const BlockInstruction &operation) {
-  repeat_mode_ = true;
+  entry_ = Entry::repeat;
+  return generate(std::span<const BlockInstruction>(&operation, 1));
+}
+
+std::vector<std::uint8_t> Emitter::generate_vector(const BlockInstruction &operation) {
+  entry_ = Entry::vector;
   return generate(std::span<const BlockInstruction>(&operation, 1));
 }
 }

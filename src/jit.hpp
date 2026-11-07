@@ -118,6 +118,9 @@ public:
   [[nodiscard]] std::uint32_t run(std::uint32_t budget);
   [[nodiscard]] std::uint32_t run_repeat(BlockInstruction operation, std::uint32_t budget);
   [[nodiscard]] std::uint32_t run_captured(BlockInstruction operation);
+#if defined(__aarch64__)
+  [[nodiscard]] std::uint32_t run_vector(BlockInstruction operation);
+#endif
   [[nodiscard]] bool exit_requested() const noexcept;
   void request_yield() noexcept;
   void invalidate() noexcept;

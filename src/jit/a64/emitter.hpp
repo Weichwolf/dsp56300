@@ -71,8 +71,15 @@ class Emitter {
 public:
   [[nodiscard]] std::vector<std::uint8_t> generate(std::span<const BlockInstruction> operations);
   [[nodiscard]] std::vector<std::uint8_t> generate_repeat(const BlockInstruction &operation);
+  [[nodiscard]] std::vector<std::uint8_t> generate_vector(const BlockInstruction &operation);
 
 private:
+  enum class Entry : std::uint8_t { block, repeat, vector };
+  [[nodiscard]] bool prepare_instruction(const BlockInstruction &operation);
+  [[nodiscard]] bool prepare_vector(const BlockInstruction &operation);
+  void vector_operation(const BlockInstruction &operation);
+  void finish_vector(const BlockInstruction &operation);
+  void call_vector(const BlockInstruction &operation);
   void begin();
   void snapshot();
   void publish();
@@ -203,6 +210,6 @@ private:
   Label repeat_header_;
   Flow flow_ = Flow::sequential;
   Label *failure_ = nullptr;
-  bool repeat_mode_ = false;
+  Entry entry_ = Entry::block;
 };
 }

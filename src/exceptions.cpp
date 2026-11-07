@@ -4,8 +4,8 @@
 #include "core_impl.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
-#include "fields.hpp"
 #include "instruction.hpp"
+#include "vector_instruction.hpp"
 
 #include <array>
 
@@ -16,27 +16,7 @@ namespace {
 constexpr Word vector_base_mask = 0xffff00, illegal_vector = 4, trap_vector = 8;
 constexpr Word short_address_mask = 0xfff, priority_mask = 0x300;
 constexpr unsigned maximum_level = 3, priority_shift = 8;
-constexpr Word transfer_direction = Word{1} << 15;
 
-bool permitted_fast_move(const Instruction &decoded) {
-  Word reg = 0;
-  bool load = false;
-  if (decoded.operation == Operation::move_program_effective ||
-      decoded.operation == Operation::move_program_short) {
-    reg = decoded.opcode & six_bit_mask;
-    load = (decoded.opcode & transfer_direction) != 0;
-  } else if (decoded.operation == Operation::move_peripheral_register) {
-    reg = (decoded.opcode >> 8) & six_bit_mask;
-    // MOVEP W writes the peripheral; MOVEM W reads program memory.
-    load = (decoded.opcode & transfer_direction) == 0;
-  } else {
-    return false;
-  }
-  // FM A.3.7: SSH reads pop; these control destinations are prohibited in fast vectors.
-  if (!load) { return reg != ssh_register; }
-  return reg != la_register && reg != lc_register && reg != sp_register && reg != sc_register &&
-         reg != ssh_register && reg != ssl_register;
-}
 }
 
 void Core::Impl::execute_exception(const Instruction &decoded) {
@@ -110,12 +90,7 @@ void Core::Impl::step_vector() {
       decoded.operation == Operation::call_effective) {
     call_vector(decoded);
   } else {
-    if (decoded.operation != Operation::parallel && decoded.operation != Operation::nop &&
-        decoded.operation != Operation::move_peripheral_memory &&
-        decoded.operation != Operation::move_peripheral_program && !permitted_fast_move(decoded) &&
-        decoded.operation != Operation::reset_peripherals &&
-        decoded.operation != Operation::debug &&
-        decoded.operation != Operation::conditional_debug) {
+    if (!permitted_vector_instruction(decoded)) {
       fail(FaultKind::unsupported_instruction, Space::program, current_pc, decoded.opcode);
       return;
     }
