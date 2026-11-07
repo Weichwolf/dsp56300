@@ -9,6 +9,18 @@
 #include <cstdint>
 
 namespace dsp56300 {
+void Core::Impl::jit_access(void *const owner, detail::NativeAccess &access) noexcept {
+  auto &self = *static_cast<Impl *>(owner);
+  self.current_pc = access.pc;
+  if (access.action == detail::BusAction::read) {
+    access.value = self.read_memory(access.space, access.address);
+  } else {
+    self.write_memory(access.space, access.address, access.value);
+  }
+  self.synchronize_program_view();
+  access.failure = self.fault;
+}
+
 std::uint32_t Core::Impl::jit_execute(void *const owner,
                                       const detail::BlockInstruction *const operation) noexcept {
   auto &self = *static_cast<Impl *>(owner);

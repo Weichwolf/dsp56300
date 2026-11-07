@@ -44,6 +44,38 @@ struct JitRuntime {
 
 enum class NativeBoundary : std::uint8_t { none, owner, context };
 
+enum class BusAction : std::uint8_t { read, write };
+
+struct NativeAccess {
+  Fault failure{};
+  Word address = 0, value = 0, pc = 0;
+  Space space = Space::program;
+  BusAction action = BusAction::read;
+};
+
+struct NativeWindow {
+  Word address = 0;
+  std::size_t words = 0;
+  Word *data = nullptr;
+  std::uint8_t *known = nullptr;
+  bool writable = false, aliases_program = false;
+};
+
+struct NativeWindows {
+  const NativeWindow *data = nullptr;
+  std::size_t count = 0;
+};
+
+struct NativeBus {
+  JitMemory program{};
+  std::array<NativeWindows, 2> windows{};
+  CacheRegion cache{};
+  void *owner = nullptr;
+  void (*access)(void *, NativeAccess &) noexcept = nullptr;
+  Fault *failure = nullptr;
+  bool external = false;
+};
+
 struct NativeContext {
   JitRuntime runtime;
   bool *exit_requested = nullptr;
@@ -52,11 +84,13 @@ struct NativeContext {
   // Helpers return to the owner; retained loop-context changes may stay native.
   NativeBoundary boundary = NativeBoundary::none;
   Fault failure{};
+  NativeBus bus{};
+  bool program_written = false;
 };
 
 class Jit {
 public:
-  Jit(Cpu &cpu, std::span<const Word> program, JitRuntime runtime);
+  Jit(Cpu &cpu, std::span<const Word> program, JitRuntime runtime, NativeBus bus = {});
   ~Jit();
   Jit(const Jit &) = delete;
   Jit &operator=(const Jit &) = delete;
@@ -67,7 +101,7 @@ public:
   [[nodiscard]] bool exit_requested() const noexcept;
   void request_yield() noexcept;
   void invalidate() noexcept;
-  void bind_windows(std::array<std::span<const MemoryWindow>, 2> windows) noexcept;
+  [[nodiscard]] bool bind_windows(std::array<std::span<const MemoryWindow>, 2> windows) noexcept;
   void reset();
 
 private:

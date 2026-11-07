@@ -27,7 +27,11 @@ bool Core::Impl::bind_memory_windows() {
       end = window.address + static_cast<Word>(window.words.size());
     }
   }
-  jit->bind_windows(windows);
+  if (!jit->bind_windows(windows)) {
+    current_pc = cpu.reg.pc;
+    fail(FaultKind::host_event, Space::program, current_pc);
+    return false;
+  }
   windows_bound = true;
   return true;
 }

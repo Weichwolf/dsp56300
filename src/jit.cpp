@@ -20,6 +20,10 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#if defined(__aarch64__)
+#include <cstddef>
+#include <exception>
+#endif
 #if defined(__x86_64__) && defined(__linux__)
 #include "mac_batch.hpp"
 #endif
@@ -41,15 +45,19 @@ struct Block {
 }
 
 struct Jit::Impl {
-  Impl(Cpu &state, const std::span<const Word> supplied, const JitRuntime runtime)
+  Impl(Cpu &state,
+       const std::span<const Word> supplied,
+       const JitRuntime runtime,
+       const NativeBus bus)
       : cpu(state),
         program(supplied),
-        context{.runtime = runtime, .exit_requested = &exit_requested} {}
+        context{.runtime = runtime, .exit_requested = &exit_requested, .bus = bus} {}
 
   [[nodiscard]] std::unique_ptr<Block> compile();
   [[nodiscard]] Block *retain(std::unique_ptr<Block> block);
   [[nodiscard]] const void *prepare();
   [[nodiscard]] std::uint32_t enter(const Block &block, Word budget);
+  [[nodiscard]] std::uint32_t finish(std::uint32_t retired);
   Cpu &cpu;
   std::span<const Word> program;
   std::unordered_map<std::uint64_t, Block *> blocks;
@@ -62,6 +70,7 @@ struct Jit::Impl {
   NativeContext context;
   ExecutableArena arena;
   std::vector<std::unique_ptr<Block>> storage;
+  std::array<std::vector<NativeWindow>, 2> windows;
 };
 
 std::unique_ptr<Block> Jit::Impl::compile() {
@@ -89,8 +98,11 @@ std::unique_ptr<Block> Jit::Impl::compile() {
   return block;
 }
 
-Jit::Jit(Cpu &cpu, const std::span<const Word> program, const JitRuntime runtime)
-    : impl_(std::make_unique<Impl>(cpu, program, runtime)) {}
+Jit::Jit(Cpu &cpu,
+         const std::span<const Word> program,
+         const JitRuntime runtime,
+         const NativeBus bus)
+    : impl_(std::make_unique<Impl>(cpu, program, runtime, bus)) {}
 
 Jit::~Jit() = default;
 
@@ -120,9 +132,32 @@ void Jit::invalidate() noexcept {
   }
 }
 
-void Jit::bind_windows(const std::array<std::span<const MemoryWindow>, 2> windows) noexcept {
+bool Jit::bind_windows(const std::array<std::span<const MemoryWindow>, 2> windows) noexcept {
+#if defined(__aarch64__)
+  std::array<std::vector<NativeWindow>, 2> prepared;
+  try {
+    for (std::size_t bank = 0; bank < windows.size(); ++bank) {
+      auto &native = prepared[bank];
+      native.reserve(windows[bank].size());
+      for (const auto &window : windows[bank]) {
+        native.push_back({.address = window.address,
+                          .words = window.words.size(),
+                          .data = window.words.data(),
+                          .known = window.known.empty() ? nullptr : window.known.data(),
+                          .writable = window.writable,
+                          .aliases_program = window.aliases_program});
+      }
+    }
+  } catch (const std::exception &) { return false; }
+  impl_->windows.swap(prepared);
+  for (std::size_t bank = 0; bank < windows.size(); ++bank) {
+    const auto &native = impl_->windows[bank];
+    impl_->context.bus.windows[bank] = {.data = native.data(), .count = native.size()};
+  }
+#endif
   impl_->context.runtime.windows = windows;
   invalidate();
+  return true;
 }
 
 void Jit::reset() {
@@ -171,7 +206,22 @@ const void *Jit::Impl::prepare() {
 
 std::uint32_t Jit::Impl::enter(const Block &block, const Word budget) {
   context.budget = budget;
-  return enter_block(block.entry, cpu, context);
+  context.boundary = NativeBoundary::none;
+  context.failure = {};
+  return finish(enter_block(block.entry, cpu, context));
+}
+
+std::uint32_t Jit::Impl::finish(const std::uint32_t retired) {
+  if (context.bus.failure != nullptr && context.bus.failure->kind == FaultKind::none &&
+      context.failure.kind != FaultKind::none) {
+    *context.bus.failure = context.failure;
+  }
+  if (context.program_written) {
+    context.program_written = false;
+    invalidated = true;
+    exit_requested = true;
+  }
+  return retired;
 }
 
 std::uint32_t Jit::run(const std::uint32_t budget) {
@@ -180,8 +230,9 @@ std::uint32_t Jit::run(const std::uint32_t budget) {
   const auto *entry = self.prepare();
   if (entry == nullptr) { return 0; }
   self.context.boundary = NativeBoundary::none;
-  return enter_blocks(
-      entry, self.cpu, self.context, budget, self.current->table.index(), &self.catalog.index());
+  self.context.failure = {};
+  return self.finish(enter_blocks(
+      entry, self.cpu, self.context, budget, self.current->table.index(), &self.catalog.index()));
 }
 
 std::uint32_t Jit::run_repeat(const BlockInstruction operation, const std::uint32_t budget) {

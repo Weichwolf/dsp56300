@@ -35,6 +35,20 @@ void Emitter::control_move(const BlockInstruction &operation) {
 
 bool Emitter::transfer(const BlockInstruction &operation) {
   const auto kind = operation.instruction.operation;
+  if (kind == Operation::move_control_effective || kind == Operation::move_control_short ||
+      kind == Operation::move_program_effective || kind == Operation::move_program_short) {
+    memory_transfer(operation);
+    return true;
+  }
+  if (kind == Operation::move_displacement) {
+    displacement_move(operation);
+    return true;
+  }
+  if (kind == Operation::move_peripheral_register || kind == Operation::move_peripheral_memory ||
+      kind == Operation::move_peripheral_program) {
+    peripheral_move(operation);
+    return true;
+  }
   if (kind == Operation::move_control_register || kind == Operation::move_control_immediate) {
     control_move(operation);
     return true;

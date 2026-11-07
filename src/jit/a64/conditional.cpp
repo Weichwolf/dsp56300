@@ -12,10 +12,13 @@
 
 namespace dsp56300::detail::a64 {
 bool Emitter::numeric_mode(const BlockInstruction &operation, const bool saturating) {
+  return numeric_mode(operation, saturating ? arithmetic_saturation : 0U);
+}
+
+bool Emitter::numeric_mode(const BlockInstruction &operation, const Word ignored_modes) {
   constexpr Word unsupported =
       compatibility_mode | multiply_mode | arithmetic_16 | arithmetic_saturation;
-  const auto allowed = saturating ? arithmetic_saturation : 0U;
-  if ((operation.mode & (unsupported & ~allowed)) != 0 ||
+  if ((operation.mode & (unsupported & ~ignored_modes)) != 0 ||
       (operation.mode & (scale_up | scale_down)) == (scale_up | scale_down)) {
     fault(operation, FaultKind::unsupported_mode, status);
     return false;

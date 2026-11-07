@@ -10,6 +10,7 @@
 #include "jit/block.hpp"
 #include "support.hpp"
 
+#include <array>
 #include <cstdint>
 #include <iostream>
 #include <limits>
@@ -55,6 +56,7 @@ struct Expected {
   ExecutionState processing = ExecutionState::running;
   detail::NativeBoundary boundary = detail::NativeBoundary::none;
   bool inhibited = false, repeat_completed = false;
+  bool program_written = false;
 };
 
 class Invocation {
@@ -72,6 +74,13 @@ public:
   Invocation(const Invocation &) = delete;
   Invocation &operator=(const Invocation &) = delete;
 
+  void bind(const std::array<detail::JitMemory, 2> memory, const detail::NativeBus bus) {
+    context_.runtime.memory = memory;
+    context_.bus = bus;
+  }
+
+  [[nodiscard]] const detail::Cpu &cpu() const noexcept { return cpu_; }
+
   void run(const Program &program, const Word budget = 1) {
     context_.budget = budget;
     retired_ = detail::enter_block(program.entry(), cpu_, context_);
@@ -87,7 +96,8 @@ public:
         cpu_.processing == expected.processing && cpu_.interrupt_inhibited == expected.inhibited &&
         cpu_.repeat_completed == expected.repeat_completed &&
         context_.failure == expected.failure && context_.boundary == expected.boundary &&
-        cpu_.repeat_remaining == 0 && !cpu_.repeat_loaded && cpu_.debug_flags == 0;
+        context_.program_written == expected.program_written && cpu_.repeat_remaining == 0 &&
+        !cpu_.repeat_loaded && cpu_.debug_flags == 0;
     if (!matched) {
       auto actual = cpu_.reg;
       actual.a >>= detail::padding_bits;

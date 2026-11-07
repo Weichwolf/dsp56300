@@ -34,8 +34,12 @@ register/immediate parallel transfers and address updates preserve pre-transfer 
 inputs and post-transfer partial accumulators. Native register-bus emission covers
 partial/full accumulators, sticky transfer flags, R/N/M and control registers,
 including SSH/SSL stack effects and precise bounds faults. LRA/LUA address calculations
-and register/immediate MOVEC forms are implemented. General parallel memory transfers,
-remaining instruction families and complete owner integration remain open.
+and register/immediate MOVEC forms are implemented. Memory emission now covers ordinary
+parallel X/Y moves, class-II moves, displaced/control/program/peripheral transfers,
+direct RAM, guarded external windows and separate actual-bus callbacks. Native tests
+check full-width RAM/I/O priority, initialized-word grants, callback-visible state,
+same-instruction remapping and exact executable-alias exits. Long, paired and class-I
+mixed transfers, remaining instruction families and complete owner integration remain open.
 Complete ARM64 Core execution and qualification remain in progress. The production
 Core still reports an unsupported host on ARM64.
 

@@ -63,7 +63,14 @@ Core::Impl::Impl(const Buffers supplied, Io *const host_io, const bool external_
                                      {.data = buffers.y.data(),
                                       .words = buffers.y.size(),
                                       .aliases_program = aliases_program[2]}}},
-                         .cacheable_program = buffers.cache.begin < buffers.cache.end});
+                         .cacheable_program = buffers.cache.begin < buffers.cache.end},
+      detail::NativeBus{
+          .program = {.data = buffers.program.data(), .words = buffers.program.size()},
+          .cache = buffers.cache,
+          .owner = this,
+          .access = jit_access,
+          .failure = &fault,
+          .external = external});
 }
 
 bool Core::Impl::overlaps_program(const std::span<const Word> memory) const {

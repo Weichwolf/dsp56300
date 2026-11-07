@@ -40,6 +40,10 @@ void Emitter::moves(const BlockInstruction &operation) {
     effective(operation, {.mode = (opcode >> 11) & 3U, .index = (opcode >> 8) & 7U});
   } else if ((opcode & parallel_group_mask) == immediate_group) {
     register_move(operation);
+  } else if ((opcode & memory_group_mask) == memory_group && (opcode & long_selector_mask) != 0) {
+    memory_move(operation);
+  } else if ((opcode & class_two_mask) == class_two) {
+    class_two_move(operation);
   } else {
     throw std::invalid_argument("A64 DSP parallel memory transfer lowering is incomplete");
   }

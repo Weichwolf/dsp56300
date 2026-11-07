@@ -34,9 +34,7 @@ void Emitter::begin() {
   for (const auto reg : saved) {
     code_.push(reg, static_cast<Reg>(static_cast<unsigned>(reg) + 1));
   }
-  code_.push(Reg::zr, Reg::x17);
-  code_.push(Reg::zr, Reg::x17);
-  code_.push(Reg::zr, Reg::x17);
+  for (std::size_t pair = 0; pair < Frame::pairs; ++pair) { code_.push(Reg::zr, Reg::x17); }
   code_.move(cpu, Reg::x0);
   code_.move(context, Reg::x1);
   for (const auto &[reg, offset] : held) { code_.load(reg, cpu, offset, Access::doubleword); }
@@ -95,6 +93,8 @@ std::vector<std::uint8_t> Emitter::generate(const std::span<const BlockInstructi
     flow_ = Flow::sequential;
     operation(item);
     retire(item);
+    code_.load(Reg::x17, context, offsetof(NativeContext, boundary), Access::byte);
+    code_.branch_zero_far(Reg::x17, done_, Width::w32, true);
     if (flow_ == Flow::owner || flow_ == Flow::context) {
       code_.branch(done_);
     } else if (flow_ == Flow::control) {
@@ -106,9 +106,7 @@ std::vector<std::uint8_t> Emitter::generate(const std::span<const BlockInstructi
   code_.bind(done_);
   publish();
   code_.move(Reg::x0, retired, Width::w32);
-  code_.pop(Reg::zr, Reg::x17);
-  code_.pop(Reg::zr, Reg::x17);
-  code_.pop(Reg::zr, Reg::x17);
+  for (std::size_t pair = 0; pair < Frame::pairs; ++pair) { code_.pop(Reg::zr, Reg::x17); }
   for (const auto reg : std::views::reverse(saved)) {
     code_.pop(reg, static_cast<Reg>(static_cast<unsigned>(reg) + 1));
   }

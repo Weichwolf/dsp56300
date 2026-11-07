@@ -6,6 +6,7 @@
 #include "jit.hpp"
 #include "jit/a64/code.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <vector>
@@ -49,6 +50,21 @@ struct ShiftOperation {
 
 enum class Flow : std::uint8_t { sequential, control, context, owner };
 
+struct Frame {
+  static constexpr std::size_t address = 40, value = 48, secondary = 64, access = 80;
+  static constexpr std::size_t pairs = (access + sizeof(NativeAccess) + 15) / 16;
+};
+
+struct BusOperand {
+  Space space = Space::x;
+  bool write = false;
+};
+
+struct MemoryLabels {
+  Label &mapped;
+  Label &unmapped;
+};
+
 class Emitter {
 public:
   [[nodiscard]] std::vector<std::uint8_t> generate(std::span<const BlockInstruction> operations);
@@ -60,6 +76,7 @@ private:
   void retire(const BlockInstruction &operation);
   void operation(const BlockInstruction &operation);
   [[nodiscard]] bool numeric_mode(const BlockInstruction &operation, bool saturating);
+  [[nodiscard]] bool numeric_mode(const BlockInstruction &operation, Word ignored_modes);
   [[nodiscard]] static bool supported_alu(Word opcode);
   void alu(const BlockInstruction &operation);
   void conditional_alu(const BlockInstruction &operation);
@@ -67,6 +84,18 @@ private:
   [[nodiscard]] bool transfer(const BlockInstruction &operation);
   void moves(const BlockInstruction &operation);
   void register_move(const BlockInstruction &operation);
+  void memory_move(const BlockInstruction &operation);
+  void class_two_move(const BlockInstruction &operation);
+  void memory(const BlockInstruction &operation, BusOperand operand);
+  void memory_windows(BusOperand operand, MemoryLabels labels);
+  void memory_flat(BusOperand operand, MemoryLabels labels);
+  void memory_owned(const BlockInstruction &operation, BusOperand operand);
+  void memory_fault(const BlockInstruction &operation, BusOperand operand);
+  void bus_failure();
+  void mark_program_written();
+  void memory_transfer(const BlockInstruction &operation);
+  void displacement_move(const BlockInstruction &operation);
+  void peripheral_move(const BlockInstruction &operation);
   void control_move(const BlockInstruction &operation);
   void address_calculation(const BlockInstruction &operation);
   void calculation_offset(Word opcode);
