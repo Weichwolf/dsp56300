@@ -6,6 +6,7 @@
 #include "iir_program.hpp"
 #include "iir_stream_program.hpp"
 #include "nonlinear_stream_program.hpp"
+#include "numeric_host_asm.hpp"
 #include "stream_host.hpp"
 #include "stream_host_math.hpp"
 #include "support.hpp"
@@ -24,10 +25,11 @@ constexpr std::int64_t state_unit = std::int64_t{1} << word_bits;
 
 class NativeBank {
 public:
-  NativeBank(const std::string_view name, const BinaryCase &item)
+  NativeBank(const std::string_view name, const BinaryCase &item, const bool use_asm = false)
       : memory_(initial_memory(item)),
         total_(item.initial.n[7]),
         nonlinear_(name == "nonlinear"),
+        use_asm_(use_asm),
         bits_(word_bits + ((item.initial.sr & mode_down) != 0 ? 1U : 0U) -
               ((item.initial.sr & mode_up) != 0 ? 1U : 0U)),
         rm_((item.initial.sr & mode_rm) != 0) {
@@ -39,6 +41,11 @@ public:
 
   void run(const Word count) {
     require(count <= total_ - frame_, "Native bank cannot exceed the requested stream");
+    if (use_asm_) {
+      run_asm(count);
+      frame_ += count;
+      return;
+    }
     for (Word index = 0; index < count; ++index, ++frame_) {
       if (nonlinear_) {
         nonlinear_frame();
@@ -56,6 +63,27 @@ public:
   }
 
 private:
+  void run_asm(const Word count) {
+    const numeric_host::Job job{
+        .input = memory_[1].data() +
+                 (nonlinear_ ? nonlinear_stream::input_base : iir_stream::input_base),
+        .coefficients = memory_[2].data() + (nonlinear_ ? nonlinear_stream::coefficient_base
+                                                        : iir_stream::coefficient_base),
+        .state = memory_[1].data() +
+                 (nonlinear_ ? nonlinear_stream::state_base : iir_stream::state_base),
+        .output = memory_[1].data() +
+                  (nonlinear_ ? nonlinear_stream::output_base : iir_stream::output_base),
+        .progress = nonlinear_ ? &memory_[1][nonlinear_stream::progress_address] : nullptr,
+        .first = frame_,
+        .frames = count,
+        .total = total_};
+    if (nonlinear_) {
+      numeric_host::nonlinear_asm(job, bits_, rm_);
+    } else {
+      numeric_host::iir_asm(job, bits_, rm_);
+    }
+  }
+
   [[nodiscard]] Word quantize(const std::int64_t raw) const noexcept {
     return host_math::word(host_math::rounded(raw, bits_, rm_));
   }
@@ -97,6 +125,7 @@ private:
         const auto gain = signed24(memory_[2][coefficient_base + (2 * stage)]);
         const auto feedback = signed24(memory_[2][coefficient_base + (2 * stage) + 1]);
         auto raw = host_math::mac(0, {.a = signed24(value), .b = gain});
+        raw = std::clamp(raw, -boundary, boundary - 1);
         raw = host_math::mac(raw, {.a = signed24(memory_[1][slot]), .b = feedback});
         raw = host_math::rounded(raw, bits_, rm_) * quantum;
         raw = raw >= boundary ? boundary - state_unit : std::max(raw, -boundary);
@@ -110,23 +139,29 @@ private:
 
   FixtureMemory memory_;
   Word total_, frame_ = 0;
-  bool nonlinear_;
+  bool nonlinear_, use_asm_;
   unsigned bits_;
   bool rm_;
 };
-}
 
-HostStreamTimes measure_numeric_host(const std::string_view name, const BinaryCase &item) {
-  require(item.initial.n[7] == iir_stream::stream_frames, "Native timing covers two input seconds");
-  NativeBank host(name, item);
+double numeric_time(const std::string_view name, const BinaryCase &item, const bool use_asm) {
+  NativeBank host(name, item, use_asm);
   host.run(iir_stream::sample_rate);
   const auto begin = Clock::now();
   host.run(iir_stream::sample_rate);
   const auto elapsed = std::chrono::duration<double>(Clock::now() - begin).count();
   host.verify(item);
-  return {.scalar_seconds = elapsed,
+  return elapsed;
+}
+
+}
+
+HostStreamTimes measure_numeric_host(const std::string_view name, const BinaryCase &item) {
+  require(item.initial.n[7] == iir_stream::stream_frames, "Native timing covers two input seconds");
+  return {.scalar_seconds = numeric_time(name, item, false),
+          .asm_seconds = numeric_time(name, item, true),
           .scope = "fixed-point-algorithm-and-memory",
-          .implementation = "cpp-with-inline-mac-asm"};
+          .implementation = "handwritten-scalar-asm-and-cpp"};
 }
 
 void verify_numeric_host(const std::string_view name, const std::vector<BinaryCase> &cases) {
@@ -134,6 +169,9 @@ void verify_numeric_host(const std::string_view name, const std::vector<BinaryCa
     NativeBank host(name, item);
     host.run(item.initial.n[7]);
     host.verify(item);
+    NativeBank native(name, item, true);
+    native.run(item.initial.n[7]);
+    native.verify(item);
   }
   std::cout << cases.size() << " independent native " << name << " stream cases passed\n";
 }

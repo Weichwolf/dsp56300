@@ -486,9 +486,13 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   add_executable(dsp56300_fixture_bench test/bench/fixture_bench.cpp)
   add_executable(dsp56300_continuous_bench test/bench/continuous_bench.cpp
     test/bench/fir_stream_host.cpp test/bench/fir_host.cpp test/bench/fir_host_avx2.cpp
-    test/bench/numeric_stream_host.cpp test/bench/spectral_stream_host.cpp
+    test/bench/numeric_stream_host.cpp test/bench/numeric_host_asm.cpp test/bench/spectral_stream_host.cpp
     test/bench/spectral_host_asm.cpp)
   target_link_libraries(dsp56300_continuous_bench PRIVATE dsp56300::core dsp56300_fixture_format)
+  add_executable(dsp56300_numeric_host_test test/bench/numeric_host_test.cpp
+    test/bench/numeric_host_asm.cpp)
+  target_link_libraries(dsp56300_numeric_host_test PRIVATE dsp56300::core dsp56300_fixture_format)
+  add_test(NAME numeric-host-asm COMMAND dsp56300_numeric_host_test)
   add_executable(dsp56300_spectral_host_test test/bench/spectral_host_test.cpp
     test/bench/spectral_host_asm.cpp)
   target_link_libraries(dsp56300_spectral_host_test PRIVATE dsp56300::core dsp56300_fixture_format)

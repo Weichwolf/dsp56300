@@ -69,7 +69,8 @@ bench fails on any cold/warm packet deadline miss or modeled hardware factor <1;
 Host references use the same fixed-point inputs, rounding, saturation, retained
 history and memory effects, with independently generated expectations. FIR uses
 checked scalar/AVX2 assembly and verifies complete registers and memory. IIR and
-nonlinear banks use inline scalar MAC assembly with optimized native scheduling;
+nonlinear banks compare optimized C++ with complete handwritten scalar ASM kernels,
+including frame/channel/stage loops, quantization, histories and output rings;
 spectral processing compares compiler-generated scalar/vector code with handwritten
 ASM windowing, FFT butterflies, output permutation and power/ring-buffer kernels.
 The latter three are numerical algorithm baselines and omit architectural

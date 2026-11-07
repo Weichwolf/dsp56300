@@ -7,19 +7,13 @@
 #include <cstdint>
 
 namespace dsp56300::test::host_math {
-// Handwritten arithmetic primitive; the compiler schedules the surrounding bank.
+// Independent C++ arithmetic; complete handwritten kernels are timed separately.
 struct Product {
   std::int64_t a, b;
 };
 
-inline std::int64_t mac(std::int64_t sum, const Product input) noexcept {
-  auto a = input.a;
-  const auto b = input.b;
-  asm("imulq %[b], %[a]\n\tleaq (%[sum],%[a],2), %[sum]"
-      : [sum] "+&r"(sum), [a] "+&r"(a)
-      : [b] "r"(b)
-      : "cc");
-  return sum;
+inline std::int64_t mac(const std::int64_t sum, const Product input) noexcept {
+  return sum + (2 * input.a * input.b);
 }
 
 inline std::int64_t rounded(const std::int64_t value, const unsigned bits, const bool rm) noexcept {
