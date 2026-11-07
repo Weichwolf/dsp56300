@@ -67,7 +67,6 @@ Reg Emitter::destination(const Word opcode) {
 }
 
 void Emitter::retire(const BlockInstruction &operation) {
-  code_.constant(pc, (operation.pc + operation.instruction.words) & word_mask);
   code_.add(retired, retired, 1);
   code_.constant(Reg::x17, 1);
   code_.alu(Alu::subtract, remaining, remaining, Reg::x17);
@@ -89,10 +88,19 @@ std::vector<std::uint8_t> Emitter::generate(const std::span<const BlockInstructi
       throw std::invalid_argument("A64 DSP hardware-loop lowering is incomplete");
     }
     code_.branch_zero_far(remaining, done_);
+    code_.constant(pc, (item.pc + item.instruction.words) & word_mask);
     code_.store(Reg::zr, cpu, offsetof(Cpu, interrupt_inhibited), Access::byte);
     snapshot();
+    flow_ = Flow::sequential;
     operation(item);
     retire(item);
+    if (flow_ == Flow::owner || flow_ == Flow::context) {
+      code_.branch(done_);
+    } else if (flow_ == Flow::control) {
+      code_.constant(Reg::x17, (item.pc + item.instruction.words) & word_mask);
+      code_.compare(pc, Reg::x17);
+      code_.branch_far(Condition::not_equal, done_);
+    }
   }
   code_.bind(done_);
   publish();

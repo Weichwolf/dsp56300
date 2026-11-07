@@ -131,6 +131,11 @@ void Emitter::multiply(const BlockInstruction &operation) {
 void Emitter::operation(const BlockInstruction &operation) {
   const auto &instruction = operation.instruction;
   if (instruction.operation == Operation::nop) { return; }
+  if (control(operation)) { return; }
+  const bool numeric = instruction.operation == Operation::parallel ||
+                       instruction.operation == Operation::immediate_alu || shifting(instruction);
+  if (!numeric) { throw std::invalid_argument("A64 DSP operation lowering is incomplete"); }
+
   if ((operation.mode & (compatibility_mode | multiply_mode | arithmetic_16)) != 0 ||
       (operation.mode & (scale_up | scale_down)) == (scale_up | scale_down)) {
     fault(operation, FaultKind::unsupported_mode, status);

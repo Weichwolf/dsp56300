@@ -106,6 +106,8 @@ public:
   void shift(Shift operation, Reg target, Reg source, unsigned count, Width width = Width::w32);
   void shift(Shift operation, Reg target, Reg source, Reg count, Width width = Width::w32);
   void reverse_half(Reg target, Reg source);
+  void reverse_bits(Reg target, Reg source, Width width = Width::w32);
+  void count_leading_zeroes(Reg target, Reg source, Width width = Width::w32);
   void load(Reg target, Reg base, std::size_t offset, Access access = Access::word);
   void store(Reg source, Reg base, std::size_t offset, Access access = Access::word);
   void multiply(Reg target, Reg left, Reg right, Width width = Width::w32);

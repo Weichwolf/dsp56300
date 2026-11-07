@@ -22,8 +22,11 @@ and independently tested. Native arithmetic covers add/subtract with carry,
 comparison, signed multiply/MAC, rounding, SM saturation, ALU TFR forms and
 logical operations in parallel/immediate instruction forms against independent raw-width models.
 Shift/rotate emission covers immediate and register counts, with precise native
-invalid-count and numeric-mode fault exits;
-complete ARM64 Core execution and qualification remain in progress. The production
+invalid-count and numeric-mode fault exits. Control emission covers all conditions,
+absolute/relative/effective jumps and calls, returns, stack faults, WAIT/STOP and
+byte control operations. Effective addressing handles linear, reverse-carry,
+modulo and multiple-wrap updates, including updates on untaken conditional jumps.
+Complete ARM64 Core execution and qualification remain in progress. The production
 Core still reports an unsupported host on ARM64.
 
 The `strict` preset enables ASan/UBSan. On macOS 26.4 and later, LLVM 19's

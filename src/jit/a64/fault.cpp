@@ -11,7 +11,6 @@
 namespace dsp56300::detail::a64 {
 void Emitter::fault(const BlockInstruction &operation, const FaultKind kind, const Reg value) {
   constexpr auto failure = offsetof(NativeContext, failure);
-  code_.constant(pc, (operation.pc + operation.instruction.words) & word_mask);
   code_.store(value, context, failure + offsetof(Fault, value));
   code_.constant(Reg::x17, static_cast<std::uint8_t>(kind));
   code_.store(Reg::x17, context, failure + offsetof(Fault, kind), Access::byte);

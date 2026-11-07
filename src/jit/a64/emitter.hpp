@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
+#include "architecture.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "jit.hpp"
@@ -40,6 +41,8 @@ struct ShiftOperation {
   bool left = false, saturate = false;
 };
 
+enum class Flow : std::uint8_t { sequential, control, context, owner };
+
 class Emitter {
 public:
   [[nodiscard]] std::vector<std::uint8_t> generate(std::span<const BlockInstruction> operations);
@@ -50,6 +53,20 @@ private:
   void publish();
   void retire(const BlockInstruction &operation);
   void operation(const BlockInstruction &operation);
+  [[nodiscard]] bool control(const BlockInstruction &operation);
+  void condition(Reg result, unsigned selector);
+  void boundary(NativeBoundary state);
+  void control_byte(const BlockInstruction &operation);
+  void jump(const BlockInstruction &operation);
+  void branch(const BlockInstruction &operation);
+  void return_(const BlockInstruction &operation);
+  void push_frame(const BlockInstruction &operation);
+  void pop_frame(const BlockInstruction &operation);
+  void effective(const BlockInstruction &operation, AddressForm form);
+  void update_address(const BlockInstruction &operation);
+  void reverse_address();
+  void ring_address(Label &linear);
+  void multiple_address(const BlockInstruction &operation);
   void source(Reg value, unsigned selector, bool destination_b);
   void product_word(Reg value, unsigned selector);
   void arithmetic(const BlockInstruction &operation);
@@ -71,5 +88,6 @@ private:
   [[nodiscard]] static Reg destination(Word opcode);
   Code code_;
   Label done_;
+  Flow flow_ = Flow::sequential;
 };
 }

@@ -129,6 +129,16 @@ void Code::reverse_half(const Reg target, const Reg source) {
   word(opcode | (reg(source) << register_shift) | reg(target));
 }
 
+void Code::reverse_bits(const Reg target, const Reg source, const Width width) {
+  constexpr std::uint32_t opcode = 0x5ac00000;
+  word(wide(width) | opcode | (reg(source) << register_shift) | reg(target));
+}
+
+void Code::count_leading_zeroes(const Reg target, const Reg source, const Width width) {
+  constexpr std::uint32_t opcode = 0x5ac01000;
+  word(wide(width) | opcode | (reg(source) << register_shift) | reg(target));
+}
+
 void Code::memory(const Reg value,
                   const Reg base,
                   const std::size_t offset,

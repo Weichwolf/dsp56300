@@ -87,6 +87,18 @@ void barrel_encodings() {
   }
 }
 
+void bit_encodings() {
+  Code code;
+  code.count_leading_zeroes(Reg::x0, Reg::x1);
+  code.count_leading_zeroes(Reg::x0, Reg::x1, Width::x64);
+  code.reverse_bits(Reg::x0, Reg::x1);
+  code.reverse_bits(Reg::x0, Reg::x1, Width::x64);
+  constexpr std::array<std::uint32_t, 4> expected{0x5ac01020, 0xdac01020, 0x5ac00020, 0xdac00020};
+  for (std::size_t index = 0; index < expected.size(); ++index) {
+    require(instruction(code, index) == expected[index], "A64 CLZ/RBIT encoding differs from ISA");
+  }
+}
+
 void fixups() {
   Code code;
   Label begin;
@@ -170,6 +182,35 @@ void execute_barrels() {
   }
 }
 
+void execute_bits() {
+  dsp56300::detail::ExecutableArena arena;
+  constexpr std::array<std::uint64_t, 7> values{
+      0, 1, 0x80000000, 0xffffffff, 0x123456789abcdef, 0x8000000000000000, 0xffffffffffffffff};
+  for (const auto width : {Width::w32, Width::x64}) {
+    const unsigned bits = width == Width::x64 ? 64U : 32U;
+    Code reversed;
+    reversed.reverse_bits(Reg::x0, Reg::x0, width);
+    reversed.return_();
+    const auto *reverse_entry = arena.append(reversed.bytes());
+    Code leading;
+    leading.count_leading_zeroes(Reg::x0, Reg::x0, width);
+    leading.return_();
+    const auto *leading_entry = arena.append(leading.bytes());
+    for (const auto value : values) {
+      std::uint64_t expected = 0;
+      for (unsigned bit = 0; bit < bits; ++bit) {
+        expected = (expected << 1) | ((value >> bit) & 1U);
+      }
+      require(dsp56300_a64_test_enter(reverse_entry, value, 0) == expected,
+              "A64 RBIT must reverse exactly the selected width");
+      const auto zeros = width == Width::x64 ? std::countl_zero(value)
+                                             : std::countl_zero(static_cast<std::uint32_t>(value));
+      require(dsp56300_a64_test_enter(leading_entry, value, 0) == static_cast<std::uint64_t>(zeros),
+              "A64 CLZ must retain its zero-input and width semantics");
+    }
+  }
+}
+
 void execute() {
   dsp56300::detail::ExecutableArena arena;
   Code code;
@@ -207,9 +248,11 @@ int main() {
     encodings();
     fixups();
     barrel_encodings();
+    bit_encodings();
 #if defined(__aarch64__)
     execute();
     execute_barrels();
+    execute_bits();
 #endif
     std::cout << "A64 encoding and branch checks passed.\n";
   } catch (const std::exception &error) {
