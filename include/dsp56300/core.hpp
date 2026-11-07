@@ -134,6 +134,8 @@ public:
   Core &operator=(const Core &) = delete;
   void reset();
   [[nodiscard]] State state() const;
+  // Completed nominal work; does not materialize a register snapshot.
+  [[nodiscard]] Progress progress() const noexcept;
   // Explicit host programming; ordinary data may be accessed through borrowed memory.
   void load(Space space, Word address, std::span<const Word> words);
   [[nodiscard]] RunResult step();
@@ -179,7 +181,6 @@ public:
   void interrupt(Word vector, unsigned level);
 
 private:
-  [[nodiscard]] Progress progress() const noexcept;
   [[nodiscard]] Fault fault() const noexcept;
   [[nodiscard]] ExecutionState processing_state() const noexcept;
   void clear_code_cache();

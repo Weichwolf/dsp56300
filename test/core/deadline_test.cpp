@@ -97,6 +97,7 @@ class Device final : public Io {
 public:
   Core *core = nullptr;
   unsigned calls = 0, rejections = 0;
+  Progress before_effect;
   bool refuse = false;
 
   bool read(Space /*space*/, Word /*address*/, Word /*pc*/, Word & /*value*/) noexcept override {
@@ -118,6 +119,7 @@ public:
 
   bool reset_peripherals(Word /*pc*/) noexcept override {
     ++calls;
+    before_effect = core->progress();
     try {
       static_cast<void>(core->run_until(0));
     } catch (const std::logic_error &) { ++rejections; }
@@ -135,7 +137,8 @@ void effect_exit() {
   require(
       first.retired == 2 && first.yielded && first.fault.kind == FaultKind::none &&
           first.progress == Progress{.instructions = 2, .estimated_cycles = 8} &&
-          core.registers().pc == 2 && device.calls == 1 && device.rejections == 1,
+          core.registers().pc == 2 && device.calls == 1 && device.rejections == 1 &&
+          device.before_effect == Progress{.instructions = 1, .estimated_cycles = 1},
       "A real seven-cycle RESET yields once, preserving its prefix and rejecting callback reentry");
   const auto resumed = core.run_until(9);
   require(resumed.retired == 1 && !resumed.yielded &&

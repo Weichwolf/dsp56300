@@ -32,14 +32,16 @@ void execution() {
   Core core(Memory::unified(ram));
   const auto initial = core.state();
   require(initial.execution == ExecutionState::running && initial.failure.kind == FaultKind::none &&
-              initial.progress == Progress{} && initial.registers.pc == 0,
+              initial.progress == Progress{} && core.progress() == Progress{} &&
+              initial.registers.pc == 0,
           "Read-only state begins at the reset boundary");
   for (const auto modifier : initial.registers.m) {
     require(modifier == word_mask, "Reset initializes every linear AGU modifier");
   }
   const auto first = core.step();
   require(first.retired == 1 && first.fault.kind == FaultKind::none &&
-              first.state == ExecutionState::running && core.state().registers.pc == 1,
+              first.state == ExecutionState::running && core.state().registers.pc == 1 &&
+              core.progress() == Progress{.instructions = 1, .estimated_cycles = 1},
           "Step executes the actual NOP and publishes its boundary");
   const auto last = core.run();
   require(last.retired == 1 && last.state == ExecutionState::stopped &&
@@ -49,11 +51,12 @@ void execution() {
   require(initial.registers.pc == 0 && initial.progress == Progress{},
           "A state snapshot remains an independent read-only observation");
   require(core.state().registers == core.registers() &&
-              core.state().progress == Progress{.instructions = 2, .estimated_cycles = 11},
+              core.state().progress == Progress{.instructions = 2, .estimated_cycles = 11} &&
+              core.progress() == Progress{.instructions = 2, .estimated_cycles = 11},
           "State exposes canonical DSP coordinates and actual instruction progress");
   core.reset();
   require(core.state().registers == initial.registers && core.state().progress == Progress{} &&
-              core.state().failure.kind == FaultKind::none,
+              core.progress() == Progress{} && core.state().failure.kind == FaultKind::none,
           "Reset restores the architectural entry state");
   auto seed = initial.registers;
   constexpr std::uint64_t positive = 0x007fffffffffff;
