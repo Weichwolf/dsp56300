@@ -39,6 +39,13 @@ Neither core contains Blofeld protocols, an audio scheduler or physical wiring.
 The host emitter is a private implementation boundary: x86 today, other hosts
 later. Do not add abstractions to an executed instruction merely for symmetry.
 
+Use the same private execution vocabulary as cpu12: `BlockInstruction`,
+`parse_block`, `emit_block`, `enter_block`/`enter_blocks`, `ResidentPlan` and
+`ResidentRegion`. Keep resident planning, emission and execution in
+`resident_plan`, `resident_emit` and `resident_region_*` files; x86 lowering
+belongs under `jit/x64/`. ISA-specific value graphs and SIMD allocation remain
+DSP implementation details. Public consumers use only `Core`, `Memory` and `Io`.
+
 ## Cold path: compile control flow once
 
 Decode from the actual entry PC into a compact semantic representation. Basic

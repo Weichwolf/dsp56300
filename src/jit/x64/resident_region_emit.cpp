@@ -3,7 +3,7 @@
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "jit/code.hpp"
-#include "region.hpp"
+#include "resident_region.hpp"
 #include "value_graph.hpp"
 
 #include <algorithm>
@@ -47,9 +47,9 @@ struct ValueOutput {
   unsigned lane;
 };
 
-class RegionEmitter {
+class ResidentRegionEmitter {
 public:
-  RegionEmitter(NativeRegion &region, unsigned lanes);
+  ResidentRegionEmitter(ResidentRegion &region, unsigned lanes);
   [[nodiscard]] std::vector<std::uint8_t> generate();
 
 private:
@@ -85,7 +85,7 @@ private:
   void advance(bool inner);
   void push(Reg reg);
   void pop(Reg reg);
-  NativeRegion &region_;
+  ResidentRegion &region_;
   x64::Code code_;
   unsigned lanes_;
   bool inner_vector_;
@@ -97,7 +97,7 @@ private:
   std::array<std::size_t, 2> inputs_{};
 };
 
-RegionEmitter::RegionEmitter(NativeRegion &region, const unsigned lanes)
+ResidentRegionEmitter::ResidentRegionEmitter(ResidentRegion &region, const unsigned lanes)
     : region_(region),
       lanes_(region.nested && lanes == 1 ? 4U : lanes),
       inner_vector_(region.nested && lanes == 1),
@@ -111,13 +111,13 @@ RegionEmitter::RegionEmitter(NativeRegion &region, const unsigned lanes)
   liveness();
 }
 
-void RegionEmitter::pin(const GraphValue value) {
+void ResidentRegionEmitter::pin(const GraphValue value) {
   if (!value.valid()) { return; }
   needed_[value.node] = true;
   last_[value.node] = region_.graph.nodes.size();
 }
 
-void RegionEmitter::liveness() {
+void ResidentRegionEmitter::liveness() {
   const auto &graph = region_.graph;
   for (unsigned index = 0; index < graph.registers.size(); ++index) {
     if ((graph.changed_registers & (Word{1} << index)) != 0) { pin(graph.registers[index]); }
@@ -139,7 +139,7 @@ void RegionEmitter::liveness() {
   }
 }
 
-void RegionEmitter::spill(const unsigned reg) {
+void ResidentRegionEmitter::spill(const unsigned reg) {
   const auto node = owners_[reg];
   auto &slot = spill_slots_[node];
   if (slot == no_value) {
@@ -153,7 +153,7 @@ void RegionEmitter::spill(const unsigned reg) {
   owners_[reg] = no_value;
 }
 
-Xmm RegionEmitter::allocate() {
+Xmm ResidentRegionEmitter::allocate() {
   unsigned selected = 0;
   std::size_t farthest = 0;
   bool found = false;
@@ -172,7 +172,7 @@ Xmm RegionEmitter::allocate() {
   return static_cast<Xmm>(selected);
 }
 
-Xmm RegionEmitter::read(const GraphValue value) {
+Xmm ResidentRegionEmitter::read(const GraphValue value) {
   if (!value.valid()) { throw std::logic_error("Invalid native graph input"); }
   auto &location = locations_[value.node];
   if (location != no_value) { return static_cast<Xmm>(location); }
@@ -186,14 +186,14 @@ Xmm RegionEmitter::read(const GraphValue value) {
   return reg;
 }
 
-Xmm RegionEmitter::destination() {
+Xmm ResidentRegionEmitter::destination() {
   const auto reg = allocate();
   locations_[current_] = static_cast<unsigned>(reg);
   owners_[static_cast<unsigned>(reg)] = current_;
   return reg;
 }
 
-void RegionEmitter::operands(const GraphNode &node) {
+void ResidentRegionEmitter::operands(const GraphNode &node) {
   inputs_.fill(no_value);
   for (unsigned index = 0; index < node.inputs.size(); ++index) {
     if (node.inputs[index].valid()) { inputs_[index] = node.inputs[index].node; }
@@ -203,14 +203,15 @@ void RegionEmitter::operands(const GraphNode &node) {
   }
 }
 
-void RegionEmitter::broadcast(const Xmm result, const std::uint64_t value) {
+void ResidentRegionEmitter::broadcast(const Xmm result, const std::uint64_t value) {
   const auto found = std::ranges::find(region_.constants, value);
   const auto index = static_cast<std::size_t>(found - region_.constants.begin());
   if (found == region_.constants.end()) { region_.constants.push_back(value); }
   code_.vector_broadcast(result, {.base = Reg::r11, .offset = index * sizeof(value)});
 }
 
-void RegionEmitter::vector_constant(const Xmm result, const std::array<std::uint64_t, 4> &values) {
+void ResidentRegionEmitter::vector_constant(const Xmm result,
+                                            const std::array<std::uint64_t, 4> &values) {
   const auto found = std::ranges::search(region_.constants, values).begin();
   const auto index = static_cast<std::size_t>(found - region_.constants.begin());
   if (found == region_.constants.end()) {
@@ -219,7 +220,7 @@ void RegionEmitter::vector_constant(const Xmm result, const std::array<std::uint
   code_.vector_load(result, {.base = Reg::r11, .offset = index * sizeof(std::uint64_t)});
 }
 
-void RegionEmitter::reverse_indices(const Xmm result, const unsigned stream) {
+void ResidentRegionEmitter::reverse_indices(const Xmm result, const unsigned stream) {
   const auto &address = region_.graph.streams[stream];
   const auto base = offsetof(RegionFrame, reverse) + (address.address * sizeof(ReverseCursor));
   code_.vector_broadcast(result, {.base = Reg::di, .offset = base});
@@ -261,7 +262,7 @@ void RegionEmitter::reverse_indices(const Xmm result, const unsigned stream) {
                {.destination = result, .left = result, .right = first_scratch});
 }
 
-void RegionEmitter::reverse_load(const Xmm result, const unsigned stream) {
+void ResidentRegionEmitter::reverse_load(const Xmm result, const unsigned stream) {
   reverse_indices(result, stream);
   zero(first_scratch);
   for (unsigned lane = 0; lane < 4; ++lane) {
@@ -272,11 +273,11 @@ void RegionEmitter::reverse_load(const Xmm result, const unsigned stream) {
   code_.vector_unary(VectorOp::copy, result, first_scratch);
 }
 
-void RegionEmitter::zero(const Xmm result) {
+void ResidentRegionEmitter::zero(const Xmm result) {
   code_.vector(VectorOp::bit_xor, {.destination = result, .left = result, .right = result});
 }
 
-void RegionEmitter::canonical(const Xmm result, const GraphValue value) {
+void ResidentRegionEmitter::canonical(const Xmm result, const GraphValue value) {
   const auto source = read(value);
   if (value.canonical) {
     code_.vector_unary(VectorOp::copy, result, source);
@@ -292,7 +293,9 @@ void RegionEmitter::canonical(const Xmm result, const GraphValue value) {
                          canonical_high);
 }
 
-Xmm RegionEmitter::aligned(const GraphValue value, const unsigned scale, const Xmm scratch) {
+Xmm ResidentRegionEmitter::aligned(const GraphValue value,
+                                   const unsigned scale,
+                                   const Xmm scratch) {
   const auto source = read(value);
   if (value.canonical && value.scale == scale) { return source; }
   canonical(scratch, value);
@@ -302,7 +305,7 @@ Xmm RegionEmitter::aligned(const GraphValue value, const unsigned scale, const X
   return scratch;
 }
 
-void RegionEmitter::pointer(const unsigned stream) {
+void ResidentRegionEmitter::pointer(const unsigned stream) {
   const auto root = region_.stream_roots[stream];
   if (root < root_registers.size()) {
     code_.mov({.destination = Reg::r10, .source = root_registers[root]});
@@ -320,7 +323,7 @@ void RegionEmitter::pointer(const unsigned stream) {
   }
 }
 
-void RegionEmitter::load(const Xmm result, const unsigned stream) {
+void ResidentRegionEmitter::load(const Xmm result, const unsigned stream) {
   const auto root = region_.stream_roots[stream];
   const auto &address = region_.roots[root];
   const auto &delta = inner_vector_ ? region_.inner_addresses[address.address]
@@ -368,7 +371,7 @@ void RegionEmitter::load(const Xmm result, const unsigned stream) {
   code_.vector_unary(VectorOp::extend_dword, result, result);
 }
 
-void RegionEmitter::store(const GraphValue value, const unsigned stream) {
+void ResidentRegionEmitter::store(const GraphValue value, const unsigned stream) {
   const auto source = read(value);
   const auto root = region_.stream_roots[stream];
   const auto address = region_.roots[root].address;
@@ -398,7 +401,7 @@ void RegionEmitter::store(const GraphValue value, const unsigned stream) {
   code_.bind(stored);
 }
 
-void RegionEmitter::store_packed(const Xmm source) {
+void ResidentRegionEmitter::store_packed(const Xmm source) {
   code_.vector_extract(second_scratch, source, 1);
   code_.vector_pack(first_scratch, source, second_scratch);
   code_.vector_shift(first_scratch, first_scratch, VectorShift::left, padding_bits, true);
@@ -411,9 +414,9 @@ void RegionEmitter::store_packed(const Xmm source) {
   }
 }
 
-void RegionEmitter::store_strided(const Xmm source,
-                                  const std::size_t root,
-                                  const bool stride_loaded) {
+void ResidentRegionEmitter::store_strided(const Xmm source,
+                                          const std::size_t root,
+                                          const bool stride_loaded) {
   auto words = source;
   if (lanes_ == 4) {
     code_.vector_shift(first_scratch, source, VectorShift::left, padding_bits, true);
@@ -441,14 +444,14 @@ void RegionEmitter::store_strided(const Xmm source,
   }
 }
 
-void RegionEmitter::input(const Xmm result, const unsigned slot) {
+void ResidentRegionEmitter::input(const Xmm result, const unsigned slot) {
   code_.vector_broadcast(
       result,
       {.base = Reg::di,
        .offset = offsetof(RegionFrame, invariants) + (slot * sizeof(std::uint64_t))});
 }
 
-void RegionEmitter::binary(const GraphNode &node, const Xmm result) {
+void ResidentRegionEmitter::binary(const GraphNode &node, const Xmm result) {
   const auto &left = node.inputs[0];
   const auto &right = node.inputs[1];
   const auto scale = std::min(left.scale, right.scale);
@@ -458,7 +461,7 @@ void RegionEmitter::binary(const GraphNode &node, const Xmm result) {
                {.destination = result, .left = a, .right = b});
 }
 
-void RegionEmitter::round(const GraphNode &node, const Xmm result) {
+void ResidentRegionEmitter::round(const GraphNode &node, const Xmm result) {
   auto source = read(node.inputs[0]);
   if (!node.inputs[0].canonical) {
     canonical(result, node.inputs[0]);
@@ -484,7 +487,7 @@ void RegionEmitter::round(const GraphNode &node, const Xmm result) {
   code_.vector_shift(result, result, VectorShift::right, bits);
 }
 
-void RegionEmitter::word(const GraphNode &node, const Xmm result) {
+void ResidentRegionEmitter::word(const GraphNode &node, const Xmm result) {
   const auto value = node.inputs[0];
   const auto source = read(value);
   const auto position = growth_position - value.scale;
@@ -534,7 +537,7 @@ void RegionEmitter::word(const GraphNode &node, const Xmm result) {
                {.destination = limit_register, .left = limit_register, .right = second_scratch});
 }
 
-void RegionEmitter::shift(const GraphNode &node, const Xmm result) {
+void ResidentRegionEmitter::shift(const GraphNode &node, const Xmm result) {
   const auto value = node.inputs[0];
   const auto source = read(value);
   if (value.width <= 32) {
@@ -549,7 +552,7 @@ void RegionEmitter::shift(const GraphNode &node, const Xmm result) {
   code_.vector(VectorOp::bit_or, {.destination = result, .left = result, .right = second_scratch});
 }
 
-void RegionEmitter::emit(const GraphNode &node) {
+void ResidentRegionEmitter::emit(const GraphNode &node) {
   operands(node);
   if (node.operation == GraphOp::store) {
     store(node.inputs[0], node.parameter);
@@ -581,7 +584,7 @@ void RegionEmitter::emit(const GraphNode &node) {
   }
 }
 
-void RegionEmitter::publish(const GraphValue value, const ValueOutput output) {
+void ResidentRegionEmitter::publish(const GraphValue value, const ValueOutput output) {
   if (!value.valid()) { return; }
   const auto lane = output.lane;
   const auto location = locations_[value.node];
@@ -602,7 +605,7 @@ void RegionEmitter::publish(const GraphValue value, const ValueOutput output) {
   code_.store(Reg::di, output.offset, Reg::ax);
 }
 
-void RegionEmitter::outputs(const unsigned lane, const bool preceding) {
+void ResidentRegionEmitter::outputs(const unsigned lane, const bool preceding) {
   const auto base =
       preceding ? offsetof(RegionFrame, preceding_flags) : offsetof(RegionFrame, flags);
   publish(region_.graph.flags, {.offset = base, .lane = lane});
@@ -614,7 +617,7 @@ void RegionEmitter::outputs(const unsigned lane, const bool preceding) {
   }
 }
 
-bool RegionEmitter::advance_known(const std::size_t root, const bool inner) {
+bool ResidentRegionEmitter::advance_known(const std::size_t root, const bool inner) {
   const auto address = region_.roots[root].address;
   const auto &delta = inner ? region_.inner_addresses[address] : region_.graph.addresses[address];
   if (delta.offsets != 0 || (!inner && region_.nested)) { return false; }
@@ -633,7 +636,7 @@ bool RegionEmitter::advance_known(const std::size_t root, const bool inner) {
   return true;
 }
 
-void RegionEmitter::advance_reverse() {
+void ResidentRegionEmitter::advance_reverse() {
   for (unsigned index = 0; index < agu_registers; ++index) {
     if ((region_.reverse_addresses & (Word{1} << index)) == 0) { continue; }
     const auto base = offsetof(RegionFrame, reverse) + (index * sizeof(ReverseCursor));
@@ -646,7 +649,7 @@ void RegionEmitter::advance_reverse() {
   }
 }
 
-void RegionEmitter::advance(const bool inner) {
+void ResidentRegionEmitter::advance(const bool inner) {
   if (!inner) { advance_reverse(); }
   for (std::size_t root = 0; root < region_.roots.size(); ++root) {
     if ((inner && !region_.nested) ||
@@ -668,19 +671,19 @@ void RegionEmitter::advance(const bool inner) {
   }
 }
 
-void RegionEmitter::push(const Reg reg) {
+void ResidentRegionEmitter::push(const Reg reg) {
   const auto index = static_cast<unsigned>(reg);
   if (index >= 8) { code_.byte(high_rex); }
   code_.byte(push_register + (index & 7U));
 }
 
-void RegionEmitter::pop(const Reg reg) {
+void ResidentRegionEmitter::pop(const Reg reg) {
   const auto index = static_cast<unsigned>(reg);
   if (index >= 8) { code_.byte(high_rex); }
   code_.byte(pop_register + (index & 7U));
 }
 
-std::vector<std::uint8_t> RegionEmitter::generate() {
+std::vector<std::uint8_t> ResidentRegionEmitter::generate() {
   code_.raw(landing);
   const auto saved = std::min(root_registers.size(), region_.roots.size());
   const auto inner_trips = region_.inner_iterations / (inner_vector_ ? lanes_ : 1U);
@@ -759,12 +762,12 @@ std::vector<std::uint8_t> RegionEmitter::generate() {
 }
 } // namespace
 
-std::vector<std::uint8_t> emit_region(NativeRegion &region, const unsigned lanes) {
-  return RegionEmitter(region, lanes).generate();
+std::vector<std::uint8_t> emit_resident_region(ResidentRegion &region, const unsigned lanes) {
+  return ResidentRegionEmitter(region, lanes).generate();
 }
 
-std::vector<std::uint8_t> select_region(NativeRegion &region,
-                                        const std::span<const std::uint8_t> fallback) {
+std::vector<std::uint8_t> select_resident_region(ResidentRegion &region,
+                                                 const std::span<const std::uint8_t> fallback) {
   constexpr std::array<std::uint8_t, 10> prologue{
       0xf3, 0x0f, 0x1e, 0xfa, 0x57, 0x56, 0x48, 0x83, 0xec, 0x08};
   constexpr std::array<std::uint8_t, 10> invoke{
@@ -773,7 +776,7 @@ std::vector<std::uint8_t> select_region(NativeRegion &region,
   x64::Label rejected;
   code.raw(prologue);
   code.constant(x64::Reg::dx, reinterpret_cast<std::uintptr_t>(&region));
-  code.constant(x64::Reg::ax, std::bit_cast<std::uintptr_t>(&run_region));
+  code.constant(x64::Reg::ax, std::bit_cast<std::uintptr_t>(&run_resident_region));
   code.raw(invoke);
   code.jump_if(x64::Branch::equal, rejected);
   code.byte(return_opcode);

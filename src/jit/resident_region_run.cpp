@@ -4,7 +4,7 @@
 #include "dsp56300/memory.hpp"
 #include "fields.hpp"
 #include "jit.hpp"
-#include "region.hpp"
+#include "resident_region.hpp"
 #include "value_graph.hpp"
 
 #include <algorithm>
@@ -36,7 +36,7 @@ bool scaled_offset(const GraphAddress amount, const Word n, std::uint64_t &resul
   return result <= word_mask;
 }
 
-bool header(const Cpu &cpu, const NativeContext &context, const NativeRegion &region) {
+bool header(const Cpu &cpu, const NativeContext &context, const ResidentRegion &region) {
   const auto &reg = cpu.reg;
   return reg.pc == region.entry && reg.la == region.last && (reg.sr & loop_flag) != 0 &&
          (reg.sr & forever_flag) == 0 && (reg.sr & numeric_mode_mask) == region.mode &&
@@ -47,7 +47,7 @@ bool header(const Cpu &cpu, const NativeContext &context, const NativeRegion &re
          (context.exit_requested == nullptr || !*context.exit_requested);
 }
 
-bool memory(const Cpu &cpu, const NativeContext &context, const NativeRegion &region) {
+bool memory(const Cpu &cpu, const NativeContext &context, const ResidentRegion &region) {
   std::array<bool, 2> seen{};
   for (const auto &stream : region.graph.streams) {
     const auto index = stream.space == Space::x ? 0U : 1U;
@@ -76,7 +76,7 @@ Word reverse_bits(Word value) {
   return std::byteswap(value);
 }
 
-bool reverse_address(const Registers &reg, NativeRegion &region, const unsigned index) {
+bool reverse_address(const Registers &reg, ResidentRegion &region, const unsigned index) {
   const auto initial = reg.r[index];
   const auto n = reg.n[index];
   if ((reg.m[index] & modifier_mask) != 0 || initial > word_mask || n > sign24_bit ||
@@ -94,7 +94,7 @@ bool reverse_address(const Registers &reg, NativeRegion &region, const unsigned 
   return true;
 }
 
-bool address(const Registers &reg, NativeRegion &region, const unsigned index) {
+bool address(const Registers &reg, ResidentRegion &region, const unsigned index) {
   if ((region.reverse_addresses & (Word{1} << index)) != 0) {
     return reverse_address(reg, region, index);
   }
@@ -122,7 +122,7 @@ bool address(const Registers &reg, NativeRegion &region, const unsigned index) {
   return true;
 }
 
-bool cursors(const Registers &reg, const NativeContext &context, NativeRegion &region) {
+bool cursors(const Registers &reg, const NativeContext &context, ResidentRegion &region) {
   for (unsigned index = 0; index < agu_registers; ++index) {
     if (!address(reg, region, index)) { return false; }
   }
@@ -159,7 +159,7 @@ bool cursors(const Registers &reg, const NativeContext &context, NativeRegion &r
 
 bool footprint(const Registers &reg,
                const NativeContext &context,
-               NativeRegion &region,
+               ResidentRegion &region,
                const std::size_t index,
                RegionFootprint &result) {
   const auto &stream = region.graph.streams[index];
@@ -210,7 +210,7 @@ bool independent(const RegionFootprint &left, const RegionFootprint &right) {
          right.inner_span < right.stride && later_span < left.stride - distance;
 }
 
-bool streams(const Registers &reg, const NativeContext &context, NativeRegion &region) {
+bool streams(const Registers &reg, const NativeContext &context, ResidentRegion &region) {
   // Scratch storage is sized during translation, never allocated by execution.
   for (std::size_t index = 0; index < region.graph.streams.size(); ++index) {
     auto &current = region.footprints[index];
@@ -223,7 +223,7 @@ bool streams(const Registers &reg, const NativeContext &context, NativeRegion &r
   return true;
 }
 
-bool admit_inner(const NativeRegion &region, const bool parent_available) {
+bool admit_inner(const ResidentRegion &region, const bool parent_available) {
   std::size_t inner_cost = 0;
   std::size_t parent_cost = 0;
   for (std::size_t index = 0; index < region.graph.streams.size(); ++index) {
@@ -253,7 +253,7 @@ bool admit_inner(const NativeRegion &region, const bool parent_available) {
   return true;
 }
 
-bool select_lanes(NativeRegion &region, const Word count) {
+bool select_lanes(ResidentRegion &region, const Word count) {
   region.lanes = 4;
   if (count < 4) { region.lanes = 2; }
   if (count < 2) { region.lanes = 1; }
@@ -268,7 +268,7 @@ bool select_lanes(NativeRegion &region, const Word count) {
   return true;
 }
 
-void invariants(const Registers &reg, NativeRegion &region) {
+void invariants(const Registers &reg, ResidentRegion &region) {
   for (unsigned index = 0; index < region.frame.invariants.size(); ++index) {
     if ((region.graph.invariant_registers & (Word{1} << index)) == 0) { continue; }
     std::int64_t value = 0;
@@ -311,7 +311,7 @@ Word flags(const std::array<std::uint64_t, 3> &values, const ValueGraph &graph) 
   return result | carry_value;
 }
 
-Word sticky(const NativeRegion &region,
+Word sticky(const ResidentRegion &region,
             const RegionVector &growth_events,
             const RegionVector &limit_events,
             const unsigned lanes) {
@@ -325,7 +325,7 @@ Word sticky(const NativeRegion &region,
          ((limited & std::numeric_limits<Word>::max()) != 0 ? limit : 0U);
 }
 
-void stack(Registers &reg, const NativeRegion &region, const Word changed) {
+void stack(Registers &reg, const ResidentRegion &region, const Word changed) {
   const auto &frame = region.frame;
   if (region.nested) {
     const auto preceding = sticky(region, frame.preceding_growth, frame.preceding_limits, 4) |
@@ -347,7 +347,7 @@ void stack(Registers &reg, const NativeRegion &region, const Word changed) {
   reg.sc -= 2;
 }
 
-void commit(Cpu &cpu, NativeContext &context, const NativeRegion &region) {
+void commit(Cpu &cpu, NativeContext &context, const ResidentRegion &region) {
   auto &reg = cpu.reg;
   const auto &frame = region.frame;
   Word changed = region.graph.flags.valid() ? arithmetic_status : 0;
@@ -390,8 +390,9 @@ void commit(Cpu &cpu, NativeContext &context, const NativeRegion &region) {
 }
 } // namespace
 
-std::uint32_t
-run_region(Cpu *const cpu, NativeContext *const context, NativeRegion *const region) noexcept {
+std::uint32_t run_resident_region(Cpu *const cpu,
+                                  NativeContext *const context,
+                                  ResidentRegion *const region) noexcept {
   if (!header(*cpu, *context, *region) || !memory(*cpu, *context, *region)) { return 0; }
   const auto count = std::min(cpu->reg.lc, context->budget / region->graph.instructions);
   if (!select_lanes(*region, count)) { return 0; }
@@ -417,7 +418,7 @@ run_region(Cpu *const cpu, NativeContext *const context, NativeRegion *const reg
   region->frame.constants = region->constants.data();
   region->frame.offsets = region->offsets.data();
   region->frame.spills = region->spills.data();
-  if (!enter_region(region->native[region->lanes / 2], region->frame)) { return 0; }
+  if (!enter_resident_region(region->native[region->lanes / 2], region->frame)) { return 0; }
   commit(*cpu, *context, *region);
   return region->frame.iterations * region->graph.instructions;
 }

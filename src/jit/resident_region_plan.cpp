@@ -7,7 +7,7 @@
 #include "jit.hpp"
 #include "jit/block.hpp"
 #include "move.hpp"
-#include "region.hpp"
+#include "resident_region.hpp"
 #include "translation.hpp"
 #include "value_graph.hpp"
 
@@ -38,7 +38,7 @@ bool nested(const std::span<const Word> program,
             const Registers &state,
             const JitRuntime &runtime,
             const std::span<const BlockInstruction> operations,
-            NativeRegion &region) {
+            ResidentRegion &region) {
   const auto &setup = operations.back();
   const auto &instruction = setup.instruction;
   if (instruction.operation != Operation::loop_immediate || setup.loop_address == inactive_loop) {
@@ -96,7 +96,7 @@ bool nested(const std::span<const Word> program,
   return true;
 }
 
-bool roots(NativeRegion &region, const Registers &state) {
+bool roots(ResidentRegion &region, const Registers &state) {
   for (const auto &stream : region.graph.streams) {
     const auto &delta = region.graph.addresses[stream.address];
     if ((state.m[stream.address] & modifier_mask) == 0 && delta.offsets != 0) {
@@ -123,12 +123,13 @@ bool roots(NativeRegion &region, const Registers &state) {
 }
 } // namespace
 
-std::unique_ptr<NativeRegion> plan_region(const std::span<const Word> program,
-                                          const Registers &state,
-                                          const JitRuntime &runtime,
-                                          const std::span<const BlockInstruction> operations) {
+std::unique_ptr<ResidentRegion>
+resident_region_plan(const std::span<const Word> program,
+                     const Registers &state,
+                     const JitRuntime &runtime,
+                     const std::span<const BlockInstruction> operations) {
   if (operations.empty()) { return nullptr; }
-  auto region = std::make_unique<NativeRegion>();
+  auto region = std::make_unique<ResidentRegion>();
   region->runtime = runtime;
   region->entry = operations.front().pc;
   region->last = operations.back().loop_address;

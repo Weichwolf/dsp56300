@@ -46,8 +46,8 @@ add_library(dsp56300_core STATIC
   src/jit/x64/retirement.cpp src/jit/x64/status.cpp
   src/jit/x64/shifts.cpp src/jit/registers.cpp src/jit/x64/inputs.cpp
   src/jit/mac_batch.cpp src/jit/x64/mac_batch_avx2.cpp src/jit/x64/batch.cpp
-  src/jit/value_graph.cpp src/jit/region_run.cpp src/jit/region_plan.cpp
-  src/jit/x64/vector.cpp src/jit/x64/region_emit.cpp)
+  src/jit/value_graph.cpp src/jit/resident_region_run.cpp src/jit/resident_region_plan.cpp
+  src/jit/x64/vector.cpp src/jit/x64/resident_region_emit.cpp)
 add_library(dsp56300::core ALIAS dsp56300_core)
 target_include_directories(dsp56300_core PUBLIC include)
 target_compile_features(dsp56300_core PUBLIC cxx_std_23)

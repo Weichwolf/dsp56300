@@ -48,7 +48,7 @@ struct RegionFootprint {
   std::uint64_t bytes = 0, stride = 0, inner_span = 0;
 };
 
-struct NativeRegion {
+struct ResidentRegion {
   ValueGraph graph;
   JitRuntime runtime;
   std::vector<RegionRoot> roots;
@@ -66,15 +66,16 @@ struct NativeRegion {
   unsigned lanes = 4, growth_shift = 0;
 };
 
-[[nodiscard]] std::unique_ptr<NativeRegion>
-plan_region(std::span<const Word> program,
-            const Registers &state,
-            const JitRuntime &runtime,
-            std::span<const BlockInstruction> operations);
-[[nodiscard]] std::vector<std::uint8_t> emit_region(NativeRegion &region, unsigned lanes);
-[[nodiscard]] std::vector<std::uint8_t> select_region(NativeRegion &region,
-                                                      std::span<const std::uint8_t> fallback);
-[[nodiscard]] bool enter_region(const void *entry, RegionFrame &frame) noexcept;
+[[nodiscard]] std::unique_ptr<ResidentRegion>
+resident_region_plan(std::span<const Word> program,
+                     const Registers &state,
+                     const JitRuntime &runtime,
+                     std::span<const BlockInstruction> operations);
+[[nodiscard]] std::vector<std::uint8_t> emit_resident_region(ResidentRegion &region,
+                                                             unsigned lanes);
+[[nodiscard]] std::vector<std::uint8_t>
+select_resident_region(ResidentRegion &region, std::span<const std::uint8_t> fallback);
+[[nodiscard]] bool enter_resident_region(const void *entry, RegionFrame &frame) noexcept;
 [[nodiscard]] std::uint32_t
-run_region(Cpu *cpu, NativeContext *context, NativeRegion *region) noexcept;
+run_resident_region(Cpu *cpu, NativeContext *context, ResidentRegion *region) noexcept;
 } // namespace dsp56300::detail
