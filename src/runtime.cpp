@@ -6,7 +6,28 @@
 #include "jit.hpp"
 #include "translation.hpp"
 
+#include <array>
 #include <cstdint>
+
+namespace dsp56300::detail {
+void access_bit_io(Io *const io, NativeAccess &access) noexcept {
+  constexpr std::array actions{
+      BitAction::test, BitAction::clear, BitAction::set, BitAction::change};
+  const auto bit = access.value;
+  const auto action =
+      actions[static_cast<unsigned>(access.action) - static_cast<unsigned>(BusAction::bit_test)];
+  bool previous = false;
+  if ((io == nullptr || !io->bit(access.space, access.address, access.pc, bit, action, previous)) &&
+      access.failure.kind == FaultKind::none) {
+    access.failure = {.kind = FaultKind::io_bit,
+                      .space = access.space,
+                      .address = access.address,
+                      .value = bit,
+                      .pc = access.pc};
+  }
+  access.value = previous ? 1U : 0U;
+}
+}
 
 namespace dsp56300 {
 void Core::Impl::jit_access(void *const owner, detail::NativeAccess &access) noexcept {
@@ -15,8 +36,11 @@ void Core::Impl::jit_access(void *const owner, detail::NativeAccess &access) noe
   if (self.fault.kind == FaultKind::none) { self.fault = access.failure; }
   if (access.action == detail::BusAction::read) {
     access.value = self.read_memory(access.space, access.address);
-  } else {
+  } else if (access.action == detail::BusAction::write) {
     self.write_memory(access.space, access.address, access.value);
+  } else {
+    detail::access_bit_io(self.io, access);
+    if (self.fault.kind == FaultKind::none) { self.fault = access.failure; }
   }
   self.synchronize_program_view();
   access.failure = self.fault;

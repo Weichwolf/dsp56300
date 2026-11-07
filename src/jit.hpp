@@ -44,7 +44,7 @@ struct JitRuntime {
 
 enum class NativeBoundary : std::uint8_t { none, owner, context };
 
-enum class BusAction : std::uint8_t { read, write };
+enum class BusAction : std::uint8_t { read, write, bit_test, bit_clear, bit_set, bit_change };
 
 struct NativeAccess {
   Fault failure{};
@@ -52,6 +52,8 @@ struct NativeAccess {
   Space space = Space::program;
   BusAction action = BusAction::read;
 };
+
+void access_bit_io(Io *io, NativeAccess &access) noexcept;
 
 struct NativeWindow {
   Word address = 0;

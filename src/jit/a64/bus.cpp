@@ -40,9 +40,10 @@ void Emitter::memory_fault(const BlockInstruction &operation, const BusOperand o
   code_.store(Reg::x17, context, failure + offsetof(Fault, pc));
   code_.constant(Reg::x17, static_cast<std::uint8_t>(operand.space));
   code_.store(Reg::x17, context, failure + offsetof(Fault, space), Access::byte);
-  const auto kind = operand.write ? FaultKind::memory_write : FaultKind::memory_read;
+  auto kind = operand.write ? FaultKind::memory_write : FaultKind::memory_read;
+  if (operand.bit) { kind = FaultKind::io_bit; }
   code_.constant(Reg::x9, static_cast<std::uint8_t>(kind));
-  if (operand.space != Space::program) {
+  if (!operand.bit && operand.space != Space::program) {
     const auto peripheral = operand.write ? FaultKind::io_write : FaultKind::io_read;
     code_.constant(Reg::x10, static_cast<std::uint8_t>(peripheral));
     code_.constant(Reg::x17, io_begin);
@@ -58,6 +59,12 @@ void Emitter::memory_fault(const BlockInstruction &operation, const BusOperand o
 }
 
 void Emitter::memory_owned(const BlockInstruction &operation, const BusOperand operand) {
+  owned_access(operation, operand, operand.write ? BusAction::write : BusAction::read);
+}
+
+void Emitter::owned_access(const BlockInstruction &operation,
+                           const BusOperand operand,
+                           const BusAction action) {
   constexpr auto request = Frame::access;
   constexpr auto failure = request + offsetof(NativeAccess, failure);
   for (std::size_t offset = 0; offset < sizeof(Fault); offset += sizeof(Word)) {
@@ -74,8 +81,7 @@ void Emitter::memory_owned(const BlockInstruction &operation, const BusOperand o
   code_.store(Reg::x17, Reg::sp, request + offsetof(NativeAccess, pc));
   code_.constant(Reg::x17, static_cast<std::uint8_t>(operand.space));
   code_.store(Reg::x17, Reg::sp, request + offsetof(NativeAccess, space), Access::byte);
-  code_.constant(Reg::x17,
-                 static_cast<std::uint8_t>(operand.write ? BusAction::write : BusAction::read));
+  code_.constant(Reg::x17, static_cast<std::uint8_t>(action));
   code_.store(Reg::x17, Reg::sp, request + offsetof(NativeAccess, action), Access::byte);
   code_.load(Reg::x16,
              context,
@@ -94,7 +100,7 @@ void Emitter::memory_owned(const BlockInstruction &operation, const BusOperand o
              Access::doubleword);
   code_.add(Reg::x1, Reg::sp, request, Width::x64);
   code_.call(Reg::x16);
-  if (!operand.write) {
+  if (operand.bit || !operand.write) {
     code_.load(Reg::x0, Reg::sp, request + offsetof(NativeAccess, value));
     mask(Reg::x0, Reg::x0, word_mask, Width::w32);
   }

@@ -58,6 +58,14 @@ Independent per-bit matrices cover all descriptor widths/offsets, register alias
 flag preservation and mixed-sequence budget/fault exits. VSL captures raw X/Y
 outputs before addressing or bus access; native tests check AGU updates, I/O
 priority, first/second-store faults, physical aliases and callback remapping.
+Bit clear/set/change/test and conditional bit jumps/calls execute natively on
+registers and RAM. Tests preserve SSH peek/pop ordering, accumulator bus flags,
+SR writes, AGU effects, failed writes and call-stack faults. Peripheral bits use
+one actual atomic `Io::bit` callback with canonical visible CPU state. Private bus
+actions now encode bit test/clear/set/change; `NativeAccess.value` carries the bit
+index into this callback and the previous bit out. Existing read/write actions and
+native context layouts are unchanged. Native I/O tests also cover absent owners,
+rejected accesses and RAM mapping/permission changes between a read and its write.
 Other instruction families and complete owner integration remain open.
 Complete ARM64 Core execution and qualification remain in progress. The production
 Core still reports an unsupported host on ARM64.

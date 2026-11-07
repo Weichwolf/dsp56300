@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 #include "architecture.hpp"
+#include "bit_instruction.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "jit.hpp"
@@ -58,7 +59,7 @@ struct Frame {
 
 struct BusOperand {
   Space space = Space::x;
-  bool write = false;
+  bool write = false, bit = false;
 };
 
 struct MemoryLabels {
@@ -100,6 +101,7 @@ private:
   void memory_windows(BusOperand operand, MemoryLabels labels);
   void memory_flat(BusOperand operand, MemoryLabels labels);
   void memory_owned(const BlockInstruction &operation, BusOperand operand);
+  void owned_access(const BlockInstruction &operation, BusOperand operand, BusAction action);
   void memory_fault(const BlockInstruction &operation, BusOperand operand);
   void bus_failure();
   void mark_program_written();
@@ -144,6 +146,12 @@ private:
   void merge_field(const BlockInstruction &operation);
   void count_leading_bits(const BlockInstruction &operation);
   void viterbi_shift(const BlockInstruction &operation);
+  [[nodiscard]] bool bits(const BlockInstruction &operation);
+  void register_bit(const BlockInstruction &operation, BitAccess access);
+  void memory_bit(const BlockInstruction &operation, BitAccess access);
+  [[nodiscard]] bool bit_address(const BlockInstruction &operation, BitOperand operand);
+  void modify_bit(BitAction action, unsigned bit);
+  void bit_branch(const BlockInstruction &operation);
   [[nodiscard]] bool integer(const BlockInstruction &operation);
   void unit(const BlockInstruction &operation);
   void compare_unsigned(const BlockInstruction &operation);

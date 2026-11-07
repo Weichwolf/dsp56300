@@ -33,6 +33,13 @@ public:
     for (const auto input : inputs) {
       auto decoded = detail::decode(input.opcode);
       decoded.extension = input.extension;
+      if (decoded.words != input.words || decoded.cycles != input.cycles) {
+        std::cerr << std::hex << "opcode=" << input.opcode << std::dec
+                  << " words=" << static_cast<unsigned>(decoded.words)
+                  << " expected_words=" << input.words
+                  << " cycles=" << static_cast<unsigned>(decoded.cycles)
+                  << " expected_cycles=" << input.cycles << '\n';
+      }
       require(decoded.words == input.words && decoded.cycles == input.cycles,
               "Authored instruction length/base cost differs from its independent expectation");
       operations.push_back({.instruction = decoded, .pc = input.pc, .mode = input.mode});

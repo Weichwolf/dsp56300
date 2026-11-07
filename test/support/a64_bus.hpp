@@ -64,16 +64,17 @@ private:
     constexpr unsigned padding = 8;
     physical.a <<= padding;
     physical.b <<= padding;
-    valid_ = valid_ && request.space == expected.space && request.address == expected.address &&
-             request.pc == expected.pc &&
-             (request.action == detail::BusAction::write) == expected.write &&
-             request.value == (expected.write ? expected.value : 0U) &&
-             request.failure == expected.prior_failure && cpu.reg == physical &&
-             cpu.instructions == wrapped(expected.instructions) &&
-             cpu.cycles == wrapped(expected.cycles) && !cpu.interrupt_inhibited &&
-             cpu.repeat_completed == (expected.instructions == 0) &&
-             cpu.processing == ExecutionState::running &&
-             (expected.observed == nullptr || *expected.observed == expected.observed_value);
+    valid_ =
+        valid_ && request.space == expected.space && request.address == expected.address &&
+        request.pc == expected.pc &&
+        request.action == (expected.write ? detail::BusAction::write : detail::BusAction::read) &&
+        request.value == (expected.write ? expected.value : 0U) &&
+        request.failure == expected.prior_failure && cpu.reg == physical &&
+        cpu.instructions == wrapped(expected.instructions) &&
+        cpu.cycles == wrapped(expected.cycles) && !cpu.interrupt_inhibited &&
+        cpu.repeat_completed == (expected.instructions == 0) &&
+        cpu.processing == ExecutionState::running &&
+        (expected.observed == nullptr || *expected.observed == expected.observed_value);
     if (!expected.write) { request.value = expected.value; }
     request.failure = expected.failure;
     if (next_ == 1 && remapped_ != nullptr) {
