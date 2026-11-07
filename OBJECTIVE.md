@@ -85,9 +85,10 @@ Current user requirements
   Parameterize
   host SIMD lane width separately from vector width; validate combinations and
   retain exact DSP precision and runtime host-ISA admission.
-- Keep entry points in src/core.cpp and src/jit.cpp; helpers in src/core/ and
-  src/jit/, native emission in src/jit/x64/, memory in src/core/memory.cpp.
-  Organize sources consistently and remove empty project directories.
+- Keep entry points in src/core.cpp and src/jit.cpp; architectural helpers
+  directly in src/ as in cpu12, JIT helpers in src/jit/ and native emission in
+  src/jit/x64/. Keep borrowed memory in memory.hpp. Organize sources consistently
+  and remove empty project directories.
 - Keep neighboring application/firmware repositories read-only. Preserve
   GPL-3.0-only licensing and source/dependency attribution. Keep manufacturer
   reference copies and private analysis outside the tracked source tree.

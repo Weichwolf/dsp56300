@@ -11,9 +11,10 @@
   transfer helpers here; JIT fallback gaps remain visible until native lowering
   preserves all effects and precise exits. I/O callbacks are separate from ISA
   interpretation. Do not add a hardware virtualization backend.
-- Keep Core/JIT entry points in src/core.cpp and src/jit.cpp; use block_parse,
-  block_emit, run, arena and code under src/jit/ as in cpu12. Keep x86 lowering
-  in src/jit/x64/ and borrowed memory in memory.hpp.
+- Keep architectural execution and private helpers directly in src/ as in cpu12,
+  with Core/JIT entry points in core.cpp and jit.cpp. Use move.cpp, transfer.cpp
+  and loop.cpp for the corresponding instruction families. Use block_parse,
+  block_emit, run, arena and code under src/jit/; keep x86 lowering in src/jit/x64/.
 - Publish reviewed increments only to configured origin/main. Keep neighboring
   application sources read-only; coordinate core revisions with consumer pins.
 
