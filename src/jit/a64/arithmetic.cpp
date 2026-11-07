@@ -133,6 +133,7 @@ void Emitter::operation(const BlockInstruction &operation) {
   const auto &instruction = operation.instruction;
   if (instruction.operation == Operation::nop) { return; }
   if (control(operation)) { return; }
+  if (event(operation)) { return; }
   if (loop(operation)) { return; }
   if (transfer(operation)) { return; }
   if (integer(operation)) { return; }

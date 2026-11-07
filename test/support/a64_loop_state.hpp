@@ -7,6 +7,7 @@
 #include "jit.hpp"
 #include "jit/block.hpp"
 #include "support.hpp"
+#include "vector_state.hpp"
 
 #include <array>
 #include <cstdint>
@@ -25,6 +26,10 @@ struct State {
   std::uint64_t instructions = std::numeric_limits<std::uint64_t>::max(),
                 cycles = std::numeric_limits<std::uint64_t>::max();
   Fault fault;
+  detail::VectorState vector;
+  Word debug_vector = 0;
+  ExecutionState processing = ExecutionState::running;
+  std::uint8_t debug_flags = 0;
   detail::NativeBoundary boundary = detail::NativeBoundary::none;
   bool completed = true, inhibited = true, program_written = false;
 };
@@ -42,8 +47,9 @@ inline void retire(State &state, const unsigned cycles) {
 class Runner {
 public:
   explicit Runner(const State &initial)
-      : context_{.runtime = {
-                     .owner = &helpers_, .execute = forbidden, .moves = forbidden, .memory = {}}} {
+      : context_{
+            .runtime = {.owner = &helpers_, .execute = forbidden, .moves = forbidden, .memory = {}},
+            .events = {.vector = &vector_, .debug_vector = &debug_vector_}} {
     cpu_.reg = initial.reg;
     constexpr unsigned padding = 8;
     cpu_.reg.a <<= padding;
@@ -57,6 +63,10 @@ public:
     cpu_.repeat_loaded = initial.repeat.loaded;
     cpu_.repeat_completed = initial.completed;
     cpu_.interrupt_inhibited = initial.inhibited;
+    cpu_.processing = initial.processing;
+    cpu_.debug_flags = initial.debug_flags;
+    vector_ = initial.vector;
+    debug_vector_ = initial.debug_vector;
   }
 
   void bind(const std::array<detail::JitMemory, 2> memory, const detail::NativeBus bus = {}) {
@@ -94,8 +104,11 @@ public:
         cpu_.repeat_opcode == expected.repeat.opcode &&
         cpu_.repeat_loaded == expected.repeat.loaded &&
         cpu_.repeat_completed == expected.completed &&
-        cpu_.interrupt_inhibited == expected.inhibited &&
-        cpu_.processing == ExecutionState::running && cpu_.debug_flags == 0 &&
+        cpu_.interrupt_inhibited == expected.inhibited && cpu_.processing == expected.processing &&
+        cpu_.debug_flags == expected.debug_flags && vector_.resume == expected.vector.resume &&
+        vector_.address == expected.vector.address && vector_.level == expected.vector.level &&
+        vector_.phase == expected.vector.phase && vector_.words == expected.vector.words &&
+        vector_.loaded == expected.vector.loaded && debug_vector_ == expected.debug_vector &&
         context_.boundary == expected.boundary && context_.failure == expected.fault &&
         context_.program_written == expected.program_written && helpers_ == 0;
     if (!matched) {
@@ -129,5 +142,7 @@ private:
   detail::Cpu cpu_;
   detail::NativeContext context_;
   unsigned helpers_ = 0;
+  detail::VectorState vector_;
+  Word debug_vector_ = 0;
 };
 }

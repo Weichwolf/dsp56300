@@ -5,6 +5,7 @@
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 #include "translation.hpp"
+#include "vector_state.hpp"
 
 #include <array>
 #include <cstddef>
@@ -78,6 +79,11 @@ struct NativeBus {
   bool external = false;
 };
 
+struct NativeEvents {
+  VectorState *vector = nullptr;
+  Word *debug_vector = nullptr;
+};
+
 struct NativeContext {
   JitRuntime runtime;
   bool *exit_requested = nullptr;
@@ -88,11 +94,16 @@ struct NativeContext {
   Fault failure{};
   NativeBus bus{};
   bool program_written = false;
+  NativeEvents events{};
 };
 
 class Jit {
 public:
-  Jit(Cpu &cpu, std::span<const Word> program, JitRuntime runtime, NativeBus bus = {});
+  Jit(Cpu &cpu,
+      std::span<const Word> program,
+      JitRuntime runtime,
+      NativeBus bus = {},
+      NativeEvents events = {});
   ~Jit();
   Jit(const Jit &) = delete;
   Jit &operator=(const Jit &) = delete;

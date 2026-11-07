@@ -36,7 +36,7 @@ InstructionFetch Core::instruction_fetch() const {
   if (impl_->exception_ready()) {
     const auto slot = impl_->vector.phase == Impl::VectorPhase::second ? 1U : 0U;
     std::optional<Word> latch;
-    if (const auto words = impl_->vector.words) { latch = words->at(slot); }
+    if (impl_->vector.loaded) { latch = impl_->vector.words.at(slot); }
     return {.address = (impl_->vector.address +
                         (impl_->vector.phase == Impl::VectorPhase::second ? 1U : 0U)) &
                        word_mask,

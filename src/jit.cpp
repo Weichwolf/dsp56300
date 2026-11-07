@@ -48,10 +48,12 @@ struct Jit::Impl {
   Impl(Cpu &state,
        const std::span<const Word> supplied,
        const JitRuntime runtime,
-       const NativeBus bus)
+       const NativeBus bus,
+       const NativeEvents events)
       : cpu(state),
         program(supplied),
-        context{.runtime = runtime, .exit_requested = &exit_requested, .bus = bus} {}
+        context{
+            .runtime = runtime, .exit_requested = &exit_requested, .bus = bus, .events = events} {}
 
   [[nodiscard]] std::unique_ptr<Block> compile();
   [[nodiscard]] Block *retain(std::unique_ptr<Block> block);
@@ -101,8 +103,9 @@ std::unique_ptr<Block> Jit::Impl::compile() {
 Jit::Jit(Cpu &cpu,
          const std::span<const Word> program,
          const JitRuntime runtime,
-         const NativeBus bus)
-    : impl_(std::make_unique<Impl>(cpu, program, runtime, bus)) {}
+         const NativeBus bus,
+         const NativeEvents events)
+    : impl_(std::make_unique<Impl>(cpu, program, runtime, bus, events)) {}
 
 Jit::~Jit() = default;
 

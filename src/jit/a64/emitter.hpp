@@ -131,6 +131,9 @@ private:
   void loop_restore(const BlockInstruction &operation);
   void loop_pop(const BlockInstruction &operation);
   void finish_loop(const BlockInstruction &operation);
+  [[nodiscard]] bool event(const BlockInstruction &operation);
+  void debug_request();
+  void exception_request(const BlockInstruction &operation);
   void control_byte(const BlockInstruction &operation);
   void jump(const BlockInstruction &operation);
   void branch(const BlockInstruction &operation);

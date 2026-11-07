@@ -73,17 +73,18 @@ void Core::Impl::call_vector(const Instruction &decoded) {
 
 Instruction Core::Impl::vector_instruction() {
 
-  if (vector.phase == VectorPhase::first && !vector.words) {
+  if (vector.phase == VectorPhase::first && !vector.loaded) {
     const auto first = fetch_program(vector.address);
     if (fault.kind != FaultKind::none) { return {}; }
     const auto second = fetch_program((vector.address + 1) & word_mask);
     if (fault.kind != FaultKind::none) { return {}; }
     vector.words = std::array{first, second};
+    vector.loaded = true;
   }
-  if (!vector.words) { return instruction(current_pc); }
-  auto decoded = decode(vector.words->at(vector.phase == VectorPhase::second ? 1U : 0U));
+  if (!vector.loaded) { return instruction(current_pc); }
+  auto decoded = decode(vector.words.at(vector.phase == VectorPhase::second ? 1U : 0U));
   if (decoded.words == 2 && vector.phase == VectorPhase::first) {
-    decoded.extension = vector.words->at(1);
+    decoded.extension = vector.words.at(1);
   }
   return decoded;
 }

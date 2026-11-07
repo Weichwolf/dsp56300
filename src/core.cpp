@@ -70,7 +70,8 @@ Core::Impl::Impl(const Buffers supplied, Io *const host_io, const bool external_
           .owner = this,
           .access = jit_access,
           .failure = &fault,
-          .external = external});
+          .external = external},
+      detail::NativeEvents{.vector = &vector, .debug_vector = &debug_vector});
 }
 
 bool Core::Impl::overlaps_program(const std::span<const Word> memory) const {
