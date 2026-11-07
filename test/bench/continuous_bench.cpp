@@ -242,10 +242,15 @@ bool run(const BinaryCase &item, const Engine engine, const Workload spec) {
   } else {
     host = measure_numeric_host(spec.name, item);
   }
-  const auto fastest = host.avx2_seconds > 0 ? std::min(host.scalar_seconds, host.avx2_seconds)
-                                             : host.scalar_seconds;
-  std::cout << "  host_scalar_s=" << host.scalar_seconds << " host_avx2_s=" << host.avx2_seconds
-            << " jit_to_scalar_host_percent=" << 100.0 * host.scalar_seconds / result.wall
+  auto fastest = host.avx2_seconds > 0 ? std::min(host.scalar_seconds, host.avx2_seconds)
+                                       : host.scalar_seconds;
+  if (host.asm_seconds > 0) { fastest = std::min(fastest, host.asm_seconds); }
+  std::cout << "  host_scalar_s=" << host.scalar_seconds << " host_avx2_s=" << host.avx2_seconds;
+  if (host.asm_seconds > 0) {
+    std::cout << " host_asm_s=" << host.asm_seconds
+              << " jit_to_asm_host_percent=" << 100.0 * host.asm_seconds / result.wall;
+  }
+  std::cout << " jit_to_scalar_host_percent=" << 100.0 * host.scalar_seconds / result.wall
             << " jit_to_host_percent=" << 100.0 * fastest / result.wall << " jit_target_70="
             << (fastest >= host_target_fraction * result.wall ? "PASS" : "FAIL")
             << " host_comparison=" << host.scope << " host_implementation=" << host.implementation

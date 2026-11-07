@@ -7,7 +7,7 @@
 
 namespace dsp56300::test {
 struct HostStreamTimes {
-  double scalar_seconds = 0, avx2_seconds = 0;
+  double scalar_seconds = 0, avx2_seconds = 0, asm_seconds = 0;
   std::string_view scope = "complete-state-and-memory";
   std::string_view implementation = "handwritten-asm";
 };

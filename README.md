@@ -70,11 +70,14 @@ Host references use the same fixed-point inputs, rounding, saturation, retained
 history and memory effects, with independently generated expectations. FIR uses
 checked scalar/AVX2 assembly and verifies complete registers and memory. IIR and
 nonlinear banks use inline scalar MAC assembly with optimized native scheduling;
-spectral processing compares compiler-generated scalar and single-thread AVX2
-vector code. The latter three
-are numerical algorithm baselines and omit architectural register/flag bookkeeping;
+spectral processing compares compiler-generated scalar/vector code with handwritten
+ASM windowing, FFT butterflies, output permutation and power/ring-buffer kernels.
+The latter three are numerical algorithm baselines and omit architectural
+register/flag bookkeeping;
 the output identifies that stricter comparison scope and the reference implementation.
-The fastest available host variant is used; the percentage is
+The fastest available host variant is used, including the additional `host_asm_s`
+reference where provided; `jit_to_asm_host_percent` reports it separately.
+The percentage is
 `100 * host_time / jit_time`. The scalar-only percentage is reported separately.
 JIT results always verify complete registers and all P/X/Y memory.
 Initialization and final verification are outside continuous timing on both sides.
