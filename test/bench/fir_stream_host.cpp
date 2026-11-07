@@ -101,14 +101,16 @@ double measure(const BinaryCase &item, const fir_host::HostIsa isa) {
 HostStreamTimes measure_fir_host(const BinaryCase &item) {
   require(item.initial.n[7] == stream_frames, "Matched stream timing covers two input seconds");
   HostStreamTimes result{.scalar_seconds = measure(item, fir_host::HostIsa::scalar)};
-  if (fir_host::avx2_supported()) { result.avx2_seconds = measure(item, fir_host::HostIsa::avx2); }
+  if (fir_host::vector_supported()) {
+    result.vector_seconds = measure(item, fir_host::HostIsa::vector);
+  }
   return result;
 }
 
 void verify_fir_host(const std::vector<BinaryCase> &cases) {
   for (const auto &item : cases) {
-    for (const auto isa : {fir_host::HostIsa::scalar, fir_host::HostIsa::avx2}) {
-      if (isa == fir_host::HostIsa::avx2 && !fir_host::avx2_supported()) { continue; }
+    for (const auto isa : {fir_host::HostIsa::scalar, fir_host::HostIsa::vector}) {
+      if (isa == fir_host::HostIsa::vector && !fir_host::vector_supported()) { continue; }
       HostStream host(item);
       host.run(item.initial.n[7], isa);
       host.verify(item);

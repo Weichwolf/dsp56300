@@ -653,17 +653,25 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   add_executable(dsp56300_fixture_test test/isa/fixture_test.cpp)
   target_link_libraries(dsp56300_fixture_test PRIVATE dsp56300::core dsp56300_fixture_format)
   add_executable(dsp56300_fixture_bench test/bench/fixture_bench.cpp)
+  set(dsp56300_numeric_host_source test/bench/numeric_host_asm.cpp)
+  set(dsp56300_fir_vector_source test/bench/fir_host_avx2.cpp)
+  set(dsp56300_spectral_host_source test/bench/spectral_host_asm.cpp)
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
+    set(dsp56300_numeric_host_source test/bench/numeric_host_a64.cpp)
+    set(dsp56300_fir_vector_source test/bench/fir_host_neon.cpp)
+    set(dsp56300_spectral_host_source test/bench/spectral_host_a64.cpp)
+  endif()
   add_executable(dsp56300_continuous_bench test/bench/continuous_bench.cpp
-    test/bench/fir_stream_host.cpp test/bench/fir_host.cpp test/bench/fir_host_avx2.cpp
-    test/bench/numeric_stream_host.cpp test/bench/numeric_host_asm.cpp test/bench/spectral_stream_host.cpp
-    test/bench/spectral_host_asm.cpp)
+    test/bench/fir_stream_host.cpp test/bench/fir_host.cpp ${dsp56300_fir_vector_source}
+    test/bench/numeric_stream_host.cpp ${dsp56300_numeric_host_source} test/bench/spectral_stream_host.cpp
+    ${dsp56300_spectral_host_source})
   target_link_libraries(dsp56300_continuous_bench PRIVATE dsp56300::core dsp56300_fixture_format)
   add_executable(dsp56300_numeric_host_test test/bench/numeric_host_test.cpp
-    test/bench/numeric_host_asm.cpp)
+    ${dsp56300_numeric_host_source})
   target_link_libraries(dsp56300_numeric_host_test PRIVATE dsp56300::core dsp56300_fixture_format)
   add_test(NAME numeric-host-asm COMMAND dsp56300_numeric_host_test)
   add_executable(dsp56300_spectral_host_test test/bench/spectral_host_test.cpp
-    test/bench/spectral_host_asm.cpp)
+    ${dsp56300_spectral_host_source})
   target_link_libraries(dsp56300_spectral_host_test PRIVATE dsp56300::core dsp56300_fixture_format)
   add_test(NAME spectral-host-asm COMMAND dsp56300_spectral_host_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/fft.d56")
@@ -711,7 +719,7 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   add_test(NAME fir-fixtures COMMAND dsp56300_fixture_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/fir.d56")
   add_executable(dsp56300_fir_host_bench test/bench/fir_host_bench.cpp test/bench/fir_host.cpp
-    test/bench/fir_host_avx2.cpp)
+    ${dsp56300_fir_vector_source})
   target_link_libraries(dsp56300_fir_host_bench PRIVATE dsp56300::core dsp56300_fixture_format)
   add_test(NAME fir-matched-host-asm COMMAND dsp56300_fir_host_bench
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/fir.d56" --verify)

@@ -4,6 +4,7 @@
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "fir_host_kernel.hpp"
+#include "host_features.hpp"
 #include "support.hpp"
 
 #include <algorithm>
@@ -21,6 +22,30 @@ constexpr Word loop_body = start + 3, after_program = start + 7;
 void products_kernel(Kernel &state,
                      const std::span<const Word> data,
                      const std::span<const Word> coefficients) {
+#if defined(__aarch64__)
+  asm volatile(
+      R"(
+    1:
+      ldr %w[left],[%[data],%[index],lsl #2]
+      ldr %w[right],[%[coefficients],%[index],lsl #2]
+      sbfx %[left],%[left],#0,#24
+      sbfx %[right],%[right],#0,#24
+      mul %[left],%[left],%[right]
+      adds %[sum],%[sum],%[left],lsl #9
+      cset %w[left],vs
+      orr %[sticky],%[sticky],%[left]
+      add %[index],%[index],#1
+      cmp %[index],%[count]
+      b.lo 1b
+  )"
+      : [sum] "+&r"(state.accumulated.sum),
+        [sticky] "+&r"(state.accumulated.overflow),
+        [index] "+&r"(state.index),
+        [left] "=&r"(state.left),
+        [right] "=&r"(state.right)
+      : [data] "r"(data.data()), [coefficients] "r"(coefficients.data()), [count] "r"(data.size())
+      : "cc", "memory");
+#else
   // Intermediate N/Z/U/E/V are dead; L is sticky across every individual MAC.
   // Eight low padding bits turn signed-56 wrap and overflow into native ADD/OF.
   // Both spans are checked before entering assembly; no hidden vector overread.
@@ -51,14 +76,14 @@ void products_kernel(Kernel &state,
                  [word_extension] "i"(64 - word_bits),
                  [product_extension] "i"(64 - word_bits - (64 - accumulator_bits) - 1)
                : "cc", "memory");
+#endif
 }
 
 Accumulator products(const std::span<const Word> data,
                      const std::span<const Word> coefficients,
                      const HostIsa host_isa) {
   Kernel state;
-  constexpr std::size_t vector_words = 4;
-  if (host_isa == HostIsa::avx2 && data.size() >= vector_words) {
+  if (host_isa == HostIsa::vector && data.size() >= host_vector_words) {
     vector_products(state, data, coefficients);
   }
   if (state.index < data.size()) { products_kernel(state, data, coefficients); }
@@ -111,8 +136,8 @@ Word finish(Registers &state, const Accumulator accumulated) {
 }
 } // namespace
 
-bool avx2_supported() noexcept {
-  return __builtin_cpu_supports("avx2");
+bool vector_supported() noexcept {
+  return host_vector_available();
 }
 
 Word filter(Registers &state,
@@ -122,8 +147,8 @@ Word filter(Registers &state,
   if (data.empty() || data.size() != coefficients.size() || data.size() > word_mask) {
     throw std::invalid_argument("FIR requires equally sized nonempty bounded inputs");
   }
-  if (host_isa == HostIsa::avx2 && !avx2_supported()) {
-    throw std::invalid_argument("AVX2 host execution requires qualified runtime support");
+  if (host_isa == HostIsa::vector && !vector_supported()) {
+    throw std::invalid_argument("Vector host execution requires qualified runtime support");
   }
   return finish(state, products(data, coefficients, host_isa));
 }

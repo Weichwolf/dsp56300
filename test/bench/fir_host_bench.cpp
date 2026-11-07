@@ -5,6 +5,7 @@
 #include "dsp56300/memory.hpp"
 #include "fir_host.hpp"
 #include "fixture_memory.hpp"
+#include "host_features.hpp"
 #include "isa.hpp"
 #include "support.hpp"
 
@@ -83,8 +84,8 @@ void guarded_inputs(const BinaryCase &item) {
   }
   const GuardedWords data(data_words);
   const GuardedWords coefficients(coefficient_words);
-  for (const auto host_isa : {HostIsa::scalar, HostIsa::avx2}) {
-    if (host_isa == HostIsa::avx2 && !avx2_supported()) { continue; }
+  for (const auto host_isa : {HostIsa::scalar, HostIsa::vector}) {
+    if (host_isa == HostIsa::vector && !vector_supported()) { continue; }
     const auto result = execute(item.initial, data.view(), coefficients.view(), host_isa);
     check(result.registers == item.expected && result.output == item.after[0].words[0],
           "Guarded host inputs retain complete state without a vector or scalar tail overread");
@@ -120,8 +121,8 @@ public:
         std::span<const Word>(host_memory_[2]).subspan(item.initial.r[4], item.budget - 4);
     auto expected = initial;
     patch(expected, item.after);
-    for (const auto host_isa : {HostIsa::scalar, HostIsa::avx2}) {
-      if (host_isa == HostIsa::avx2 && !avx2_supported()) { continue; }
+    for (const auto host_isa : {HostIsa::scalar, HostIsa::vector}) {
+      if (host_isa == HostIsa::vector && !vector_supported()) { continue; }
       run_host(item, host_isa);
       check(host_memory_ == expected,
             "Each host ISA matches independent full registers and all P/X/Y words");
@@ -190,7 +191,7 @@ void benchmark(Replay &replay, const BinaryCase &item) {
   std::array<double, trials> core_times{};
   std::array<double, trials> scalar_times{};
   std::array<double, trials> vector_times{};
-  const bool vectors = avx2_supported();
+  const bool vectors = vector_supported();
   const unsigned engines = vectors ? 3U : 2U;
   for (unsigned trial = 0; trial < trials; ++trial) {
     const auto invoke = [&](const unsigned engine) {
@@ -199,7 +200,7 @@ void benchmark(Replay &replay, const BinaryCase &item) {
       } else if (engine == 1) {
         scalar_times[trial] = measure([&] { replay.run_host(item, HostIsa::scalar); });
       } else {
-        vector_times[trial] = measure([&] { replay.run_host(item, HostIsa::avx2); });
+        vector_times[trial] = measure([&] { replay.run_host(item, HostIsa::vector); });
       }
     };
     for (unsigned step = 0; step < engines; ++step) { invoke((trial + step) % engines); }
@@ -220,7 +221,8 @@ void benchmark(Replay &replay, const BinaryCase &item) {
         "Warm measurements retain exact instruction/cycle charges and publish no native code");
   constexpr double million = 1000000.0;
   std::cout << item.name << " core_s=" << core << " host_s=" << host << " host_scalar_s=" << scalar
-            << " host_avx2_s=" << vector << " host_isa=" << (vector_faster ? "avx2" : "scalar")
+            << " host_" << host_vector_name << "_s=" << vector
+            << " host_isa=" << (vector_faster ? host_vector_name : "scalar")
             << " jit_to_host_percent=" << host / core * 100.0
             << " guest_mips=" << static_cast<double>(item.budget) * repetitions / core / million
             << " warm_publications=" << after.count - before.count << '\n';
@@ -272,7 +274,7 @@ int main(const int argc, const char *const *const argv) {
     }
     std::cout << std::setprecision(9)
               << "scope=reset+run+full-register/output-check; immutable-code-and-inputs; "
-                 "warm-translation; best-qualified-scalar/avx2-host-asm; median-nine; "
+                 "warm-translation; best-qualified-scalar/SIMD-host-asm; median-nine; "
                  "intermediate-dead-flags-elided-but-sticky-L-preserved; "
                  "full-memory-and-cycle-checks-outside-timing; FIR-only-not-performance-gate\n";
     dsp56300::test::fir_host::run(dsp56300::test::read_fixture(argv[1]), argc == 3);

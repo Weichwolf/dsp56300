@@ -9,6 +9,7 @@
 #include "executable_mappings.hpp"
 #include "fir_stream_program.hpp"
 #include "fixture_memory.hpp"
+#include "host_features.hpp"
 #include "iir_stream_program.hpp"
 #include "nonlinear_stream_program.hpp"
 #include "spectral_stream_program.hpp"
@@ -242,10 +243,11 @@ bool run(const BinaryCase &item, const Engine engine, const Workload spec) {
   } else {
     host = measure_numeric_host(spec.name, item);
   }
-  auto fastest = host.avx2_seconds > 0 ? std::min(host.scalar_seconds, host.avx2_seconds)
-                                       : host.scalar_seconds;
+  auto fastest = host.vector_seconds > 0 ? std::min(host.scalar_seconds, host.vector_seconds)
+                                         : host.scalar_seconds;
   if (host.asm_seconds > 0) { fastest = std::min(fastest, host.asm_seconds); }
-  std::cout << "  host_scalar_s=" << host.scalar_seconds << " host_avx2_s=" << host.avx2_seconds;
+  std::cout << "  host_scalar_s=" << host.scalar_seconds << " host_" << host_vector_name
+            << "_s=" << host.vector_seconds;
   if (host.asm_seconds > 0) {
     std::cout << " host_asm_s=" << host.asm_seconds
               << " jit_to_asm_host_percent=" << 100.0 * host.asm_seconds / result.wall;

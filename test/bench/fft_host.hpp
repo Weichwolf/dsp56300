@@ -2,6 +2,7 @@
 // Single-thread FFT reference for the paired JIT/host stream comparison.
 #pragma once
 #include "dsp56300/memory.hpp"
+#include "host_features.hpp"
 #include "support.hpp"
 
 #include <algorithm>
@@ -103,12 +104,12 @@ inline void scalar_work(Job &job, const std::size_t begin, const std::size_t end
 }
 
 // Compiler vector expressions keep arithmetic independent of x86 intrinsics.
-// The AVX2 variant is selected only after the host feature check.
+// The SIMD variant is selected only after the host feature check.
 using Vector = std::int64_t __attribute__((ext_vector_type(lane_count)));
 using Narrow = std::int32_t __attribute__((ext_vector_type(lane_count)));
 
 template <unsigned Bits, bool Rm>
-[[gnu::target("avx2")]] inline Vector round_vector(const Vector value) noexcept {
+DSP56300_HOST_VECTOR inline Vector round_vector(const Vector value) noexcept {
   constexpr auto mask = (std::int64_t{1} << Bits) - 1;
   constexpr auto half = std::int64_t{1} << (Bits - 1);
   const Vector one{1, 1, 1, 1};
@@ -122,20 +123,20 @@ template <unsigned Bits, bool Rm>
   return floor + ((greater & one) | (equal & parity));
 }
 
-[[gnu::target("avx2")]] inline Vector limit_vector(const Vector value) noexcept {
+DSP56300_HOST_VECTOR inline Vector limit_vector(const Vector value) noexcept {
   const Vector low{-scale, -scale, -scale, -scale};
   const Vector high{scale - 1, scale - 1, scale - 1, scale - 1};
   const auto top = value > high ? high : value;
   return top < low ? low : top;
 }
 
-[[gnu::target("avx2")]] inline Vector load(const std::int64_t *const data) noexcept {
+DSP56300_HOST_VECTOR inline Vector load(const std::int64_t *const data) noexcept {
   Vector result{};
   std::memcpy(&result, data, sizeof(result));
   return result;
 }
 
-[[gnu::target("avx2")]] inline void store(std::int64_t *const data, const Vector value) noexcept {
+DSP56300_HOST_VECTOR inline void store(std::int64_t *const data, const Vector value) noexcept {
   std::memcpy(data, &value, sizeof(value));
 }
 
@@ -143,7 +144,7 @@ struct Product {
   Vector left{}, right{};
 };
 
-[[gnu::target("avx2")]] inline Vector product(const Product input) noexcept {
+DSP56300_HOST_VECTOR inline Vector product(const Product input) noexcept {
   // Inputs are limited signed24 words. Explicit widening lets LLVM select
   // four signed32-to-signed64 products instead of general 64-bit multiplication.
   const auto a = __builtin_convertvector(__builtin_convertvector(input.left, Narrow), Vector);
@@ -152,7 +153,7 @@ struct Product {
 }
 
 template <bool Rm>
-[[gnu::target("avx2")]] inline void vector_butterfly(Job &job, const std::size_t flat) noexcept {
+DSP56300_HOST_VECTOR inline void vector_butterfly(Job &job, const std::size_t flat) noexcept {
   const auto half = job.stage->half;
   const auto column = flat % half;
   const auto left = (2 * (flat / half) * half) + column;
@@ -175,7 +176,7 @@ template <bool Rm>
 }
 
 template <bool Rm>
-[[gnu::target("avx2")]] inline void
+DSP56300_HOST_VECTOR inline void
 vector_work(Job &job, const std::size_t begin, const std::size_t end) noexcept {
   auto index = begin;
   while (index < end) {
@@ -190,8 +191,8 @@ vector_work(Job &job, const std::size_t begin, const std::size_t end) noexcept {
   }
 }
 
-[[gnu::target("avx2")]] inline void
-avx2_work(Job &job, const std::size_t begin, const std::size_t end) noexcept {
+DSP56300_HOST_VECTOR inline void
+simd_work(Job &job, const std::size_t begin, const std::size_t end) noexcept {
   if (job.rm) {
     vector_work<true>(job, begin, end);
   } else {
@@ -202,8 +203,8 @@ avx2_work(Job &job, const std::size_t begin, const std::size_t end) noexcept {
 using Work = void (*)(Job &, std::size_t, std::size_t) noexcept;
 
 inline void
-transform(Data &data, const std::span<const Stage> plan, const bool rm, const bool avx2) {
-  const Work work = avx2 ? avx2_work : scalar_work;
+transform(Data &data, const std::span<const Stage> plan, const bool rm, const bool vectors) {
+  const Work work = vectors ? simd_work : scalar_work;
   for (const auto &stage : plan) {
     Job job{.data = &data, .stage = &stage, .rm = rm};
     work(job, 0, data.real.size() / 2);

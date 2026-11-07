@@ -5,6 +5,7 @@
 #include "fft_host.hpp"
 #include "fft_program.hpp"
 #include "fixture_memory.hpp"
+#include "host_features.hpp"
 #include "spectral_host_asm.hpp"
 #include "spectral_stream_program.hpp"
 #include "stream_host.hpp"
@@ -149,8 +150,8 @@ HostStreamTimes measure_spectral_host(const BinaryCase &item) {
   HostStreamTimes result{.scalar_seconds = measure<Kernel::scalar>(item),
                          .scope = "fixed-point-algorithm-and-memory",
                          .implementation = "compiler-and-handwritten-spectrum-asm"};
-  if (__builtin_cpu_supports("avx2")) {
-    result.avx2_seconds = measure<Kernel::vector>(item);
+  if (host_vector_available()) {
+    result.vector_seconds = measure<Kernel::vector>(item);
     result.asm_seconds = measure<Kernel::assembly>(item);
   }
   return result;
@@ -165,7 +166,7 @@ void verify_spectral_host(const std::vector<BinaryCase> &cases) {
     }
   };
   verify.operator()<Kernel::scalar>();
-  if (__builtin_cpu_supports("avx2")) {
+  if (host_vector_available()) {
     verify.operator()<Kernel::vector>();
     verify.operator()<Kernel::assembly>();
   }

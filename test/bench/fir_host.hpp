@@ -6,9 +6,9 @@
 #include <span>
 
 namespace dsp56300::test::fir_host {
-enum class HostIsa : unsigned char { scalar, avx2 };
+enum class HostIsa : unsigned char { scalar, vector };
 
-[[nodiscard]] bool avx2_supported() noexcept;
+[[nodiscard]] bool vector_supported() noexcept;
 
 // One ordered dot product, convergent rounding, transfer limiting and exact flags.
 [[nodiscard]] Word filter(Registers &state,

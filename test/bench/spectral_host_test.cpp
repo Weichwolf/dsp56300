@@ -4,6 +4,7 @@
 #include "fft_host.hpp"
 #include "fft_program.hpp"
 #include "fixture_memory.hpp"
+#include "host_features.hpp"
 #include "spectral_host_asm.hpp"
 #include "support.hpp"
 
@@ -199,8 +200,8 @@ void run(const char *const path) {
 int main(const int argc, const char *const *const argv) {
   try {
     if (argc != 2) { throw std::runtime_error("Usage: dsp56300_spectral_host_test FFT.d56"); }
-    dsp56300::test::require(__builtin_cpu_supports("avx2"),
-                            "ASM spectral qualification needs AVX2");
+    dsp56300::test::require(dsp56300::test::host_vector_available(),
+                            "ASM spectral qualification needs the native host SIMD ISA");
     dsp56300::test::run(argv[1]);
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';
