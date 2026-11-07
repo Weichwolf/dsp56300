@@ -5,6 +5,7 @@
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
+#include "isa.hpp"
 #include "jit.hpp"
 #include "jit/code.hpp"
 #include "jit/emitter.hpp"
@@ -434,6 +435,58 @@ void helper_reuse() {
   }
 }
 
+void high_word_move(Core &core, Registers state, const Word index, const bool prime) {
+  constexpr std::array sources{5U, 7U};
+  constexpr Word instruction_stride = 3;
+  state.pc = (index * instruction_stride) + (prime ? 0U : 1U);
+  auto expected = state;
+  const auto source = sources[index / 4];
+  if (prime) {
+    const auto word = register_model::read(expected, source - 1);
+    register_model::write(expected, source, word);
+  }
+  const auto value = register_model::read(expected, source);
+  register_model::write(expected, 4 + (index % 4), value);
+  const auto count = prime ? 2U : 1U;
+  expected.pc += count;
+  core.set_registers(state);
+  const auto run = core.run(count);
+  require(run.retired == count && run.fault.kind == FaultKind::none && core.registers() == expected,
+          "Public Core transfers stored high words without changing flags or other fields");
+}
+
+void high_word_moves() {
+  constexpr unsigned source_shift = 13;
+  constexpr unsigned destination_shift = 8;
+  constexpr auto move = isa::opcode<isa::Opcode::move_none>().front();
+  constexpr std::array sources{5U, 7U};
+  constexpr std::array values{0U, 1U, sign24 - 1, sign24, word_mask - 1, word_mask};
+  constexpr Word instruction_stride = 3;
+  std::array<Word, sources.size() * 4 * instruction_stride> program{};
+  for (unsigned source = 0; source < sources.size(); ++source) {
+    for (unsigned destination = 4; destination < 8; ++destination) {
+      const auto index = (source * 4) + destination - 4;
+      const auto start = index * instruction_stride;
+      program[start] =
+          move | ((sources[source] - 1) << source_shift) | (sources[source] << destination_shift);
+      program[start + 1] =
+          move | (sources[source] << source_shift) | (destination << destination_shift);
+      program[start + 2] = isa::stop.front();
+    }
+  }
+  Core core(Memory::unified(program));
+  for (const auto high : values) {
+    for (const auto low : values) {
+      auto state = register_model::seed(0);
+      state.x = (std::uint64_t{high} << word_bits) | low;
+      state.y = (std::uint64_t{high ^ word_mask} << word_bits) | (low ^ word_mask);
+      for (Word index = 0; index < sources.size() * 4; ++index) {
+        for (const bool prime : {false, true}) { high_word_move(core, state, index, prime); }
+      }
+    }
+  }
+}
+
 void callbacks() {
   for (const auto backend : {Backend::jit}) {
     {
@@ -455,6 +508,7 @@ void callbacks() {
 
 int main() {
   try {
+    dsp56300::test::high_word_moves();
     for (const auto source : dsp56300::test::temporaries) {
       for (const auto destination : dsp56300::test::temporaries) {
         for (const auto snapshot : dsp56300::test::snapshots) {
