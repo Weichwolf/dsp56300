@@ -29,7 +29,24 @@ enum class Reg : std::uint8_t {
   r15
 };
 enum class Width : std::uint8_t { byte = 1, word = 2, dword = 4, qword = 8 };
-enum class Xmm : std::uint8_t { x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13 };
+enum class Xmm : std::uint8_t {
+  x0,
+  x1,
+  x2,
+  x3,
+  x4,
+  x5,
+  x6,
+  x7,
+  x8,
+  x9,
+  x10,
+  x11,
+  x12,
+  x13,
+  x14,
+  x15
+};
 enum class Packed : std::uint8_t {
   copy = 0x6f,
   add_qword = 0xd4,
@@ -58,6 +75,46 @@ struct IndexedAddress {
   Reg base, index;
   std::size_t offset = 0;
 };
+
+// Low byte is the opcode; the next byte is the VEX opcode-map selector.
+enum class VectorOp : std::uint16_t {
+  copy = 0x016f,
+  add = 0x01d4,
+  subtract = 0x01fb,
+  multiply = 0x0228,
+  bit_and = 0x01db,
+  bit_and_not = 0x01df,
+  bit_or = 0x01eb,
+  bit_xor = 0x01ef,
+  equal_dword = 0x0176,
+  greater_qword = 0x0237,
+  minimum_dword = 0x0239,
+  maximum_dword = 0x023d,
+  blend_dword = 0x0302,
+  shuffle_dword = 0x0170,
+  extend_dword = 0x0225,
+  broadcast_qword = 0x0259
+};
+
+struct VectorOperands {
+  Xmm destination, left, right;
+};
+
+struct VectorAddress {
+  Reg base;
+  std::size_t offset = 0;
+};
+
+struct VectorEncoding {
+  unsigned map = 1, prefix = 1;
+  bool wide = true, qword = false;
+};
+
+struct VectorFields {
+  unsigned destination = 0, left = 0, base = 0, index = 0;
+};
+
+enum class VectorShift : std::uint8_t { right = 2, arithmetic = 4, left = 6 };
 
 struct Label {
   std::vector<std::size_t> references;
@@ -117,6 +174,19 @@ public:
   void jump(Label &label);
   void call(Label &label);
   void bind(Label &label);
+  void vector(VectorOp operation, VectorOperands registers, bool wide = true);
+  void vector_unary(VectorOp operation, Xmm destination, Xmm source, bool wide = true);
+  void vector_immediate(VectorOp operation, VectorOperands registers, unsigned immediate);
+  void vector_shift(
+      Xmm destination, Xmm source, VectorShift operation, unsigned bits, bool dwords = false);
+  void vector_load(Xmm destination, VectorAddress address, bool wide = true);
+  void vector_store(VectorAddress address, Xmm source, bool wide = true);
+  void vector_broadcast(Xmm destination, VectorAddress address, bool dwords = false);
+  void vector_pack(Xmm destination, Xmm low, Xmm high);
+  void vector_extract(Xmm destination, Xmm source, unsigned lane);
+  void vector_scalar(Reg destination, Xmm source, unsigned lane);
+  void vector_gather(Xmm destination, Xmm indices, Xmm mask, Reg base);
+  void vector_finish();
 
   [[nodiscard]] const std::vector<std::uint8_t> &bytes() const noexcept { return bytes_; }
 
@@ -129,6 +199,7 @@ private:
   void indexed(unsigned reg, IndexedAddress address);
   void reference(Label &label);
   void patch(std::size_t offset, std::size_t target);
+  void vex(VectorEncoding encoding, VectorFields fields);
   std::vector<std::uint8_t> bytes_;
 };
 } // namespace dsp56300::detail::x64

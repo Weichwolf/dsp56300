@@ -45,7 +45,9 @@ add_library(dsp56300_core STATIC
   src/jit/x64/address.cpp src/jit/x64/registers.cpp src/jit/x64/long_move.cpp
   src/jit/x64/retirement.cpp src/jit/x64/status.cpp
   src/jit/x64/shifts.cpp src/jit/registers.cpp src/jit/x64/inputs.cpp
-  src/jit/mac_batch.cpp src/jit/x64/mac_batch_avx2.cpp src/jit/x64/batch.cpp)
+  src/jit/mac_batch.cpp src/jit/x64/mac_batch_avx2.cpp src/jit/x64/batch.cpp
+  src/jit/value_graph.cpp src/jit/region_run.cpp src/jit/region_plan.cpp
+  src/jit/x64/vector.cpp src/jit/x64/region_emit.cpp)
 add_library(dsp56300::core ALIAS dsp56300_core)
 target_include_directories(dsp56300_core PUBLIC include)
 target_compile_features(dsp56300_core PUBLIC cxx_std_23)
@@ -91,6 +93,14 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
     target_include_directories(dsp56300_native_context_test PRIVATE src src/core src/jit test/support)
     target_link_libraries(dsp56300_native_context_test PRIVATE dsp56300::core)
     add_test(NAME native-context-routing COMMAND dsp56300_native_context_test)
+    add_executable(dsp56300_x64_vector_test test/jit/x64_vector_test.cpp)
+    target_include_directories(dsp56300_x64_vector_test PRIVATE src test/support)
+    target_link_libraries(dsp56300_x64_vector_test PRIVATE dsp56300::core)
+    add_test(NAME native-vector-encodings COMMAND dsp56300_x64_vector_test)
+    add_executable(dsp56300_native_value_region_test test/jit/native_value_region_test.cpp)
+    target_include_directories(dsp56300_native_value_region_test PRIVATE test/support)
+    target_link_libraries(dsp56300_native_value_region_test PRIVATE dsp56300::core)
+    add_test(NAME native-value-regions COMMAND dsp56300_native_value_region_test)
     add_executable(dsp56300_memory_windows_bench test/bench/memory_windows_bench.cpp)
     target_link_libraries(dsp56300_memory_windows_bench PRIVATE dsp56300::core)
     add_custom_target(bench-memory-windows

@@ -8,6 +8,7 @@
 #include "jit/block.hpp"
 #include "jit/emitter.hpp"
 #include "jit/index.hpp"
+#include "jit/region.hpp"
 #include "mac_batch.hpp"
 #include "translation.hpp"
 
@@ -33,6 +34,7 @@ struct Mapping {
 struct Block {
   std::vector<BlockInstruction> operations;
   const void *entry = nullptr;
+  std::unique_ptr<NativeRegion> region;
 };
 }
 
@@ -64,7 +66,18 @@ std::unique_ptr<Block> Jit::Impl::compile() {
   auto block = std::make_unique<Block>();
   block->operations = parse_block(program, cpu.reg, context.runtime);
   if (block->operations.empty()) { return nullptr; }
-  block->entry = arena.append(emit_block(block->operations, context.runtime, cpu.reg.m));
+  auto bytes = emit_block(block->operations, context.runtime, cpu.reg.m);
+  block->region = plan_region(program, cpu.reg, context.runtime, block->operations);
+  if (block->region) {
+    auto &region = *block->region;
+    for (unsigned index = 0; index < region.native.size(); ++index) {
+      const unsigned lanes = 1U << index;
+      if (region.nested && lanes == 1) { continue; }
+      region.native[index] = arena.append(emit_region(region, lanes));
+    }
+    bytes = select_region(region, bytes);
+  }
+  block->entry = arena.append(bytes);
   return block;
 }
 

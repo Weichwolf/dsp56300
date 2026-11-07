@@ -3,6 +3,7 @@
 #include "dsp56300/core.hpp"
 #include "jit.hpp"
 #include "jit/block.hpp"
+#include "jit/region.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -28,6 +29,7 @@ static_assert(static_cast<unsigned>(NativeBoundary::none) == 0);
 static_assert(sizeof(void *) == 8 && native_page_shift == 8);
 static_assert(sizeof(NativePage) == native_page_entries * sizeof(void *));
 
+extern "C" void dsp56300_enter_region(const void *, RegionFrame *) noexcept;
 extern "C" std::uint32_t dsp56300_enter_generated(const void *, Cpu *, NativeContext *) noexcept;
 extern "C" std::uint32_t dsp56300_run_blocks(const void *,
                                              Cpu *,
@@ -51,6 +53,15 @@ asm(".pushsection .text\n"
     "mov %rdx,%rsi\n"
     "jmp *%rax\n"
     ".size dsp56300_enter_generated,.-dsp56300_enter_generated\n"
+    ".globl dsp56300_enter_region\n"
+    ".hidden dsp56300_enter_region\n"
+    ".type dsp56300_enter_region,@function\n"
+    "dsp56300_enter_region:\n"
+    "endbr64\n"
+    "mov %rdi,%rax\n"
+    "mov %rsi,%rdi\n"
+    "jmp *%rax\n"
+    ".size dsp56300_enter_region,.-dsp56300_enter_region\n"
     ".globl dsp56300_run_blocks\n"
     ".hidden dsp56300_run_blocks\n"
     ".type dsp56300_run_blocks,@function\n"
@@ -168,6 +179,17 @@ asm(".pushsection .text\n"
     ".size dsp56300_run_blocks,.-dsp56300_run_blocks\n"
     ".popsection\n");
 #endif
+
+bool enter_region(const void *const entry, RegionFrame &frame) noexcept {
+#if defined(__x86_64__) && defined(__linux__)
+  dsp56300_enter_region(entry, &frame);
+  return true;
+#else
+  static_cast<void>(entry);
+  static_cast<void>(frame);
+  return false;
+#endif
+}
 
 std::uint32_t enter_block(const void *const entry, Cpu &cpu, NativeContext &context) noexcept {
 #if defined(__x86_64__) && defined(__linux__)
