@@ -33,9 +33,11 @@ option(DSP56300_BUILD_TESTING "Build DSP library tests" ${PROJECT_IS_TOP_LEVEL})
 
 set(CMAKE_CXX_CLANG_TIDY "${DSP56300_CLANG_TIDY};--warnings-as-errors=*")
 
+set(dsp56300_run_source src/jit/run.cpp)
 set(dsp56300_mac_source src/jit/x64/mac_batch_avx2.cpp)
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
   set(dsp56300_mac_source src/jit/a64/mac_batch_neon.cpp)
+  set(dsp56300_run_source src/jit/a64/run.cpp)
 endif()
 add_library(dsp56300_core STATIC
   src/core.cpp src/captured.cpp src/repeat.cpp src/memory_windows.cpp src/external_memory.cpp src/state.cpp
@@ -47,7 +49,8 @@ add_library(dsp56300_core STATIC
   src/bits.cpp src/bit_fields.cpp src/loop.cpp src/products.cpp src/iteration.cpp
   src/processing.cpp src/debugging.cpp src/viterbi.cpp src/program_cache.cpp src/cache_control.cpp
   src/jit.cpp src/runtime.cpp src/jit/x64/emitter.cpp src/jit/code.cpp
-  src/jit/arena.cpp src/jit/block_parse.cpp src/jit/block_emit.cpp src/jit/run.cpp src/jit/index.cpp
+  src/jit/arena.cpp src/jit/block_parse.cpp src/jit/block_emit.cpp ${dsp56300_run_source} src/jit/index.cpp
+  src/jit/a64/code.cpp
   src/jit/x64/addition.cpp src/jit/x64/logic.cpp
   src/jit/x64/saturation.cpp
   src/jit/x64/loop.cpp
@@ -122,15 +125,19 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   add_executable(dsp56300_memory_api_test test/core/memory_api_test.cpp)
   target_link_libraries(dsp56300_memory_api_test PRIVATE dsp56300::core)
   add_test(NAME memory-api COMMAND dsp56300_memory_api_test)
+  add_executable(dsp56300_a64_code_test test/jit/a64_code_test.cpp)
+  target_include_directories(dsp56300_a64_code_test PRIVATE src)
+  target_link_libraries(dsp56300_a64_code_test PRIVATE dsp56300::core)
+  add_test(NAME a64-code-emission COMMAND dsp56300_a64_code_test)
+  add_executable(dsp56300_native_context_test test/jit/native_context_test.cpp)
+  target_include_directories(dsp56300_native_context_test PRIVATE src src/jit test/support)
+  target_link_libraries(dsp56300_native_context_test PRIVATE dsp56300::core)
+  add_test(NAME native-context-routing COMMAND dsp56300_native_context_test)
   if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64)$")
     add_executable(dsp56300_native_run_test test/jit/native_run_test.cpp)
     target_include_directories(dsp56300_native_run_test PRIVATE src src/jit src/jit/x64 test/support)
     target_link_libraries(dsp56300_native_run_test PRIVATE dsp56300::core)
     add_test(NAME native-linked-blocks COMMAND dsp56300_native_run_test)
-    add_executable(dsp56300_native_context_test test/jit/native_context_test.cpp)
-    target_include_directories(dsp56300_native_context_test PRIVATE src src/jit test/support)
-    target_link_libraries(dsp56300_native_context_test PRIVATE dsp56300::core)
-    add_test(NAME native-context-routing COMMAND dsp56300_native_context_test)
     add_executable(dsp56300_x64_vector_test test/jit/x64_vector_test.cpp)
     target_include_directories(dsp56300_x64_vector_test PRIVATE src test/support)
     target_link_libraries(dsp56300_x64_vector_test PRIVATE dsp56300::core)

@@ -16,7 +16,8 @@ ctest --preset release
 
 On macOS, install the matching tools with `brew install llvm@19 ninja ccache`.
 Presets discover the Homebrew LLVM 19 installation without replacing system tools.
-ARM64 executable storage and NEON MAC products are implemented;
+ARM64 executable storage, typed instruction emission, native ABI entry/context
+routing and NEON MAC products are implemented and independently tested;
 complete ARM64 Core execution and qualification remain in progress. The production
 Core still reports an unsupported host on ARM64.
 
