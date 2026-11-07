@@ -47,6 +47,11 @@ snapshot. Unsupported instructions or modes report explicit faults.
 `Memory::unified` explicitly aliases P/X/Y; `Memory::separate` supplies distinct
 logical address spaces.
 
+`run_until(base_cycle_deadline)` uses the same retained native blocks for an
+absolute nominal ISA-cycle deadline. It completes the final instruction and
+may return earlier for I/O yield, sleep or a fault. Peripheral clocks and bus
+waits belong to the consumer; this does not estimate their elapsed hardware time.
+
 ## Benchmarks
 
 ```sh

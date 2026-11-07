@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <span>
 #include <stdexcept>
@@ -291,6 +292,29 @@ RunResult Core::run(const std::uint32_t instruction_budget) {
   result.fault = fault();
   result.state = processing_state();
   result.yielded = impl_->yield_requested;
+  return result;
+}
+
+RunResult Core::run_until(const std::uint64_t base_cycle_deadline) {
+  if (impl_->executing) { throw std::logic_error("Recursive DSP execution is not permitted"); }
+  const auto bound = detail::instruction_cycle_bound();
+  if (base_cycle_deadline > std::numeric_limits<std::uint64_t>::max() - (bound - 1U)) {
+    throw std::overflow_error("DSP deadline leaves no representable instruction boundary");
+  }
+  RunResult result{.state = processing_state(), .progress = progress(), .fault = fault()};
+  while (result.progress.estimated_cycles < base_cycle_deadline &&
+         result.fault.kind == FaultKind::none && result.state == ExecutionState::running &&
+         result.retired != std::numeric_limits<std::uint32_t>::max()) {
+    const auto remaining = base_cycle_deadline - result.progress.estimated_cycles;
+    const auto available = std::numeric_limits<std::uint32_t>::max() - result.retired;
+    const auto count = static_cast<std::uint32_t>(
+        std::min<std::uint64_t>(available, std::max<std::uint64_t>(1, remaining / bound)));
+    const auto retired = result.retired;
+    result = run(count);
+    const bool stopped = result.retired == 0 || result.yielded;
+    result.retired += retired;
+    if (stopped) { break; }
+  }
   return result;
 }
 

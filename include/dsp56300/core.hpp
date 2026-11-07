@@ -155,6 +155,12 @@ public:
   // Faults require reset. CPU state after a failed dispatch is not committed evidence.
   [[nodiscard]] RunResult
   run(std::uint32_t instruction_budget = std::numeric_limits<std::uint32_t>::max());
+  // Execute at native speed to the first complete instruction boundary at or
+  // beyond this absolute base-cycle deadline; yields, faults and sleep return
+  // earlier. The result-counter width can also end a call, as with run().
+  // This is nominal ISA progress, not a derivative peripheral/bus clock.
+  // Translation and retained code never depend on the supplied deadline.
+  [[nodiscard]] RunResult run_until(std::uint64_t base_cycle_deadline);
   // Execute exactly the captured ordinary instruction through this CPU/JIT,
   // including synchronous real Io. The caller owns its external clock delay.
   // Refuses pending vector/debug/cache fetch ownership and mismatched PC/latch.

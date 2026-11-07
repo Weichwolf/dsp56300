@@ -96,6 +96,19 @@ bool rule_penalty(const EncodingRule &rule, const Word opcode) noexcept {
 }
 }
 
+unsigned instruction_cycle_bound() noexcept {
+  // Parallel transfers cost at most two base cycles; a named rule can add
+  // at most one effective-address penalty. No peripheral wait is included.
+  constexpr auto bound = [] {
+    unsigned maximum = 2;
+    for (const auto &rule : encoding_rules) {
+      maximum = std::max(maximum, static_cast<unsigned>(rule.cycles) + 1U);
+    }
+    return maximum;
+  }();
+  return bound;
+}
+
 Instruction decode(const Word opcode) noexcept {
   if (parallel_encoding(opcode)) {
     return {.opcode = opcode,

@@ -104,5 +104,7 @@ struct Instruction {
   bool operator==(const Instruction &) const = default;
 };
 
+// Conservative upper bound from the same base-cost rules used by decoding.
+[[nodiscard]] unsigned instruction_cycle_bound() noexcept;
 [[nodiscard]] Instruction decode(Word opcode) noexcept;
 } // namespace dsp56300::detail

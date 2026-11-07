@@ -78,6 +78,9 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   target_link_options(dsp56300_codegen_observer INTERFACE
     "-Wl,--wrap=${dsp56300_append_symbol}"
     "-Wl,--undefined=__wrap_${dsp56300_append_symbol}")
+  add_executable(dsp56300_deadline_test test/core/deadline_test.cpp)
+  target_link_libraries(dsp56300_deadline_test PRIVATE dsp56300::core dsp56300_codegen_observer)
+  add_test(NAME execution-deadlines COMMAND dsp56300_deadline_test)
   add_executable(dsp56300_public_api_test test/core/public_api_test.cpp)
   target_link_libraries(dsp56300_public_api_test PRIVATE dsp56300::core)
   add_test(NAME public-api COMMAND dsp56300_public_api_test)
