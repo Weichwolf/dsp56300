@@ -90,6 +90,8 @@ enum class VectorOp : std::uint16_t {
   maximum_dword = 0x023d,
   blend_dword = 0x0302,
   shuffle_dword = 0x0170,
+  shuffle_bytes = 0x0200,
+  shift_right_qword = 0x01d3,
   extend_dword = 0x0225
 };
 

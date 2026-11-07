@@ -66,7 +66,38 @@ bool memory(const Cpu &cpu, const NativeContext &context, const NativeRegion &re
   return true;
 }
 
+Word reverse_bits(Word value) {
+  constexpr Word alternating = 0x55555555;
+  constexpr Word pairs = 0x33333333;
+  constexpr Word nibbles = 0x0f0f0f0f;
+  value = ((value >> 1) & alternating) | ((value & alternating) << 1);
+  value = ((value >> 2) & pairs) | ((value & pairs) << 2);
+  value = ((value >> 4) & nibbles) | ((value & nibbles) << 4);
+  return std::byteswap(value);
+}
+
+bool reverse_address(const Registers &reg, NativeRegion &region, const unsigned index) {
+  const auto initial = reg.r[index];
+  const auto n = reg.n[index];
+  if ((reg.m[index] & modifier_mask) != 0 || initial > word_mask || n > sign24_bit ||
+      !std::has_single_bit(n)) {
+    return false;
+  }
+  auto &cursor = region.frame.reverse[index];
+  cursor.mask = (n * 2) - 1;
+  cursor.shift = static_cast<Word>(std::numeric_limits<Word>::digits - std::bit_width(n));
+  cursor.index = reverse_bits(initial & cursor.mask) >> cursor.shift;
+  const auto distance =
+      std::uint64_t{region.graph.addresses[index].offsets} * region.frame.iterations;
+  const auto final = static_cast<Word>(cursor.index + distance) & cursor.mask;
+  region.frame.addresses[index] = (initial & ~cursor.mask) | (reverse_bits(final) >> cursor.shift);
+  return true;
+}
+
 bool address(const Registers &reg, NativeRegion &region, const unsigned index) {
+  if ((region.reverse_addresses & (Word{1} << index)) != 0) {
+    return reverse_address(reg, region, index);
+  }
   const auto iterations = region.frame.iterations;
   const auto initial = region.prefix[index].value_or(reg.r[index]);
   const auto &delta = region.graph.addresses[index];
@@ -99,6 +130,13 @@ bool cursors(const Registers &reg, const NativeContext &context, NativeRegion &r
     const auto &root = region.roots[index];
     auto &cursor = region.frame.cursors[index];
     const auto first = region.prefix[root.address].value_or(reg.r[root.address]);
+    if ((region.reverse_addresses & (Word{1} << root.address)) != 0) {
+      const auto base = first & ~region.frame.reverse[root.address].mask;
+      const auto &ram = context.runtime.memory[root.space == Space::x ? 0 : 1];
+      if (base >= std::min(ram.words, std::size_t{io_begin})) { return false; }
+      cursor = {.pointer = ram.data + base};
+      continue;
+    }
     const auto &delta = region.graph.addresses[root.address];
     std::uint64_t stride = 0;
     if (!scaled_offset(delta, reg.n[root.address], stride)) { return false; }
@@ -128,6 +166,15 @@ bool footprint(const Registers &reg,
   const auto &cursor = region.frame.cursors[region.stream_roots[index]];
   const auto &ram = context.runtime.memory[stream.space == Space::x ? 0 : 1];
   const auto first = region.prefix[stream.address].value_or(reg.r[stream.address]);
+  if ((region.reverse_addresses & (Word{1} << stream.address)) != 0) {
+    const auto mask = region.frame.reverse[stream.address].mask;
+    const auto base = first & ~mask;
+    if (stream.write || base + mask >= std::min(ram.words, std::size_t{io_begin})) { return false; }
+    region.offsets[index] = 0;
+    result = {.first = reinterpret_cast<std::uintptr_t>(ram.data + base),
+              .bytes = (std::uint64_t{mask} + 1) * sizeof(Word)};
+    return true;
+  }
   std::uint64_t displacement = 0;
   if (!scaled_offset({.units = stream.units, .offsets = stream.offsets},
                      reg.n[stream.address],

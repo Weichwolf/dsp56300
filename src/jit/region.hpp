@@ -25,6 +25,11 @@ struct alignas(32) RegionVector {
   std::array<std::uint64_t, 4> words{};
 };
 
+struct ReverseCursor {
+  std::uint64_t index = 0;
+  Word mask = 0, shift = 0;
+};
+
 struct RegionFrame {
   std::array<RegionCursor, 2 * agu_registers> cursors;
   std::array<std::uint64_t, 6> invariants{}, results{};
@@ -35,6 +40,7 @@ struct RegionFrame {
   const std::uint64_t *offsets = nullptr;
   RegionVector *spills = nullptr;
   Word iterations = 0;
+  std::array<ReverseCursor, agu_registers> reverse{};
 };
 
 struct RegionFootprint {
@@ -54,6 +60,7 @@ struct NativeRegion {
   std::array<GraphAddress, agu_registers> inner_addresses{};
   RegionFrame frame;
   Word entry = 0, last = 0, mode = 0, inner_entry = 0, extra_cycles = 0, inner_iterations = 1;
+  Word reverse_addresses = 0;
   bool nested = false;
   std::array<const void *, 3> native{};
   unsigned lanes = 4;

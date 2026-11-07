@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "architecture.hpp"
+#include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "jit/code.hpp"
 #include "region.hpp"
@@ -25,7 +26,8 @@ constexpr Xmm growth_register = Xmm::x12, limit_register = Xmm::x13;
 constexpr Xmm first_scratch = Xmm::x14, second_scratch = Xmm::x15;
 constexpr unsigned value_registers = 12, group_add = 0, group_and = 4, group_subtract = 5,
                    group_compare = 7;
-constexpr unsigned op_add = 0x01, push_register = 0x50, pop_register = 0x58, high_rex = 0x41;
+constexpr unsigned op_add = 0x01, op_and = 0x21, push_register = 0x50, pop_register = 0x58,
+                   high_rex = 0x41;
 constexpr unsigned growth_position = 45, canonical_signs = 0xa0, canonical_high = 0xaa;
 constexpr std::array<std::uint8_t, 4> landing{0xf3, 0x0f, 0x1e, 0xfa};
 constexpr unsigned return_opcode = 0xc3, repeat_word_pair = 0x44;
@@ -58,6 +60,10 @@ private:
   [[nodiscard]] Xmm destination();
   void spill(unsigned reg);
   void broadcast(Xmm result, std::uint64_t value);
+  void vector_constant(Xmm result, const std::array<std::uint64_t, 4> &values);
+  void reverse_load(Xmm result, unsigned stream);
+  void reverse_indices(Xmm result, unsigned stream);
+  void advance_reverse();
   void zero(Xmm result);
   void canonical(Xmm result, GraphValue value);
   [[nodiscard]] Xmm aligned(GraphValue value, unsigned scale, Xmm scratch);
@@ -201,6 +207,68 @@ void RegionEmitter::broadcast(const Xmm result, const std::uint64_t value) {
   code_.vector_broadcast(result, {.base = Reg::r11, .offset = index * sizeof(value)});
 }
 
+void RegionEmitter::vector_constant(const Xmm result, const std::array<std::uint64_t, 4> &values) {
+  const auto found = std::ranges::search(region_.constants, values).begin();
+  const auto index = static_cast<std::size_t>(found - region_.constants.begin());
+  if (found == region_.constants.end()) {
+    region_.constants.insert(region_.constants.end(), values.begin(), values.end());
+  }
+  code_.vector_load(result, {.base = Reg::r11, .offset = index * sizeof(std::uint64_t)});
+}
+
+void RegionEmitter::reverse_indices(const Xmm result, const unsigned stream) {
+  const auto &address = region_.graph.streams[stream];
+  const auto base = offsetof(RegionFrame, reverse) + (address.address * sizeof(ReverseCursor));
+  code_.vector_broadcast(result, {.base = Reg::di, .offset = base});
+  std::array<std::uint64_t, 4> displacement{};
+  for (unsigned lane = 0; lane < displacement.size(); ++lane) {
+    displacement[lane] =
+        std::uint64_t{lane % lanes_} * region_.graph.addresses[address.address].offsets +
+        address.offsets;
+  }
+  vector_constant(second_scratch, displacement);
+  code_.vector(VectorOp::add, {.destination = result, .left = result, .right = second_scratch});
+  code_.vector_broadcast(
+      first_scratch, {.base = Reg::di, .offset = base + offsetof(ReverseCursor, mask)}, true);
+  code_.vector(VectorOp::bit_and, {.destination = result, .left = result, .right = first_scratch});
+  constexpr unsigned nibble_bits = 4;
+  code_.vector_shift(second_scratch, result, VectorShift::right, nibble_bits, true);
+  constexpr std::uint64_t nibble_mask = 0x0f0f0f0f0f0f0f0f;
+  broadcast(first_scratch, nibble_mask);
+  code_.vector(VectorOp::bit_and, {.destination = result, .left = result, .right = first_scratch});
+  code_.vector(VectorOp::bit_and,
+               {.destination = second_scratch, .left = second_scratch, .right = first_scratch});
+  constexpr std::array<std::uint64_t, 4> reversed_nibbles{
+      0x0e060a020c040800, 0x0f070b030d050901, 0x0e060a020c040800, 0x0f070b030d050901};
+  vector_constant(first_scratch, reversed_nibbles);
+  code_.vector(VectorOp::shuffle_bytes,
+               {.destination = result, .left = first_scratch, .right = result});
+  code_.vector(VectorOp::shuffle_bytes,
+               {.destination = second_scratch, .left = first_scratch, .right = second_scratch});
+  code_.vector_shift(result, result, VectorShift::left, nibble_bits, true);
+  code_.vector(VectorOp::bit_or, {.destination = result, .left = result, .right = second_scratch});
+  constexpr std::array<std::uint64_t, 4> reversed_bytes{
+      0x0405060700010203, 0x0c0d0e0f08090a0b, 0x0405060700010203, 0x0c0d0e0f08090a0b};
+  vector_constant(first_scratch, reversed_bytes);
+  code_.vector(VectorOp::shuffle_bytes,
+               {.destination = result, .left = result, .right = first_scratch});
+  code_.vector_load_dword(first_scratch,
+                          {.base = Reg::di, .offset = base + offsetof(ReverseCursor, shift)});
+  code_.vector(VectorOp::shift_right_qword,
+               {.destination = result, .left = result, .right = first_scratch});
+}
+
+void RegionEmitter::reverse_load(const Xmm result, const unsigned stream) {
+  reverse_indices(result, stream);
+  zero(first_scratch);
+  for (unsigned lane = 0; lane < 4; ++lane) {
+    if (lane == 2) { code_.vector_extract(second_scratch, result, 1); }
+    code_.vector_scalar(Reg::dx, lane < 2 ? result : second_scratch, lane & 1U);
+    code_.vector_insert_dword(first_scratch, {.base = Reg::r10, .index = Reg::dx}, lane);
+  }
+  code_.vector_unary(VectorOp::copy, result, first_scratch);
+}
+
 void RegionEmitter::zero(const Xmm result) {
   code_.vector(VectorOp::bit_xor, {.destination = result, .left = result, .right = result});
 }
@@ -239,6 +307,7 @@ void RegionEmitter::pointer(const unsigned stream) {
     code_.load(Reg::r10, Reg::di, cursor_offset(root, offsetof(RegionCursor, pointer)));
   }
   const auto &address = region_.graph.streams[stream];
+  if ((region_.reverse_addresses & (Word{1} << address.address)) != 0) { return; }
   if (address.offsets != 0) {
     code_.load(Reg::r9, Reg::di, offsetof(RegionFrame, offsets));
     code_.load(Reg::r9, Reg::r9, stream * sizeof(std::uint64_t));
@@ -254,8 +323,10 @@ void RegionEmitter::load(const Xmm result, const unsigned stream) {
   const auto &delta = inner_vector_ ? region_.inner_addresses[address.address]
                                     : region_.graph.addresses[address.address];
   pointer(stream);
-  if (lanes_ == 1 || (!inner_vector_ && region_.prefix[address.address]) ||
-      (delta.units == 0 && delta.offsets == 0)) {
+  if ((region_.reverse_addresses & (Word{1} << address.address)) != 0) {
+    reverse_load(result, stream);
+  } else if (lanes_ == 1 || (!inner_vector_ && region_.prefix[address.address]) ||
+             (delta.units == 0 && delta.offsets == 0)) {
     code_.vector_broadcast(result, {.base = Reg::r10}, true);
   } else if (lanes_ == 4 && delta.units == 1 && delta.offsets == 0) {
     code_.vector_load(result, {.base = Reg::r10}, false);
@@ -537,9 +608,26 @@ bool RegionEmitter::advance_known(const std::size_t root, const bool inner) {
   return true;
 }
 
+void RegionEmitter::advance_reverse() {
+  for (unsigned index = 0; index < agu_registers; ++index) {
+    if ((region_.reverse_addresses & (Word{1} << index)) == 0) { continue; }
+    const auto base = offsetof(RegionFrame, reverse) + (index * sizeof(ReverseCursor));
+    code_.load(Reg::ax, Reg::di, base, Width::dword);
+    code_.immediate(
+        group_add, Reg::ax, region_.graph.addresses[index].offsets * lanes_, Width::dword);
+    code_.load(Reg::r8, Reg::di, base + offsetof(ReverseCursor, mask), Width::dword);
+    code_.binary(op_and, {.destination = Reg::ax, .source = Reg::r8}, Width::dword);
+    code_.store(Reg::di, base, Reg::ax);
+  }
+}
+
 void RegionEmitter::advance(const bool inner) {
+  if (!inner) { advance_reverse(); }
   for (std::size_t root = 0; root < region_.roots.size(); ++root) {
-    if (inner && !region_.nested) { continue; }
+    if ((inner && !region_.nested) ||
+        (region_.reverse_addresses & (Word{1} << region_.roots[root].address)) != 0) {
+      continue;
+    }
     if (advance_known(root, inner)) { continue; }
     const auto member =
         inner ? offsetof(RegionCursor, inner_step_bytes) : offsetof(RegionCursor, step_bytes);

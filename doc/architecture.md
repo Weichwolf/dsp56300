@@ -191,6 +191,14 @@ saved before the last iteration. Admission must fit the execution grant and
 preserve every event and partial-execution boundary; vector width and unrolling
 choices do not limit translation coverage.
 
+For flat loops, a power-of-two reverse-carry read cursor may use a linear
+iteration coordinate followed by native bit reversal. Preserve the initial phase,
+upper address bits and every post-increment. Prove the entire address orbit is
+ordinary mapped RAM and physically independent of all stores before batching;
+partial mappings, unsafe aliases and unproved raw offsets keep scalar native
+execution. Advance each architectural cursor once per cohort even when X and Y
+both use it, and publish its exact final architectural address at the boundary.
+
 Retain both useful SIMD axes of a loop nest. Batching neighboring child iterations
 permits packed memory transfers; batching parents preserves sequential feedback
 inside each child loop. Admit the child axis only after proving independence in

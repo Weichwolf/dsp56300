@@ -83,8 +83,13 @@ bool nested(const std::span<const Word> program,
   return true;
 }
 
-bool roots(NativeRegion &region) {
+bool roots(NativeRegion &region, const Registers &state) {
   for (const auto &stream : region.graph.streams) {
+    const auto &delta = region.graph.addresses[stream.address];
+    if ((state.m[stream.address] & modifier_mask) == 0 && delta.offsets != 0) {
+      if (region.nested || delta.units != 0 || stream.write) { return false; }
+      region.reverse_addresses |= Word{1} << stream.address;
+    }
     const auto index = stream.space == Space::x ? 0U : 1U;
     if (region.runtime.memory[index].data == nullptr || !region.runtime.windows[index].empty() ||
         (stream.write && region.runtime.memory[index].aliases_program)) {
@@ -120,7 +125,7 @@ std::unique_ptr<NativeRegion> plan_region(const std::span<const Word> program,
     if (!graph) { return nullptr; }
     region->graph = std::move(*graph);
   }
-  if (!roots(*region)) { return nullptr; }
+  if (!roots(*region, state)) { return nullptr; }
   return region;
 }
 } // namespace dsp56300::detail
