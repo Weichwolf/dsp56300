@@ -54,11 +54,13 @@ std::uint32_t Core::Impl::run_repeat_native(const std::uint32_t instructions) {
     count = std::min(count, cpu.repeat_remaining - 1);
   }
 #endif
-  detail::BlockInstruction operation{
-      .instruction = *decoded, .pc = cpu.reg.pc, .mode = cpu.reg.sr & detail::numeric_mode_mask};
+  const detail::BlockInstruction operation{.instruction = *decoded,
+                                           .pc = cpu.reg.pc,
+                                           .mode = cpu.reg.sr & detail::numeric_mode_mask,
 #if defined(__aarch64__)
-  operation.loop_address = detail::active_loop_address(cpu.reg);
+                                           .loop_address = detail::active_loop_address(cpu.reg)
 #endif
+  };
   const auto retired = jit->run_repeat(operation, count);
   if (retired != 0) { repeated = *decoded; }
   return retired;
