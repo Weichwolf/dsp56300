@@ -77,9 +77,13 @@ private:
   void helper(JitHelper function, const BlockInstruction &operation);
   void native(const BlockInstruction &operation);
   [[nodiscard]] static bool is_control_flow(const BlockInstruction &operation);
-  [[nodiscard]] bool control_flow(const BlockInstruction &operation);
+  [[nodiscard]] bool boundary_operation(const BlockInstruction &operation, bool publish);
   void control_condition(unsigned selector, x64::Label &untaken);
   void control_pop();
+  [[nodiscard]] static bool is_bits(const BlockInstruction &operation);
+  [[nodiscard]] bool bits(const BlockInstruction &operation, bool publish);
+  void bit_result(const BlockInstruction &operation, NativeMove move, bool publish);
+  void bit_slow(const BlockInstruction &operation);
   void moves(const BlockInstruction &operation);
   void general_moves(const BlockInstruction &operation);
   void capture_inputs();

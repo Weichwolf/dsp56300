@@ -153,7 +153,8 @@ void BlockEmitter::control_pop() {
   code_.store(Reg::r12, pc_offset, Reg::dx, Width::dword);
 }
 
-bool BlockEmitter::control_flow(const BlockInstruction &operation) {
+bool BlockEmitter::boundary_operation(const BlockInstruction &operation, const bool publish) {
+  if (bits(operation, publish)) { return true; }
   if (is_loop_setup(operation)) {
     loop_setup(operation);
     return true;

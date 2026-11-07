@@ -135,7 +135,7 @@ bool BlockEmitter::lowerable(const BlockInstruction &operation) {
       ((operation.mode & arithmetic_saturation) != 0 && !saturation_supported(operation))) {
     return false;
   }
-  if (is_loop_setup(operation)) { return true; }
+  if (is_loop_setup(operation) || is_bits(operation)) { return true; }
   if (decoded.operation == Operation::immediate_alu) { return is_addition(operation); }
   if (decoded.operation != Operation::parallel) { return false; }
   const auto opcode = decoded.opcode;
@@ -561,7 +561,7 @@ void BlockEmitter::emit_operations(const std::span<const BlockInstruction> opera
     word_populate_ = populations[operation_index] & ~word_selected_;
     prepare_value_proof(operation, ranges);
     if (lowerable(operation)) {
-      if (control_flow(operation)) { continue; }
+      if (boundary_operation(operation, publish_pc(operations, operation_index))) { continue; }
       loop_guard(operation);
       if (has_moves(operation)) { moves(operation); }
       invalidate_moved_accumulators();

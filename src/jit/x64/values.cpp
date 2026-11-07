@@ -32,7 +32,7 @@ BlockEmitter::word_effects(const std::span<const BlockInstruction> operations) c
     result.push_back({.operands = product_operands(operation.instruction),
                       .writes = written_words(operation.instruction),
                       .barrier = word_mode_ == WordReuseMode::disabled || !lowerable(operation) ||
-                                 observable_moves(operation) ||
+                                 observable_moves(operation) || is_bits(operation) ||
                                  pure_address_update(operation.instruction) ||
                                  is_loop_setup(operation)});
   }

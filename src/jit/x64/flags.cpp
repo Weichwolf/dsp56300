@@ -44,6 +44,9 @@ bool reads_carry(const BlockInstruction &operation) {
 }
 
 Word BlockEmitter::written_flags(const BlockInstruction &operation) {
+  if (is_bits(operation)) {
+    return operation.instruction.operation == Operation::bit_memory ? carry : 0U;
+  }
   if (is_control_flow(operation) || operation.instruction.operation == Operation::nop ||
       operation.instruction.operation == Operation::jump_short ||
       operation.instruction.operation == Operation::loop_immediate) {
@@ -81,7 +84,8 @@ BlockEmitter::plan_flags(const std::span<const BlockInstruction> operations) con
     }
     // Moves may call observers/fault or invalidate code after their ALU. A
     // loop-ending guard may exit before its ALU. Neither boundary hides flags.
-    const bool boundary = observable_moves(operation) || at_loop_end(operation) ||
+    const bool boundary = observable_moves(operation) || is_bits(operation) ||
+                          at_loop_end(operation) ||
                           operation.instruction.operation == Operation::loop_immediate;
     if (boundary) { live = observed_flags; }
     result[i - 1] = live;
