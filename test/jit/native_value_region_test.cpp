@@ -359,7 +359,171 @@ void root_spills() {
           "without a host-register cap");
 }
 
+void nested_finish(Registers &state, const Word last) {
+  if (last != state.la || state.pc != state.la + 1) { return; }
+  if (state.lc > 1) {
+    --state.lc;
+    state.pc = static_cast<Word>(state.stack[state.sp % stack_entries] >> word_bits);
+    return;
+  }
+  const auto saved = state.stack[state.sp % stack_entries];
+  state.sp = (state.sp + pointer_mask) & pointer_mask;
+  const auto outer = state.stack[state.sp % stack_entries];
+  state.sp = (state.sp + pointer_mask) & pointer_mask;
+  state.sc -= 2;
+  state.sr = (state.sr & ~loop_bits) | (static_cast<Word>(saved) & loop_bits);
+  state.la = static_cast<Word>(outer >> word_bits);
+  state.lc = static_cast<Word>(outer) & word_mask;
+}
+
+using NestedData = std::array<Word, 4096>;
+
+struct NestedModel {
+  Registers state;
+  NestedData x;
+  NestedData y;
+};
+
+Word nested_step(NestedModel &model, const Word child) {
+  auto &state = model.state;
+  const auto offset = state.pc - start;
+  Word words = 1;
+  Word cycles = 1;
+  if (offset == 0 || offset == 2) {
+    state.r[offset == 0 ? 0 : 4] = input_base;
+    words = cycles = 2;
+  } else if (offset == 4) {
+    const auto push = [&](const Word high, const Word low) {
+      state.sp = (state.sp + 1) & pointer_mask;
+      ++state.sc;
+      state.stack[state.sp % stack_entries] = (std::uint64_t{high} << word_bits) | low;
+    };
+    push(state.la, state.lc);
+    push(state.pc + 2, state.sr);
+    state.la = start + 9;
+    state.lc = child;
+    words = 2;
+    cycles = 5;
+  } else if (offset == 6) {
+    state.x = (state.x & ~std::uint64_t{word_mask}) | (model.x[state.r[0]] & word_mask);
+    state.y = (state.y & ~std::uint64_t{word_mask}) | (model.y[state.r[4]] & word_mask);
+    state.r[0] += state.n[0];
+    state.r[4] += state.n[4];
+  } else if (offset == 7 || offset == 8) {
+    const auto old = state;
+    sequence_model::alu(state, old, offset == 7 ? product : rounding);
+  } else if (offset == 9) {
+    model.x[state.r[1]++] = register_model::bus_word(state, state.a);
+    model.y[state.r[5]++] = register_model::bus_word(state, state.b);
+  } else {
+    constexpr std::array<unsigned, 4> post{0, 4, 1, 5};
+    const auto index = post.at(offset - 10);
+    state.r[index] += state.n[index];
+  }
+  const auto last = state.pc + words - 1;
+  state.pc += words;
+  nested_finish(state, last);
+  return cycles;
+}
+
+void nested_case(const Word child, const Point point) {
+  constexpr Word immediate = static_cast<Word>(isa::Opcode::move_long) | (6U << 11) | (4U << 8) |
+                             (Word{1} << 14) | (Word{1} << 15);
+  constexpr Word low_count_mask = 255;
+  constexpr Word r0 = 16;
+  constexpr Word r4 = 20;
+  constexpr unsigned high_mask = 24;
+  constexpr unsigned high_shift = 17;
+  const auto address_word = [](const Word reg) {
+    return immediate | ((reg & 7U) << 16) | ((reg & high_mask) << high_shift);
+  };
+  const Word update = static_cast<Word>(isa::Opcode::move_address_update) | (1U << 11);
+  const std::array code{address_word(r0),
+                        input_base,
+                        address_word(r4),
+                        input_base,
+                        static_cast<Word>(isa::Opcode::do_immediate) |
+                            ((child & low_count_mask) << 8) | (child >> 8),
+                        start + 9,
+                        (body[0] & ~postincrements) | (1U << 11) | (1U << 20),
+                        product,
+                        rounding,
+                        body[3],
+                        update,
+                        update | (4U << 8),
+                        update | (1U << 8),
+                        update | (5U << 8)};
+  std::array<Word, memory_words> program{};
+  std::ranges::copy(code, program.begin() + start);
+  NestedData x{};
+  NestedData y{};
+  NestedData seed_x{};
+  NestedData seed_y{};
+  for (std::size_t index = 0; index < x.size(); ++index) {
+    seed_x[index] = samples[index % samples.size()];
+    seed_y[index] = samples[(3 * index + 2) % samples.size()];
+  }
+  auto initial = register_model::seed(point.mode);
+  initial.sr |= loop_flag;
+  initial.pc = start;
+  initial.la = start + static_cast<Word>(code.size()) - 1;
+  initial.lc = point.count;
+  initial.sp = point.pointer;
+  initial.sc = 2;
+  initial.r[1] = initial.r[5] = output_base;
+  initial.n.fill(1);
+  initial.n[4] = 2;
+  initial.stack[point.pointer % stack_entries] = std::uint64_t{start} << word_bits;
+  initial.stack[(point.pointer + pointer_mask) % stack_entries] =
+      (std::uint64_t{previous_end} << word_bits) | previous_count;
+  Core core(Memory::separate({.program = program, .x = x, .y = y}));
+  const Word budget = point.count * ((4 * child) + 7);
+  for (unsigned warmth = 0; warmth < 2; ++warmth) {
+    for (Word prefix = 0; prefix <= budget; ++prefix) {
+      const auto parent_size = (4 * child) + 7;
+      const auto position = prefix % parent_size;
+      // Exhaust small nests; retain boundary and interior cuts for large nests.
+      if (child > 8 && position > 6 && position < parent_size - 6 && position != parent_size / 2) {
+        continue;
+      }
+      NestedModel expected{.state = initial, .x = seed_x, .y = seed_y};
+      Word cycles = 0;
+      for (Word index = 0; index < prefix; ++index) { cycles += nested_step(expected, child); }
+      x = seed_x;
+      y = seed_y;
+      core.set_registers(initial);
+      const auto before = core.state().progress;
+      const auto result = core.run(prefix);
+      const auto actual = core.registers();
+      if (actual != expected.state) {
+        std::cerr << "child=" << child << " parents=" << point.count << " prefix=" << prefix
+                  << " R0=" << actual.r[0] << '/' << expected.state.r[0] << " R4=" << actual.r[4]
+                  << '/' << expected.state.r[4] << '\n';
+      }
+      require(result.retired == prefix && result.fault.kind == FaultKind::none &&
+                  actual == expected.state && x == expected.x && y == expected.y &&
+                  result.progress == Progress{.instructions = before.instructions + prefix,
+                                              .estimated_cycles = before.estimated_cycles + cycles},
+              "Every nested-loop prefix retains complete state, reset-root induction, post "
+              "updates and both active/inactive stack frames");
+    }
+  }
+}
+
+void nested_cases() {
+  for (const Word child : {1U, 2U, 4U, 8U, 16U, 32U, 64U, 128U, 256U, 512U}) {
+    for (const Word parents : {2U, 4U}) {
+      for (const Word pointer : {0U, 14U, pointer_mask}) {
+        for (const Word mode : {0U, mode_rm}) {
+          nested_case(child, {.count = parents, .mode = mode, .pointer = pointer});
+        }
+      }
+    }
+  }
+}
+
 void cases() {
+  nested_cases();
   tail_guard();
   root_spills();
   for (const bool shared : {false, true}) {

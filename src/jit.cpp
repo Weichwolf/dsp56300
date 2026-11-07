@@ -70,9 +70,14 @@ std::unique_ptr<Block> Jit::Impl::compile() {
   block->region = plan_region(program, cpu.reg, context.runtime, block->operations);
   if (block->region) {
     auto &region = *block->region;
+    const auto full_width = 1U << (region.native.size() - 1);
     for (unsigned index = 0; index < region.native.size(); ++index) {
       const unsigned lanes = 1U << index;
-      if (region.nested && lanes == 1) { continue; }
+      // Long child loops amortize gathers when the parent cohort fills SIMD.
+      if (region.nested &&
+          (lanes == 1 || (lanes < full_width && region.inner_iterations > full_width))) {
+        continue;
+      }
       region.native[index] = arena.append(emit_region(region, lanes));
     }
     bytes = select_region(region, bytes);

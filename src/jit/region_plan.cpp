@@ -12,6 +12,7 @@
 #include "value_graph.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <memory>
 #include <span>
 #include <utility>
@@ -19,7 +20,6 @@
 namespace dsp56300::detail {
 namespace {
 constexpr Word relative_end_bit = 16;
-constexpr unsigned native_lanes = 4;
 
 bool nested(const std::span<const Word> program,
             const Registers &state,
@@ -43,9 +43,6 @@ bool nested(const std::span<const Word> program,
   const auto body = parse_block(program, body_state, runtime);
   auto graph = value_graph(body);
   if (!graph) { return false; }
-  // Choose the parent SIMD axis for short child loops. This is a lowering
-  // decision; other loops retain their complete child-native translation.
-  if (count > native_lanes) { return false; }
   region.inner_entry = body_state.pc;
   body_state.pc = (last + 1) & word_mask;
   body_state.la = setup.loop_address;
@@ -61,8 +58,10 @@ bool nested(const std::span<const Word> program,
   }
   region.inner_addresses = graph->addresses;
   for (auto &delta : graph->addresses) {
-    delta.units *= count;
-    delta.offsets *= count;
+    const auto units = std::uint64_t{delta.units} * count;
+    const auto offsets = std::uint64_t{delta.offsets} * count;
+    if (units > word_mask || offsets > word_mask) { return false; }
+    delta = {.units = static_cast<Word>(units), .offsets = static_cast<Word>(offsets)};
   }
   for (const auto &operation : post) {
     const auto opcode = operation.instruction.opcode;
@@ -73,7 +72,9 @@ bool nested(const std::span<const Word> program,
   Word cycles = 0;
   for (const auto &operation : operations) { cycles += operation.instruction.cycles; }
   for (const auto &operation : post) { cycles += operation.instruction.cycles; }
-  graph->instructions = (graph->instructions * count) + overhead;
+  const auto instructions = (std::uint64_t{graph->instructions} * count) + overhead;
+  if (!std::in_range<Word>(instructions)) { return false; }
+  graph->instructions = static_cast<Word>(instructions);
   region.graph = std::move(*graph);
   region.extra_cycles = cycles - overhead;
   region.inner_iterations = count;

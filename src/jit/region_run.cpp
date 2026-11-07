@@ -70,21 +70,16 @@ bool address(const Registers &reg, NativeRegion &region, const unsigned index) {
   const auto iterations = region.frame.iterations;
   const auto initial = region.prefix[index].value_or(reg.r[index]);
   const auto &delta = region.graph.addresses[index];
-  const auto &inner = region.inner_addresses[index];
-  const bool uses_n = delta.offsets != 0 || inner.offsets != 0;
+  const bool uses_n = delta.offsets != 0;
   const auto n = uses_n ? reg.n[index] : 0;
   if (initial > word_mask || n >= sign24_bit) { return false; }
   std::uint64_t step = 0;
-  std::uint64_t final = 0;
   if (!scaled_offset(delta, n, step)) { return false; }
-  if (region.prefix[index]) {
-    if (!scaled_offset(inner, n, final) || final > word_mask - initial) { return false; }
-    final += initial;
-  } else {
-    const auto distance = iterations * step;
-    if (distance > word_mask - initial) { return false; }
-    final = initial + distance;
-  }
+  // A reset root still advances through every child iteration and the postlude
+  // of the final parent; only the next parent's prefix resets it again.
+  const auto distance = region.prefix[index] ? step : iterations * step;
+  if (distance > word_mask - initial) { return false; }
+  const auto final = initial + distance;
   const auto modifier = reg.m[index] & modifier_mask;
   if (step != 0 && modifier != modifier_mask) {
     if (modifier == 0 || modifier >= multiple_wrap_bit) { return false; }
@@ -319,7 +314,7 @@ run_region(Cpu *const cpu, NativeContext *const context, NativeRegion *const reg
     region->lanes = count % 4 == 0 ? 4U : 2U;
   }
   region->frame.iterations = count - (count % region->lanes);
-  if (region->frame.iterations == 0 ||
+  if (region->frame.iterations == 0 || region->native[region->lanes / 2] == nullptr ||
       (region->frame.iterations == cpu->reg.lc && cpu->reg.sc < 2) ||
       (region->nested &&
        (region->frame.iterations != cpu->reg.lc || cpu->reg.sc >= stack_entries - 2)) ||
