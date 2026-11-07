@@ -16,59 +16,8 @@ ctest --preset release
 
 On macOS, install the matching tools with `brew install llvm@19 ninja ccache`.
 Presets discover the Homebrew LLVM 19 installation without replacing system tools.
-ARM64 executable storage, typed instruction emission, native ABI entry/context
-routing, NEON MAC products and the scalar arithmetic emitter are implemented
-and independently tested. Native arithmetic covers add/subtract with carry,
-comparison including magnitude, shifted add/subtract, MAX/MAXM, signed
-multiply/MAC, rounding, SM saturation, ALU TFR forms and
-logical operations in parallel/immediate instruction forms against independent raw-width models.
-Shift/rotate emission covers immediate and register counts, with precise native
-invalid-count and numeric-mode fault exits. Control emission covers all conditions,
-absolute/relative/effective jumps and calls, returns, stack faults, WAIT/STOP and
-byte control operations. Effective addressing handles linear, reverse-carry,
-modulo and multiple-wrap updates, including updates on untaken conditional jumps.
-Conditional emission covers Tcc accumulator/address/dual transfers and all IFcc
-ALU bytes, preserving optional SR updates and the different mode-fault ordering.
-Independent native matrices cover every scalar ALU byte without a parallel transfer;
-register/immediate parallel transfers and address updates preserve pre-transfer ALU
-inputs and post-transfer partial accumulators. Native register-bus emission covers
-partial/full accumulators, sticky transfer flags, R/N/M and control registers,
-including SSH/SSL stack effects and precise bounds faults. LRA/LUA address calculations
-and register/immediate MOVEC forms are implemented. Memory emission now covers ordinary
-parallel X/Y moves, class-II moves, displaced/control/program/peripheral transfers,
-direct RAM, guarded external windows and separate actual-bus callbacks. Native tests
-check full-width RAM/I/O priority, initialized-word grants, callback-visible state,
-same-instruction remapping and exact executable-alias exits. Long, paired X/Y and
-class-I mixed transfers now preserve captured inputs, scaled bus limits, partial
-fault effects and first-fault priority. Paired external accesses stop after a fault;
-ordinary flat-memory partial effects follow the existing implementation. Integer
-emission covers raw-LSB INC/DEC and low-48 unsigned CMPU. DIV preserves
-the raw quotient carry and unaffected CCR bits across SM limiting. NORM supports
-flags-selected shifts and compatibility-mode exponent wrapping; NORMF checks
-signed register counts and bypasses SM limiting. Native state matrices and
-mixed instruction sequences check these effects and exact budget/fault exits.
-Extended product emission covers immediate and power coefficients, signed/unsigned
-mixed products and double-precision accumulation. Native matrices check every
-source pair, product variant, scale, rounding mode and SM saturation/bypass rule,
-including signed discarded fractions, rounded overflow and precise reserved-field
-faults. Mixed product sequences preserve current accumulator inputs and budgets.
-BFU emission implements signed/unsigned field extraction, insertion, merge and
-leading-sign-bit counts with SM bypass and exact descriptor/selector faults.
-Independent per-bit matrices cover all descriptor widths/offsets, register aliases,
-flag preservation and mixed-sequence budget/fault exits. VSL captures raw X/Y
-outputs before addressing or bus access; native tests check AGU updates, I/O
-priority, first/second-store faults, physical aliases and callback remapping.
-Bit clear/set/change/test and conditional bit jumps/calls execute natively on
-registers and RAM. Tests preserve SSH peek/pop ordering, accumulator bus flags,
-SR writes, AGU effects, failed writes and call-stack faults. Peripheral bits use
-one actual atomic `Io::bit` callback with canonical visible CPU state. Private bus
-actions now encode bit test/clear/set/change; `NativeAccess.value` carries the bit
-index into this callback and the previous bit out. Existing read/write actions and
-native context layouts are unchanged. Native I/O tests also cover absent owners,
-rejected accesses and RAM mapping/permission changes between a read and its write.
-Other instruction families and complete owner integration remain open.
-Complete ARM64 Core execution and qualification remain in progress. The production
-Core still reports an unsupported host on ARM64.
+ARM64 contains private instruction emitters and component tests; the public
+`Core` reports an unsupported host on ARM64.
 
 The `strict` preset enables ASan/UBSan. On macOS 26.4 and later, LLVM 19's
 original sanitizer runtime deadlocks during dyld initialization. Build the same
@@ -127,35 +76,19 @@ waits belong to the consumer; this does not estimate their elapsed hardware time
 cmake --build --preset release --target bench
 ```
 
-The command runs continuous FIR, IIR, Hann/FFT/power and nonlinear feedback banks,
-sequentially on one execution thread. Each stream retains state across packets:
-one input second includes first-use compilation, followed by one warm input second.
-Select scenarios with the CMake cache variable `DSP56300_BENCH_FILTER` (a regex).
+The benchmarks run continuous FIR, IIR, spectral processing and nonlinear
+feedback streams with retained state. Select scenarios with the CMake cache
+variable `DSP56300_BENCH_FILTER`. Fixture definitions are in [test/bench](test/bench).
 
-Each case reports `hardware_factor` (target >=1) and `jit_to_host_percent` (target
->=70), plus worst cold/warm packets, deadline misses and actual code publications.
-The conservative hardware model uses declared ISA base cycles at 275 MHz, without
-pipeline or memory stalls; it is an assumption, not a calibrated Blofeld clock.
-The separate `realtime_factor` uses the stream's 48 kHz input duration. Release
-bench fails on any cold/warm packet deadline miss or modeled hardware factor <1;
-`DSP56300_BENCH_ENFORCE_DEADLINE=OFF` selects reporting only.
+Reports include cold/warm packet times, deadline misses, code publications and
+`jit_to_host_percent` (`100 * host_time / jit_time`). JIT results are checked
+against independent register and memory expectations. Host comparisons use
+fixed-point C++ and ASM references; the output identifies their semantic scope.
 
-Host references use the same fixed-point inputs, rounding, saturation, retained
-history and memory effects, with independently generated expectations. FIR uses
-checked scalar/AVX2 assembly and verifies complete registers and memory. IIR and
-nonlinear banks compare optimized C++ with complete handwritten scalar ASM kernels,
-including frame/channel/stage loops, quantization, histories and output rings;
-spectral processing compares compiler-generated scalar/vector code with handwritten
-ASM windowing, FFT butterflies, output permutation and power/ring-buffer kernels.
-The latter three are numerical algorithm baselines and omit architectural
-register/flag bookkeeping;
-the output identifies that stricter comparison scope and the reference implementation.
-The fastest available host variant is used, including the additional `host_asm_s`
-reference where provided; `jit_to_asm_host_percent` reports it separately.
-The percentage is
-`100 * host_time / jit_time`. The scalar-only percentage is reported separately.
-JIT results always verify complete registers and all P/X/Y memory.
-Initialization and final verification are outside continuous timing on both sides.
-Short `bench-fir-host` calls remain overhead diagnostics, not sustained qualification.
+The conservative `hardware_factor` uses declared ISA base cycles at 275 MHz,
+excluding pipeline and memory stalls. `realtime_factor` uses the streams' 48 kHz
+input duration. Neither metric establishes Blofeld instrument throughput.
+Release benchmarks enforce packet deadlines and a modeled hardware factor of
+at least one; `DSP56300_BENCH_ENFORCE_DEADLINE=OFF` selects reporting only.
 
 [License](LICENSE)
