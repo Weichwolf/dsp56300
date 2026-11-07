@@ -27,7 +27,7 @@ std::vector<std::uint8_t> emit_block(const std::span<const BlockInstruction> ope
                                      const JitRuntime & /*runtime*/,
                                      const std::array<Word, agu_registers> & /*modifiers*/) {
   a64::Emitter emitter;
-  return emitter.generate(operations);
+  return emitter.generate_chained(operations);
 }
 
 std::vector<std::uint8_t> emit_repeat(const BlockInstruction &operation,

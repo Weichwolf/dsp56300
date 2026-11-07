@@ -141,6 +141,58 @@ void complete_blocks() {
           "Cold grants of one and a complete block publish identical native bytes");
 }
 
+void internal_backedges() {
+  constexpr Word iterations = 9;
+  constexpr Word outer_address = 99;
+  auto initial = seed(loop_model::lf);
+  initial.reg.la = start;
+  initial.reg.lc = iterations;
+  initial.reg.sp = 0;
+  initial.reg.sc = 2;
+  initial.reg.stack[0] = std::uint64_t{start} << word_bits;
+  initial.reg.stack[stack_entries - 1] = (std::uint64_t{outer_address} << word_bits) | saved_count;
+  a64::Machine machine(initial);
+  machine.program()[start] = add;
+  require(machine.jit().run(1) == 1, "Compile one complete native self-loop body");
+  const auto image = latest();
+  const auto warm = codegen::publications();
+  for (const Word depth : {0U, 2U}) {
+    initial.reg.sc = depth;
+    for (const Word budget : {0U, 1U, 3U, iterations, iterations + 2}) {
+      detail::Cpu cpu{};
+      cpu.reg = initial.reg;
+      cpu.reg.a <<= detail::padding_bits;
+      cpu.reg.b <<= detail::padding_bits;
+      cpu.instructions = initial.instructions;
+      cpu.cycles = initial.cycles;
+      cpu.repeat_completed = initial.completed;
+      cpu.interrupt_inhibited = initial.inhibited;
+      detail::NativeContext context{};
+      context.budget = budget;
+      auto expected = initial;
+      Word retired = 0;
+      while (retired < budget && expected.boundary == detail::NativeBoundary::none) {
+        ordinary(expected, add);
+        if (expected.fault.kind != FaultKind::none) { break; }
+        ++retired;
+      }
+      require(detail::enter_block(image.entry, cpu, context) == retired,
+              "One direct ABI entry follows its own native backedges without a dispatcher");
+      auto physical = expected.reg;
+      physical.a <<= detail::padding_bits;
+      physical.b <<= detail::padding_bits;
+      require(cpu.reg == physical && cpu.instructions == expected.instructions &&
+                  cpu.cycles == expected.cycles && cpu.repeat_completed == expected.completed &&
+                  cpu.interrupt_inhibited == expected.inhibited &&
+                  context.failure == expected.fault && context.boundary == expected.boundary,
+              "Internal loops retain exact grants, wrapping progress, final cleanup and faults");
+      require(codegen::publications() == warm,
+              "Direct native backedges never allocate or translate another entry");
+      preserved(image);
+    }
+  }
+}
+
 void semantic_boundaries() {
   using byte_model::Field;
   const std::array opcodes{
@@ -376,6 +428,7 @@ int main() {
     using namespace dsp56300::test;
     codegen::track_images();
     complete_blocks();
+    internal_backedges();
     semantic_boundaries();
     versions();
     captured_versions();

@@ -115,7 +115,11 @@ bool Emitter::prepare_instruction(const BlockInstruction &operation) {
 
 std::vector<std::uint8_t> Emitter::generate(const std::span<const BlockInstruction> operations) {
   if (operations.empty()) { throw std::invalid_argument("Cannot emit an empty A64 DSP block"); }
+  const bool chained = entry_ == Entry::chained;
+  Label header;
+  Label dispatch;
   begin();
+  code_.bind(header);
   for (const auto &item : operations) {
     if (!prepare_instruction(item)) { continue; }
     snapshot();
@@ -133,8 +137,14 @@ std::vector<std::uint8_t> Emitter::generate(const std::span<const BlockInstructi
     } else {
       code_.constant(Reg::x17, (item.pc + item.instruction.words) & word_mask);
       code_.compare(pc, Reg::x17);
-      code_.branch_far(Condition::not_equal, done_);
+      code_.branch_far(Condition::not_equal, chained ? dispatch : done_);
     }
+  }
+  if (chained) {
+    code_.bind(dispatch);
+    code_.constant(Reg::x17, operations.front().pc);
+    code_.compare(pc, Reg::x17);
+    code_.branch_far(Condition::equal, header);
   }
   code_.bind(done_);
   publish();
@@ -146,6 +156,12 @@ std::vector<std::uint8_t> Emitter::generate(const std::span<const BlockInstructi
   code_.pop(Reg::fp, Reg::lr);
   code_.return_();
   return code_.bytes();
+}
+
+std::vector<std::uint8_t>
+Emitter::generate_chained(const std::span<const BlockInstruction> operations) {
+  entry_ = Entry::chained;
+  return generate(operations);
 }
 
 std::vector<std::uint8_t> Emitter::generate_repeat(const BlockInstruction &operation) {

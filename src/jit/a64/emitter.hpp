@@ -70,11 +70,13 @@ struct MemoryLabels {
 class Emitter {
 public:
   [[nodiscard]] std::vector<std::uint8_t> generate(std::span<const BlockInstruction> operations);
+  [[nodiscard]] std::vector<std::uint8_t>
+  generate_chained(std::span<const BlockInstruction> operations);
   [[nodiscard]] std::vector<std::uint8_t> generate_repeat(const BlockInstruction &operation);
   [[nodiscard]] std::vector<std::uint8_t> generate_vector(const BlockInstruction &operation);
 
 private:
-  enum class Entry : std::uint8_t { block, repeat, vector };
+  enum class Entry : std::uint8_t { block, repeat, vector, chained };
   [[nodiscard]] bool prepare_instruction(const BlockInstruction &operation);
   [[nodiscard]] bool prepare_vector(const BlockInstruction &operation);
   void vector_operation(const BlockInstruction &operation);
