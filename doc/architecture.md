@@ -172,6 +172,25 @@ and sticky flags exact. Parallel transfers read the required old values before
 publishing ordered destinations. Preserve AGU modulo/reverse-carry addressing,
 REP/DO loop semantics and interrupt boundaries.
 
+Build a typed value graph before selecting host instructions. Track signed bounds,
+known zero bits and binary-point position independently of each value's eventual
+host register. Preserve the exact guest rounding and overflow effects while
+avoiding repeated expansion into padded accumulator form. Snapshot parallel
+sources in the graph; a move and its ALU operation consume the architecturally
+required versions even when their destinations overlap. Materialize canonical
+architectural values only at an actual observation or exit.
+
+Plan affine memory streams across complete loop nests, including nested loop
+setup, cursor resets and outer address steps. Batch independent iterations only
+after proving their physical read/write dependencies, bounds and address updates.
+Logical X/Y separation alone does not establish independence. Hoist these proofs
+over the admitted region and retain scalar native execution for unproved cases.
+Keep rounding, limiting and sticky events from every lane; reconstruct the final
+registers and all affected loop-stack frames in guest order, including status
+saved before the last iteration. Admission must fit the execution grant and
+preserve every event and partial-execution boundary; vector width and unrolling
+choices do not limit translation coverage.
+
 Use measured SSE/AVX register packing where it reduces native instructions and
 spills. Keep accumulators and hot AGU state resident. SIMD is an implementation
 tool, not permission to change fixed-point results or operation order. Lower the
