@@ -12,31 +12,56 @@
 #include <cstdint>
 #include <exception>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <iterator>
 #include <span>
 #include <stdexcept>
+#include <system_error>
+#include <vector>
+#if defined(__APPLE__)
+#include "arena_macos_faults.hpp"
+
+#include <libproc.h>
+#include <mach/vm_prot.h>
+#include <sys/proc_info.h>
+#include <unistd.h>
+#else
+#include <fstream>
 #include <string>
 #include <sys/mman.h>
 #include <sys/types.h>
-#include <system_error>
-#include <vector>
+#endif
 
 namespace dsp56300::test {
 namespace {
 constexpr std::uint8_t pattern_one = 0x5a, pattern_two = 0xa5, pattern_three = 0x3c,
                        pattern_four = 0xc3;
 constexpr std::size_t segment_bytes = std::size_t{64} << 10, alignment = 16;
+#if defined(__APPLE__)
+using Failure = ArenaFailure;
+#else
 enum class Failure : std::uint8_t { none, descriptor, truncate, writable, executable };
 thread_local Failure failure = Failure::none;
 
+void set_arena_failure(const Failure requested) noexcept {
+  failure = requested;
+}
+#endif
+
 std::size_t descriptors() {
-  return static_cast<std::size_t>(std::distance(
-      std::filesystem::directory_iterator("/proc/self/fd"), std::filesystem::directory_iterator()));
+#if defined(__APPLE__)
+  constexpr auto path = "/dev/fd";
+#else
+  constexpr auto path = "/proc/self/fd";
+#endif
+  return static_cast<std::size_t>(std::distance(std::filesystem::directory_iterator(path),
+                                                std::filesystem::directory_iterator()));
 }
 
 std::size_t aliases() {
+#if defined(__APPLE__)
+  return jit_executable_mappings().size();
+#else
   std::ifstream maps("/proc/self/maps");
   require(maps.good(), "Read actual kernel arena aliases");
   std::size_t count = 0;
@@ -44,9 +69,21 @@ std::size_t aliases() {
     if (line.find("/memfd:dsp56300-jit (deleted)") != std::string::npos) { ++count; }
   }
   return count;
+#endif
 }
 
 void permissions() {
+#if defined(__APPLE__)
+  const auto mappings = jit_executable_mappings();
+  require(!mappings.empty(), "Published arenas have actual kernel mappings");
+  for (const auto range : mappings) {
+    proc_regioninfo region{};
+    require(proc_pidinfo(getpid(), PROC_PIDREGIONINFO, range.first, &region, sizeof(region)) ==
+                    sizeof(region) &&
+                region.pri_protection == static_cast<unsigned>(VM_PROT_READ | VM_PROT_EXECUTE),
+            "Execution-owner publication seals every actual arena RX without write permission");
+  }
+#else
   std::ifstream maps("/proc/self/maps");
   require(maps.good(), "Read actual kernel permissions of both aliases");
   std::size_t writable = 0;
@@ -61,6 +98,7 @@ void permissions() {
     if (access == "r-xs") { ++executable; }
   }
   require(executable > 0 && writable == executable, "Each arena has one RW and one RX mapping");
+#endif
 }
 
 struct Image {
@@ -97,9 +135,10 @@ void append(detail::ExecutableArena &arena,
 
 void packing() {
   const auto original = jit_executable_mappings();
+  const auto initial_bytes = jit_executable_bytes();
   const auto initial_descriptors = descriptors();
   {
-    detail::ExecutableArena arena;
+    detail::ExecutableArena arena(detail::WriteProtection::owner);
     std::vector<Image> images;
     for (const std::size_t size : {1U, 15U, 16U, 17U}) { append(arena, images, size, pattern_one); }
     const auto first = std::bit_cast<std::uintptr_t>(images.front().entry);
@@ -108,15 +147,18 @@ void packing() {
       require(std::bit_cast<std::uintptr_t>(images[index].entry) == first + offsets[index],
               "Small images pack contiguously with only necessary alignment padding");
     }
-    require(jit_executable_bytes() == segment_bytes, "Small images share one 64-KiB RX segment");
+    require(jit_executable_bytes() == initial_bytes + segment_bytes,
+            "Small images share one 64-KiB RX segment");
     constexpr auto prefix_bytes = offsets.back() + 17;
     constexpr auto tail_offset = (prefix_bytes + alignment - 1) / alignment * alignment;
     append(arena, images, segment_bytes - tail_offset, pattern_two);
-    require(jit_executable_bytes() == segment_bytes, "An exact-fit tail uses existing storage");
+    require(jit_executable_bytes() == initial_bytes + segment_bytes,
+            "An exact-fit tail uses existing storage");
     append(arena, images, 1, pattern_three);
-    require(jit_executable_bytes() == 2 * segment_bytes, "Full storage grows without rewriting");
+    require(jit_executable_bytes() == initial_bytes + 2 * segment_bytes,
+            "Full storage grows without rewriting");
     append(arena, images, segment_bytes * 2, pattern_four);
-    require(jit_executable_bytes() == 4 * segment_bytes,
+    require(jit_executable_bytes() == initial_bytes + 4 * segment_bytes,
             "An oversized complete image gets sufficient contiguous storage");
     require(descriptors() == initial_descriptors, "Mapped arenas retain no open descriptors");
   }
@@ -137,25 +179,35 @@ void empty_input() {
 }
 
 void failures() {
-  for (const auto step :
-       {Failure::descriptor, Failure::truncate, Failure::writable, Failure::executable}) {
-    detail::ExecutableArena arena;
+#if defined(__APPLE__)
+  constexpr std::array stages{Failure::allocation, Failure::writable, Failure::executable};
+#else
+  constexpr std::array stages{
+      Failure::descriptor, Failure::truncate, Failure::writable, Failure::executable};
+#endif
+  for (const auto step : stages) {
+    detail::ExecutableArena arena(detail::WriteProtection::owner);
     const auto mappings = jit_executable_mappings();
     const auto initial_aliases = aliases();
     const auto before = codegen::publications();
     const auto initial_descriptors = descriptors();
     constexpr std::array<std::uint8_t, 1> input{0xc3};
     bool rejected = false;
-    failure = step;
+    set_arena_failure(step);
     try {
       static_cast<void>(arena.append(input));
     } catch (const std::system_error &error) {
       auto expected = ENOMEM;
+#if !defined(__APPLE__)
       if (step == Failure::descriptor) { expected = EMFILE; }
       if (step == Failure::truncate) { expected = ENOSPC; }
+#endif
       rejected = error.code().value() == expected;
     }
-    failure = Failure::none;
+    set_arena_failure(Failure::none);
+#if defined(__APPLE__)
+    require(arena_failure_released(), "Failed allocations leave no actual Mach mapping behind");
+#endif
     require(rejected && jit_executable_mappings() == mappings && aliases() == initial_aliases &&
                 codegen::publications() == before && descriptors() == initial_descriptors,
             "Every failed allocation stage releases all partial resources and keeps its errno");
@@ -167,6 +219,7 @@ void failures() {
 }
 } // namespace
 
+#if !defined(__APPLE__)
 extern "C" int real_memfd(const char *name, unsigned flags) noexcept asm("__real_memfd_create");
 extern "C" int wrap_memfd(const char *name, unsigned flags) noexcept asm("__wrap_memfd_create");
 
@@ -215,6 +268,7 @@ void *wrap_map(void *const address,
   }
   return real_map(address, size, protection, flags, descriptor, offset);
 }
+#endif
 } // namespace dsp56300::test
 
 int main() {
