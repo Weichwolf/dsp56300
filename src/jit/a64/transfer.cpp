@@ -35,6 +35,10 @@ void Emitter::control_move(const BlockInstruction &operation) {
 
 bool Emitter::transfer(const BlockInstruction &operation) {
   const auto kind = operation.instruction.operation;
+  if (kind == Operation::viterbi_shift) {
+    viterbi_shift(operation);
+    return true;
+  }
   if (kind == Operation::move_control_effective || kind == Operation::move_control_short ||
       kind == Operation::move_program_effective || kind == Operation::move_program_short) {
     memory_transfer(operation);

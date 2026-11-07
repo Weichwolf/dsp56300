@@ -136,6 +136,14 @@ private:
   void ordinary_product(const BlockInstruction &operation);
   void mixed_product(const BlockInstruction &operation);
   void product_complete(const BlockInstruction &operation);
+  [[nodiscard]] bool bit_field(const BlockInstruction &operation);
+  [[nodiscard]] bool field_control(const BlockInstruction &operation);
+  void field_bounds(const BlockInstruction &operation, bool insert);
+  void extract_field(const BlockInstruction &operation);
+  void insert_field(const BlockInstruction &operation);
+  void merge_field(const BlockInstruction &operation);
+  void count_leading_bits(const BlockInstruction &operation);
+  void viterbi_shift(const BlockInstruction &operation);
   [[nodiscard]] bool integer(const BlockInstruction &operation);
   void unit(const BlockInstruction &operation);
   void compare_unsigned(const BlockInstruction &operation);

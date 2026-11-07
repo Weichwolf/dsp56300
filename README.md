@@ -52,6 +52,12 @@ mixed products and double-precision accumulation. Native matrices check every
 source pair, product variant, scale, rounding mode and SM saturation/bypass rule,
 including signed discarded fractions, rounded overflow and precise reserved-field
 faults. Mixed product sequences preserve current accumulator inputs and budgets.
+BFU emission implements signed/unsigned field extraction, insertion, merge and
+leading-sign-bit counts with SM bypass and exact descriptor/selector faults.
+Independent per-bit matrices cover all descriptor widths/offsets, register aliases,
+flag preservation and mixed-sequence budget/fault exits. VSL captures raw X/Y
+outputs before addressing or bus access; native tests check AGU updates, I/O
+priority, first/second-store faults, physical aliases and callback remapping.
 Other instruction families and complete owner integration remain open.
 Complete ARM64 Core execution and qualification remain in progress. The production
 Core still reports an unsupported host on ARM64.
