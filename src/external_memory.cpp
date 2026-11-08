@@ -5,6 +5,7 @@
 #include "dsp56300/memory.hpp"
 #include "program_cache.hpp"
 
+#include <algorithm>
 #include <optional>
 
 namespace dsp56300 {
@@ -15,10 +16,17 @@ void Core::request_yield() noexcept {
 }
 
 std::optional<Word> Core::Impl::jit_program(void *owner, const Word address) noexcept {
-  const auto &self = *static_cast<Impl *>(owner);
+  auto &self = *static_cast<Impl *>(owner);
   if (self.io == nullptr || address > word_mask) { return std::nullopt; }
   const auto value = self.io->inspect_program(address);
-  return value && *value <= word_mask ? value : std::nullopt;
+  if (!value || *value > word_mask) { return std::nullopt; }
+  self.observe_program_word(address);
+  return value;
+}
+
+void Core::Impl::observe_program_word(const Word address) noexcept {
+  code_begin = std::min(code_begin, address);
+  code_end = std::max(code_end, address + 1);
 }
 
 void Core::Impl::synchronize_program_view() {
@@ -57,7 +65,11 @@ void Core::Impl::write_external(const Space space, const Word address, const Wor
     fail(peripheral ? FaultKind::io_write : FaultKind::memory_write, space, address, value);
     return;
   }
-  if (space == Space::program && jit) { jit->invalidate(); }
+  // Initial loading beside a translated ROM does not alter that ROM's entries.
+  // The envelope includes opcode extensions and code inspected for fused regions.
+  if (space == Space::program && jit && address >= code_begin && address < code_end) {
+    jit->invalidate();
+  }
   if (space == Space::program && cacheable(address) && icache) {
     icache->write({.address = address, .value = value});
   }

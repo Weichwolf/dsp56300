@@ -55,6 +55,7 @@ struct Core::Impl {
 
   [[nodiscard]] std::uint32_t run_repeat_native(std::uint32_t instructions);
   [[nodiscard]] Word fetch_program(Word address);
+  void observe_program_word(Word address) noexcept;
   [[nodiscard]] Word read_external(Space space, Word address);
   void write_external(Space space, Word address, Word value);
   void execute_processing(const detail::Instruction &decoded);
@@ -187,5 +188,7 @@ struct Core::Impl {
   std::uint64_t cycle_deadline = std::numeric_limits<std::uint64_t>::max();
   std::uint64_t program_revision = 0;
   Word program_omr = 0;
+  // Conservative dependency envelope for externally inspected/fetched code.
+  Word code_begin = address_words, code_end = 0;
 };
 } // namespace dsp56300

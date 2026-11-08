@@ -18,6 +18,7 @@ ProgramCache &Core::Impl::program_cache() {
 }
 
 Word Core::Impl::fetch_program(const Word address) {
+  if (external) { observe_program_word(address); }
   if (!cacheable(address)) { return read_memory(Space::program, address); }
   const auto read = [](void *context, const Word index) -> std::optional<Word> {
     auto &core = *static_cast<Impl *>(context);

@@ -385,6 +385,8 @@ bool Core::interrupt_ready() const {
 
 void Core::clear_code_cache() {
   impl_->windows_bound = false;
+  impl_->code_begin = address_words;
+  impl_->code_end = 0;
   if (impl_->jit) { impl_->jit->invalidate(); }
 }
 } // namespace dsp56300
