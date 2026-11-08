@@ -36,7 +36,10 @@ set(CMAKE_CXX_CLANG_TIDY "${DSP56300_CLANG_TIDY};--warnings-as-errors=*")
 set(dsp56300_run_source src/jit/run.cpp)
 set(dsp56300_a64_sources)
 set(dsp56300_mac_source src/jit/x64/mac_batch_avx2.cpp)
+set(dsp56300_region_source src/jit/x64/resident_region_emit.cpp)
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
+  set(dsp56300_region_source src/jit/a64/resident_region_emit.cpp
+    src/jit/a64/resident_values.cpp src/jit/a64/resident_memory.cpp)
   set(dsp56300_mac_source src/jit/a64/mac_batch_neon.cpp)
   set(dsp56300_run_source src/jit/a64/run.cpp)
   set(dsp56300_a64_sources src/native_owner.cpp src/jit/a64/emitter.cpp src/jit/a64/batch.cpp src/jit/a64/flags.cpp
@@ -63,7 +66,7 @@ add_library(dsp56300_core STATIC
   src/processing.cpp src/debugging.cpp src/viterbi.cpp src/program_cache.cpp src/cache_control.cpp
   src/jit.cpp src/runtime.cpp src/jit/x64/emitter.cpp src/jit/code.cpp
   src/jit/arena.cpp src/jit/block_parse.cpp src/jit/block_emit.cpp ${dsp56300_run_source} src/jit/index.cpp
-  src/jit/a64/code.cpp ${dsp56300_a64_sources}
+  src/jit/a64/code.cpp src/jit/a64/neon.cpp ${dsp56300_a64_sources}
   src/jit/x64/addition.cpp src/jit/x64/logic.cpp
   src/jit/x64/saturation.cpp
   src/jit/x64/loop.cpp src/jit/x64/control.cpp src/jit/x64/bits.cpp
@@ -78,7 +81,7 @@ add_library(dsp56300_core STATIC
   src/jit/x64/shifts.cpp src/jit/registers.cpp src/jit/x64/inputs.cpp
   src/jit/mac_batch.cpp ${dsp56300_mac_source} src/jit/x64/batch.cpp
   src/jit/value_graph.cpp src/jit/resident_region_run.cpp src/jit/resident_region_plan.cpp
-  src/jit/x64/vector.cpp src/jit/x64/resident_region_emit.cpp)
+  src/jit/x64/vector.cpp ${dsp56300_region_source})
 add_library(dsp56300::core ALIAS dsp56300_core)
 target_include_directories(dsp56300_core PUBLIC include)
 target_compile_features(dsp56300_core PUBLIC cxx_std_23)
@@ -122,6 +125,15 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   add_executable(dsp56300_mac_batch_boundary_test test/isa/mac_batch_boundary_test.cpp)
   target_link_libraries(dsp56300_mac_batch_boundary_test PRIVATE dsp56300::core)
   add_test(NAME mac-batch-observation-boundaries COMMAND dsp56300_mac_batch_boundary_test)
+  add_executable(dsp56300_native_value_region_test test/jit/native_value_region_test.cpp)
+  target_link_libraries(dsp56300_native_value_region_test PRIVATE dsp56300::core)
+  add_test(NAME native-value-regions COMMAND dsp56300_native_value_region_test)
+  add_executable(dsp56300_value_bounds_test test/jit/value_bounds_test.cpp)
+  target_link_libraries(dsp56300_value_bounds_test PRIVATE dsp56300::core)
+  add_test(NAME native-value-bounds COMMAND dsp56300_value_bounds_test)
+  add_executable(dsp56300_reverse_stream_test test/jit/reverse_stream_test.cpp)
+  target_link_libraries(dsp56300_reverse_stream_test PRIVATE dsp56300::core)
+  add_test(NAME native-reverse-streams COMMAND dsp56300_reverse_stream_test)
   set_tests_properties(host-mac-products executable-arena PROPERTIES TIMEOUT 30)
   add_library(dsp56300_codegen_observer STATIC test/support/codegen_observer.cpp)
   target_include_directories(dsp56300_codegen_observer PUBLIC test/support)
@@ -288,18 +300,6 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
     target_include_directories(dsp56300_x64_vector_test PRIVATE src test/support)
     target_link_libraries(dsp56300_x64_vector_test PRIVATE dsp56300::core)
     add_test(NAME native-vector-encodings COMMAND dsp56300_x64_vector_test)
-    add_executable(dsp56300_native_value_region_test test/jit/native_value_region_test.cpp)
-    target_include_directories(dsp56300_native_value_region_test PRIVATE test/support)
-    target_link_libraries(dsp56300_native_value_region_test PRIVATE dsp56300::core)
-    add_test(NAME native-value-regions COMMAND dsp56300_native_value_region_test)
-    add_executable(dsp56300_value_bounds_test test/jit/value_bounds_test.cpp)
-    target_include_directories(dsp56300_value_bounds_test PRIVATE test/support)
-    target_link_libraries(dsp56300_value_bounds_test PRIVATE dsp56300::core)
-    add_test(NAME native-value-bounds COMMAND dsp56300_value_bounds_test)
-    add_executable(dsp56300_reverse_stream_test test/jit/reverse_stream_test.cpp)
-    target_include_directories(dsp56300_reverse_stream_test PRIVATE test/support)
-    target_link_libraries(dsp56300_reverse_stream_test PRIVATE dsp56300::core)
-    add_test(NAME native-reverse-streams COMMAND dsp56300_reverse_stream_test)
     add_executable(dsp56300_memory_windows_bench test/bench/memory_windows_bench.cpp)
     target_link_libraries(dsp56300_memory_windows_bench PRIVATE dsp56300::core)
     add_custom_target(${DSP56300_TOOL_PREFIX}bench-memory-windows

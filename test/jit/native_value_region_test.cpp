@@ -560,6 +560,7 @@ void nested_finish(Registers &state, const Word last) {
 using NestedData = std::array<Word, 4096>;
 
 enum class NestedShape : unsigned char { reset, independent, feedback, strided };
+enum class ChildVariant : unsigned char { ordinary, negative, absolute };
 
 struct NestedModel {
   Registers state;
@@ -567,6 +568,7 @@ struct NestedModel {
   NestedData y;
   NestedShape shape = NestedShape::reset;
   bool mirrored = false;
+  Word arithmetic = product;
 };
 
 Word nested_step(NestedModel &model, const Word child) {
@@ -599,7 +601,7 @@ Word nested_step(NestedModel &model, const Word child) {
     state.r[4] += state.n[4];
   } else if (offset == 7 || offset == 8) {
     const auto old = state;
-    sequence_model::alu(state, old, offset == 7 ? product : rounding);
+    sequence_model::alu(state, old, offset == 7 ? model.arithmetic : rounding);
   } else if (offset == 9) {
     model.x[state.r[1]] = register_model::bus_word(state, state.a);
     model.y[state.r[5]] = register_model::bus_word(state, model.mirrored ? state.a : state.b);
@@ -616,9 +618,27 @@ Word nested_step(NestedModel &model, const Word child) {
   return cycles;
 }
 
+Word child_product(const ChildVariant variant) {
+  switch (variant) {
+    case ChildVariant::ordinary: return product;
+    case ChildVariant::negative: return product | 4U;
+    case ChildVariant::absolute: return static_cast<Word>(isa::Opcode::abs_a);
+    default: throw std::logic_error("Unknown child operation");
+  }
+}
+
+Word set_child_product(Core &core, const ChildVariant variant, const unsigned warmth) {
+  if (variant == ChildVariant::ordinary) { return product; }
+  const auto opcode = warmth == 0 ? product : child_product(variant);
+  const std::array changed{opcode};
+  core.load(Space::program, start + 7, changed);
+  return opcode;
+}
+
 void nested_case(const Word child,
                  const Point point,
-                 const NestedShape shape = NestedShape::reset) {
+                 const NestedShape shape = NestedShape::reset,
+                 const ChildVariant variant = ChildVariant::ordinary) {
   constexpr Word immediate = static_cast<Word>(isa::Opcode::move_long) | (6U << 11) | (4U << 8) |
                              (Word{1} << 14) | (Word{1} << 15);
   constexpr Word low_count_mask = 255;
@@ -679,6 +699,7 @@ void nested_case(const Word child,
   Core core(Memory::separate({.program = program, .x = x, .y = y}));
   const Word budget = point.count * ((4 * child) + 7);
   for (unsigned warmth = 0; warmth < 2; ++warmth) {
+    const auto arithmetic = set_child_product(core, variant, warmth);
     for (Word prefix = 0; prefix <= budget; ++prefix) {
       const auto parent_size = (4 * child) + 7;
       const auto position = prefix % parent_size;
@@ -686,8 +707,12 @@ void nested_case(const Word child,
       if (child > 8 && position > 6 && position < parent_size - 6 && position != parent_size / 2) {
         continue;
       }
-      NestedModel expected{
-          .state = initial, .x = seed_x, .y = seed_y, .shape = shape, .mirrored = point.mirrored};
+      NestedModel expected{.state = initial,
+                           .x = seed_x,
+                           .y = seed_y,
+                           .shape = shape,
+                           .mirrored = point.mirrored,
+                           .arithmetic = arithmetic};
       Word cycles = 0;
       for (Word index = 0; index < prefix; ++index) { cycles += nested_step(expected, child); }
       x = seed_x;
@@ -759,6 +784,9 @@ void mirrored_nested_cases() {
 void cases() {
   mapped_cases();
   constexpr Word advancing_output_base = 1536;
+  for (const auto variant : {ChildVariant::negative, ChildVariant::absolute}) {
+    nested_case(4, {.count = 8, .output = advancing_output_base}, NestedShape::reset, variant);
+  }
   nested_cases();
   mirrored_nested_cases();
   for (const auto shape : {NestedShape::independent, NestedShape::feedback, NestedShape::strided}) {

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "jit/a64/code.hpp"
+#include "jit/a64/neon.hpp"
 
 #include <array>
 #include <cstddef>
@@ -10,8 +11,10 @@
 #if defined(__aarch64__)
 #include "jit/arena.hpp"
 
+#include <algorithm>
 #include <bit>
 #include <type_traits>
+#include <vector>
 #endif
 
 namespace {
@@ -96,6 +99,40 @@ void bit_encodings() {
   constexpr std::array<std::uint32_t, 4> expected{0x5ac01020, 0xdac01020, 0x5ac00020, 0xdac00020};
   for (std::size_t index = 0; index < expected.size(); ++index) {
     require(instruction(code, index) == expected[index], "A64 CLZ/RBIT encoding differs from ISA");
+  }
+}
+
+void neon_encodings() {
+  Code code;
+  Neon neon(code);
+  neon.binary(VectorOp::add, Vec{0}, Vec{1}, Vec{2});
+  neon.binary(VectorOp::subtract, Vec{0}, Vec{1}, Vec{2});
+  neon.binary(VectorOp::bit_and, Vec{0}, Vec{1}, Vec{2});
+  neon.binary(VectorOp::bit_or, Vec{0}, Vec{1}, Vec{2});
+  neon.binary(VectorOp::bit_xor, Vec{0}, Vec{1}, Vec{2});
+  neon.shift(Vec{0}, Vec{1}, Shift::left, 9);
+  neon.shift(Vec{0}, Vec{1}, Shift::right, 9);
+  neon.shift(Vec{0}, Vec{1}, Shift::arithmetic, 9);
+  neon.shift(Vec{0}, Vec{1}, Shift::left, 8, true);
+  neon.shift(Vec{0}, Vec{1}, Shift::arithmetic, 8, true);
+  neon.narrow(Vec{0}, Vec{1});
+  neon.extend(Vec{0}, Vec{1});
+  neon.binary(VectorOp::multiply, Vec{0}, Vec{1}, Vec{2});
+  neon.broadcast(Vec{0}, Reg::x1);
+  neon.insert(Vec{0}, Reg::x1, 1);
+  neon.extract(Reg::x1, Vec{0}, 1);
+  neon.load(Vec{0}, Reg::x1, 32);
+  neon.store(Vec{0}, Reg::x1, 32);
+  neon.load(Vec{0}, Reg::x1, 8, true);
+  neon.binary(VectorOp::maximum, Vec{0}, Vec{1}, Vec{2});
+  neon.binary(VectorOp::minimum, Vec{0}, Vec{1}, Vec{2});
+  constexpr std::array<std::uint32_t, 21> expected{
+      0x4ee28420, 0x6ee28420, 0x4e221c20, 0x4ea21c20, 0x6e221c20, 0x4f495420, 0x6f770420,
+      0x4f770420, 0x4f285420, 0x4f380420, 0x0ea12820, 0x0f20a420, 0x0ea2c020, 0x4e080c20,
+      0x4e181c20, 0x4e183c01, 0x3dc00820, 0x3d800820, 0xfd400420, 0x4ea26420, 0x4ea26c20};
+  for (std::size_t index = 0; index < expected.size(); ++index) {
+    require(instruction(code, index) == expected[index],
+            "NEON encoding differs from independent assembler reference");
   }
 }
 
@@ -211,6 +248,36 @@ void execute_bits() {
   }
 }
 
+void execute_neon_memory() {
+  dsp56300::detail::ExecutableArena arena;
+  constexpr std::size_t large_offset = 65536;
+  constexpr std::uint64_t guard = 0xabcdef0123456789;
+  constexpr std::uint64_t value = 0x8123456789abcdef;
+  std::vector<std::uint64_t> memory((large_offset / sizeof(value)) + 4, guard);
+  for (const auto offset : {std::size_t{16}, large_offset}) {
+    for (const bool words : {false, true}) {
+      std::ranges::fill(memory, guard);
+      Code code;
+      Neon neon(code);
+      neon.broadcast(Vec{0}, Reg::x1);
+      neon.store(Vec{0}, Reg::x0, offset, words);
+      neon.load(Vec{1}, Reg::x0, offset, words);
+      neon.extract(Reg::x0, Vec{1}, words ? 0U : 1U);
+      code.return_();
+      const auto *entry = arena.append(code.bytes());
+      require(dsp56300_a64_test_enter(
+                  entry, reinterpret_cast<std::uintptr_t>(memory.data()), value) == value,
+              "NEON memory preserves exact small and expanded displacements");
+      const auto first = offset / sizeof(value);
+      const auto last = first + (words ? 1U : 2U);
+      for (std::size_t index = 0; index < memory.size(); ++index) {
+        require(memory[index] == (index >= first && index < last ? value : guard),
+                "NEON stores preserve every word outside the selected lane extent");
+      }
+    }
+  }
+}
+
 void execute() {
   dsp56300::detail::ExecutableArena arena;
   Code code;
@@ -249,10 +316,12 @@ int main() {
     fixups();
     barrel_encodings();
     bit_encodings();
+    neon_encodings();
 #if defined(__aarch64__)
     execute();
     execute_barrels();
     execute_bits();
+    execute_neon_memory();
 #endif
     std::cout << "A64 encoding and branch checks passed.\n";
   } catch (const std::exception &error) {

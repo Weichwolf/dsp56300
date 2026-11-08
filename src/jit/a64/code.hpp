@@ -131,6 +131,7 @@ public:
   void write_flags(Reg source);
 
 private:
+  friend class Neon;
   void word(std::uint32_t value);
   void reference(Label &label, unsigned bits);
   void patch(Reference reference, std::size_t target);
