@@ -51,6 +51,7 @@ struct RegionFootprint {
 struct ResidentRegion {
   ValueGraph graph;
   JitRuntime runtime;
+  std::array<MemoryWindow, 2> memory;
   std::vector<RegionRoot> roots;
   std::vector<RegionFootprint> footprints;
   std::vector<unsigned> stream_roots;

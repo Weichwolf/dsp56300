@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <exception>
 #include <iostream>
+#include <optional>
 #include <span>
 #include <stdexcept>
 
@@ -75,6 +76,8 @@ struct Point {
        modifier = word_mask, stack_count = 2;
   std::uint64_t accumulator_b = register_model::seed_accumulator_b;
   bool shared = false, mirrored = false;
+  std::uint8_t input_known = 1, output_known = 1;
+  bool deadline = false;
 };
 
 struct Model {
@@ -141,12 +144,27 @@ bool step(Model &model, const bool shared) {
   return model.failure.kind == FaultKind::none;
 }
 
-class Machine {
+class Machine final : public Io {
 public:
-  explicit Machine(const bool shared, const Shape shape = Shape::product)
+  explicit Machine(const bool shared,
+                   const Shape shape = Shape::product,
+                   const bool mapped = false,
+                   const Word origin = 0)
       : code_(instructions(shape)),
-        core_(Memory::separate(
-            {.program = program_, .x = x_, .y = shared ? std::span(x_) : std::span(y_)})) {
+        windows_{MemoryWindow{.address = origin,
+                              .words = std::span(x_).subspan(origin),
+                              .known = std::span(x_known_).subspan(origin),
+                              .writable = true},
+                 MemoryWindow{.address = origin,
+                              .words = (shared ? std::span(x_) : std::span(y_)).subspan(origin),
+                              .known = std::span(y_known_).subspan(origin),
+                              .writable = true}},
+        mapped_(mapped),
+        core_(mapped ? Memory::external()
+                     : Memory::separate({.program = program_,
+                                         .x = x_,
+                                         .y = shared ? std::span(x_) : std::span(y_)}),
+              mapped ? this : nullptr) {
     std::ranges::copy(code_, program_.begin() + start);
     for (std::size_t index = 0; index < x_.size(); ++index) {
       x_[index] = samples[index % samples.size()];
@@ -156,40 +174,68 @@ public:
     seed_y_ = y_;
   }
 
+  [[nodiscard]] std::span<const MemoryWindow> memory_windows(const Space space) noexcept override {
+    if (space == Space::program) { return {}; }
+    return std::span(&windows_[space == Space::x ? 0 : 1], 1);
+  }
+
+  [[nodiscard]] std::optional<Word> inspect_program(const Word address) const noexcept override {
+    return address < program_.size() ? std::optional{program_[address]} : std::nullopt;
+  }
+
+  bool read(const Space space, const Word address, Word /*pc*/, Word &value) noexcept override {
+    const auto word = inspect_program(address);
+    if (space != Space::program || !word) { return false; }
+    value = *word;
+    return true;
+  }
+
+  bool write(Space /*space*/, Word /*address*/, Word /*pc*/, Word /*value*/) noexcept override {
+    return false;
+  }
+
+  bool bit(Space /*space*/,
+           Word /*address*/,
+           Word /*pc*/,
+           Word /*bit*/,
+           BitAction /*action*/,
+           bool & /*previous*/) noexcept override {
+    return false;
+  }
+
   void check(const Point point) {
     if (core_.state().failure.kind != FaultKind::none) { core_.reset(); }
     x_ = seed_x_;
     y_ = seed_y_;
-    auto state = register_model::seed(point.mode);
-    state.sr |= loop_flag;
-    state.b = point.accumulator_b;
-    state.la = start + static_cast<Word>(body.size()) - 1;
-    state.lc = point.count;
-    state.sp = point.pointer;
-    state.sc = point.stack_count;
-    state.m.fill(point.modifier);
-    state.r[0] = state.r[4] = input_base;
-    state.r[1] = state.r[5] = point.output;
-    state.stack[state.sp % stack_entries] =
-        (std::uint64_t{start} << register_bits) | ((state.sr & ~loop_bits) | point.saved);
-    state.stack[(state.sp + pointer_mask) % stack_entries] =
-        (std::uint64_t{previous_end} << register_bits) | previous_count;
+    x_known_.fill(point.input_known);
+    y_known_.fill(point.input_known);
+    for (Word index = 0; index < point.count && point.output + index < data_words; ++index) {
+      x_known_[point.output + index] = y_known_[point.output + index] = point.output_known;
+    }
+    auto expected_x_known = x_known_;
+    auto expected_y_known = y_known_;
+    const auto state = registers(point);
     Model model{.state = state, .x = seed_x_, .y = seed_y_, .failure = {}, .code = code_};
     for (Word index = 0; index < point.prefix; ++index) {
+      if (model.state.pc == start + body.size() - 1) {
+        expected_x_known[model.state.r[1]] = expected_y_known[model.state.r[5]] = 1;
+      }
       if (!step(model, point.shared)) { break; }
       ++model.retired;
     }
     core_.set_registers(state);
     const auto before = core_.state().progress;
-    const auto result = core_.run(point.prefix);
+    const auto result = point.deadline ? core_.run_until(before.estimated_cycles + point.prefix)
+                                       : core_.run(point.prefix);
     const auto expected_progress =
         Progress{.instructions = before.instructions + model.retired,
                  .estimated_cycles = before.estimated_cycles + model.retired};
     const auto actual = core_.registers();
-    const bool matched = result.retired == model.retired && result.fault == model.failure &&
-                         result.state == ExecutionState::running && !result.yielded &&
-                         actual == model.state && result.progress == expected_progress &&
-                         x_ == model.x && y_ == model.y;
+    const bool matched =
+        result.retired == model.retired && result.fault == model.failure &&
+        result.state == ExecutionState::running && !result.yielded && actual == model.state &&
+        result.progress == expected_progress && x_ == model.x && y_ == model.y &&
+        (!mapped_ || (x_known_ == expected_x_known && y_known_ == expected_y_known));
     if (!matched) {
       std::cerr << "count=" << point.count << " prefix=" << point.prefix << " mode=" << point.mode
                 << " SP=" << point.pointer << " output=" << point.output
@@ -204,10 +250,93 @@ public:
             "flags and all RAM");
   }
 
+  void refused_access(const Word hole, const bool store, const bool alias = false) {
+    constexpr Word count = 33;
+    x_ = seed_x_;
+    y_ = seed_y_;
+    x_known_.fill(1);
+    y_known_.fill(1);
+    if (store) {
+      windows_[0].writable = alias;
+      windows_[0].aliases_program = alias;
+    } else {
+      x_known_[input_base + hole] = 0;
+    }
+    const auto state = registers({.count = count});
+    Model expected{.state = state, .x = x_, .y = y_, .failure = {}, .code = code_};
+    const Word retired =
+        store ? static_cast<Word>(body.size() - 1) : hole * static_cast<Word>(body.size());
+    for (Word index = 0; index < retired; ++index) {
+      require(step(expected, false), "The independent prefix completes before its refused access");
+    }
+    core_.set_registers(state);
+    const auto result = core_.run(count * body.size());
+    require(result.retired == retired &&
+                result.progress == Progress{.instructions = retired, .estimated_cycles = retired} &&
+                result.fault.kind == (store ? FaultKind::memory_write : FaultKind::memory_read) &&
+                result.fault.space == Space::x && result.fault.pc == (store ? state.la : start) &&
+                result.fault.address == (store ? output_base : input_base + hole) &&
+                x_ == expected.x && y_ == expected.y,
+            "Unknown reads, ROM stores and executable-alias stores retain their precise prefix");
+  }
+
+  void metadata_alias() {
+    constexpr Word count = 32;
+    constexpr Word canonical_word = 0x01010101;
+    x_ = seed_x_;
+    y_.fill(canonical_word);
+    y_known_.fill(1);
+    windows_[0].known = {reinterpret_cast<std::uint8_t *>(y_.data() + output_base), data_words};
+    const auto state = registers({.count = count});
+    Model expected{.state = state, .x = x_, .y = y_, .failure = {}, .code = code_};
+    auto knowledge = std::as_writable_bytes(std::span(expected.y))
+                         .subspan(output_base * sizeof(Word), data_words);
+    Word retired = 0;
+    while (retired < count * body.size()) {
+      if (expected.state.pc == start && knowledge[expected.state.r[0]] == std::byte{0}) { break; }
+      const auto store = expected.state.pc == state.la;
+      const auto output = expected.state.r[1];
+      require(step(expected, false), "The independent alias prefix has valid loop frames");
+      // Metadata marks are beyond the Y output prefix preceding this read fault.
+      if (store) { knowledge[output] = std::byte{1}; }
+      ++retired;
+    }
+    require(retired < count * body.size(), "An actual Y store makes a future X input unknown");
+    core_.set_registers(state);
+    const auto result = core_.run(count * body.size());
+    require(result.retired == retired &&
+                result.progress == Progress{.instructions = retired, .estimated_cycles = retired} &&
+                result.fault.kind == FaultKind::memory_read && result.fault.space == Space::x &&
+                result.fault.address == expected.state.r[0] && result.fault.pc == start &&
+                x_ == expected.x && y_ == expected.y,
+            "Word stores aliasing knowledge metadata preserve ordered unknown-read faults");
+  }
+
 private:
+  static Registers registers(const Point point) {
+    auto state = register_model::seed(point.mode);
+    state.sr |= loop_flag;
+    state.b = point.accumulator_b;
+    state.la = start + static_cast<Word>(body.size()) - 1;
+    state.lc = point.count;
+    state.sp = point.pointer;
+    state.sc = point.stack_count;
+    state.m.fill(point.modifier);
+    state.r[0] = state.r[4] = input_base;
+    state.r[1] = state.r[5] = point.output;
+    state.stack[state.sp % stack_entries] =
+        (std::uint64_t{start} << register_bits) | ((state.sr & ~loop_bits) | point.saved);
+    state.stack[(state.sp + pointer_mask) % stack_entries] =
+        (std::uint64_t{previous_end} << register_bits) | previous_count;
+    return state;
+  }
+
   std::array<Word, memory_words> program_{};
   Data x_{}, y_{}, seed_x_{}, seed_y_{};
+  std::array<std::uint8_t, data_words> x_known_{}, y_known_{};
   const std::array<Word, 4> code_;
+  std::array<MemoryWindow, 2> windows_;
+  bool mapped_;
   Core core_;
 };
 
@@ -234,6 +363,48 @@ void placements(Machine &machine, Point point) {
       point.output = output;
       counts(machine, point);
     }
+  }
+}
+
+void mapped_cases() {
+  constexpr Word packet_tail = 33;
+  for (const bool shared : {false, true}) {
+    for (const auto shape : {Shape::product,
+                             Shape::negative,
+                             Shape::word_shift,
+                             Shape::wide_shift,
+                             Shape::clear,
+                             Shape::add,
+                             Shape::subtract}) {
+      Machine machine(shared, shape, true);
+      for (const Word mode : {0U, mode_rm, mode_down, mode_up}) {
+        placements(machine, {.mode = mode, .shared = shared});
+        for (const Word count : {32U, packet_tail}) {
+          prefixes(machine, {.count = count, .mode = mode, .shared = shared});
+        }
+      }
+    }
+  }
+  Machine based(false, Shape::product, true, 16);
+  prefixes(based, {.count = packet_tail});
+  constexpr std::uint8_t noncanonical = 0xff;
+  for (const auto known : std::array<std::uint8_t, 4>{0, 1, 2, noncanonical}) {
+    Machine tracked(false, Shape::product, true);
+    prefixes(tracked, {.count = packet_tail, .input_known = noncanonical, .output_known = known});
+  }
+  for (const Word hole : {0U, 3U, 32U}) {
+    Machine guarded(false, Shape::product, true);
+    guarded.refused_access(hole, false);
+  }
+  for (const bool alias : {false, true}) {
+    Machine guarded(false, Shape::product, true);
+    guarded.refused_access(0, true, alias);
+  }
+  Machine alias(false, Shape::product, true);
+  alias.metadata_alias();
+  for (const bool mapped : {false, true}) {
+    Machine timed(false, Shape::product, mapped);
+    prefixes(timed, {.count = packet_tail, .deadline = true});
   }
 }
 
@@ -586,6 +757,7 @@ void mirrored_nested_cases() {
 }
 
 void cases() {
+  mapped_cases();
   constexpr Word advancing_output_base = 1536;
   nested_cases();
   mirrored_nested_cases();

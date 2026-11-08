@@ -119,7 +119,7 @@ Block *Jit::Impl::compile() {
 #endif
   std::span<const BlockInstruction> admission;
 #if defined(__x86_64__)
-  if (!block->region) { admission = block->operations; }
+  if (!block->region || !block->region->nested) { admission = block->operations; }
 #endif
   block->entry = arena.append(admit_cycles(bytes, admission));
   return retain(std::move(block));

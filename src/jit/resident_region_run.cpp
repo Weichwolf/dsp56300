@@ -12,6 +12,7 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <vector>
 
@@ -47,21 +48,65 @@ bool header(const Cpu &cpu, const NativeContext &context, const ResidentRegion &
          (context.exit_requested == nullptr || !*context.exit_requested);
 }
 
-bool memory(const Cpu &cpu, const NativeContext &context, const ResidentRegion &region) {
-  std::array<bool, 2> seen{};
-  for (const auto &stream : region.graph.streams) {
-    const auto index = stream.space == Space::x ? 0U : 1U;
+bool host_storage(const Cpu &cpu,
+                  const NativeContext &context,
+                  const std::uintptr_t base,
+                  const std::size_t bytes) {
+  return !overlap(base, bytes, reinterpret_cast<std::uintptr_t>(&cpu), sizeof(cpu)) &&
+         !overlap(base, bytes, reinterpret_cast<std::uintptr_t>(&context), sizeof(context));
+}
+
+bool select_memory(const Cpu &cpu,
+                   const NativeContext &context,
+                   ResidentRegion &region,
+                   const RegionRoot &root) {
+  const auto index = root.space == Space::x ? 0U : 1U;
+  auto &view = region.memory[index];
+  const auto windows = context.runtime.windows[index];
+  const auto first = region.prefix[root.address].value_or(cpu.reg.r[root.address]);
+  // The owner retains descriptors until a mapping revision leaves this entry.
+  // Continuing packets inside the same grant need no descriptor copy or search.
+  if (!view.words.empty() && first >= view.address && first - view.address < view.words.size()) {
+    return true;
+  }
+  if (windows.empty()) {
     const auto &ram = context.runtime.memory[index];
-    if (stream.write && ram.aliases_program) { return false; }
+    if (ram.data == nullptr) { return false; }
+    view = {.words = {ram.data, std::min(ram.words, std::size_t{io_begin})},
+            .known = {},
+            .writable = true,
+            .aliases_program = ram.aliases_program};
+  } else {
+    const auto found = std::ranges::find_if(windows, [first](const auto &window) {
+      return first >= window.address && first - window.address < window.words.size();
+    });
+    if (found == windows.end()) { return false; }
+    view = *found;
+  }
+  const bool valid =
+      host_storage(cpu,
+                   context,
+                   reinterpret_cast<std::uintptr_t>(view.words.data()),
+                   view.words.size_bytes()) &&
+      (view.known.empty() || host_storage(cpu,
+                                          context,
+                                          reinterpret_cast<std::uintptr_t>(view.known.data()),
+                                          view.known.size_bytes()));
+  if (!valid) { view = {}; }
+  return valid;
+}
+
+bool memory(const Cpu &cpu, const NativeContext &context, ResidentRegion &region) {
+  std::array<bool, 2> seen{};
+  for (const auto &root : region.roots) {
+    const auto index = root.space == Space::x ? 0U : 1U;
     if (seen[index]) { continue; }
     seen[index] = true;
-    const auto bytes = std::min(ram.words, std::size_t{io_begin}) * sizeof(Word);
-    const auto base = reinterpret_cast<std::uintptr_t>(ram.data);
-    if (ram.data == nullptr || !context.runtime.windows[index].empty() ||
-        overlap(base, bytes, reinterpret_cast<std::uintptr_t>(&cpu), sizeof(cpu)) ||
-        overlap(base, bytes, reinterpret_cast<std::uintptr_t>(&context), sizeof(context))) {
-      return false;
-    }
+    if (!select_memory(cpu, context, region, root)) { return false; }
+  }
+  for (const auto &stream : region.graph.streams) {
+    const auto &view = region.memory[stream.space == Space::x ? 0 : 1];
+    if (stream.write && (!view.writable || view.aliases_program)) { return false; }
   }
   return true;
 }
@@ -122,7 +167,7 @@ bool address(const Registers &reg, ResidentRegion &region, const unsigned index)
   return true;
 }
 
-bool cursors(const Registers &reg, const NativeContext &context, ResidentRegion &region) {
+bool cursors(const Registers &reg, ResidentRegion &region) {
   for (unsigned index = 0; index < agu_registers; ++index) {
     if (!address(reg, region, index)) { return false; }
   }
@@ -132,9 +177,9 @@ bool cursors(const Registers &reg, const NativeContext &context, ResidentRegion 
     const auto first = region.prefix[root.address].value_or(reg.r[root.address]);
     if ((region.reverse_addresses & (Word{1} << root.address)) != 0) {
       const auto base = first & ~region.frame.reverse[root.address].mask;
-      const auto &ram = context.runtime.memory[root.space == Space::x ? 0 : 1];
-      if (base >= std::min(ram.words, std::size_t{io_begin})) { return false; }
-      cursor = {.pointer = ram.data + base};
+      const auto &ram = region.memory[root.space == Space::x ? 0 : 1];
+      if (base < ram.address || base - ram.address >= ram.words.size()) { return false; }
+      cursor = {.pointer = ram.words.data() + (base - ram.address)};
       continue;
     }
     const auto &delta = region.graph.addresses[root.address];
@@ -150,28 +195,52 @@ bool cursors(const Registers &reg, const NativeContext &context, ResidentRegion 
     cursor.step_bytes =
         static_cast<std::int64_t>(stride * region.lanes * sizeof(Word)) -
         static_cast<std::int64_t>(cursor.inner_step_bytes * region.inner_iterations);
-    const auto &ram = context.runtime.memory[root.space == Space::x ? 0 : 1];
-    if (first >= std::min(ram.words, std::size_t{io_begin})) { return false; }
-    cursor.pointer = ram.data + first;
+    const auto &ram = region.memory[root.space == Space::x ? 0 : 1];
+    if (first < ram.address || first - ram.address >= ram.words.size()) { return false; }
+    cursor.pointer = ram.words.data() + (first - ram.address);
   }
   return true;
 }
 
+bool initialized(const MemoryWindow &view,
+                 const Word first,
+                 const std::uint64_t last,
+                 const bool write) {
+  if (first < view.address || last >= view.address + view.words.size()) { return false; }
+  if (view.known.empty()) { return true; }
+  // Writes to already canonical knowledge bytes leave metadata unchanged. Other
+  // writes retain ordered scalar stores, including first initialization.
+  auto knowledge =
+      view.known.subspan(first - view.address, static_cast<std::size_t>(last - first + 1));
+  if (!write) { return std::memchr(knowledge.data(), 0, knowledge.size()) == nullptr; }
+  static constexpr auto canonical = [] {
+    std::array<std::uint8_t, 64> result{};
+    result.fill(1);
+    return result;
+  }();
+  while (knowledge.size() > canonical.size()) {
+    if (std::memcmp(knowledge.data(), canonical.data(), canonical.size()) != 0) { return false; }
+    knowledge = knowledge.subspan(canonical.size());
+  }
+  return std::memcmp(knowledge.data(), canonical.data(), knowledge.size()) == 0;
+}
+
 bool footprint(const Registers &reg,
-               const NativeContext &context,
                ResidentRegion &region,
                const std::size_t index,
                RegionFootprint &result) {
   const auto &stream = region.graph.streams[index];
   const auto &cursor = region.frame.cursors[region.stream_roots[index]];
-  const auto &ram = context.runtime.memory[stream.space == Space::x ? 0 : 1];
+  const auto &ram = region.memory[stream.space == Space::x ? 0 : 1];
   const auto first = region.prefix[stream.address].value_or(reg.r[stream.address]);
   if ((region.reverse_addresses & (Word{1} << stream.address)) != 0) {
     const auto mask = region.frame.reverse[stream.address].mask;
     const auto base = first & ~mask;
-    if (stream.write || base + mask >= std::min(ram.words, std::size_t{io_begin})) { return false; }
+    if (stream.write || !initialized(ram, base, std::uint64_t{base} + mask, false)) {
+      return false;
+    }
     region.offsets[index] = 0;
-    result = {.first = reinterpret_cast<std::uintptr_t>(ram.data + base),
+    result = {.first = reinterpret_cast<std::uintptr_t>(cursor.pointer),
               .bytes = (std::uint64_t{mask} + 1) * sizeof(Word)};
     return true;
   }
@@ -183,11 +252,11 @@ bool footprint(const Registers &reg,
   }
   const auto span = (region.inner_iterations - 1) * cursor.inner_stride;
   const auto end = first + displacement + span + ((region.frame.iterations - 1) * cursor.stride);
-  if (end >= std::min(ram.words, std::size_t{io_begin}) || (stream.write && cursor.stride == 0)) {
+  if (!initialized(ram, first, end, stream.write) || (stream.write && cursor.stride == 0)) {
     return false;
   }
   region.offsets[index] = displacement * sizeof(Word);
-  result = {.first = reinterpret_cast<std::uintptr_t>(ram.data + first + displacement),
+  result = {.first = reinterpret_cast<std::uintptr_t>(cursor.pointer + displacement),
             .bytes = (((region.frame.iterations - 1) * cursor.stride) + span + 1) * sizeof(Word),
             .stride = cursor.stride * sizeof(Word),
             .inner_span = span * sizeof(Word)};
@@ -210,11 +279,21 @@ bool independent(const RegionFootprint &left, const RegionFootprint &right) {
          right.inner_span < right.stride && later_span < left.stride - distance;
 }
 
-bool streams(const Registers &reg, const NativeContext &context, ResidentRegion &region) {
+bool streams(const Registers &reg, ResidentRegion &region) {
   // Scratch storage is sized during translation, never allocated by execution.
   for (std::size_t index = 0; index < region.graph.streams.size(); ++index) {
     auto &current = region.footprints[index];
-    if (!footprint(reg, context, region, index, current)) { return false; }
+    if (!footprint(reg, region, index, current)) { return false; }
+    if (region.graph.streams[index].write) {
+      for (const auto &view : region.memory) {
+        if (!view.known.empty() && overlap(current.first,
+                                           current.bytes,
+                                           reinterpret_cast<std::uintptr_t>(view.known.data()),
+                                           view.known.size_bytes())) {
+          return false;
+        }
+      }
+    }
     for (std::size_t other = 0; other < index; ++other) {
       if (!region.graph.streams[index].write && !region.graph.streams[other].write) { continue; }
       if (!independent(current, region.footprints[other])) { return false; }
@@ -401,7 +480,7 @@ std::uint32_t run_resident_region(Cpu *const cpu,
       (region->frame.iterations == cpu->reg.lc && cpu->reg.sc < 2) ||
       (region->nested &&
        (region->frame.iterations != cpu->reg.lc || cpu->reg.sc >= stack_entries - 2)) ||
-      !cursors(cpu->reg, *context, *region) || !streams(cpu->reg, *context, *region)) {
+      !cursors(cpu->reg, *region) || !streams(cpu->reg, *region)) {
     return 0;
   }
   if (region->nested && region->lanes == 1) {
@@ -411,7 +490,7 @@ std::uint32_t run_resident_region(Cpu *const cpu,
       // A child recurrence may still be independent across separate parents.
       if (!parent_available) { return 0; }
       region->lanes = parent_lanes;
-      if (!cursors(cpu->reg, *context, *region)) { return 0; }
+      if (!cursors(cpu->reg, *region)) { return 0; }
     }
   }
   invariants(cpu->reg, *region);

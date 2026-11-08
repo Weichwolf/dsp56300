@@ -2,6 +2,7 @@
 #include "architecture.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "jit.hpp"
 #include "jit/code.hpp"
 #include "resident_region.hpp"
 #include "value_graph.hpp"
@@ -779,7 +780,21 @@ std::vector<std::uint8_t> select_resident_region(ResidentRegion &region,
       0xff, 0xd0, 0x48, 0x83, 0xc4, 0x08, 0x5e, 0x5f, 0x85, 0xc0};
   x64::Code code;
   x64::Label rejected;
-  code.raw(prologue);
+  constexpr Word minimum_work = 128;
+  constexpr unsigned compare = 7;
+  constexpr auto landing_bytes = std::size_t{4};
+  code.raw(std::span(prologue).first(landing_bytes));
+  // Small packets use the scalar native loop without entering the region helper.
+  code.memory_immediate(compare,
+                        x64::Reg::di,
+                        offsetof(Cpu, reg) + offsetof(Registers, lc),
+                        x64::Width::dword,
+                        ((minimum_work - 1) / region.graph.instructions) + 1);
+  code.jump_if(x64::Branch::below, rejected);
+  code.memory_immediate(
+      compare, x64::Reg::si, offsetof(NativeContext, budget), x64::Width::dword, minimum_work);
+  code.jump_if(x64::Branch::below, rejected);
+  code.raw(std::span(prologue).subspan(landing_bytes));
   code.constant(x64::Reg::dx, reinterpret_cast<std::uintptr_t>(&region));
   code.constant(x64::Reg::ax, std::bit_cast<std::uintptr_t>(&run_resident_region));
   code.raw(invoke);

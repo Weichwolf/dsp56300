@@ -104,8 +104,9 @@ bool roots(ResidentRegion &region, const Registers &state) {
       region.reverse_addresses |= Word{1} << stream.address;
     }
     const auto index = stream.space == Space::x ? 0U : 1U;
-    if (region.runtime.memory[index].data == nullptr || !region.runtime.windows[index].empty() ||
-        (stream.write && region.runtime.memory[index].aliases_program)) {
+    if (region.runtime.windows[index].empty() &&
+        (region.runtime.memory[index].data == nullptr ||
+         (stream.write && region.runtime.memory[index].aliases_program))) {
       return false;
     }
     const auto found = std::ranges::find_if(region.roots, [&](const auto &root) {
