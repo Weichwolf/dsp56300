@@ -83,6 +83,7 @@ private:
   [[nodiscard]] static bool is_bits(const BlockInstruction &operation);
   [[nodiscard]] bool bits(const BlockInstruction &operation, bool publish);
   void bit_result(const BlockInstruction &operation, NativeMove move, bool publish);
+  void bit_complete(const BlockInstruction &operation, bool publish);
   void bit_slow(const BlockInstruction &operation);
   void moves(const BlockInstruction &operation);
   void general_moves(const BlockInstruction &operation);
