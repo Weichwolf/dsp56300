@@ -1,85 +1,39 @@
 # dsp56300
 
-- Build an independent, general DSP56300 native JIT library for audio, image/video,
-  communications, measurement and control. Complete ISA and exact fixed-point,
-  flags, AGU, parallel transfers, loops and interrupts remain open. See OBJECTIVE.md.
-- Keep board clocks, derivative peripherals and application firmware in consumers.
-  No foreign DSP execution dependency; use independently authored test programs.
-- Use Core(Memory, Io*), typed memory and explicit ownership, aliases,
-  invalidation and event limits. The core has one execution owner.
-- Automatically choose the fastest qualified host path. Fix slow instruction and
-  transfer helpers here; JIT fallback gaps remain visible until native lowering
-  preserves all effects and precise exits. I/O callbacks are separate from ISA
-  interpretation. Do not add a hardware virtualization backend.
-- Keep architectural execution and private helpers directly in src/ as in cpu12,
-  with Core/JIT entry points in core.cpp and jit.cpp. Use move.cpp, transfer.cpp
-  and loop.cpp for the corresponding instruction families. Use block_parse,
-  block_emit, run, arena and code under src/jit/; keep x86 lowering in src/jit/x64/.
-- Publish reviewed increments only to configured origin/main. Keep neighboring
-  application sources read-only; coordinate core revisions with consumer pins.
-
-- Expose only core.hpp and memory.hpp under include/. Keep ISA encodings in
-  test/support/isa.hpp and production decoding/transfer helpers private; production code must not include test headers.
-- Keep the same minimal public Core/Memory/Io API shape in both cores.
-  Core owns its state; optional read-only state inspection is outside normal use.
-  Remove checkpoint/restore APIs and their implementation completely. Preserve
-  ISA, wait and interrupt behavior; state inspection is read-only. Expose no
-  pipeline tickets in the normal API.
-- Production execution is JIT-only. Future x86/SSE/AVX and ARM/NEON host emitters
-  implement the same host concept. Remove interpreter/reference/cached backend
-  selection; preserve independent ISA tests and all implemented instructions.
-
-- Translate complete logical blocks/functions independently of execution grants.
-  No artificial instruction-count translation caps or budget-specific fragments.
-  Keep generated code immutable and retained for the entire Core lifetime; no
-  eviction/recompilation. The consumer creates a new Core for a new program.
-
-## Performance priority
-
-- Prioritize complete Blofeld instrument integration. Fix and optimize the
-  responsible core when connected execution exposes a generic defect or a
-  measured throughput/latency bottleneck; keep both libraries generally usable.
-- Retain >=70% of matched host-ASM throughput per representative warm scenario
-  as an optimization reference, not an integration gate. Preserve identical
-  inputs, relevant ISA effects and independent results. Report every slow case,
-  cold translation and packet deadline miss; do not hide failures in averages.
-- Use scalar or SIMD lowering according to measured benefit; SIMD is optional.
-  Keep code small and qualified. Preserve independent ISA tests and strict checks;
-  use focused validation for targeted changes and broaden it when justified.
+- Build an independent complete DSP56300 native JIT. Keep application firmware,
+  device clocks, peripherals and scheduling in consumers; no foreign core.
+- Expose only core.hpp and memory.hpp, aligned with the other core. Core owns
+  readable state; consumers own memory. One owner executes each core.
+- Production is JIT-only. Keep all implemented ISA semantics. Compile natural
+  control-flow regions once, retain immutable code and link native successors.
+  No instruction-count translation caps, checkpoints or public effect tickets.
+- Lower ordinary ISA natively; distinguish actual I/O calls from ISA fallback
+  gaps. Keep unsupported cases visible. Fix generic integration defects here.
+- Keep code small, registers live and RAM direct. SIMD needs measured benefit.
+  Representative warm >=70% matched host-ASM throughput is a reference, not an
+  instrument-integration gate. Report cold latency and every slow scenario.
+- Test programs are independently authored and use test/support/isa.hpp.
 
 ## Working rules
 
-- Speak German with the user; write code, comments, documentation and commits in English.
-- Prefer simple native execution, direct memory and large bounded runs. Keep device
-  effects and event boundaries explicit; avoid per-clock work and unnecessary copies.
-  Telemetry is runtime-selectable and off by default; keep its work out of hot paths.
-- Run builds, tests and benchmarks locally; do not add GitHub workflows or pipelines.
-- Validate ARM64 work locally on macOS. The consumer agent owns Linux x86-64
-  validation; coordinate interface changes and qualified revisions through commits.
-- Use C++23, LLVM 19 and CMake/Ninja. Keep strict compiler/linker flags, warnings
-  as errors, clang-format, clang-tidy with zero findings and functions <=120 lines.
-  Never weaken checks or hide findings with suppressions or diagnostic baselines.
-- Release is the performance build. Preserve ASan/UBSan for project code and native
-  dependencies, and separate TSan for concurrent code; preserve dependency notices.
-- Run affected cpu12/dsp56300 correctness tests for core changes, including
-  independent instruction/state expectations and appropriate sanitizer coverage.
-  Core tests are not subject to the instrument's real-time milestone restriction.
-  Avoid duplicate or full-suite runs after small changes; report gaps and scope.
-- Until the instrument reaches real time, suspend long Blofeld firmware runs.
-  Startup/throughput probes stop after at most 10 host seconds and fail unless
-  playable; never extend or automatically repeat a failed probe. Keep compilation,
-  formatting and static analysis active.
-- README describes current supported behavior, setup and use. Keep progress,
-  measurements and coordination in commit messages, not README.
-- Keep doc/ for one target architecture and important primary references only.
-  Requirements belong in OBJECTIVE.md and test/; build metadata belongs in cmake/.
-  No activity diaries or historical result manifests. Issue communication belongs
-  in private Weichwolf/blofeld-src, with concrete consolidated problems only.
+- Speak German with the user; code, comments, documentation and commits are English.
+- C++23, LLVM 19, CMake/Ninja; strict warnings/linking, clang-format, zero-finding
+  clang-tidy, functions <=120 lines. Never suppress or weaken checks.
+- Use Release for performance. Test affected core semantics independently and with
+  ASan/UBSan, including native dependencies; use separate TSan for concurrent code.
+  Keep checks focused; no GitHub workflows.
+- Blofeld firmware probes stop within 10 host seconds and fail unless playable.
+  Until real time, no long firmware runs or unchanged failed-probe repetitions.
+- Telemetry is runtime-selectable and off by default; no hot-path statistics.
+- README describes implemented use; OBJECTIVE defines acceptance; doc/ contains
+  one target architecture and primary references. No diaries or result archives.
 - Keep firmware, samples, manuals, disassemblies and private analysis untracked.
-  Preserve source URLs, sizes and hashes in reference manifests; never publish assets.
-  Local reference inputs live under ignored build/local/; run artifacts belong
-  under ignored build/. Preserve inputs when cleaning generated files.
-- Original code is GPL-3.0-only; add matching SPDX identifiers to new source.
-- Commit reviewed, verified increments; push only to the configured project remote
-  on main. Never publish backup branches or use --all/--mirror. Coordinate core
-  revisions with consumer dependency pins; preserve unrelated work.
+  Reference inputs: ignored build/local/; artifacts: build/. Preserve inputs and
+  source/size/hash manifests. Original source is GPL-3.0-only with SPDX notices.
+- Keep canonical main current. Commit reviewed increments; push only configured
+  upstream/main (blofeld-emu) or origin/main (cores). No backup branches or
+  --all/--mirror; preserve unrelated work and coordinate consumer dependency pins.
+- Issues belong only in private Weichwolf/blofeld-src; no routine status spam.
+  Gearmulator is read-only reference: copy no code. Preserve dependency notices;
+  do not import GPL-2.0-only octa-capture code. Run as a regular user.
+- Validate ARM64 on macOS and x86-64 on Linux; communicate revisions in commits.
