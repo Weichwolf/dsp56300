@@ -635,6 +635,16 @@ Word set_child_product(Core &core, const ChildVariant variant, const unsigned wa
   return opcode;
 }
 
+unsigned profile_phases(const Word child, const NestedShape shape, const ChildVariant variant) {
+  return child <= 8 && shape == NestedShape::strided && variant == ChildVariant::ordinary ? 4U : 2U;
+}
+
+void change_offsets(Registers &state, const unsigned phase) {
+  if (phase < 2) { return; }
+  const Word amount = phase == 2 ? 3U : 2U;
+  for (const unsigned index : {0U, 1U, 4U, 5U}) { state.n[index] = amount; }
+}
+
 void nested_case(const Word child,
                  const Point point,
                  const NestedShape shape = NestedShape::reset,
@@ -698,7 +708,8 @@ void nested_case(const Word child,
       (std::uint64_t{previous_end} << word_bits) | previous_count;
   Core core(Memory::separate({.program = program, .x = x, .y = y}));
   const Word budget = point.count * ((4 * child) + 7);
-  for (unsigned warmth = 0; warmth < 2; ++warmth) {
+  for (unsigned warmth = 0; warmth < profile_phases(child, shape, variant); ++warmth) {
+    change_offsets(initial, warmth);
     const auto arithmetic = set_child_product(core, variant, warmth);
     for (Word prefix = 0; prefix <= budget; ++prefix) {
       const auto parent_size = (4 * child) + 7;

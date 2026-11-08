@@ -9,7 +9,7 @@
 
 namespace dsp56300::detail::a64 {
 namespace {
-constexpr unsigned source_shift = 5, right_shift = 16, lane_shift = 20;
+constexpr unsigned source_shift = 5, right_shift = 16;
 constexpr unsigned memory_shift = 10;
 
 constexpr auto reg(const Vec value) {
@@ -31,6 +31,40 @@ void Neon::move(const Vec destination, const Vec operand) {
 
 void Neon::zero(const Vec destination) {
   binary(VectorOp::bit_xor, destination, destination, destination);
+}
+
+bool Neon::constant_words(const Vec destination, const std::uint32_t value) {
+  constexpr unsigned byte_bits = 8;
+  constexpr std::uint32_t byte_mask = 255;
+  constexpr std::uint32_t movi = 0x4f000400;
+  constexpr std::uint32_t inverse_bit = 0x20000000;
+  constexpr unsigned low_bits = 5;
+  constexpr unsigned mode_shift = 12;
+  for (const bool inverse : {false, true}) {
+    const auto bits = inverse ? ~value : value;
+    const auto emit = [&](const std::uint32_t immediate, const unsigned mode) {
+      code_.word(movi | (inverse ? inverse_bit : 0U) | (mode << mode_shift) |
+                 ((immediate >> low_bits) << right_shift) |
+                 ((immediate & ((1U << low_bits) - 1)) << source_shift) | reg(destination));
+    };
+    for (unsigned lane = 0; lane < 4; ++lane) {
+      const auto shift = lane * byte_bits;
+      const auto byte = (bits >> shift) & byte_mask;
+      if (bits == (byte << shift)) {
+        emit(byte, lane * 2);
+        return true;
+      }
+    }
+    for (const unsigned shift : {8U, 16U}) {
+      const auto low = (std::uint32_t{1} << shift) - 1;
+      const auto byte = bits >> shift;
+      if (byte <= byte_mask && (bits & low) == low) {
+        emit(byte, shift == byte_bits ? 12U : 13U);
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 void Neon::shift(const Vec destination,
@@ -57,33 +91,57 @@ void Neon::shift(const Vec destination,
   code_.word(opcode | (amount << right_shift) | (reg(operand) << source_shift) | reg(destination));
 }
 
-void Neon::narrow(const Vec destination, const Vec operand) {
+void Neon::narrow(const Vec destination, const Vec operand, const bool upper) {
   constexpr std::uint32_t xtn = 0x0ea12800;
-  code_.word(xtn | (reg(operand) << source_shift) | reg(destination));
+  constexpr std::uint32_t high = 0x40000000;
+  code_.word(xtn | (upper ? high : 0U) | (reg(operand) << source_shift) | reg(destination));
 }
 
-void Neon::extend(const Vec destination, const Vec operand) {
+void Neon::extend(const Vec destination, const Vec operand, const bool upper) {
   constexpr std::uint32_t sshll = 0x0f20a400;
-  code_.word(sshll | (reg(operand) << source_shift) | reg(destination));
+  constexpr std::uint32_t high = 0x40000000;
+  code_.word(sshll | (upper ? high : 0U) | (reg(operand) << source_shift) | reg(destination));
 }
 
-void Neon::broadcast(const Vec destination, const Reg operand) {
-  constexpr std::uint32_t dup = 0x4e080c00;
-  code_.word(dup | (static_cast<unsigned>(operand) << source_shift) | reg(destination));
+void Neon::round_narrow(const Vec destination,
+                        const Vec operand,
+                        const unsigned count,
+                        const bool upper) {
+  constexpr unsigned width = 32;
+  if (count == 0 || count > width) { throw std::invalid_argument("Invalid NEON rounding shift"); }
+  constexpr std::uint32_t rshrn = 0x0f008c00;
+  constexpr std::uint32_t high = 0x40000000;
+  code_.word(rshrn | (upper ? high : 0U) | ((2 * width - count) << right_shift) |
+             (reg(operand) << source_shift) | reg(destination));
 }
 
-void Neon::insert(const Vec destination, const Reg operand, const unsigned lane) {
-  if (lane > 1) { throw std::invalid_argument("Invalid NEON doubleword lane"); }
-  constexpr std::uint32_t ins = 0x4e081c00;
-  code_.word(ins | (lane << lane_shift) | (static_cast<unsigned>(operand) << source_shift) |
+void Neon::broadcast(const Vec destination, const Reg operand, const bool words) {
+  constexpr std::uint32_t dup = 0x4e000c00;
+  const auto size = words ? 4U : 8U;
+  code_.word(dup | (size << right_shift) | (static_cast<unsigned>(operand) << source_shift) |
              reg(destination));
 }
 
-void Neon::extract(const Reg destination, const Vec operand, const unsigned lane) {
-  if (lane > 1) { throw std::invalid_argument("Invalid NEON doubleword lane"); }
-  constexpr std::uint32_t umov = 0x4e083c00;
-  code_.word(umov | (lane << lane_shift) | (reg(operand) << source_shift) |
-             static_cast<unsigned>(destination));
+void Neon::insert(const Vec destination, const Reg operand, const unsigned lane, const bool words) {
+  if (lane >= (words ? 4U : 2U)) { throw std::invalid_argument("Invalid NEON insertion lane"); }
+  constexpr std::uint32_t ins = 0x4e001c00;
+  const auto size = words ? 4U : 8U;
+  const auto element = size | (lane * size * 2);
+  code_.word(ins | (element << right_shift) | (static_cast<unsigned>(operand) << source_shift) |
+             reg(destination));
+}
+
+void Neon::extract(const Reg destination,
+                   const Vec operand,
+                   const unsigned lane,
+                   const bool words) {
+  if (lane >= (words ? 4U : 2U)) { throw std::invalid_argument("Invalid NEON extraction lane"); }
+  constexpr std::uint32_t umov = 0x0e003c00;
+  constexpr std::uint32_t wide = 0x40000000;
+  const auto size = words ? 4U : 8U;
+  const auto element = size | (lane * size * 2);
+  code_.word(umov | (words ? 0U : wide) | (element << right_shift) |
+             (reg(operand) << source_shift) | static_cast<unsigned>(destination));
 }
 
 void Neon::load(const Vec destination, const Reg base, const std::size_t offset, const bool words) {
@@ -92,6 +150,18 @@ void Neon::load(const Vec destination, const Reg base, const std::size_t offset,
 
 void Neon::store(const Vec operand, const Reg base, const std::size_t offset, const bool words) {
   memory(operand, base, offset, words, MemoryOp::store);
+}
+
+void Neon::push_doubles(const Vec left, const Vec right) {
+  constexpr std::uint32_t stp = 0x6dbf03e0;
+  constexpr unsigned pair_shift = 10;
+  code_.word(stp | (reg(right) << pair_shift) | reg(left));
+}
+
+void Neon::pop_doubles(const Vec left, const Vec right) {
+  constexpr std::uint32_t ldp = 0x6cc103e0;
+  constexpr unsigned pair_shift = 10;
+  code_.word(ldp | (reg(right) << pair_shift) | reg(left));
 }
 
 void Neon::memory(

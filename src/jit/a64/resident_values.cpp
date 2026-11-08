@@ -11,6 +11,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 
 namespace dsp56300::detail::a64 {
@@ -21,12 +22,19 @@ RegionEmitter::RegionEmitter(ResidentRegion &region, const unsigned lanes)
       inner_vector_(region.nested && lanes == 1),
       bounds_(graph_bounds(region.graph, region.mode)),
       needed_(region.graph.nodes.size()),
+      compact_(region.graph.nodes.size()),
       last_(region.graph.nodes.size()),
       locations_(region.graph.nodes.size(), no_value),
-      spill_slots_(region.graph.nodes.size(), no_value) {
+      spill_slots_(region.graph.nodes.size(), no_value),
+      fused_(region.graph.nodes.size(), no_value) {
   owners_.fill(no_value);
   inputs_.fill(no_value);
   liveness();
+  for (std::size_t index = 0; index < compact_.size(); ++index) {
+    compact_[index] = bounds_[index].low >= std::numeric_limits<std::int32_t>::min() &&
+                      bounds_[index].high <= std::numeric_limits<std::int32_t>::max();
+  }
+  fuse_products();
 }
 
 void RegionEmitter::pin(const GraphValue value) {
@@ -65,7 +73,7 @@ void RegionEmitter::spill(const unsigned reg) {
     region_.spills.emplace_back();
   }
   code_.load(Reg::x9, Reg::x0, offsetof(RegionFrame, spills), Access::doubleword);
-  for (unsigned part = 0; part < parts_; ++part) {
+  for (unsigned part = 0; part < (compact_[node] ? 1U : parts_); ++part) {
     neon_.store(static_cast<Vec>((2 * reg) + part),
                 Reg::x9,
                 (slot * sizeof(RegionVector)) + (std::size_t{part} * 16));
@@ -81,7 +89,7 @@ unsigned RegionEmitter::allocate() {
   for (unsigned reg = 0; reg < owners_.size(); ++reg) {
     const auto node = owners_[reg];
     if (node == no_value) { return reg; }
-    if (node == inputs_[0] || node == inputs_[1] || node == current_) { continue; }
+    if (std::ranges::find(inputs_, node) != inputs_.end() || node == current_) { continue; }
     if (!found || last_[node] > farthest) {
       selected = reg;
       farthest = last_[node];
@@ -96,7 +104,9 @@ unsigned RegionEmitter::allocate() {
 Vec RegionEmitter::read(const GraphValue value, const unsigned part) {
   if (!value.valid()) { throw std::logic_error("Invalid NEON graph input"); }
   auto &location = locations_[value.node];
-  if (location != no_value) { return static_cast<Vec>((2 * location) + part); }
+  if (location != no_value) {
+    return static_cast<Vec>((2 * location) + (compact(value) ? 0 : part));
+  }
   if (spill_slots_[value.node] == no_value) {
     throw std::logic_error("Undefined NEON graph value");
   }
@@ -104,16 +114,23 @@ Vec RegionEmitter::read(const GraphValue value, const unsigned part) {
   location = reg;
   owners_[reg] = value.node;
   code_.load(Reg::x9, Reg::x0, offsetof(RegionFrame, spills), Access::doubleword);
-  for (unsigned half = 0; half < parts_; ++half) {
+  for (unsigned half = 0; half < (compact(value) ? 1U : parts_); ++half) {
     neon_.load(static_cast<Vec>((2 * reg) + half),
                Reg::x9,
                (spill_slots_[value.node] * sizeof(RegionVector)) + (std::size_t{half} * 16));
   }
-  return static_cast<Vec>((2 * reg) + part);
+  return static_cast<Vec>((2 * reg) + (compact(value) ? 0 : part));
 }
 
 Vec RegionEmitter::destination() {
-  const auto reg = allocate();
+  auto reg = 0U;
+  if (fused_[current_] != no_value) {
+    const auto input = region_.graph.nodes[current_].inputs[0].node;
+    reg = static_cast<unsigned>(locations_[input]);
+    locations_[input] = no_value;
+  } else {
+    reg = allocate();
+  }
   locations_[current_] = reg;
   owners_[reg] = current_;
   return static_cast<Vec>(2 * reg);
@@ -124,12 +141,21 @@ void RegionEmitter::operands(const GraphNode &node) {
   for (unsigned index = 0; index < node.inputs.size(); ++index) {
     if (node.inputs[index].valid()) { inputs_[index] = node.inputs[index].node; }
   }
-  for (const auto input : node.inputs) {
-    if (input.valid()) { static_cast<void>(read(input)); }
+  if (fused_[current_] != no_value) {
+    const auto &product = region_.graph.nodes[fused_[current_]];
+    inputs_[1] = product.inputs[0].node;
+    inputs_[2] = product.inputs[1].node;
+  }
+  for (const auto input : inputs_) {
+    if (input != no_value) { static_cast<void>(read({.node = input})); }
   }
 }
 
 void RegionEmitter::constant(const Vec target, const std::uint64_t value) {
+  if (value == 1) {
+    neon_.move(target, one_register);
+    return;
+  }
   const std::array values{value, value};
   const auto found = std::ranges::search(region_.constants, values).begin();
   const auto offset = static_cast<std::size_t>(found - region_.constants.begin());
@@ -141,7 +167,9 @@ void RegionEmitter::constant(const Vec target, const std::uint64_t value) {
 
 void RegionEmitter::canonical(const Vec target, const GraphValue value, const unsigned part) {
   const auto source = read(value, part);
-  if (value.canonical) {
+  if (compact(value)) {
+    neon_.extend(target, source, part != 0);
+  } else if (value.canonical) {
     neon_.move(target, source);
   } else {
     neon_.shift(target, source, Shift::left, 32);
@@ -153,13 +181,22 @@ Vec RegionEmitter::aligned(const GraphValue value,
                            const unsigned scale,
                            const Vec scratch,
                            const unsigned part) {
-  if (value.canonical && value.scale == scale) { return read(value, part); }
+  if (!compact(value) && value.canonical && value.scale == scale) { return read(value, part); }
   canonical(scratch, value, part);
   if (value.scale > scale) { neon_.shift(scratch, scratch, Shift::left, value.scale - scale); }
   return scratch;
 }
 
 void RegionEmitter::binary(const GraphNode &node, const Vec target, const unsigned part) {
+  if (fused_[current_] != no_value) {
+    const auto &product = region_.graph.nodes[fused_[current_]];
+    auto opcode = part == 0 ? VectorOp::multiply_add : VectorOp::multiply_add_upper;
+    if (node.operation == GraphOp::subtract) {
+      opcode = part == 0 ? VectorOp::multiply_subtract : VectorOp::multiply_subtract_upper;
+    }
+    neon_.binary(opcode, target, read(product.inputs[0]), read(product.inputs[1]));
+    return;
+  }
   const auto scale = std::min(node.inputs[0].scale, node.inputs[1].scale);
   const auto left = aligned(node.inputs[0], scale, first_scratch, part);
   const auto right = aligned(node.inputs[1], scale, second_scratch, part);
@@ -189,7 +226,8 @@ void RegionEmitter::round(const GraphNode &node, const Vec target, const unsigne
 
 void RegionEmitter::word(const GraphNode &node, const Vec target, const unsigned part) {
   const auto value = node.inputs[0];
-  const auto source = read(value, part);
+  canonical(target, value, part);
+  const auto source = target;
   constexpr unsigned growth_position = double_word_bits - 3;
   const auto position = growth_position - value.scale;
   if (value.width > position + 1) {
@@ -201,10 +239,9 @@ void RegionEmitter::word(const GraphNode &node, const Vec target, const unsigned
       neon_.shift(second_scratch, source, Shift::right, position + 1);
       neon_.binary(VectorOp::bit_xor, first_scratch, first_scratch, second_scratch);
     }
-    neon_.binary(VectorOp::bit_or, growth_register + part, growth_register + part, first_scratch);
+    merge_wide(StickyEvent::growth, first_scratch, part);
   }
   const auto bits = word_bits - value.scale;
-  canonical(target, value, part);
   if (bits != 0) { neon_.shift(target, target, Shift::arithmetic, bits); }
   const auto &bounds = bounds_[value.node];
   const bool lower = (bounds.low >> bits) < minimum_word;
@@ -220,18 +257,26 @@ void RegionEmitter::word(const GraphNode &node, const Vec target, const unsigned
     neon_.binary(VectorOp::minimum, target, target, first_scratch);
   }
   neon_.binary(VectorOp::bit_xor, second_scratch, second_scratch, target);
-  neon_.binary(VectorOp::bit_or, limit_register + part, limit_register + part, second_scratch);
+  merge_wide(StickyEvent::limit, second_scratch, part);
 }
 
 void RegionEmitter::emit(const GraphNode &node) {
   operands(node);
   if (node.operation == GraphOp::store) {
+    if (compact(node.inputs[0])) {
+      store_words(node.inputs[0], node.parameter);
+      return;
+    }
     for (unsigned part = 0; part < parts_; ++part) {
       store(node.inputs[0], {.stream = node.parameter, .part = part});
     }
     return;
   }
   const auto output = destination();
+  if (compact_[current_]) {
+    emit_words(node, output);
+    return;
+  }
   for (unsigned part = 0; part < parts_; ++part) {
     const auto target = output + part;
     switch (node.operation) {
@@ -246,11 +291,7 @@ void RegionEmitter::emit(const GraphNode &node) {
       case GraphOp::zero: neon_.zero(target); break;
       case GraphOp::add:
       case GraphOp::subtract: binary(node, target, part); break;
-      case GraphOp::multiply:
-        neon_.narrow(first_scratch, read(node.inputs[0], part));
-        neon_.narrow(second_scratch, read(node.inputs[1], part));
-        neon_.binary(VectorOp::multiply, target, first_scratch, second_scratch);
-        break;
+      case GraphOp::multiply: multiply(node, target, part); break;
       case GraphOp::negate:
         canonical(target, node.inputs[0], part);
         neon_.zero(first_scratch);
@@ -271,17 +312,22 @@ void RegionEmitter::emit(const GraphNode &node) {
 void RegionEmitter::publish(const GraphValue value, const ValueOutput output) {
   const auto lane = output.lane;
   if (!value.valid()) { return; }
+  const bool packed = compact(value);
   const auto location = locations_[value.node];
   if (location == no_value) {
     const auto slot = spill_slots_[value.node];
     if (slot == no_value) { throw std::logic_error("Undefined published NEON graph value"); }
     code_.load(Reg::x9, Reg::x0, offsetof(RegionFrame, spills), Access::doubleword);
-    code_.constant(Reg::x10, (slot * sizeof(RegionVector)) + (lane * sizeof(std::uint64_t)));
+    const auto element_bytes = packed ? sizeof(Word) : sizeof(std::uint64_t);
+    code_.constant(Reg::x10, (slot * sizeof(RegionVector)) + (lane * element_bytes));
     code_.alu(Alu::add, Reg::x9, Reg::x9, Reg::x10, Width::x64);
-    code_.load(Reg::x9, Reg::x9, 0, Access::doubleword);
+    code_.load(Reg::x9, Reg::x9, 0, packed ? Access::word : Access::doubleword);
+  } else if (packed) {
+    neon_.extract(Reg::x9, static_cast<Vec>(2 * location), lane, true);
   } else {
     neon_.extract(Reg::x9, static_cast<Vec>((2 * location) + (lane / 2)), lane & 1U);
   }
+  if (packed) { code_.extract(Reg::x9, Reg::x9, 0, 32, Width::x64, true); }
   code_.store(Reg::x9, Reg::x0, output.offset, Access::doubleword);
 }
 

@@ -39,7 +39,9 @@ set(dsp56300_mac_source src/jit/x64/mac_batch_avx2.cpp)
 set(dsp56300_region_source src/jit/x64/resident_region_emit.cpp)
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
   set(dsp56300_region_source src/jit/a64/resident_region_emit.cpp
-    src/jit/a64/resident_values.cpp src/jit/a64/resident_memory.cpp)
+    src/jit/a64/resident_values.cpp src/jit/a64/resident_memory.cpp
+    src/jit/a64/resident_compact.cpp src/jit/a64/resident_compact_memory.cpp
+    src/jit/a64/resident_compact_word.cpp src/jit/a64/resident_fusion.cpp)
   set(dsp56300_mac_source src/jit/a64/mac_batch_neon.cpp)
   set(dsp56300_run_source src/jit/a64/run.cpp)
   set(dsp56300_a64_sources src/native_owner.cpp src/jit/a64/emitter.cpp src/jit/a64/guarded.cpp src/jit/a64/guarded_guards.cpp
@@ -131,6 +133,7 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   add_test(NAME native-value-regions COMMAND dsp56300_native_value_region_test)
   add_executable(dsp56300_value_bounds_test test/jit/value_bounds_test.cpp)
   target_link_libraries(dsp56300_value_bounds_test PRIVATE dsp56300::core)
+  target_include_directories(dsp56300_value_bounds_test PRIVATE src/jit)
   add_test(NAME native-value-bounds COMMAND dsp56300_value_bounds_test)
   add_executable(dsp56300_reverse_stream_test test/jit/reverse_stream_test.cpp)
   target_link_libraries(dsp56300_reverse_stream_test PRIVATE dsp56300::core)

@@ -17,14 +17,14 @@
 
 namespace dsp56300::detail::a64 {
 void RegionEmitter::save() {
-  for (std::size_t index = 0; index < root_registers.size(); index += 2) {
-    code_.push(root_registers[index], root_registers[index + 1]);
+  const auto saved_roots = (std::min(root_registers.size(), region_.roots.size()) + 1) / 2;
+  for (std::size_t pair = 0; pair < saved_roots; ++pair) {
+    code_.push(root_registers[2 * pair], root_registers[(2 * pair) + 1]);
   }
   constexpr unsigned first_saved = 8;
   constexpr unsigned last_saved = 16;
-  for (unsigned reg = first_saved; reg < last_saved; ++reg) { code_.push(Reg::zr, Reg::x17); }
-  for (unsigned reg = first_saved; reg < last_saved; ++reg) {
-    neon_.store(static_cast<Vec>(reg), Reg::sp, std::size_t{reg - first_saved} * 16);
+  for (unsigned reg = first_saved; reg < last_saved; reg += 2) {
+    neon_.push_doubles(static_cast<Vec>(reg), static_cast<Vec>(reg + 1));
   }
   for (std::size_t root = 0; root < std::min(root_registers.size(), region_.roots.size()); ++root) {
     code_.load(root_registers[root],
@@ -37,12 +37,12 @@ void RegionEmitter::save() {
 void RegionEmitter::restore() {
   constexpr unsigned first_saved = 8;
   constexpr unsigned last_saved = 16;
-  for (unsigned reg = first_saved; reg < last_saved; ++reg) {
-    neon_.load(static_cast<Vec>(reg), Reg::sp, std::size_t{reg - first_saved} * 16);
+  for (auto reg = last_saved; reg != first_saved; reg -= 2) {
+    neon_.pop_doubles(static_cast<Vec>(reg - 2), static_cast<Vec>(reg - 1));
   }
-  for (unsigned reg = first_saved; reg < last_saved; ++reg) { code_.pop(Reg::zr, Reg::x17); }
-  for (auto index = root_registers.size(); index != 0; index -= 2) {
-    code_.pop(root_registers[index - 2], root_registers[index - 1]);
+  const auto saved_roots = (std::min(root_registers.size(), region_.roots.size()) + 1) / 2;
+  for (auto pair = saved_roots; pair != 0; --pair) {
+    code_.pop(root_registers[2 * (pair - 1)], root_registers[(2 * pair) - 1]);
   }
 }
 
@@ -52,8 +52,25 @@ void RegionEmitter::save_events(const bool preceding) {
   const auto limits =
       preceding ? offsetof(RegionFrame, preceding_limits) : offsetof(RegionFrame, limits);
   for (unsigned part = 0; part < 2; ++part) {
-    neon_.store(growth_register + part, Reg::x0, growth + (std::size_t{part} * 16));
-    neon_.store(limit_register + part, Reg::x0, limits + (std::size_t{part} * 16));
+    auto growth_value = growth_register + part;
+    auto limit_value = limit_register + part;
+    if (packed_events()) {
+      growth_value = first_scratch;
+      limit_value = second_scratch;
+      if (part < parts_) {
+        neon_.extend(growth_value, growth_register, part != 0);
+        neon_.extend(limit_value, limit_register, part != 0);
+        if (lanes_ == 1) {
+          neon_.insert(growth_value, Reg::zr, 1);
+          neon_.insert(limit_value, Reg::zr, 1);
+        }
+      } else {
+        neon_.zero(growth_value);
+        neon_.zero(limit_value);
+      }
+    }
+    neon_.store(growth_value, Reg::x0, growth + (std::size_t{part} * 16));
+    neon_.store(limit_value, Reg::x0, limits + (std::size_t{part} * 16));
   }
 }
 
@@ -71,8 +88,11 @@ void RegionEmitter::emit_body() {
 
 std::vector<std::uint8_t> RegionEmitter::generate() {
   save();
+  cache_strides();
   code_.load(Reg::x3, Reg::x0, offsetof(RegionFrame, constants), Access::doubleword);
   code_.load(Reg::x1, Reg::x0, offsetof(RegionFrame, iterations));
+  code_.constant(Reg::x9, 1);
+  neon_.broadcast(one_register, Reg::x9);
   for (unsigned part = 0; part < 2; ++part) {
     neon_.zero(growth_register + part);
     neon_.zero(limit_register + part);

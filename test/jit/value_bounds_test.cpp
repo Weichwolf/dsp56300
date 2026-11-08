@@ -6,6 +6,15 @@
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
 #include "support.hpp"
+#if defined(__aarch64__)
+#include "architecture.hpp"
+#include "jit.hpp"
+#include "jit/arena.hpp"
+#include "jit/block.hpp"
+#include "jit/resident_region.hpp"
+
+#include <memory>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -13,6 +22,7 @@
 #include <cstdint>
 #include <exception>
 #include <iostream>
+#include <stdexcept>
 
 namespace dsp56300::test {
 namespace {
@@ -29,7 +39,16 @@ constexpr Word body_words = 7;
 using Data = std::array<Word, data_words>;
 using Program = std::array<Word, body_words>;
 
-enum class Shape : std::uint8_t { sum, difference, product, negative_product, mac, negative_mac };
+enum class Shape : std::uint8_t {
+  sum,
+  difference,
+  product,
+  negative_product,
+  mac,
+  negative_mac,
+  dual_product,
+  dual_negative_product
+};
 
 Program program(const Shape shape, const unsigned shifts, const bool rounded, const bool mirrored) {
   constexpr Word nop = static_cast<Word>(isa::Opcode::nop);
@@ -40,7 +59,11 @@ Program program(const Shape shape, const unsigned shifts, const bool rounded, co
                nop,
                rounded ? static_cast<Word>(isa::Opcode::rnd_a) : nop,
                pair | post | stores};
-  if (shape == Shape::sum || shape == Shape::difference) {
+  if (shape == Shape::dual_product || shape == Shape::dual_negative_product) {
+    code[1] = static_cast<Word>(isa::Opcode::mpy_register_a) | (5U << 4);
+    code[2] = static_cast<Word>(isa::Opcode::mac_register_a) | (5U << 4) |
+              (shape == Shape::dual_negative_product ? 4U : 0U);
+  } else if (shape == Shape::sum || shape == Shape::difference) {
     code[2] =
         static_cast<Word>(shape == Shape::sum ? isa::Opcode::add_y0_a : isa::Opcode::sub_y0_a);
   } else if (shape == Shape::mac || shape == Shape::negative_mac) {
@@ -129,6 +152,9 @@ public:
         (std::uint64_t{previous_end} << word_bits) | previous_count;
     Model model{.registers = initial, .x = x_, .y = y_, .mirrored = mirrored_};
     const auto original_program = p_;
+#if defined(__aarch64__)
+    if (!split) { direct(model); }
+#endif
     core_.set_registers(initial);
     const Word total = point.count * body_words;
     const Word prefix = split ? total / 2 : total;
@@ -155,6 +181,43 @@ public:
   }
 
 private:
+#if defined(__aarch64__)
+  void direct(const Model &seed) {
+    const detail::JitRuntime runtime{.memory = {{{.data = x_.data(), .words = x_.size()},
+                                                 {.data = y_.data(), .words = y_.size()}}}};
+    auto &region = regions_[(seed.registers.sr & mode_rm) != 0 ? 1U : 0U];
+    if (!region) {
+      const auto operations = detail::parse_block(p_, seed.registers, runtime);
+      region = detail::resident_region_plan(p_, seed.registers, runtime, operations);
+      if (!region) {
+        throw std::runtime_error("Independent bounds trace must admit native regions");
+      }
+      for (const unsigned lanes : {1U, 2U, 4U}) {
+        region->native[lanes / 2] = arena_.append(detail::emit_resident_region(*region, lanes));
+      }
+    }
+    detail::Cpu cpu;
+    cpu.reg = seed.registers;
+    cpu.reg.a <<= detail::padding_bits;
+    cpu.reg.b <<= detail::padding_bits;
+    const auto budget = seed.registers.lc * body_words;
+    detail::NativeContext context{.runtime = runtime, .budget = budget};
+    const auto retired = detail::run_resident_region(&cpu, &context, region.get());
+    auto expected = seed;
+    for (Word index = 0; index < retired; ++index) { step(expected, code_); }
+    cpu.reg.a >>= detail::padding_bits;
+    cpu.reg.b >>= detail::padding_bits;
+    require(retired != 0 && retired <= budget && cpu.reg == expected.registers &&
+                cpu.instructions == retired && cpu.cycles == retired && x_ == expected.x &&
+                y_ == expected.y,
+            "Actual retained native regions preserve independent bounds, flags and ordered memory");
+    x_ = seed.x;
+    y_ = seed.y;
+  }
+
+  detail::ExecutableArena arena_;
+  std::array<std::unique_ptr<detail::ResidentRegion>, 2> regions_;
+#endif
   const Program code_;
   bool mirrored_;
   std::array<Word, memory_words> p_{};
@@ -167,7 +230,7 @@ void cases(Machine &machine) {
   for (const auto rm : {Word{0}, mode_rm}) {
     for (std::size_t left = 0; left < samples.size(); ++left) {
       for (std::size_t right = 0; right < samples.size(); ++right) {
-        for (const Word count : {1U, 3U, 4U, 5U, 8U}) {
+        for (const Word count : {1U, 2U, 3U, 4U, 5U, 8U, 19U, 20U, 21U, 32U, 33U, 40U, 41U}) {
           const Point point{.left = left,
                             .right = right,
                             .count = count,
@@ -191,7 +254,9 @@ int main() {
                               Shape::product,
                               Shape::negative_product,
                               Shape::mac,
-                              Shape::negative_mac}) {
+                              Shape::negative_mac,
+                              Shape::dual_product,
+                              Shape::dual_negative_product}) {
       for (unsigned shifts = 0; shifts <= 2; ++shifts) {
         for (const bool rounded : {false, true}) {
           for (const bool mirrored : {false, true}) {

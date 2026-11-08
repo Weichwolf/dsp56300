@@ -8,6 +8,7 @@
 #include "jit/resident_region.hpp"
 #include "jit/value_graph.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -25,63 +26,97 @@ std::optional<std::uint64_t> RegionEmitter::fixed_stride(const unsigned stream) 
   return std::nullopt;
 }
 
-void RegionEmitter::stride(const unsigned stream) {
+std::optional<std::uint64_t> RegionEmitter::fixed_offset(const unsigned stream) const {
+  const auto &input = region_.graph.streams[stream];
+  if (input.offsets == 0) { return std::uint64_t{input.units} * sizeof(Word); }
+  return std::nullopt;
+}
+
+void RegionEmitter::cache_strides() {
+  const auto member =
+      inner_vector_ ? offsetof(RegionCursor, inner_stride) : offsetof(RegionCursor, stride);
+  for (unsigned stream = 0; stream < region_.graph.streams.size(); ++stream) {
+    const auto root = region_.stream_roots[stream];
+    if (root >= stride_registers.size() || (cached_strides_ & (Word{1} << root)) != 0 ||
+        fixed_stride(stream)) {
+      continue;
+    }
+    const auto target = stride_registers[root];
+    code_.load(target, Reg::x0, cursor_offset(root, member), Access::doubleword);
+    code_.shift(Shift::left, target, target, 2, Width::x64);
+    cached_strides_ |= Word{1} << root;
+  }
+}
+
+Reg RegionEmitter::stride(const unsigned stream) {
   if (const auto fixed = fixed_stride(stream)) {
     code_.constant(Reg::x11, *fixed);
-    return;
+    return Reg::x11;
   }
   const auto root = region_.stream_roots[stream];
+  if ((cached_strides_ & (Word{1} << root)) != 0) { return stride_registers[root]; }
   const auto member =
       inner_vector_ ? offsetof(RegionCursor, inner_stride) : offsetof(RegionCursor, stride);
   code_.load(Reg::x11, Reg::x0, cursor_offset(root, member), Access::doubleword);
   code_.shift(Shift::left, Reg::x11, Reg::x11, 2, Width::x64);
+  return Reg::x11;
 }
 
 void RegionEmitter::pointer(const StreamSlice slice) {
   const auto stream = slice.stream;
   const auto part = slice.part;
+  stride_ = Reg::x11;
   const auto root = region_.stream_roots[stream];
-  if (root < root_registers.size()) {
-    code_.move(Reg::x10, root_registers[root]);
-  } else {
+  const auto base = root < root_registers.size() ? root_registers[root] : Reg::x10;
+  if (base == Reg::x10) {
     code_.load(Reg::x10,
                Reg::x0,
                cursor_offset(root, offsetof(RegionCursor, pointer)),
                Access::doubleword);
   }
   const auto &address = region_.graph.streams[stream];
-  if ((region_.reverse_addresses & (Word{1} << address.address)) != 0) { return; }
-  if (address.offsets == 0 && address.units != 0) {
-    code_.constant(Reg::x9, std::uint64_t{address.units} * sizeof(Word));
-  } else if (address.offsets != 0) {
-    code_.load(Reg::x9, Reg::x0, offsetof(RegionFrame, offsets), Access::doubleword);
-    code_.load(Reg::x9, Reg::x9, stream * sizeof(std::uint64_t), Access::doubleword);
+  if ((region_.reverse_addresses & (Word{1} << address.address)) != 0) {
+    code_.move(Reg::x10, base);
+    return;
   }
-  if (address.units != 0 || address.offsets != 0) {
-    code_.alu(Alu::add, Reg::x10, Reg::x10, Reg::x9, Width::x64);
+  const auto offset = fixed_offset(stream);
+  constexpr std::uint64_t maximum_immediate = 4095;
+  if (offset && *offset <= maximum_immediate) {
+    code_.add(Reg::x10, base, static_cast<std::uint16_t>(*offset), Width::x64);
+  } else {
+    if (offset) {
+      code_.constant(Reg::x9, *offset);
+    } else {
+      code_.load(Reg::x9, Reg::x0, offsetof(RegionFrame, offsets), Access::doubleword);
+      code_.load(Reg::x9, Reg::x9, stream * sizeof(std::uint64_t), Access::doubleword);
+    }
+    code_.alu(Alu::add, Reg::x10, base, Reg::x9, Width::x64);
   }
   const auto fixed = fixed_stride(stream);
-  if (lanes_ != 1 && (!fixed || (*fixed != 0 && *fixed != sizeof(Word)))) { stride(stream); }
+  if (lanes_ != 1 && (!fixed || (*fixed != 0 && *fixed != sizeof(Word)))) {
+    stride_ = stride(stream);
+  }
   if (part != 0) {
     if (fixed) {
       code_.constant(Reg::x9, *fixed * 2);
     } else {
-      code_.shift(Shift::left, Reg::x9, Reg::x11, 1, Width::x64);
+      code_.shift(Shift::left, Reg::x9, stride_, 1, Width::x64);
     }
     code_.alu(Alu::add, Reg::x10, Reg::x10, Reg::x9, Width::x64);
   }
 }
 
-void RegionEmitter::reverse_load(const Vec target, const StreamSlice slice) {
+void RegionEmitter::reverse_load(const Vec target, const StreamSlice slice, const bool packed) {
   const auto stream = slice.stream;
   const auto part = slice.part;
   const auto &address = region_.graph.streams[stream];
   const auto base = offsetof(RegionFrame, reverse) + (address.address * sizeof(ReverseCursor));
-  for (unsigned lane = 0; lane < (lanes_ == 1 ? 1U : 2U); ++lane) {
+  const unsigned count = packed ? lanes_ : std::min(lanes_, 2U);
+  for (unsigned lane = 0; lane < count; ++lane) {
     code_.load(Reg::x9, Reg::x0, base, Access::doubleword);
-    const auto displacement =
-        (std::uint64_t{(2 * part) + lane} * region_.graph.addresses[address.address].offsets) +
-        address.offsets;
+    const auto displacement = (std::uint64_t{(packed ? 0U : 2 * part) + lane} *
+                               region_.graph.addresses[address.address].offsets) +
+                              address.offsets;
     code_.constant(Reg::x12, displacement);
     code_.alu(Alu::add, Reg::x9, Reg::x9, Reg::x12, Width::x64);
     code_.load(Reg::x12, Reg::x0, base + offsetof(ReverseCursor, mask));
@@ -94,9 +129,9 @@ void RegionEmitter::reverse_load(const Vec target, const StreamSlice slice) {
     code_.load(Reg::x9, Reg::x9, 0);
     code_.extract(Reg::x9, Reg::x9, 0, word_bits, Width::x64, true);
     if (lane == 0) {
-      neon_.broadcast(target, Reg::x9);
+      neon_.broadcast(target, Reg::x9, packed);
     } else {
-      neon_.insert(target, Reg::x9, lane);
+      neon_.insert(target, Reg::x9, lane, packed);
     }
   }
 }
@@ -120,7 +155,7 @@ void RegionEmitter::load(const Vec target, const StreamSlice slice) {
   Label complete;
   if (!fixed) {
     code_.constant(Reg::x9, sizeof(Word));
-    code_.compare(Reg::x11, Reg::x9, Width::x64);
+    code_.compare(stride_, Reg::x9, Width::x64);
     code_.branch(Condition::not_equal, strided);
   }
   if (!fixed || fixed == sizeof(Word)) {
@@ -135,7 +170,7 @@ void RegionEmitter::load(const Vec target, const StreamSlice slice) {
   code_.load(Reg::x9, Reg::x10, 0);
   code_.extract(Reg::x9, Reg::x9, 0, word_bits, Width::x64, true);
   neon_.broadcast(target, Reg::x9);
-  code_.alu(Alu::add, Reg::x12, Reg::x10, Reg::x11, Width::x64);
+  code_.alu(Alu::add, Reg::x12, Reg::x10, stride_, Width::x64);
   code_.load(Reg::x9, Reg::x12, 0);
   code_.extract(Reg::x9, Reg::x9, 0, word_bits, Width::x64, true);
   neon_.insert(target, Reg::x9, 1);
@@ -155,7 +190,7 @@ void RegionEmitter::store(const GraphValue value, const StreamSlice slice) {
   }
   if (lanes_ != 1 && !fixed) {
     code_.constant(Reg::x9, sizeof(Word));
-    code_.compare(Reg::x11, Reg::x9, Width::x64);
+    code_.compare(stride_, Reg::x9, Width::x64);
     code_.branch(Condition::not_equal, strided);
     store_packed(source);
     code_.branch(complete);
@@ -166,7 +201,7 @@ void RegionEmitter::store(const GraphValue value, const StreamSlice slice) {
   code_.extract(Reg::x9, Reg::x9, 0, word_bits);
   code_.store(Reg::x9, Reg::x10, 0);
   if (lanes_ != 1) {
-    code_.alu(Alu::add, Reg::x12, Reg::x10, Reg::x11, Width::x64);
+    code_.alu(Alu::add, Reg::x12, Reg::x10, stride_, Width::x64);
     neon_.extract(Reg::x9, source, 1);
     code_.extract(Reg::x9, Reg::x9, 0, word_bits);
     code_.store(Reg::x9, Reg::x12, 0);
