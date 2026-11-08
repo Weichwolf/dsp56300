@@ -9,6 +9,10 @@
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
 #include "support.hpp"
+#if defined(__aarch64__)
+#include "jit/arena.hpp"
+#include "jit/block.hpp"
+#endif
 
 #include <array>
 #include <cstddef>
@@ -136,8 +140,28 @@ void direct_check(Fixture &fixture,
               fixture.cpu.cycles == modulo_sum(before_cycles, count) &&
               !fixture.cpu.repeat_completed && !fixture.cpu.interrupt_inhibited && fixture.x == x &&
               fixture.y == y,
-          "AVX2 chunks match ordered independent raw56 arithmetic and complete state");
+          "SIMD chunks match ordered independent raw56 arithmetic and complete state");
 }
+
+#if defined(__aarch64__)
+void generated_selection() {
+  for (const Word budget : {4U, 5U, 7U, 8U, 9U, 16U, 31U}) {
+    Fixture expected;
+    Fixture actual;
+    actual.context.budget = expected.context.budget = budget;
+    const auto count = budget & ~Word{3};
+    direct_check(expected, count);
+    const std::array operations{actual.operation};
+    const auto bytes = detail::emit_block(operations, actual.context.runtime, actual.cpu.reg.m);
+    detail::ExecutableArena arena;
+    const auto *entry = arena.append(bytes);
+    const auto retired = detail::enter_block(entry, actual.cpu, actual.context);
+    require(retired == count && snapshot(actual.cpu) == snapshot(expected.cpu) &&
+                actual.x == expected.x && actual.y == expected.y,
+            "Generated A64 selectors enter the proved batch and return its exact canonical prefix");
+  }
+}
+#endif
 
 struct ArithmeticInput {
 
@@ -473,7 +497,7 @@ void reduction_selection() {
   }
 }
 
-void core_prefixes(const Word mode) {
+void core_prefixes(const Word mode, const bool deadline) {
   std::array<Word, memory_words> p{};
   Fixture fixture;
   TestCore core({.program = p, .x = fixture.x, .y = fixture.y});
@@ -515,7 +539,8 @@ void core_prefixes(const Word mode) {
     core.set_registers(initial);
     const auto before = core.progress();
 
-    const auto result = core.run(budget);
+    const auto result =
+        deadline ? core.run_until(before.estimated_cycles + budget) : core.run(budget);
     require(result.retired == budget && result.fault.kind == FaultKind::none &&
                 core.registers() == expected &&
                 result.progress.instructions == before.instructions + budget &&
@@ -533,6 +558,9 @@ int main() {
     dsp56300::test::rejections();
     dsp56300::test::reduction_selection();
     dsp56300::test::prepared_selection();
+#if defined(__aarch64__)
+    dsp56300::test::generated_selection();
+#endif
     {
       dsp56300::test::uncached_ce();
       dsp56300::test::addresses();
@@ -542,8 +570,10 @@ int main() {
       dsp56300::test::prepared_reuse();
     }
     for (const auto mode : dsp56300::test::modes) {
-      dsp56300::test::core_prefixes(mode);
-      dsp56300::test::core_prefixes(mode | dsp56300::detail::cache_enable);
+      for (const bool deadline : {false, true}) {
+        dsp56300::test::core_prefixes(mode, deadline);
+        dsp56300::test::core_prefixes(mode | dsp56300::detail::cache_enable, deadline);
+      }
     }
     std::cout << dsp56300::test::checks << " guarded MAC batch checks passed\n";
   } catch (const std::exception &error) {

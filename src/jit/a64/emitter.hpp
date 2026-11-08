@@ -67,6 +67,9 @@ struct MemoryLabels {
   Label &unmapped;
 };
 
+[[nodiscard]] std::vector<std::uint8_t> select_mac_batch(const BlockInstruction &operation,
+                                                         std::span<const std::uint8_t> fallback);
+
 class Emitter {
 public:
   [[nodiscard]] std::vector<std::uint8_t> generate(std::span<const BlockInstruction> operations);

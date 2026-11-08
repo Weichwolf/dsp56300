@@ -66,7 +66,8 @@ std::vector<std::uint8_t> emit_block(const std::span<const BlockInstruction> ope
                                      const JitRuntime & /*runtime*/,
                                      const std::array<Word, agu_registers> & /*modifiers*/) {
   a64::Emitter emitter;
-  return emitter.generate_chained(operations);
+  auto bytes = emitter.generate_chained(operations);
+  return operations.size() == 1 ? a64::select_mac_batch(operations.front(), bytes) : bytes;
 }
 
 std::vector<std::uint8_t> emit_repeat(const BlockInstruction &operation,
