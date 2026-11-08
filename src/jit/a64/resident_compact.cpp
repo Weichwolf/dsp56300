@@ -109,6 +109,7 @@ void RegionEmitter::emit_words(const GraphNode &node, const Vec target) {
       }
       break;
     case GraphOp::round: round_words(node, target); break;
+    case GraphOp::saturate: saturate_words(node, target); break;
     case GraphOp::store: throw std::logic_error("Unexpected compact graph store");
     default: throw std::logic_error("Unknown compact graph operation");
   }

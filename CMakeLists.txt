@@ -41,7 +41,8 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
   set(dsp56300_region_source src/jit/a64/resident_region_emit.cpp
     src/jit/a64/resident_values.cpp src/jit/a64/resident_memory.cpp
     src/jit/a64/resident_compact.cpp src/jit/a64/resident_compact_memory.cpp
-    src/jit/a64/resident_compact_word.cpp src/jit/a64/resident_fusion.cpp)
+    src/jit/a64/resident_compact_word.cpp src/jit/a64/resident_fusion.cpp
+    src/jit/a64/resident_saturation.cpp)
   set(dsp56300_mac_source src/jit/a64/mac_batch_neon.cpp)
   set(dsp56300_run_source src/jit/a64/run.cpp)
   set(dsp56300_a64_sources src/native_owner.cpp src/jit/a64/emitter.cpp src/jit/a64/guarded.cpp src/jit/a64/guarded_guards.cpp

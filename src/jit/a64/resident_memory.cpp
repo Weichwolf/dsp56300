@@ -231,6 +231,7 @@ void RegionEmitter::advance_reverse() {
 
 void RegionEmitter::step(const std::size_t root, const bool inner) {
   const auto address = region_.roots[root].address;
+  if (!inner && !region_.nested && region_.prefix[address]) { return; }
   const auto &delta = inner ? region_.inner_addresses[address] : region_.graph.addresses[address];
   if (delta.offsets == 0 && (inner || !region_.nested)) {
     const auto bytes =

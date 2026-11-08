@@ -54,8 +54,11 @@ bool nested(const std::span<const Word> program,
   body_state.la = last;
   body_state.sr = setup.mode | loop_flag;
   const auto body = parse_block(program, body_state, runtime);
-  auto graph = value_graph(body);
-  if (!graph) { return false; }
+  auto graph = value_graph(body, resident_region_support());
+  if (!graph || std::ranges::any_of(graph->address_constants,
+                                    [](const auto &value) { return value.has_value(); })) {
+    return false;
+  }
   region.inner_entry = body_state.pc;
   body_state.pc = (last + 1) & word_mask;
   body_state.la = setup.loop_address;
@@ -88,8 +91,8 @@ bool nested(const std::span<const Word> program,
   const auto instructions = (std::uint64_t{graph->instructions} * count) + overhead;
   if (!std::in_range<Word>(instructions)) { return false; }
   graph->instructions = static_cast<Word>(instructions);
+  region.extra_cycles = (graph->extra_cycles * count) + cycles - overhead;
   region.graph = std::move(*graph);
-  region.extra_cycles = cycles - overhead;
   region.inner_iterations = count;
   region.last = setup.loop_address;
   region.nested = true;
@@ -100,7 +103,9 @@ bool roots(ResidentRegion &region, const Registers &state) {
   for (const auto &stream : region.graph.streams) {
     const auto &delta = region.graph.addresses[stream.address];
     if ((state.m[stream.address] & modifier_mask) == 0 && delta.offsets != 0) {
-      if (region.nested || delta.units != 0 || stream.write) { return false; }
+      if (region.nested || region.prefix[stream.address] || delta.units != 0 || stream.write) {
+        return false;
+      }
       region.reverse_addresses |= Word{1} << stream.address;
     }
     const auto index = stream.space == Space::x ? 0U : 1U;
@@ -136,8 +141,10 @@ resident_region_plan(const std::span<const Word> program,
   region->last = operations.back().loop_address;
   region->mode = operations.front().mode;
   if (!nested(program, state, runtime, operations, *region)) {
-    auto graph = value_graph(operations);
+    auto graph = value_graph(operations, resident_region_support());
     if (!graph) { return nullptr; }
+    region->extra_cycles = graph->extra_cycles;
+    region->prefix = graph->address_constants;
     region->graph = std::move(*graph);
   }
   region->growth_shift = growth_shift(region->graph);

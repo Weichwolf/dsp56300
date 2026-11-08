@@ -157,6 +157,18 @@ void stack_encodings() {
           "NEON paired doubleword stack operations differ from ISA");
 }
 
+void selection_encodings() {
+  Code code;
+  Neon neon(code);
+  neon.binary(VectorOp::greater, Vec{0}, Vec{1}, Vec{2});
+  neon.binary(VectorOp::bit_insert, Vec{0}, Vec{1}, Vec{2});
+  constexpr std::array<std::uint32_t, 2> expected{0x4ee23420, 0x6ea21c20};
+  for (std::size_t index = 0; index < expected.size(); ++index) {
+    require(instruction(code, index) == expected[index],
+            "NEON comparison and insertion differ from assembler reference");
+  }
+}
+
 void immediate_encodings() {
   constexpr std::array<std::uint32_t, 6> values{
       1, 0x007fffff, 0xff800000, 0x80000000, 0x12ff, 0xffffedff};
@@ -525,6 +537,7 @@ int main() {
     immediate_encodings();
     accumulate_encodings();
     stack_encodings();
+    selection_encodings();
 #if defined(__aarch64__)
     execute();
     execute_barrels();

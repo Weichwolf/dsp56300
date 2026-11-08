@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "architecture.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "jit.hpp"
@@ -93,6 +94,12 @@ std::vector<std::uint8_t> RegionEmitter::generate() {
   code_.load(Reg::x1, Reg::x0, offsetof(RegionFrame, iterations));
   code_.constant(Reg::x9, 1);
   neon_.broadcast(one_register, Reg::x9);
+  if ((region_.mode & arithmetic_saturation) != 0) {
+    constexpr std::uint64_t high = 0x00007fffffffffff;
+    constexpr std::uint64_t low = 0xffff800000000000;
+    constant(saturation_high, high);
+    constant(saturation_low, low);
+  }
   for (unsigned part = 0; part < 2; ++part) {
     neon_.zero(growth_register + part);
     neon_.zero(limit_register + part);
@@ -152,6 +159,10 @@ std::vector<std::uint8_t> RegionEmitter::generate() {
 }
 
 namespace dsp56300::detail {
+GraphSupport resident_region_support() noexcept {
+  return {.numeric_modes = rounding_mode | arithmetic_saturation, .address_constants = true};
+}
+
 std::vector<std::uint8_t> emit_resident_region(ResidentRegion &region, const unsigned lanes) {
   return a64::RegionEmitter(region, lanes).generate();
 }

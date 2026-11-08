@@ -139,6 +139,38 @@ bool reverse_address(const Registers &reg, ResidentRegion &region, const unsigne
   return true;
 }
 
+Word iteration_limit(const Registers &reg, const ResidentRegion &region, const unsigned index) {
+  const auto modifier = reg.m[index] & modifier_mask;
+  if (region.prefix[index] || modifier == 0 || modifier >= multiple_wrap_bit) { return word_mask; }
+  const auto &delta = region.graph.addresses[index];
+  const auto n = delta.offsets != 0 ? reg.n[index] : 0;
+  std::uint64_t step = 0;
+  if (n >= sign24_bit || !scaled_offset(delta, n, step)) { return 0; }
+  if (step == 0) { return word_mask; }
+  const auto initial = reg.r[index];
+  const auto begin = initial & ~(std::bit_ceil(modifier + 1) - 1);
+  const auto limit = begin + modifier + 1;
+  if (initial >= limit) { return 0; }
+  const auto room = limit - initial;
+  auto count = static_cast<Word>(room / step);
+  if (count == 0 || room % step != 0) { return count; }
+  for (const auto &stream : region.graph.streams) {
+    if (stream.address != index) { continue; }
+    std::uint64_t offset = 0;
+    if (!scaled_offset({.units = stream.units, .offsets = stream.offsets}, n, offset)) { return 0; }
+    if (offset == step) { return count - 1; }
+  }
+  return count;
+}
+
+Word bounded_iterations(const Registers &reg, const ResidentRegion &region, Word count) {
+  if (region.nested) { return count; }
+  for (unsigned index = 0; index < agu_registers; ++index) {
+    count = std::min(count, iteration_limit(reg, region, index));
+  }
+  return count;
+}
+
 bool address(const Registers &reg, ResidentRegion &region, const unsigned index) {
   if ((region.reverse_addresses & (Word{1} << index)) != 0) {
     return reverse_address(reg, region, index);
@@ -155,13 +187,17 @@ bool address(const Registers &reg, ResidentRegion &region, const unsigned index)
   // of the final parent; only the next parent's prefix resets it again.
   const auto distance = region.prefix[index] ? step : iterations * step;
   if (distance > word_mask - initial) { return false; }
-  const auto final = initial + distance;
+  auto final = initial + distance;
   const auto modifier = reg.m[index] & modifier_mask;
   if (step != 0 && modifier != modifier_mask) {
     if (modifier == 0 || modifier >= multiple_wrap_bit) { return false; }
     const auto begin = initial & ~(std::bit_ceil(modifier + 1) - 1);
     const auto limit = begin + modifier + 1;
-    if (initial >= limit || final >= limit) { return false; }
+    if (initial >= limit || final > limit) { return false; }
+    if (final == limit) {
+      if (region.nested || region.prefix[index]) { return false; }
+      final = begin;
+    }
   }
   region.frame.addresses[index] = static_cast<Word>(final);
   return true;
@@ -368,11 +404,14 @@ std::uint64_t guest(const std::uint64_t raw, const GraphValue value) {
   return (canonical << value.scale) & accumulator_mask;
 }
 
-Word flags(const std::array<std::uint64_t, 3> &values, const ValueGraph &graph) {
+Word flags(const std::array<std::uint64_t, 4> &values, const ValueGraph &graph) {
   Word result = 0;
   if (graph.flags.valid()) {
     const auto value = guest(values[0], graph.flags);
     if (value == 0) { result |= zero; }
+    if (graph.overflow_input.valid() && guest(values[3], graph.overflow_input) != value) {
+      result |= overflow;
+    }
     if ((value & (std::uint64_t{1} << sign_bit)) != 0) { result |= negative; }
     if ((value >> extension_shift) != 0 && (value >> extension_shift) != extension_mask) {
       result |= extension;
@@ -473,7 +512,8 @@ std::uint32_t run_resident_region(Cpu *const cpu,
                                   NativeContext *const context,
                                   ResidentRegion *const region) noexcept {
   if (!header(*cpu, *context, *region) || !memory(*cpu, *context, *region)) { return 0; }
-  const auto count = std::min(cpu->reg.lc, context->budget / region->graph.instructions);
+  const auto count = bounded_iterations(
+      cpu->reg, *region, std::min(cpu->reg.lc, context->budget / region->graph.instructions));
   if (!select_lanes(*region, count)) { return 0; }
   region->frame.iterations = count - (count % region->lanes);
   if (region->frame.iterations == 0 || region->native[region->lanes / 2] == nullptr ||

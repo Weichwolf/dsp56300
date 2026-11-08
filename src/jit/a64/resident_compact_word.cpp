@@ -37,13 +37,13 @@ void RegionEmitter::merge_wide(const StickyEvent event, const Vec source, const 
   neon_.binary(VectorOp::bit_or, target, target, temporary);
 }
 
-void RegionEmitter::word_words(const GraphNode &node, const Vec target) {
+void RegionEmitter::word_words(const GraphNode &node, const Vec target, const bool transfer) {
   const auto value = node.inputs[0];
   const auto source = read(value);
   constexpr unsigned growth_position = double_word_bits - 3;
   const auto position = growth_position - value.scale;
   constexpr unsigned word_sign = 31;
-  if (value.width > position + 1 && position < word_sign) {
+  if (transfer && value.width > position + 1 && position < word_sign) {
     neon_.shift(first_scratch, source, Shift::right, 1, true);
     neon_.binary(VectorOp::bit_xor, first_scratch, first_scratch, source);
     if (region_.growth_shift == 0) {

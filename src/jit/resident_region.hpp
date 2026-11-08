@@ -33,7 +33,7 @@ struct ReverseCursor {
 struct RegionFrame {
   std::array<RegionCursor, 2 * agu_registers> cursors;
   std::array<std::uint64_t, 6> invariants{}, results{};
-  std::array<std::uint64_t, 3> flags{}, preceding_flags{};
+  std::array<std::uint64_t, 4> flags{}, preceding_flags{};
   std::array<Word, agu_registers> addresses{};
   RegionVector growth, limits, preceding_growth, preceding_limits;
   const std::uint64_t *constants = nullptr;
@@ -66,6 +66,8 @@ struct ResidentRegion {
   std::array<const void *, 3> native{};
   unsigned lanes = 4, growth_shift = 0;
 };
+
+[[nodiscard]] GraphSupport resident_region_support() noexcept;
 
 [[nodiscard]] std::unique_ptr<ResidentRegion>
 resident_region_plan(std::span<const Word> program,

@@ -19,6 +19,8 @@ RegionEmitter::RegionEmitter(ResidentRegion &region, const unsigned lanes)
     : region_(region),
       lanes_(region.nested && lanes == 1 ? 4U : lanes),
       parts_(lanes_ == 4 ? 2U : 1U),
+      value_registers_((region.mode & arithmetic_saturation) != 0 ? region_values - 1
+                                                                  : region_values),
       inner_vector_(region.nested && lanes == 1),
       bounds_(graph_bounds(region.graph, region.mode)),
       needed_(region.graph.nodes.size()),
@@ -49,13 +51,14 @@ void RegionEmitter::liveness() {
     if ((graph.changed_registers & (Word{1} << index)) != 0) { pin(graph.registers[index]); }
   }
   pin(graph.flags);
+  pin(graph.overflow_input);
   if (graph.carry != GraphCarry::unchanged && graph.carry != GraphCarry::zero) {
     for (const auto value : graph.carry_inputs) { pin(value); }
   }
   for (auto index = graph.nodes.size(); index != 0; --index) {
     const auto &node = graph.nodes[index - 1];
-    needed_[index - 1] =
-        needed_[index - 1] || node.operation == GraphOp::word || node.operation == GraphOp::store;
+    needed_[index - 1] = needed_[index - 1] || node.operation == GraphOp::word ||
+                         node.operation == GraphOp::store || node.operation == GraphOp::saturate;
     if (!needed_[index - 1]) { continue; }
     for (const auto value : node.inputs) {
       if (!value.valid()) { continue; }
@@ -86,7 +89,7 @@ unsigned RegionEmitter::allocate() {
   unsigned selected = 0;
   std::size_t farthest = 0;
   bool found = false;
-  for (unsigned reg = 0; reg < owners_.size(); ++reg) {
+  for (unsigned reg = 0; reg < value_registers_; ++reg) {
     const auto node = owners_[reg];
     if (node == no_value) { return reg; }
     if (std::ranges::find(inputs_, node) != inputs_.end() || node == current_) { continue; }
@@ -194,7 +197,13 @@ void RegionEmitter::binary(const GraphNode &node, const Vec target, const unsign
     if (node.operation == GraphOp::subtract) {
       opcode = part == 0 ? VectorOp::multiply_subtract : VectorOp::multiply_subtract_upper;
     }
-    neon_.binary(opcode, target, read(product.inputs[0]), read(product.inputs[1]));
+    auto left = read(product.inputs[0]);
+    const auto shift = node.inputs[1].scale - node.inputs[0].scale;
+    if (shift != 0) {
+      if (part == 0) { neon_.shift(first_scratch, left, Shift::left, shift, true); }
+      left = first_scratch;
+    }
+    neon_.binary(opcode, target, left, read(product.inputs[1]));
     return;
   }
   const auto scale = std::min(node.inputs[0].scale, node.inputs[1].scale);
@@ -303,6 +312,7 @@ void RegionEmitter::emit(const GraphNode &node) {
         break;
       case GraphOp::round: round(node, target, part); break;
       case GraphOp::word: word(node, target, part); break;
+      case GraphOp::saturate: saturate(node, target, part); break;
       case GraphOp::store: break;
       default: throw std::logic_error("Unknown NEON graph operation");
     }
@@ -335,6 +345,8 @@ void RegionEmitter::outputs(const unsigned lane, const bool preceding) {
   const auto base =
       preceding ? offsetof(RegionFrame, preceding_flags) : offsetof(RegionFrame, flags);
   publish(region_.graph.flags, {.offset = base, .lane = lane});
+  publish(region_.graph.overflow_input,
+          {.offset = base + (3 * sizeof(std::uint64_t)), .lane = lane});
   if (region_.graph.carry == GraphCarry::unchanged || region_.graph.carry == GraphCarry::zero) {
     return;
   }

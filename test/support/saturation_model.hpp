@@ -39,6 +39,36 @@ inline Result apply(const std::uint64_t raw, const Control input) {
   return {.value = input.rounded ? rounded_positive : positive, .limited = true};
 }
 
+inline sequence_model::Arithmetic calculate(const Registers &old, const Word code) {
+  const auto operation = code & sequence_model::alu_mask;
+  const bool destination_b = (code & 8U) != 0;
+  sequence_model::Arithmetic result;
+  if ((code & 0x80U) != 0) {
+    result = sequence_model::multiplication(old, code);
+  } else if (operation == 3) {
+    result.full = signed56(destination_b ? old.b : old.a);
+    result.compare = true;
+  } else if (operation == sequence_model::clear) {
+    result.full = 0;
+  } else if (operation == sequence_model::right_shift) {
+    const auto raw = destination_b ? old.b : old.a;
+    const auto value = signed56(raw);
+    result.full = value / 2 - (value % 2 < 0 ? 1 : 0);
+    result.carry_changed = true;
+    result.carry = raw % 2 != 0;
+  } else if (operation == sequence_model::round || operation == sequence_model::absolute ||
+             operation == sequence_model::negate) {
+    const auto before = signed56(destination_b ? old.b : old.a);
+    result.full = operation == sequence_model::round ? before : -before;
+    if (operation == sequence_model::absolute && before >= 0) { result.full = before; }
+    if (operation == sequence_model::round) { sequence_model::rounded(result, old.sr); }
+    result.overflow = result.overflow || sequence_model::overflowed(result.full);
+  } else {
+    result = sequence_model::addition(old, code);
+  }
+  return result;
+}
+
 inline void alu(Registers &state, const Registers &old, const Word opcode) {
   const auto code = opcode & status_byte;
   if (code == 0) { return; }
@@ -51,27 +81,8 @@ inline void alu(Registers &state, const Registers &old, const Word opcode) {
   }
   const bool destination_b = (code & 8U) != 0;
   auto &destination = destination_b ? state.b : state.a;
-  sequence_model::Arithmetic result;
-  bool rounded = false;
-  if ((code & 0x80U) != 0) {
-    result = sequence_model::multiplication(old, code);
-    rounded = (code & 1U) != 0;
-  } else if (operation == 3) {
-    result.full = signed56(destination_b ? old.b : old.a);
-    result.compare = true;
-  } else if (operation == sequence_model::clear) {
-    result.full = 0;
-  } else if (operation == sequence_model::round || operation == sequence_model::absolute ||
-             operation == sequence_model::negate) {
-    const auto before = signed56(destination_b ? old.b : old.a);
-    result.full = operation == sequence_model::round ? before : -before;
-    if (operation == sequence_model::absolute && before >= 0) { result.full = before; }
-    rounded = operation == sequence_model::round;
-    if (rounded) { sequence_model::rounded(result, old.sr); }
-    result.overflow = result.overflow || sequence_model::overflowed(result.full);
-  } else {
-    result = sequence_model::addition(old, code);
-  }
+  auto result = calculate(old, code);
+  const bool rounded = (code & 0x80U) != 0 ? (code & 1U) != 0 : operation == sequence_model::round;
   const auto limited = apply(static_cast<std::uint64_t>(result.full) & accumulator_mask,
                              {.status = state.sr, .rounded = rounded});
   if (!result.compare) { destination = limited.value; }

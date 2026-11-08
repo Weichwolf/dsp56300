@@ -33,6 +33,7 @@ enum class GraphOp : std::uint8_t {
   negate,
   shift,
   round,
+  saturate,
   word,
   store
 };
@@ -61,10 +62,11 @@ struct ValueGraph {
   std::vector<GraphStream> streams;
   std::array<GraphValue, 6> registers{};
   std::array<GraphAddress, agu_registers> addresses{};
-  GraphValue flags;
+  GraphValue flags, overflow_input;
   GraphCarry carry = GraphCarry::unchanged;
   std::array<GraphValue, 2> carry_inputs{};
-  Word instructions = 0, changed_registers = 0, invariant_registers = 0;
+  Word instructions = 0, extra_cycles = 0, changed_registers = 0, invariant_registers = 0;
+  std::array<std::optional<Word>, agu_registers> address_constants{};
 };
 
 struct GraphBounds {
@@ -74,7 +76,13 @@ struct GraphBounds {
 // Signed integer coordinates before each edge's binary-point scaling.
 [[nodiscard]] std::vector<GraphBounds> graph_bounds(const ValueGraph &graph, Word mode);
 
+struct GraphSupport {
+  Word numeric_modes = rounding_mode;
+  bool address_constants = false;
+};
+
 // Compile-time graph construction. Unproved arithmetic or iteration dependencies
 // leave the existing scalar native lowering responsible for the whole region.
-[[nodiscard]] std::optional<ValueGraph> value_graph(std::span<const BlockInstruction> operations);
+[[nodiscard]] std::optional<ValueGraph> value_graph(std::span<const BlockInstruction> operations,
+                                                    GraphSupport support = {});
 } // namespace dsp56300::detail

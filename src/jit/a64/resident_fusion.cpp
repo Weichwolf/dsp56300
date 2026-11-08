@@ -26,10 +26,11 @@ void RegionEmitter::fuse_products() {
     const auto left = node.inputs[0];
     const auto right = node.inputs[1];
     const auto &product = nodes[right.node];
-    if (compact(left) || !left.canonical || left.scale != right.scale ||
+    if (compact(left) || !left.canonical || left.scale > right.scale ||
         product.operation != GraphOp::multiply || uses[right.node] != 1 ||
         last_[right.node] != index || last_[left.node] != index || !compact(product.inputs[0]) ||
-        !compact(product.inputs[1])) {
+        !compact(product.inputs[1]) || product.inputs[0].width > 32 ||
+        right.scale - left.scale > 32 - product.inputs[0].width) {
       continue;
     }
     fused_[index] = right.node;

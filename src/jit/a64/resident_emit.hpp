@@ -15,6 +15,7 @@ namespace dsp56300::detail::a64 {
 inline constexpr unsigned region_values = 12;
 inline constexpr Vec first_scratch{24}, second_scratch{25}, growth_register{26}, limit_register{28},
     one_register{31};
+inline constexpr Vec saturation_high{22}, saturation_low{23};
 
 struct StreamSlice {
   unsigned stream, part;
@@ -54,7 +55,9 @@ private:
   [[nodiscard]] bool compact(GraphValue value) const;
   [[nodiscard]] Vec aligned_words(GraphValue value, unsigned scale, Vec scratch);
   void emit_words(const GraphNode &node, Vec target);
-  void word_words(const GraphNode &node, Vec target);
+  void word_words(const GraphNode &node, Vec target, bool transfer = true);
+  void saturate_words(const GraphNode &node, Vec target);
+  void saturate(const GraphNode &node, Vec target, unsigned part);
   void round_words(const GraphNode &node, Vec target);
   void merge_words(StickyEvent event, Vec source);
   void merge_wide(StickyEvent event, Vec source, unsigned part);
@@ -93,7 +96,7 @@ private:
   ResidentRegion &region_;
   Code code_;
   Neon neon_{code_};
-  unsigned lanes_, parts_;
+  unsigned lanes_, parts_, value_registers_;
   bool inner_vector_;
   Word cached_strides_ = 0;
   Reg stride_ = Reg::x11;

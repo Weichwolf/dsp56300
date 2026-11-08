@@ -21,6 +21,7 @@ enum class VectorOp : std::uint32_t {
   bit_and = 0x4e201c00,
   bit_or = 0x4ea01c00,
   bit_xor = 0x6e201c00,
+  bit_insert = 0x6ea01c00,
   greater = 0x4ee03400,
   maximum = 0x4ea06400,
   minimum = 0x4ea06c00,

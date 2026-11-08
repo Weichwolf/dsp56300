@@ -17,6 +17,10 @@
 #include <vector>
 
 namespace dsp56300::detail {
+GraphSupport resident_region_support() noexcept {
+  return {};
+}
+
 namespace {
 using x64::Reg;
 using x64::VectorOp;
@@ -124,6 +128,7 @@ void ResidentRegionEmitter::liveness() {
     if ((graph.changed_registers & (Word{1} << index)) != 0) { pin(graph.registers[index]); }
   }
   pin(graph.flags);
+  pin(graph.overflow_input);
   if (graph.carry != GraphCarry::unchanged && graph.carry != GraphCarry::zero) {
     for (const auto value : graph.carry_inputs) { pin(value); }
   }
@@ -585,6 +590,7 @@ void ResidentRegionEmitter::emit(const GraphNode &node) {
     case GraphOp::shift: shift(node, result); break;
     case GraphOp::round: round(node, result); break;
     case GraphOp::word: word(node, result); break;
+    case GraphOp::saturate: throw std::logic_error("Unadmitted x64 saturation region");
     case GraphOp::store: break;
     default: throw std::logic_error("Unknown native graph operation");
   }
@@ -615,6 +621,8 @@ void ResidentRegionEmitter::outputs(const unsigned lane, const bool preceding) {
   const auto base =
       preceding ? offsetof(RegionFrame, preceding_flags) : offsetof(RegionFrame, flags);
   publish(region_.graph.flags, {.offset = base, .lane = lane});
+  publish(region_.graph.overflow_input,
+          {.offset = base + (3 * sizeof(std::uint64_t)), .lane = lane});
   if (region_.graph.carry != GraphCarry::unchanged && region_.graph.carry != GraphCarry::zero) {
     for (unsigned index = 0; index < region_.graph.carry_inputs.size(); ++index) {
       publish(region_.graph.carry_inputs[index],

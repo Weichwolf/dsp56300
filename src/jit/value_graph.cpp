@@ -22,6 +22,8 @@ namespace dsp56300::detail {
 namespace {
 constexpr unsigned accumulator_slot = 4, graph_slots = 6;
 constexpr Word product_bit = 0x80, operation_mask = 0xf7;
+constexpr std::int64_t saturation_minimum = -(std::int64_t{1} << (double_word_bits - 1));
+constexpr std::int64_t saturation_maximum = -saturation_minimum - 1;
 constexpr Word clear_code = 0x13, shift_code = 0x22, round_code = 0x11;
 
 GraphBounds aligned_bounds(GraphBounds bounds, const unsigned shift) {
@@ -73,6 +75,13 @@ node_bounds(const GraphNode &node, const std::vector<GraphBounds> &bounds, const
     case GraphOp::round:
       return {.low = rounded_bound(input(0).low, node.parameter, mode),
               .high = rounded_bound(input(0).high, node.parameter, mode)};
+    case GraphOp::saturate: {
+      const auto shift = node.parameter != 0 ? 0U : node.inputs[0].scale;
+      const auto before = aligned_bounds(input(0), shift);
+      const auto low = node.parameter != 0 ? std::int64_t{minimum_word} : saturation_minimum;
+      const auto high = node.parameter != 0 ? std::int64_t{maximum_word} : saturation_maximum;
+      return {.low = std::clamp(before.low, low, high), .high = std::clamp(before.high, low, high)};
+    }
     case GraphOp::word: {
       const auto shift = word_bits - node.inputs[0].scale;
       return {.low = std::clamp(
@@ -101,11 +110,14 @@ std::optional<unsigned> slot(const unsigned reg) {
 
 class ValueGraphBuilder {
 public:
+  explicit ValueGraphBuilder(const GraphSupport support) : support_(support) {}
+
   [[nodiscard]] std::optional<ValueGraph> build(std::span<const BlockInstruction> operations);
 
 private:
   using Slots = std::array<GraphValue, graph_slots>;
   [[nodiscard]] bool classify(const BlockInstruction &operation);
+  [[nodiscard]] bool address_constant(const Instruction &instruction);
   [[nodiscard]] GraphValue read(unsigned index, Slots &state);
   [[nodiscard]] GraphValue node(GraphOp operation,
                                 GraphValue result,
@@ -115,25 +127,31 @@ private:
   [[nodiscard]] GraphValue word(GraphValue value);
   [[nodiscard]] GraphValue sum(GraphValue left, GraphValue right, bool subtract);
   [[nodiscard]] GraphValue round(GraphValue value);
+  [[nodiscard]] GraphValue saturate(GraphValue value, bool rounded);
   [[nodiscard]] bool moves(const BlockInstruction &operation, Slots &old);
   [[nodiscard]] bool arithmetic(Word code, Slots &old);
   [[nodiscard]] bool product(AluOperands operands, Slots &old);
   [[nodiscard]] GraphValue operand(InputOperand input, Slots &old);
   ValueGraph graph_;
   std::array<bool, graph_slots> writes_{};
+  std::array<bool, agu_registers> accessed_{};
+  std::vector<GraphBounds> bounds_;
+  GraphSupport support_;
+  Word mode_ = 0;
   bool valid_ = true;
 };
 
 bool ValueGraphBuilder::classify(const BlockInstruction &operation) {
   const auto &instruction = operation.instruction;
-  if (instruction.words != 1 || instruction.cycles != 1 ||
-      (instruction.operation != Operation::parallel && instruction.operation != Operation::nop)) {
+  if (instruction.operation != Operation::parallel && instruction.operation != Operation::nop) {
     return false;
   }
+  if (plan_address_immediate(instruction).valid()) { return address_constant(instruction); }
+  if (instruction.words != 1 || instruction.cycles != 1) { return false; }
   if (instruction.operation == Operation::nop) { return true; }
   const auto plan = plan_moves(instruction);
   const auto reg = plan_register_move(instruction);
-  if (plan.long_pair || plan_address_immediate(instruction).valid()) { return false; }
+  if (plan.long_pair) { return false; }
   if (reg.valid()) {
     const auto destination = slot(reg.destination);
     if (!destination || !slot(reg.source)) { return false; }
@@ -150,6 +168,7 @@ bool ValueGraphBuilder::classify(const BlockInstruction &operation) {
       return false;
     }
     updated.at(move.address.index) = true;
+    accessed_.at(move.address.index) = true;
     if (move.load) { writes_.at(*target) = true; }
   }
   if ((instruction.opcode & byte_mask) != 0) {
@@ -158,16 +177,31 @@ bool ValueGraphBuilder::classify(const BlockInstruction &operation) {
   return true;
 }
 
+bool ValueGraphBuilder::address_constant(const Instruction &instruction) {
+  const auto immediate = plan_address_immediate(instruction);
+  if (!support_.address_constants || immediate.destination < r_register_base ||
+      immediate.destination >= n_register_base || instruction.words > 2 ||
+      instruction.cycles != instruction.words) {
+    return false;
+  }
+  const auto index = immediate.destination - r_register_base;
+  if (accessed_[index]) { return false; }
+  graph_.address_constants[index] = immediate.value;
+  return true;
+}
+
 GraphValue ValueGraphBuilder::node(const GraphOp operation,
                                    GraphValue result,
                                    const std::array<GraphValue, 2> inputs,
                                    const unsigned parameter) {
-  if (result.width > accumulator_bits || result.scale > accumulator_bits - result.width) {
+  if (!valid_ || result.width > accumulator_bits ||
+      result.scale > accumulator_bits - result.width) {
     valid_ = false;
     return {};
   }
   result.node = graph_.nodes.size();
   graph_.nodes.push_back({.operation = operation, .inputs = inputs, .parameter = parameter});
+  bounds_.push_back(node_bounds(graph_.nodes.back(), bounds_, mode_));
   return result;
 }
 
@@ -215,6 +249,7 @@ GraphValue ValueGraphBuilder::word(const GraphValue value) {
 }
 
 bool ValueGraphBuilder::moves(const BlockInstruction &operation, Slots &old) {
+  if (plan_address_immediate(operation.instruction).valid()) { return true; }
   const auto reg = plan_register_move(operation.instruction);
   if (reg.valid()) {
     const auto source_slot = slot(reg.source);
@@ -280,6 +315,25 @@ GraphValue ValueGraphBuilder::round(const GraphValue value) {
       GraphOp::round, {.scale = word_bits, .width = width, .canonical = false}, {value, {}}, shift);
 }
 
+GraphValue ValueGraphBuilder::saturate(const GraphValue value, const bool rounded) {
+  graph_.overflow_input = {};
+  if ((mode_ & arithmetic_saturation) == 0 || !value.valid()) { return value; }
+  const auto raw = aligned_bounds(bounds_[value.node], value.scale);
+  const auto high = rounded ? std::int64_t{maximum_word} << word_bits : saturation_maximum;
+  if (raw.low >= saturation_minimum && raw.high <= high) { return value; }
+  constexpr auto period = std::int64_t{1} << (double_word_bits + 1);
+  // In this interval SM's three-bit action is exactly a signed 48-bit clamp.
+  if (raw.low < -period || raw.high >= period) {
+    valid_ = false;
+    return {};
+  }
+  graph_.overflow_input = value;
+  return node(GraphOp::saturate,
+              {.scale = rounded ? word_bits : 0U, .width = rounded ? word_bits : double_word_bits},
+              {value, {}},
+              static_cast<unsigned>(rounded));
+}
+
 GraphValue ValueGraphBuilder::operand(const InputOperand input, Slots &old) {
   const auto selector = input.selector;
   const auto destination = input.destination;
@@ -308,7 +362,9 @@ bool ValueGraphBuilder::product(const AluOperands operands, Slots &old) {
   } else if (negate) {
     value = node(GraphOp::negate, {.scale = value.scale, .width = value.width + 1}, {value, {}});
   }
-  if ((code & 1U) != 0) { value = round(value); }
+  const bool rounded = (code & 1U) != 0;
+  if (rounded) { value = round(value); }
+  value = saturate(value, rounded);
   graph_.registers.at(destination) = graph_.flags = value;
   return valid_;
 }
@@ -352,18 +408,27 @@ bool ValueGraphBuilder::arithmetic(const Word code, Slots &old) {
   } else {
     return false;
   }
+  value = saturate(value, kind == round_code);
   graph_.registers.at(destination) = graph_.flags = value;
   return valid_;
 }
 
 std::optional<ValueGraph>
 ValueGraphBuilder::build(const std::span<const BlockInstruction> operations) {
-  if (operations.empty() || !at_loop_end(operations.back()) ||
-      !std::ranges::all_of(operations, [&](const auto &op) {
-        return (op.mode & ~rounding_mode) == 0 && classify(op);
+  if (operations.empty() || !at_loop_end(operations.back())) { return std::nullopt; }
+  mode_ = operations.front().mode;
+  if (!std::ranges::all_of(operations, [&](const auto &op) {
+        return op.mode == mode_ && (op.mode & ~support_.numeric_modes) == 0 && classify(op);
       })) {
     return std::nullopt;
   }
+  std::uint64_t cycles = 0;
+  for (const auto &operation : operations) { cycles += operation.instruction.cycles; }
+  if (!std::in_range<Word>(operations.size()) || cycles < operations.size() ||
+      !std::in_range<Word>(cycles - operations.size())) {
+    return std::nullopt;
+  }
+  graph_.extra_cycles = static_cast<Word>(cycles - operations.size());
   for (const auto &operation : operations) {
     auto old = graph_.registers;
     if (!moves(operation, old) || !arithmetic(operation.instruction.opcode & byte_mask, old)) {
@@ -379,8 +444,9 @@ ValueGraphBuilder::build(const std::span<const BlockInstruction> operations) {
 }
 } // namespace
 
-std::optional<ValueGraph> value_graph(const std::span<const BlockInstruction> operations) {
-  return ValueGraphBuilder{}.build(operations);
+std::optional<ValueGraph> value_graph(const std::span<const BlockInstruction> operations,
+                                      const GraphSupport support) {
+  return ValueGraphBuilder{support}.build(operations);
 }
 
 std::vector<GraphBounds> graph_bounds(const ValueGraph &graph, const Word mode) {
