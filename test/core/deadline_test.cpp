@@ -80,6 +80,36 @@ void long_block_deadlines() {
           "Warm deadline execution resumes across long native blocks after an untimed run");
 }
 
+void chunked_deadlines() {
+  constexpr std::array<Word, 3> lengths{1, 31, 257};
+  constexpr std::array<std::uint64_t, 9> grants{1, 2, 3, 7, 16, 31, 64, 127, 4096};
+  for (const auto body : lengths) {
+    const auto period = body + 3;
+    std::vector<Word> ram(body + 1, nop);
+    ram.back() = jump;
+    Core core(Memory::unified(ram));
+    std::uint64_t deadline = 0;
+    for (unsigned pass = 0; pass < 4; ++pass) {
+      for (const auto grant : grants) {
+        const auto before = core.progress();
+        deadline += grant;
+        const auto result = core.run_until(deadline);
+        const auto remainder = deadline % period;
+        const auto cycles = deadline + (remainder > body ? period - remainder : 0);
+        const auto pc = cycles % period;
+        const auto instructions = ((cycles / period) * (body + 1)) + pc;
+        require(result.fault.kind == FaultKind::none && result.state == ExecutionState::running &&
+                    result.progress ==
+                        Progress{.instructions = instructions, .estimated_cycles = cycles} &&
+                    result.retired == instructions - before.instructions &&
+                    core.registers().pc == pc,
+                "Changing event spans retain exact mixed-cost progress through complete and "
+                "partial native blocks");
+      }
+    }
+  }
+}
+
 void hardware_loop_deadlines() {
   constexpr Word count = 67;
   constexpr Word body = 31;
@@ -241,6 +271,7 @@ int main() {
   try {
     dsp56300::test::loop_deadlines();
     dsp56300::test::long_block_deadlines();
+    dsp56300::test::chunked_deadlines();
     dsp56300::test::hardware_loop_deadlines();
     dsp56300::test::jump_and_repeat_deadlines();
     dsp56300::test::effect_exit();

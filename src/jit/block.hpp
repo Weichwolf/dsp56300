@@ -34,7 +34,8 @@ emit_repeat(const BlockInstruction &operation,
 #if defined(__aarch64__)
 [[nodiscard]] std::vector<std::uint8_t> emit_vector(const BlockInstruction &operation);
 #endif
-[[nodiscard]] std::vector<std::uint8_t> admit_cycles(std::span<const std::uint8_t> body);
+[[nodiscard]] std::vector<std::uint8_t>
+admit_cycles(std::span<const std::uint8_t> body, std::span<const BlockInstruction> operations = {});
 [[nodiscard]] std::uint32_t
 enter_block(const void *entry, Cpu &cpu, NativeContext &context) noexcept;
 [[nodiscard]] std::uint32_t enter_blocks(const void *entry,

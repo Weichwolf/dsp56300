@@ -21,6 +21,7 @@
 #include <span>
 #include <vector>
 #if !defined(__aarch64__)
+#include <algorithm>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -28,7 +29,8 @@
 
 namespace dsp56300::detail {
 #if defined(__aarch64__)
-std::vector<std::uint8_t> admit_cycles(const std::span<const std::uint8_t> body) {
+std::vector<std::uint8_t> admit_cycles(const std::span<const std::uint8_t> body,
+                                       const std::span<const BlockInstruction> /*operations*/) {
   using namespace a64;
   Code code;
   Label ready;
@@ -80,11 +82,37 @@ std::vector<std::uint8_t> emit_vector(const BlockInstruction &operation) {
 }
 
 #else
-std::vector<std::uint8_t> admit_cycles(const std::span<const std::uint8_t> body) {
+namespace {
+struct CycleCosts {
+  unsigned maximum = instruction_cycle_bound();
+  Word complete = 0;
+};
+
+CycleCosts cycle_costs(const std::span<const BlockInstruction> operations) {
+  if (operations.empty()) { return {}; }
+  unsigned maximum = 1;
+  std::uint64_t total = 0;
+  for (const auto &operation : operations) {
+    const auto cycles = std::max(1U, static_cast<unsigned>(operation.instruction.cycles));
+    maximum = std::max(maximum, cycles);
+    total += cycles;
+  }
+  // A DO endpoint can repeat inside the entry. Fused nested regions use the
+  // default ISA bound because their retained body includes additional code.
+  const bool finite = !at_loop_end(operations.back()) && std::in_range<std::int32_t>(total);
+  return {.maximum = maximum, .complete = finite ? static_cast<Word>(total) : 0U};
+}
+}
+
+std::vector<std::uint8_t> admit_cycles(const std::span<const std::uint8_t> body,
+                                       const std::span<const BlockInstruction> operations) {
   using namespace x64;
   Code code;
   Label ready;
   Label empty;
+  Label partial;
+  Label bounded;
+  const auto costs = cycle_costs(operations);
   constexpr std::array<std::uint8_t, 4> landing{0xf3, 0x0f, 0x1e, 0xfa};
   constexpr unsigned compare = 7;
   constexpr unsigned shift_right = 5;
@@ -102,13 +130,21 @@ std::vector<std::uint8_t> admit_cycles(const std::span<const std::uint8_t> body)
   code.binary(cmp, {.destination = Reg::ax, .source = Reg::dx});
   code.jump_if(Branch::below_equal, empty);
   code.binary(sub, {.destination = Reg::ax, .source = Reg::dx});
-  // Admit a conservative instruction count once per native entry. The final
-  // atomic instruction may cross the deadline; no per-instruction clock test is needed.
-  code.shift(
-      shift_right, Reg::ax, static_cast<unsigned>(std::bit_width(instruction_cycle_bound() - 1U)));
+  // A finite complete block may run when its exact base cost fits. Otherwise
+  // bound admission by this entry's slowest operation, rather than the whole ISA.
+  if (costs.complete != 0) {
+    code.immediate(compare, Reg::ax, costs.complete);
+    code.jump_if(Branch::below, partial);
+    code.constant(Reg::ax, static_cast<Word>(operations.size()));
+    code.jump(bounded);
+    code.bind(partial);
+  }
+  const auto shift = static_cast<unsigned>(std::bit_width(costs.maximum - 1U));
+  if (shift != 0) { code.shift(shift_right, Reg::ax, shift); }
   code.constant(Reg::dx, 1);
   code.binary(cmp, {.destination = Reg::ax, .source = Reg::dx});
   code.move_if(cmov_below, {.destination = Reg::ax, .source = Reg::dx});
+  code.bind(bounded);
   code.load(Reg::cx, Reg::si, offsetof(NativeContext, budget), Width::dword);
   code.binary(cmp, {.destination = Reg::ax, .source = Reg::cx});
   code.move_if(cmov_above, {.destination = Reg::ax, .source = Reg::cx});
