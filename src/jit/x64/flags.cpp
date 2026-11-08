@@ -104,7 +104,8 @@ void BlockEmitter::prepare_value_proof(const BlockInstruction &operation,
     value_proof_.saturation = SaturationProof::none;
   }
   if (range_mode_ == RangeMode::automatic) {
-    value_proof_ = ranges.advance(operation, lowerable(operation), observable_moves(operation));
+    const bool observer = observable_moves(operation) && !direct_memory(operation);
+    value_proof_ = ranges.advance(operation, lowerable(operation), observer);
   }
 }
 

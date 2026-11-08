@@ -9,7 +9,6 @@
 #include "jit/resident.hpp"
 #include "move.hpp"
 #include "region_guards.hpp"
-#include "value_ranges.hpp"
 #include "word_reuse.hpp"
 
 #include <algorithm>
@@ -37,7 +36,6 @@ std::vector<std::uint8_t> BlockEmitter::generate(const std::span<const BlockInst
     // Each interior exit needs real flags and ordinary guarded memory effects.
     region_mode_ = RegionMode::ordinary;
     residency_mode_ = LoopResidency::disabled;
-    range_mode_ = RangeMode::disabled;
     word_mode_ = WordReuseMode::disabled;
     window_mode_ = LoopWindowMode::disabled;
   }

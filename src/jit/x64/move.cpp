@@ -7,6 +7,7 @@
 #include "jit/code.hpp"
 #include "jit/emitter.hpp"
 #include "jit/resident.hpp"
+#include "value_ranges.hpp"
 
 #include <cstdint>
 #include <span>
@@ -22,6 +23,16 @@ constexpr unsigned op_test = 0x85, group_and = 4;
 void BlockEmitter::general_moves(const BlockInstruction &operation) {
   if (repeat_mode_) {
     code_.jump(exits_.at(dirty_accumulators()));
+    return;
+  }
+  if (range_mode_ == RangeMode::automatic && direct_memory(operation)) {
+    // Only guarded RAM continues into code that retains value-range proofs.
+    // A real observer executes the complete operation and leaves this entry.
+    helper(runtime_.execute, operation);
+    code_.binary(op_test, {.destination = Reg::ax, .source = Reg::ax}, Width::dword);
+    code_.jump_if(Branch::equal, exits_[0]);
+    code_.immediate(0, Reg::r15, 1, Width::dword);
+    code_.jump(exits_[0]);
     return;
   }
   helper(runtime_.moves, operation);
