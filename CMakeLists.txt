@@ -42,7 +42,8 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
     src/jit/a64/resident_values.cpp src/jit/a64/resident_memory.cpp)
   set(dsp56300_mac_source src/jit/a64/mac_batch_neon.cpp)
   set(dsp56300_run_source src/jit/a64/run.cpp)
-  set(dsp56300_a64_sources src/native_owner.cpp src/jit/a64/emitter.cpp src/jit/a64/batch.cpp src/jit/a64/flags.cpp
+  set(dsp56300_a64_sources src/native_owner.cpp src/jit/a64/emitter.cpp src/jit/a64/guarded.cpp src/jit/a64/guarded_guards.cpp
+    src/jit/a64/guarded_memory.cpp src/jit/a64/batch.cpp src/jit/a64/flags.cpp
     src/jit/a64/arithmetic.cpp src/jit/a64/unary.cpp src/jit/a64/shifts.cpp src/jit/a64/fault.cpp
     src/jit/a64/conditions.cpp src/jit/a64/control.cpp src/jit/a64/branch.cpp
     src/jit/a64/stack.cpp src/jit/a64/agu.cpp src/jit/a64/selection.cpp
@@ -159,6 +160,18 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   target_link_libraries(dsp56300_memory_api_test PRIVATE dsp56300::core)
   add_test(NAME memory-api COMMAND dsp56300_memory_api_test)
   if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
+    add_executable(dsp56300_native_region_test test/jit/native_region_test.cpp test/support/native/direct_a64.cpp)
+    target_link_libraries(dsp56300_native_region_test PRIVATE dsp56300::core)
+    target_include_directories(dsp56300_native_region_test PRIVATE src src/jit test/support)
+    add_test(NAME native-ram-regions COMMAND dsp56300_native_region_test)
+    add_executable(dsp56300_native_region_constant_test test/jit/native_region_constant_test.cpp test/support/native/direct_a64.cpp)
+    target_link_libraries(dsp56300_native_region_constant_test PRIVATE dsp56300::core)
+    target_include_directories(dsp56300_native_region_constant_test PRIVATE src src/jit test/support)
+    add_test(NAME native-constant-regions COMMAND dsp56300_native_region_constant_test)
+    add_executable(dsp56300_native_accounting_test test/jit/native_accounting_test.cpp test/support/native/direct_a64.cpp)
+    target_link_libraries(dsp56300_native_accounting_test PRIVATE dsp56300::core)
+    target_include_directories(dsp56300_native_accounting_test PRIVATE src src/jit test/support)
+    add_test(NAME native-region-accounting COMMAND dsp56300_native_accounting_test)
     add_executable(dsp56300_a64_arithmetic_test test/jit/a64_arithmetic_test.cpp)
     target_include_directories(dsp56300_a64_arithmetic_test PRIVATE src src/jit test/support)
     target_link_libraries(dsp56300_a64_arithmetic_test PRIVATE dsp56300::core)

@@ -9,7 +9,6 @@
 #include "jit/a64/emitter.hpp"
 
 #include <array>
-#include <cstdint>
 #include <stdexcept>
 
 namespace dsp56300::detail::a64 {
@@ -52,7 +51,7 @@ bool shifting(const Instruction &instruction) {
 void Emitter::source(const Reg value, const unsigned selector, const bool destination_b) {
   unsigned index = destination_b ? 0U : 1U;
   if (selector >= 2) { index = selector < 4 ? selector : (selector & 1U) + 2; }
-  code_.load(value, Reg::sp, index * sizeof(std::uint64_t), Access::doubleword);
+  read_old(value, index);
   if (selector >= 2 && selector < 4) {
     code_.extract(value, value, 0, double_word_bits, Width::x64, true);
     code_.shift(Shift::left, value, value, padding_bits, Width::x64);
@@ -73,7 +72,7 @@ void Emitter::arithmetic(const BlockInstruction &operation) {
   const bool subtract = kind == 4 || kind == 5;
   const bool compare = kind == 5 && !with_carry;
   const bool destination_b = (opcode & 8U) != 0;
-  code_.load(Reg::x0, Reg::sp, destination_b ? sizeof(std::uint64_t) : 0, Access::doubleword);
+  read_old(Reg::x0, destination_b ? 1U : 0U);
   if (immediate) {
     const auto value =
         instruction.words == 2 ? instruction.extension : (opcode >> 8) & six_bit_mask;
@@ -104,7 +103,7 @@ void Emitter::arithmetic(const BlockInstruction &operation) {
 
 void Emitter::product_word(const Reg value, const unsigned selector) {
   const auto bank = selector < 2 ? 2U : 3U;
-  code_.load(value, Reg::sp, bank * sizeof(std::uint64_t), Access::doubleword);
+  read_old(value, bank);
   code_.extract(value, value, (selector & 1U) == 0 ? 0U : word_bits, word_bits, Width::x64, true);
 }
 
@@ -119,8 +118,7 @@ void Emitter::multiply(const BlockInstruction &operation) {
   code_.shift(Shift::left, Reg::x0, Reg::x0, padding_bits + 1, Width::x64);
   if ((opcode & 4U) != 0) { code_.alu(Alu::subtract, Reg::x0, Reg::zr, Reg::x0, Width::x64); }
   if ((opcode & 2U) != 0) {
-    code_.load(
-        Reg::x1, Reg::sp, (opcode & 8U) != 0 ? sizeof(std::uint64_t) : 0, Access::doubleword);
+    read_old(Reg::x1, (opcode & 8U) != 0 ? 1U : 0U);
     code_.alu(Alu::add_flags, Reg::x0, Reg::x0, Reg::x1, Width::x64);
     code_.set(Reg::x3, Condition::overflow);
   } else {

@@ -105,11 +105,15 @@ void Emitter::update_address(const BlockInstruction &operation) {
 }
 
 void Emitter::effective(const BlockInstruction &operation, const AddressForm form) {
+  if (guarded()) {
+    guarded_effective(form);
+    return;
+  }
   const auto offset = form.index * sizeof(Word);
   code_.load(Reg::x0, cpu, offsetof(Registers, r) + offset);
   if (form.mode == 4) { return; }
   if (form.mode == 6) {
-    code_.constant(Reg::x0, form.extra);
+    code_.constant(Reg::x0, form.extra & word_mask);
     if (form.index != 0 && form.index != 4) {
       code_.constant(Reg::x0, form.index);
       fault(operation, FaultKind::invalid_instruction, Reg::x0);

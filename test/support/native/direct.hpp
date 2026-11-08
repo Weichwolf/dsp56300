@@ -3,9 +3,11 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <span>
 
 namespace dsp56300::detail {
+class ExecutableArena;
 struct Cpu;
 struct NativeContext;
 }
@@ -24,7 +26,12 @@ public:
                                     detail::NativeContext &context) const noexcept;
 
 private:
+#if defined(__aarch64__)
+  std::unique_ptr<detail::ExecutableArena> arena_;
+  const void *entry_ = nullptr;
+#else
   void *mapping_ = nullptr;
   std::size_t size_ = 0;
+#endif
 };
 } // namespace dsp56300::test::native

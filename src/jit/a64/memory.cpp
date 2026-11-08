@@ -38,6 +38,10 @@ void Emitter::mark_program_written() {
 }
 
 void Emitter::memory(const BlockInstruction &operation, const BusOperand operand) {
+  if (guarded()) {
+    guarded_memory(operand);
+    return;
+  }
   Label mapped;
   Label owned;
   Label invalid;

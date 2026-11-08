@@ -26,7 +26,7 @@ void Emitter::unary(const BlockInstruction &operation) {
     logic(operation);
     return;
   }
-  code_.load(Reg::x0, Reg::sp, destination_b ? sizeof(std::uint64_t) : 0, Access::doubleword);
+  read_old(Reg::x0, destination_b ? 1U : 0U);
   code_.constant(Reg::x3, 0);
   switch (kind) {
     case alu_clear: code_.constant(Reg::x0, 0); break;
@@ -52,7 +52,7 @@ void Emitter::logic(const BlockInstruction &operation) {
   const auto opcode = instruction.opcode;
   const auto kind = opcode & 7U;
   const bool immediate = instruction.operation == Operation::immediate_alu;
-  code_.load(Reg::x0, Reg::sp, (opcode & 8U) != 0 ? sizeof(std::uint64_t) : 0, Access::doubleword);
+  read_old(Reg::x0, (opcode & 8U) != 0 ? 1U : 0U);
   code_.extract(Reg::x0, Reg::x0, main_shift, word_bits, Width::x64);
   if (!immediate && (opcode & alu_mask) == alu_complement) {
     code_.constant(Reg::x17, word_mask);

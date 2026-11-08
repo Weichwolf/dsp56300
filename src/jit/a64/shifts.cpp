@@ -34,8 +34,7 @@ void Emitter::shift_count(const BlockInstruction &operation, const bool arithmet
     }
     constexpr std::array banks{0U, 1U, 2U, 3U, 2U, 3U};
     constexpr std::array positions{main_shift, main_shift, 0U, 0U, word_bits, word_bits};
-    code_.load(
-        Reg::x1, Reg::sp, banks.at(selector - 2) * sizeof(std::uint64_t), Access::doubleword);
+    read_old(Reg::x1, banks.at(selector - 2));
     code_.extract(Reg::x1, Reg::x1, positions.at(selector - 2), word_bits, Width::x64);
     mask(Reg::x1, Reg::x1, count_mask);
   }
@@ -134,7 +133,7 @@ void Emitter::shift(const BlockInstruction &operation) {
   }
   if (arithmetic && !parallel) { source_b = (opcode & (1U << (immediate ? 7 : 4))) != 0; }
   shift_count(operation, arithmetic);
-  code_.load(Reg::x0, Reg::sp, source_b ? sizeof(std::uint64_t) : 0, Access::doubleword);
+  read_old(Reg::x0, source_b ? 1U : 0U);
   const ShiftOperation control{
       .target = destination_b ? accumulator_b : accumulator_a, .left = left, .saturate = parallel};
   if (arithmetic) {
