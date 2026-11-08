@@ -99,8 +99,9 @@ NativeMoves plan_moves(const Instruction &instruction) {
       ((opcode >> 16) & 7) | ((opcode >> high_register_shift) & high_register_mask);
   const bool load = (opcode & (Word{1} << 15)) != 0;
   const bool partial_store = !load && reg >= a0_register && reg <= b1_register;
+  const bool address_register = reg >= r_register_base && reg < m_register_base;
   if ((reg < x0_register || reg > y1_register) && reg != a_register && reg != b_register) {
-    if (!partial_store) { return result; }
+    if (!partial_store && !address_register) { return result; }
   }
   const bool effective = (opcode & (Word{1} << 14)) != 0;
   const NativeMove move{

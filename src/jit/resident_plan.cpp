@@ -21,6 +21,9 @@ bool transfer(ResidentPlan &region,
               const NativeMove &move,
               const JitMemory &memory,
               const std::array<Word, agu_registers> &modifiers) {
+  // An R/N load can replace a later cursor/stride inside this region. Keep
+  // ordinary per-access guards until its loaded value has a region proof.
+  if (move.load && move.reg >= r_register_base) { return false; }
   if (!move.load && memory.aliases_program) { return false; }
   if (move.immediate()) { return true; }
   if (memory.data == nullptr) { return false; }

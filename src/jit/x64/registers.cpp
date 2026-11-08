@@ -20,6 +20,12 @@ constexpr unsigned shift_left = 4, shift_right = 5, shift_arithmetic = 7;
 constexpr unsigned aligned_growth_shift = 53, low_word_shift = 40;
 
 std::size_t bank_offset(const unsigned reg) {
+  if (reg >= r_register_base && reg < m_register_base) {
+    const bool offset = reg >= n_register_base;
+    const auto index = reg - (offset ? n_register_base : r_register_base);
+    return offsetof(Cpu, reg) + (offset ? offsetof(Registers, n) : offsetof(Registers, r)) +
+           (index * sizeof(Word));
+  }
   if (reg >= a_register) {
     return offsetof(Cpu, reg) +
            (reg == a_register ? offsetof(Registers, a) : offsetof(Registers, b));
@@ -31,6 +37,10 @@ std::size_t bank_offset(const unsigned reg) {
 
 void BlockEmitter::move_read_register(const Reg value, const NativeMove &move, const Word mode) {
   const auto reg = move.reg;
+  if (reg >= r_register_base && reg < m_register_base) {
+    code_.load(value, Reg::r12, bank_offset(reg), Width::dword);
+    return;
+  }
   if (reg >= a0_register && reg <= b1_register) {
     constexpr std::array shifts{padding_bits, accumulator_bits, main_shift};
     current_value(value, reg & 1U);
@@ -99,6 +109,10 @@ void BlockEmitter::move_read_register(const Reg value, const NativeMove &move, c
 }
 
 void BlockEmitter::move_write_register(const Reg value, const unsigned reg) {
+  if (reg >= r_register_base && reg < m_register_base) {
+    code_.store(Reg::r12, bank_offset(reg), value, Width::dword);
+    return;
+  }
   if (reg >= a_register) {
     code_.mov({.destination = Reg::ax, .source = value});
     code_.shift(shift_left, Reg::ax, low_word_shift);

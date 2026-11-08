@@ -18,6 +18,7 @@ constexpr Word operation_mask = 0xf7;
 constexpr Word right_shift_code = 0x22, complement_code = 0x17;
 
 Word register_bank(const unsigned reg) {
+  if (reg >= r_register_base) { return 0; }
   if (reg >= a0_register && reg <= b1_register) {
     return bank_bit((reg & 1U) == 0 ? ValueBank::a : ValueBank::b);
   }
