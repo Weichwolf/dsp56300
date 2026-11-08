@@ -44,6 +44,7 @@ bool reads_carry(const BlockInstruction &operation) {
 }
 
 Word BlockEmitter::written_flags(const BlockInstruction &operation) {
+  if (is_peripheral_register(operation)) { return 0; }
   if (is_bits(operation)) {
     return operation.instruction.operation == Operation::bit_memory ? carry : 0U;
   }

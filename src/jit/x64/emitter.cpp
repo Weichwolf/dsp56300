@@ -120,6 +120,7 @@ bool BlockEmitter::has_moves(const BlockInstruction &operation) {
 }
 
 bool BlockEmitter::observable_moves(const BlockInstruction &operation) const {
+  if (is_peripheral_register(operation)) { return true; }
   return region_mode_ != RegionMode::guarded && has_moves(operation) &&
          !plan_register_move(operation.instruction).valid() &&
          !plan_address_immediate(operation.instruction).valid();
@@ -135,7 +136,9 @@ bool BlockEmitter::lowerable(const BlockInstruction &operation) {
       ((operation.mode & arithmetic_saturation) != 0 && !saturation_supported(operation))) {
     return false;
   }
-  if (is_loop_setup(operation) || is_bits(operation)) { return true; }
+  if (is_loop_setup(operation) || is_bits(operation) || is_peripheral_register(operation)) {
+    return true;
+  }
   if (decoded.operation == Operation::immediate_alu) { return is_addition(operation); }
   if (decoded.operation != Operation::parallel) { return false; }
   const auto opcode = decoded.opcode;
@@ -444,7 +447,8 @@ void BlockEmitter::retire(const BlockInstruction &operation, const bool publish)
 
 std::vector<std::uint8_t> BlockEmitter::generate_repeat(const BlockInstruction &operation) {
   if (operation.loop_address != inactive_loop || operation.instruction.words != 1 ||
-      !repeatable(operation.instruction.operation) || !lowerable(operation)) {
+      !repeatable(operation.instruction.operation) || !lowerable(operation) ||
+      is_peripheral_register(operation)) {
     return {};
   }
   repeat_mode_ = true;

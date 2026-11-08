@@ -98,7 +98,7 @@ bool BlockEmitter::admit_packed_retirement(
   }
   for (const auto &operation : operations) {
     if (!lowerable(operation) || is_control_flow(operation) || is_bits(operation) ||
-        operation.instruction.cycles == 0 ||
+        is_peripheral_register(operation) || operation.instruction.cycles == 0 ||
         operation.instruction.operation == Operation::loop_immediate) {
       return false;
     }

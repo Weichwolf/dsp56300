@@ -67,6 +67,7 @@ add_library(dsp56300_core STATIC
   src/jit/x64/addition.cpp src/jit/x64/logic.cpp
   src/jit/x64/saturation.cpp
   src/jit/x64/loop.cpp src/jit/x64/control.cpp src/jit/x64/bits.cpp
+  src/jit/x64/io.cpp src/jit/x64/peripheral.cpp
   src/jit/x64/flags.cpp
   src/jit/move.cpp src/jit/resident_plan.cpp src/jit/dataflow.cpp src/jit/value_ranges.cpp src/jit/word_reuse.cpp src/jit/x64/move.cpp src/jit/x64/memory_windows.cpp
   src/jit/x64/resident_emit.cpp
@@ -264,6 +265,10 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
     target_include_directories(dsp56300_native_bit_io_test PRIVATE src src/jit test/support)
     target_link_libraries(dsp56300_native_bit_io_test PRIVATE dsp56300::core dsp56300_codegen_observer)
     add_test(NAME native-bit-io COMMAND dsp56300_native_bit_io_test)
+    add_executable(dsp56300_native_peripheral_test test/jit/native_peripheral_test.cpp)
+    target_include_directories(dsp56300_native_peripheral_test PRIVATE src src/jit test/support)
+    target_link_libraries(dsp56300_native_peripheral_test PRIVATE dsp56300::core)
+    add_test(NAME native-peripheral-registers COMMAND dsp56300_native_peripheral_test)
     add_executable(dsp56300_native_control_test test/jit/native_control_test.cpp)
     target_include_directories(dsp56300_native_control_test PRIVATE src src/jit test/support)
     target_link_libraries(dsp56300_native_control_test PRIVATE dsp56300::core dsp56300_codegen_observer)

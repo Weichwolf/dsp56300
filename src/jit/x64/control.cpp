@@ -155,6 +155,10 @@ void BlockEmitter::control_pop() {
 
 bool BlockEmitter::boundary_operation(const BlockInstruction &operation, const bool publish) {
   if (bits(operation, publish)) { return true; }
+  if (is_peripheral_register(operation)) {
+    peripheral_register(operation);
+    return true;
+  }
   if (is_loop_setup(operation)) {
     loop_setup(operation);
     return true;

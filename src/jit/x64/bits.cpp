@@ -7,28 +7,30 @@
 #include "jit.hpp"
 #include "jit/code.hpp"
 #include "jit/emitter.hpp"
+#include "jit/x64/io.hpp"
 #include "move.hpp"
 
 #include <array>
 #include <cstddef>
-#include <cstdint>
 
 namespace dsp56300::detail {
 namespace {
 using x64::Branch;
 using x64::Reg;
 using x64::Width;
-constexpr unsigned group_add = 0, group_or = 1, group_and = 4, group_sub = 5, group_xor = 6,
-                   group_cmp = 7, shift_right = 5;
+constexpr unsigned group_or = 1, group_and = 4, group_xor = 6, group_cmp = 7, shift_right = 5;
 constexpr unsigned op_test = 0x85;
 constexpr Word bit_mask = 31;
 constexpr auto pc_offset = offsetof(Cpu, reg) + offsetof(Registers, pc);
-constexpr std::array<std::uint8_t, 2> call_ax{0xff, 0xd0};
 
-struct PortExits {
-  x64::Label &fallback;
-  x64::Label &failure;
-};
+BusAction native_bit_action(const Instruction &instruction) {
+  constexpr std::array actions{
+      BusAction::bit_test, BusAction::bit_clear, BusAction::bit_set, BusAction::bit_change};
+  const auto action = instruction.operation == Operation::bit_memory
+                          ? bit_action(instruction.opcode)
+                          : BitAction::test;
+  return actions[static_cast<unsigned>(action)];
+}
 
 NativeMove bit_move(const Instruction &instruction) {
   const auto operand = bit_operand(instruction);
@@ -47,78 +49,6 @@ NativeMove bit_move(const Instruction &instruction) {
   return {.address = form, .space = operand.space, .load = true};
 }
 
-// Emitter bit boundaries have already published all preceding state. This bridge
-// performs the actual I/O callback only; the generated code retires the opcode.
-void port_access(x64::Code &code,
-                 const BlockInstruction &operation,
-                 const Space space,
-                 const PortExits exits) {
-  constexpr auto bus = offsetof(NativeContext, bus);
-  constexpr std::size_t stack_alignment = 16;
-  constexpr auto allocation =
-      ((sizeof(NativeAccess) + stack_alignment - 1) / stack_alignment) * stack_alignment;
-  static_assert(sizeof(Fault) % sizeof(std::uint64_t) == 0);
-  const auto &instruction = operation.instruction;
-  const auto action = instruction.operation == Operation::bit_memory
-                          ? bit_action(instruction.opcode)
-                          : BitAction::test;
-  constexpr std::array actions{
-      BusAction::bit_test, BusAction::bit_clear, BusAction::bit_set, BusAction::bit_change};
-  code.load(Reg::ax, Reg::r13, bus + offsetof(NativeBus, access));
-  code.binary(op_test, {.destination = Reg::ax, .source = Reg::ax});
-  code.jump_if(Branch::equal, exits.fallback);
-  code.immediate(group_sub, Reg::sp, allocation);
-  for (std::size_t offset = 0; offset < sizeof(Fault); offset += sizeof(std::uint64_t)) {
-    code.store_constant(Reg::sp, offsetof(NativeAccess, failure) + offset, Width::qword, 0);
-  }
-  code.store(Reg::sp,
-             offsetof(NativeAccess, address),
-             space == Space::x ? Reg::cx : Reg::r8,
-             Width::dword);
-  code.store_constant(
-      Reg::sp, offsetof(NativeAccess, value), Width::dword, instruction.opcode & bit_mask);
-  code.store_constant(Reg::sp, offsetof(NativeAccess, pc), Width::dword, operation.pc);
-  code.store_constant(
-      Reg::sp, offsetof(NativeAccess, space), Width::byte, static_cast<Word>(space));
-  code.store_constant(Reg::sp,
-                      offsetof(NativeAccess, action),
-                      Width::byte,
-                      static_cast<Word>(actions[static_cast<unsigned>(action)]));
-  code.store_constant(
-      Reg::r12, pc_offset, Width::dword, (operation.pc + instruction.words) & word_mask);
-  code.store_constant(Reg::r12, offsetof(Cpu, interrupt_inhibited), Width::byte, 0);
-  code.store_constant(Reg::r13,
-                      offsetof(NativeContext, boundary),
-                      Width::byte,
-                      static_cast<Word>(NativeBoundary::owner));
-  code.load(Reg::di, Reg::r13, bus + offsetof(NativeBus, owner));
-  code.mov({.destination = Reg::si, .source = Reg::sp});
-  code.raw(call_ax); // CALL RAX with an aligned, typed request.
-  x64::Label accepted;
-  x64::Label ready;
-  code.memory_immediate(
-      group_cmp, Reg::sp, offsetof(NativeAccess, failure) + offsetof(Fault, kind), Width::byte, 0);
-  code.jump_if(Branch::equal, accepted);
-  for (std::size_t offset = 0; offset < sizeof(Fault); offset += sizeof(std::uint64_t)) {
-    code.load(Reg::ax, Reg::sp, offsetof(NativeAccess, failure) + offset);
-    code.store(Reg::r13, offsetof(NativeContext, failure) + offset, Reg::ax);
-  }
-  code.immediate(group_add, Reg::sp, allocation);
-  code.jump(exits.failure);
-  code.bind(accepted);
-  code.load(Reg::dx, Reg::sp, offsetof(NativeAccess, value), Width::dword);
-  code.immediate(group_add, Reg::sp, allocation);
-  code.load(Reg::ax, Reg::r13, offsetof(NativeContext, exit_requested));
-  code.binary(op_test, {.destination = Reg::ax, .source = Reg::ax});
-  code.jump_if(Branch::equal, ready);
-  code.memory_immediate(group_cmp, Reg::ax, 0, Width::byte, 0);
-  code.jump_if(Branch::not_equal, ready);
-  code.store_constant(Reg::r13,
-                      offsetof(NativeContext, boundary),
-                      Width::byte,
-                      static_cast<Word>(NativeBoundary::none));
-  code.bind(ready);
-}
 }
 
 bool BlockEmitter::is_bits(const BlockInstruction &operation) {
@@ -188,19 +118,6 @@ void BlockEmitter::bit_complete(const BlockInstruction &operation, const bool pu
   code_.jump(exits_[0]);
 }
 
-void BlockEmitter::bit_slow(const BlockInstruction &operation) {
-  if (repeat_mode_) {
-    code_.jump(exits_[0]);
-    return;
-  }
-  helper(runtime_.execute, operation);
-  code_.binary(op_test, {.destination = Reg::ax, .source = Reg::ax}, Width::dword);
-  code_.jump_if(Branch::equal, exits_[0]);
-  constexpr std::array<std::uint8_t, 3> increment_retired{0x41, 0xff, 0xc7};
-  code_.raw(increment_retired);
-  code_.jump(exits_[0]);
-}
-
 bool BlockEmitter::bits(const BlockInstruction &operation, const bool publish) {
   if (!is_bits(operation)) { return false; }
   // A failed guard delegates the complete instruction. Commit preceding cached
@@ -240,7 +157,13 @@ bool BlockEmitter::bits(const BlockInstruction &operation, const bool publish) {
           group_cmp, move.space == Space::x ? Reg::cx : Reg::r8, io_begin, Width::dword);
       code_.jump_if(Branch::below, fallback);
     }
-    port_access(code_, operation, move.space, {.fallback = fallback, .failure = exits_[0]});
+    code_.constant(Reg::dx, operation.instruction.opcode & bit_mask);
+    native_io_access(code_,
+                     operation,
+                     {.space = move.space,
+                      .action = native_bit_action(operation.instruction),
+                      .address = move.space == Space::x ? Reg::cx : Reg::r8},
+                     {.fallback = fallback, .failure = exits_[0]});
     bit_complete(operation, publish);
     if (operation.instruction.operation == Operation::bit_memory) {
       code_.memory_immediate(
@@ -250,7 +173,7 @@ bool BlockEmitter::bits(const BlockInstruction &operation, const bool publish) {
     code_.jump(done);
   }
   code_.bind(fallback);
-  bit_slow(operation);
+  instruction_fallback(operation);
   code_.bind(done);
   return true;
 }
