@@ -404,6 +404,27 @@ void final_frames(const native::Direct &code, Memory &memory, const Shape shape)
       {.progress = {}, .r1 = ram_words - 2, .lc = 3, .target = shape.first, .budget = 3 * size});
 }
 
+void continuing_windows(const native::Direct &code, Memory &memory, const Shape shape) {
+  const auto size = static_cast<Word>(steps(shape).size());
+  for (const Word lc : {31U, word_mask}) {
+    for (const Word r1 : {0U, 97U, 127U}) {
+      for (const Word budget : {(29 * size) - 1, 30 * size, (31 * size) + 1}) {
+        for (const auto progress : progress_seeds) {
+          direct_case(code,
+                      memory,
+                      shape,
+                      {.progress = progress,
+                       .flags = status_byte,
+                       .r1 = r1,
+                       .lc = lc,
+                       .target = shape.first,
+                       .budget = budget});
+        }
+      }
+    }
+  }
+}
+
 void exit_cases(const native::Direct &code, Memory &memory, const Shape shape) {
   const auto size = static_cast<Word>(steps(shape).size());
   const std::array budgets{
@@ -480,7 +501,10 @@ void direct_shape(const Shape shape) {
   }
   if (shape.padding == 0) {
     exit_cases(code, memory, shape);
-    if (shape.loop) { final_frames(code, memory, shape); }
+    if (shape.loop) {
+      final_frames(code, memory, shape);
+      continuing_windows(code, memory, shape);
+    }
   }
 }
 
