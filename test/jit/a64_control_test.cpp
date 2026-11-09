@@ -283,9 +283,7 @@ void control_bytes() {
           a64::Expected expected{.reg = initial, .cycles = 3};
           byte_model::apply(expected.reg, point);
           ++expected.reg.pc;
-          if (field == byte_model::Field::mr) {
-            expected.boundary = detail::NativeBoundary::context;
-          }
+          if (field == byte_model::Field::mr) { expected.boundary = detail::NativeBoundary::owner; }
           a64::Invocation invocation(initial);
           invocation.run(program);
           invocation.expect(expected, input.opcode);
@@ -477,7 +475,7 @@ void context_boundaries() {
   ++after.pc;
   a64::Invocation mode_invocation(before);
   mode_invocation.run(mode_program, 2);
-  mode_invocation.expect({.reg = after, .cycles = 3, .boundary = detail::NativeBoundary::context},
+  mode_invocation.expect({.reg = after, .cycles = 3, .boundary = detail::NativeBoundary::owner},
                          mode_steps.front().opcode);
   const std::array return_steps{a64::Instruction{.opcode = return_model::rti, .cycles = 3},
                                 a64::Instruction{.opcode = clear, .pc = start + 1}};
