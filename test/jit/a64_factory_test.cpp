@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <exception>
 #include <iostream>
+#include <limits>
 #include <span>
 #include <vector>
 
@@ -262,6 +263,65 @@ void versions() {
   for (const auto &image : images) { preserved(image); }
 }
 
+void first_deadlines() {
+  constexpr Word body = 193;
+  constexpr Word length = body + 1;
+  constexpr Word cycles = body + 3;
+  auto initial = seed(status_byte);
+  initial.instructions = 0;
+  initial.cycles = 0;
+  for (const Word deadline : {1U, 7U, body - 1, body, body + 1, body + 2, cycles}) {
+    a64::Machine machine(initial);
+    std::ranges::fill(std::span(machine.program()).subspan(start, body), 0U);
+    machine.program()[start + body] = jump | start;
+    const auto before = codegen::publications();
+    machine.jit().set_cycle_deadline(deadline);
+    auto expected = initial;
+    const auto nops = std::min(deadline, body);
+    for (Word index = 0; index < nops; ++index) { ordinary(expected); }
+    const bool branched = deadline > body;
+    if (branched) {
+      expected.reg.pc = start;
+      loop_model::retire(expected, 3);
+    }
+    const auto retired = machine.jit().run(length * 2);
+    if (retired != nops + (branched ? 1U : 0U)) {
+      std::cerr << "first-deadline=" << deadline << " retired=" << retired
+                << " expected=" << nops + (branched ? 1U : 0U) << '\n';
+    }
+    require(
+        retired == nops + (branched ? 1U : 0U),
+        "First translation admits the real cost prefix, including one atomic deadline crossing");
+    machine.expect(expected);
+    require(codegen::publications().count == before.count + 1,
+            "A cold deadline does not compile successively shorter copies of its own region");
+    machine.initialize(initial);
+    machine.jit().set_cycle_deadline(std::numeric_limits<std::uint64_t>::max());
+    expected = initial;
+    for (unsigned pass = 0; pass < 2; ++pass) {
+      for (Word index = 0; index < body; ++index) { ordinary(expected); }
+      expected.reg.pc = start;
+      loop_model::retire(expected, 3);
+    }
+    require(machine.jit().run(length * 2) == length * 2,
+            "Warm entry admission retains complete native backedge execution");
+    machine.expect(expected);
+    machine.initialize(initial);
+    machine.jit().reset();
+    machine.jit().set_cycle_deadline(cycles);
+    expected = initial;
+    for (Word index = 0; index < body; ++index) { ordinary(expected); }
+    expected.reg.pc = start;
+    loop_model::retire(expected, 3);
+    require(machine.jit().run(length * 2) == length,
+            "Reset lookup can use retained complete code with a fresh exact deadline grant");
+    machine.expect(expected);
+    require(
+        codegen::publications().count == before.count + 1,
+        "Retained code and native loop behavior survive deadline, reset and lookup-index changes");
+  }
+}
+
 void captured_versions() {
   const auto initial = seed(status_byte);
   a64::Machine machine(initial);
@@ -431,6 +491,7 @@ int main() {
     internal_backedges();
     semantic_boundaries();
     versions();
+    first_deadlines();
     captured_versions();
     repeat_versions();
     entry_kinds();

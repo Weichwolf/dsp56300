@@ -52,7 +52,8 @@ CycleCosts cycle_costs(const std::span<const BlockInstruction> operations) {
 
 #if defined(__aarch64__)
 std::vector<std::uint8_t> admit_cycles(const std::span<const std::uint8_t> body,
-                                       const std::span<const BlockInstruction> operations) {
+                                       const std::span<const BlockInstruction> operations,
+                                       std::size_t *body_offset) {
   using namespace a64;
   Code code;
   Label ready;
@@ -75,6 +76,7 @@ std::vector<std::uint8_t> admit_cycles(const std::span<const std::uint8_t> body,
   code.select(Reg::x9, Reg::x10, Reg::x9, Condition::above, Width::x64);
   code.store(Reg::x9, Reg::x1, offsetof(NativeContext, budget));
   code.bind(ready);
+  if (body_offset != nullptr) { *body_offset = code.bytes().size(); }
   code.append(body);
   code.bind(empty);
   code.constant(Reg::x0, 0, Width::w32);
@@ -107,7 +109,8 @@ std::vector<std::uint8_t> emit_vector(const BlockInstruction &operation) {
 
 #else
 std::vector<std::uint8_t> admit_cycles(const std::span<const std::uint8_t> body,
-                                       const std::span<const BlockInstruction> operations) {
+                                       const std::span<const BlockInstruction> operations,
+                                       std::size_t *body_offset) {
   using namespace x64;
   Code code;
   Label ready;
@@ -153,6 +156,7 @@ std::vector<std::uint8_t> admit_cycles(const std::span<const std::uint8_t> body,
   code.store(Reg::si, offsetof(NativeContext, budget), Reg::ax, Width::dword);
   code.bind(ready);
   code.align_entry();
+  if (body_offset != nullptr) { *body_offset = code.bytes().size(); }
   code.raw(body);
   code.bind(empty);
   code.binary(xor_register, {.destination = Reg::ax, .source = Reg::ax}, Width::dword);

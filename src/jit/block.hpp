@@ -40,7 +40,9 @@ emit_repeat(const BlockInstruction &operation,
 [[nodiscard]] std::vector<std::uint8_t> emit_vector(const BlockInstruction &operation);
 #endif
 [[nodiscard]] std::vector<std::uint8_t>
-admit_cycles(std::span<const std::uint8_t> body, std::span<const BlockInstruction> operations = {});
+admit_cycles(std::span<const std::uint8_t> body,
+             std::span<const BlockInstruction> operations = {},
+             std::size_t *body_offset = nullptr);
 [[nodiscard]] std::uint32_t
 enter_block(const void *entry, Cpu &cpu, NativeContext &context) noexcept;
 [[nodiscard]] std::uint32_t enter_blocks(const void *entry,
