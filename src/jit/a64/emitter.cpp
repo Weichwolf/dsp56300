@@ -63,7 +63,7 @@ void Emitter::read_old(const Reg result, const unsigned bank) {
 }
 
 void Emitter::restore() {
-  for (std::size_t pair = 0; pair < Frame::pairs; ++pair) { code_.pop(Reg::zr, Reg::x17); }
+  code_.add(Reg::sp, Reg::sp, Frame::pairs * 2 * sizeof(std::uint64_t), Width::x64);
   for (const auto reg : std::views::reverse(saved)) {
     code_.pop(reg, static_cast<Reg>(static_cast<unsigned>(reg) + 1));
   }
