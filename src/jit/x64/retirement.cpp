@@ -50,8 +50,20 @@ void BlockEmitter::retire_progress(const BlockInstruction &operation) {
     return;
   }
   if (packed_retirement_) {
-    if (retirement_helpers_) { code_.packed(Packed::add_qword, Xmm::x0, Xmm::x1); }
-    if (operation.instruction.cycles > 1) {
+    if (retirement_helpers_) {
+      if (operation.instruction.cycles == 1) {
+        code_.packed(Packed::add_qword, Xmm::x0, Xmm::x1);
+      } else {
+        // Keep both increments together instead of updating cycles before an
+        // overlapping full-width progress load at the next owner boundary.
+        constexpr unsigned cycle_shift = 32;
+        const auto increments = (std::uint64_t{operation.instruction.cycles} << cycle_shift) | 1;
+        code_.constant(Reg::ax, increments);
+        code_.packed_from<64>(Xmm::x2, Reg::ax);
+        code_.vector_unary(x64::VectorOp::extend_dword, Xmm::x2, Xmm::x2, false);
+        code_.packed(Packed::add_qword, Xmm::x0, Xmm::x2);
+      }
+    } else if (operation.instruction.cycles > 1) {
       code_.memory_immediate(group_add,
                              Reg::r12,
                              offsetof(Cpu, cycles),

@@ -4,6 +4,7 @@
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
+#include "isa.hpp"
 #include "jit.hpp"
 #include "jit/code.hpp"
 #include "jit/emitter.hpp"
@@ -309,6 +310,77 @@ void nop_modes(const Word mode, const bool mixed) {
   for (const auto first : {start, word_mask - 4}) {
     for (const auto bounds : {detail::ExecutionBounds::whole, detail::ExecutionBounds::precise}) {
       nop_shape({.mode = mode, .first = first, .mixed = mixed, .bounds = bounds});
+    }
+  }
+}
+
+std::uint32_t unexpected_helper(void *owner,
+                                const detail::BlockInstruction * /*operation*/) noexcept {
+  ++*static_cast<unsigned *>(owner);
+  return 0;
+}
+
+void mixed_cycle_prefixes() {
+  constexpr Word register_field = Word{7} << 16;
+  constexpr Word load = (static_cast<Word>(isa::Opcode::move_x_effective) & ~register_field) |
+                        (4U << 16) | (4U << 11) | 0x8000U;
+  const std::array body{Step{.opcode = load},
+                        Step{.opcode = static_cast<Word>(isa::Opcode::add_immediate_long),
+                             .extension = datum,
+                             .immediate = true},
+                        Step{.opcode = isa::nop.front()},
+                        Step{.opcode = static_cast<Word>(isa::Opcode::rnd_a)}};
+  constexpr std::array seeds{
+      Progress{},
+      Progress{.instructions = boundary32 - 1, .estimated_cycles = boundary32 - 2},
+      Progress{.instructions = maximum - 2, .estimated_cycles = boundary63 - 1},
+      Progress{.instructions = boundary63 - 1, .estimated_cycles = maximum - 3}};
+  std::array<Word, 16> ram{};
+  ram[4] = datum;
+  const auto contents = ram;
+  std::array<std::uint64_t, 4> latched{};
+  unsigned calls = 0;
+  const detail::JitRuntime runtime{.owner = &calls,
+                                   .latched = &latched,
+                                   .execute = unexpected_helper,
+                                   .moves = unexpected_helper,
+                                   .memory = {{{.data = ram.data(), .words = ram.size()}, {}}}};
+  for (const auto mode : modes) {
+    const auto ops = operations(body, mode, start, false);
+    detail::BlockEmitter emitter(runtime);
+    const native::Direct code(emitter.generate(ops, detail::ExecutionBounds::precise));
+    for (const auto base : seeds) {
+      for (Word prefix = 0; prefix <= body.size(); ++prefix) {
+        auto initial = register_model::seed(mode | flag_s | flag_l | flag_c);
+        initial.r[0] = 4;
+        auto expected = initial;
+        std::uint64_t cycles = 0;
+        for (Word index = 0; index < prefix; ++index) {
+          if (index == 0) {
+            register_model::write(expected, 4, datum);
+            ++expected.pc;
+          } else {
+            arithmetic(expected, body[index]);
+          }
+          cycles += words(body[index]);
+        }
+        detail::Cpu cpu;
+        cpu.reg = initial;
+        cpu.reg.a <<= detail::padding_bits;
+        cpu.reg.b <<= detail::padding_bits;
+        cpu.instructions = base.instructions;
+        cpu.cycles = base.estimated_cycles;
+        detail::NativeContext context{.runtime = runtime, .budget = prefix};
+        const auto retired = code.enter(cpu, context);
+        cpu.reg.a >>= detail::padding_bits;
+        cpu.reg.b >>= detail::padding_bits;
+        require(retired == prefix && cpu.reg == expected &&
+                    cpu.instructions == modulo_sum(base.instructions, prefix) &&
+                    cpu.cycles == modulo_sum(base.estimated_cycles, cycles) && ram == contents &&
+                    calls == 0,
+                "Mixed-cost native RAM prefixes preserve independent full state and both wrapping "
+                "clocks");
+      }
     }
   }
 }
@@ -626,6 +698,7 @@ int main() {
     dsp56300::test::low32_packing();
     dsp56300::test::packed_copies();
     dsp56300::test::counter_lanes();
+    dsp56300::test::mixed_cycle_prefixes();
     dsp56300::test::admission_guards();
     for (const auto mode : dsp56300::test::modes) {
       dsp56300::test::nop_modes(mode, false);
