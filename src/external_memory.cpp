@@ -5,7 +5,7 @@
 #include "dsp56300/memory.hpp"
 #include "program_cache.hpp"
 
-#include <algorithm>
+#include <bitset>
 #include <optional>
 
 namespace dsp56300 {
@@ -24,9 +24,8 @@ std::optional<Word> Core::Impl::jit_program(void *owner, const Word address) noe
   return value;
 }
 
-void Core::Impl::observe_program_word(const Word address) noexcept {
-  code_begin = std::min(code_begin, address);
-  code_end = std::max(code_end, address + 1);
+void Core::Impl::observe_program_word(const Word address) const noexcept {
+  if (code_pages && address <= word_mask) { code_pages->set(address >> code_page_shift); }
 }
 
 void Core::Impl::synchronize_program_view() {
@@ -65,9 +64,9 @@ void Core::Impl::write_external(const Space space, const Word address, const Wor
     fail(peripheral ? FaultKind::io_write : FaultKind::memory_write, space, address, value);
     return;
   }
-  // Initial loading beside a translated ROM does not alter that ROM's entries.
-  // The envelope includes opcode extensions and code inspected for fused regions.
-  if (space == Space::program && jit && address >= code_begin && address < code_end) {
+  // A low loader and a high ROM do not make the uninspected gap executable.
+  // Dependencies include extensions and code inspected for fused regions.
+  if (space == Space::program && jit && code_pages->test(address >> code_page_shift)) {
     jit->invalidate();
   }
   if (space == Space::program && cacheable(address) && icache) {

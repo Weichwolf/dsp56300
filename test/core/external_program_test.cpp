@@ -66,11 +66,12 @@ Registers initialize(Core &core, const Word value = datum) {
   return state;
 }
 
-void writes_beside_code() {
+void writes_beside_code(const bool from_reset) {
   Program memory;
+  if (!from_reset) { memory.ram[0] = jump; }
   Core core(Memory::external(), &memory);
-  require(core.run(1).fault.kind == FaultKind::none, "Observe lower code before a real CPU reset");
-  core.reset();
+  require(core.run(1).fault.kind == FaultKind::none, "Observe a lower code region");
+  if (from_reset) { core.reset(); }
   const auto expected = initialize(core);
   const auto cold = core.run(2);
   require(cold.fault.kind == FaultKind::none && cold.retired == 2 && core.registers() == expected &&
@@ -126,7 +127,8 @@ void self_write() {
 }
 
 int main() try {
-  writes_beside_code();
+  writes_beside_code(true);
+  writes_beside_code(false);
   changed_code();
   self_write();
 } catch (const std::exception &error) {

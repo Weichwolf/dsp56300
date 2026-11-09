@@ -66,7 +66,10 @@ Buffers validate(const Buffers buffers, const bool external) {
 }
 
 Core::Impl::Impl(const Buffers supplied, Io *const host_io, const bool external_memory)
-    : io(host_io), buffers(validate(supplied, external_memory)), external(external_memory) {
+    : io(host_io),
+      buffers(validate(supplied, external_memory)),
+      external(external_memory),
+      code_pages(external_memory ? std::make_unique<CodePages>() : nullptr) {
   aliases_program[1] = overlaps_program(buffers.x);
   aliases_program[2] = overlaps_program(buffers.y);
 
@@ -388,8 +391,7 @@ bool Core::interrupt_ready() const {
 
 void Core::clear_code_cache() {
   impl_->windows_bound = false;
-  impl_->code_begin = address_words;
-  impl_->code_end = 0;
+  if (impl_->code_pages) { impl_->code_pages->reset(); }
   if (impl_->jit) { impl_->jit->invalidate(); }
 }
 } // namespace dsp56300
