@@ -17,7 +17,7 @@ bool BlockEmitter::is_peripheral_register(const BlockInstruction &operation) {
     return false;
   }
   const auto reg = (operation.instruction.opcode >> 8U) & six_bit_mask;
-  return (reg >= x0_register && reg <= y1_register) || (reg >= a_register && reg < m_register_base);
+  return reg >= x0_register && reg < m_register_base;
 }
 
 void BlockEmitter::peripheral_register(const BlockInstruction &operation) {

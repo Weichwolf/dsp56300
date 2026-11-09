@@ -62,7 +62,7 @@ struct Port final : Io {
   Word value = 0, request_pc = 0;
   unsigned calls = 0;
   std::uint64_t revision = 0;
-  bool refuse = false, yield = false, replace = false, valid = true;
+  bool refuse = false, yield = false, replace = false, valid = true, alternate = false;
 
   explicit Port(const Shape input) : shape(input) { program[entry] = encoding(shape); }
 
@@ -78,6 +78,7 @@ struct Port final : Io {
     if (request.write) { value = request.value; }
     valid = valid && request.space == (shape.y ? Space::y : Space::x) &&
             request.address == address(shape) && request.write == shape.write;
+    if (alternate) { shape.write = !shape.write; }
     if (core != nullptr) {
       observed = core->registers();
       prefix = core->progress();
@@ -271,6 +272,33 @@ void native_continuation() {
           "Native arithmetic immediately consumes the new port value with exact flags and costs");
 }
 
+void partial_accumulator_continuation() {
+  constexpr unsigned first_word = 8;
+  constexpr unsigned last_word = 13;
+  for (unsigned reg = first_word; reg <= last_word; ++reg) {
+    const Shape shape{.reg = reg};
+    Port port(shape);
+    port.alternate = true;
+    auto output = shape;
+    output.write = true;
+    port.program[entry + 1] = encoding(output);
+    Core core(Memory::external(), &port);
+    port.core = &core;
+    const auto initial = seed();
+    core.set_registers(initial);
+    auto wanted = initial;
+    register_model::write(wanted, reg, datum);
+    const auto value = register_model::read(wanted, reg);
+    wanted.pc += 2;
+    const auto result = core.run(2);
+    require(result.retired == 2 && result.fault.kind == FaultKind::none &&
+                core.registers() == wanted && port.calls == 2 && port.valid &&
+                port.value == value && port.observed == wanted &&
+                port.prefix == Progress{.instructions = 1, .estimated_cycles = 1},
+            "A following native port sees a partial accumulator load and its untouched residue");
+  }
+}
+
 void revision_and_repeat() {
   const Shape shape{.reg = 24, .write = true};
   Port port(shape);
@@ -303,7 +331,6 @@ int main() {
     using namespace dsp56300;
     using namespace dsp56300::test;
     for (unsigned reg = 4; reg <= last_offset; ++reg) {
-      if (reg > 7 && reg < 14) { continue; }
       for (const bool high : {false, true}) {
         for (const bool y : {false, true}) {
           for (const bool write : {false, true}) {
@@ -322,6 +349,7 @@ int main() {
     prefix_exit(false);
     prefix_exit(true);
     native_continuation();
+    partial_accumulator_continuation();
     revision_and_repeat();
     std::cout << "Native MOVEP registers, ports, scaling, callback state, faults, yields and "
                  "revisions passed\n";

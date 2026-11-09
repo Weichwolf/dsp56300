@@ -35,6 +35,18 @@ void access_bit_io(Io *const io, NativeAccess &access) noexcept {
 }
 
 namespace dsp56300 {
+void Core::Impl::check_interrupt_window(const Word previous_status) noexcept {
+  constexpr Word interrupt_mask = 0x300;
+  if (yield_requested || fault.kind != FaultKind::none || io == nullptr ||
+      ((previous_status ^ cpu.reg.sr) & interrupt_mask) == 0) {
+    return;
+  }
+  if (io->interrupt_pending(cpu.reg.sr)) {
+    yield_requested = true;
+    jit->request_yield();
+  }
+}
+
 detail::CacheState *Core::Impl::jit_cache(void *const owner) noexcept {
   return &static_cast<Impl *>(owner)->program_cache().state();
 }
@@ -58,9 +70,10 @@ void Core::Impl::jit_access(void *const owner, detail::NativeAccess &access) noe
 std::uint32_t Core::Impl::jit_execute(void *const owner,
                                       const detail::BlockInstruction *const operation) noexcept {
   auto &self = *static_cast<Impl *>(owner);
-
+  const auto previous_status = self.cpu.reg.sr;
   self.step_decoded(operation->instruction);
   self.synchronize_program_view();
+  self.check_interrupt_window(previous_status);
   if (self.fault.kind != FaultKind::none) { return 0; }
 
   const auto next = (operation->pc + operation->instruction.words) & word_mask;

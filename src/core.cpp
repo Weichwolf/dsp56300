@@ -66,7 +66,10 @@ Buffers validate(const Buffers buffers, const bool external) {
 }
 
 Core::Impl::Impl(const Buffers supplied, Io *const host_io, const bool external_memory)
-    : io(host_io), buffers(validate(supplied, external_memory)), external(external_memory) {
+    : io(host_io),
+      buffers(validate(supplied, external_memory)),
+      external(external_memory),
+      code_pages(external_memory ? std::make_unique<CodePages>() : nullptr) {
   aliases_program[1] = overlaps_program(buffers.x);
   aliases_program[2] = overlaps_program(buffers.y);
 
@@ -316,6 +319,7 @@ RunResult Core::run(const std::uint32_t instruction_budget) {
   while (result.retired < instruction_budget && impl_->cpu.cycles < impl_->cycle_deadline &&
          !impl_->yield_requested && fault().kind == FaultKind::none &&
          impl_->cpu.processing == ExecutionState::running) {
+    const auto previous_status = impl_->cpu.reg.sr;
     if (impl_->vector.phase == Impl::VectorPhase::none && !impl_->instruction_cache_active() &&
         (impl_->cpu.debug_flags & detail::debug_interrupt_pending) == 0) {
       const auto remaining = instruction_budget - result.retired;
@@ -325,6 +329,7 @@ RunResult Core::run(const std::uint32_t instruction_budget) {
 #if defined(__aarch64__)
       impl_->synchronize_cache_mode();
       impl_->synchronize_program_view();
+      impl_->check_interrupt_window(previous_status);
 #endif
       if (retired != 0 || fault().kind != FaultKind::none ||
           impl_->cpu.cycles >= impl_->cycle_deadline) {
@@ -333,6 +338,7 @@ RunResult Core::run(const std::uint32_t instruction_budget) {
     }
     impl_->step();
     impl_->synchronize_program_view();
+    impl_->check_interrupt_window(previous_status);
     if (fault().kind == FaultKind::none) { ++result.retired; }
   }
   result.progress = progress();
@@ -385,6 +391,7 @@ bool Core::interrupt_ready() const {
 
 void Core::clear_code_cache() {
   impl_->windows_bound = false;
+  if (impl_->code_pages) { impl_->code_pages->reset(); }
   if (impl_->jit) { impl_->jit->invalidate(); }
 }
 } // namespace dsp56300

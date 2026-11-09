@@ -30,6 +30,10 @@ Use compact executable arenas, deliberate layout and cold failure paths. Avoid
 per-instruction dispatch, state copies, allocations and telemetry. Translation
 boundaries do not depend on execution grants; event handling retains precise
 observable ISA prefixes. Consumer buffering and pacing do not change guest time.
+Masked external IRQs leave ordinary native execution running. Query the consumer
+at real interrupt-mask changes and return before another instruction when an IRQ
+needs arbitration. The consumer owns priority and acknowledgement; the core owns
+eligibility, REP, interrupt shadows and native vector entry.
 
 Measure realistic continuous workloads against matched optimized host ASM with
 identical inputs, relevant semantics and independently checked results. Report

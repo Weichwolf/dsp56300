@@ -56,7 +56,8 @@ void Emitter::control_byte(const BlockInstruction &operation) {
     code_.store(Reg::x17, context, offsetof(NativeContext, boundary), Access::byte);
     code_.bind(local);
   }
-  if (field == 0) { boundary(NativeBoundary::context); }
+  // Publish SR writes before the owner checks newly eligible external IRQs.
+  if (field == 0) { boundary(NativeBoundary::owner); }
 }
 
 bool Emitter::control(const BlockInstruction &operation) {

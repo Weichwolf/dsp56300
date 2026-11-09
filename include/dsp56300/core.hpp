@@ -90,6 +90,10 @@ public:
   // peripherals and their interrupt priorities; default rejection is explicit.
   virtual bool reset_peripherals(Word /*pc*/) noexcept { return false; }
 
+  // Queried only after a completed instruction changes the SR interrupt mask.
+  // True requests an owner boundary; it neither admits nor acknowledges an IRQ.
+  [[nodiscard]] virtual bool interrupt_pending(Word /*status*/) const noexcept { return false; }
+
   // Optional side-effect-free code view. Unknown/unstable words retain actual
   // owned fetches. The owner changes the revision on code or mapping mutation.
   [[nodiscard]] virtual std::optional<Word> inspect_program(Word /*address*/) const noexcept {

@@ -11,6 +11,7 @@
 #include "vector_state.hpp"
 
 #include <array>
+#include <bitset>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -55,6 +56,8 @@ struct Core::Impl {
 
   [[nodiscard]] std::uint32_t run_repeat_native(std::uint32_t instructions);
   [[nodiscard]] Word fetch_program(Word address);
+  void observe_program_word(Word address) const noexcept;
+  void check_interrupt_window(Word previous_status) noexcept;
   [[nodiscard]] Word read_external(Space space, Word address);
   void write_external(Space space, Word address, Word value);
   void execute_processing(const detail::Instruction &decoded);
@@ -187,5 +190,9 @@ struct Core::Impl {
   std::uint64_t cycle_deadline = std::numeric_limits<std::uint64_t>::max();
   std::uint64_t program_revision = 0;
   Word program_omr = 0;
+  // Translation dependencies in 256-word source pages, independent of chip banks.
+  static constexpr unsigned code_page_shift = 8;
+  using CodePages = std::bitset<(address_words >> code_page_shift)>;
+  std::unique_ptr<CodePages> code_pages;
 };
 } // namespace dsp56300
