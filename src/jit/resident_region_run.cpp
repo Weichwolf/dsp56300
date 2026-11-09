@@ -23,6 +23,8 @@ constexpr unsigned sign_bit = accumulator_bits - 1, extension_shift = double_wor
 constexpr std::uint64_t extension_mask = 511;
 constexpr Word stack_pointer_mask = 63;
 constexpr Word arithmetic_status = overflow | zero | negative | unnormalized | extension;
+constexpr Word maximum_reduction_iterations =
+    Word{1} << (std::numeric_limits<std::uint32_t>::digits - word_bits);
 
 bool overlap(const std::uintptr_t first,
              const std::uint64_t first_size,
@@ -37,6 +39,17 @@ bool scaled_offset(const GraphAddress amount, const Word n, std::uint64_t &resul
   return result <= word_mask;
 }
 
+bool cyclic_roots(const Registers &reg, const ResidentRegion &region) {
+  for (unsigned index = 0; index < agu_registers; ++index) {
+    const auto period = region.periods[index];
+    if (period != 0 && ((reg.m[index] & modifier_mask) != period - 1 ||
+                        (reg.r[index] & (std::bit_ceil(period) - 1)) != 0)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool header(const Cpu &cpu, const NativeContext &context, const ResidentRegion &region) {
   const auto &reg = cpu.reg;
   return reg.pc == region.entry && reg.la == region.last && (reg.sr & loop_flag) != 0 &&
@@ -45,7 +58,8 @@ bool header(const Cpu &cpu, const NativeContext &context, const ResidentRegion &
          cpu.repeat_remaining == 0 && cpu.processing == ExecutionState::running &&
          cpu.debug_flags == 0 && reg.lc != 0 && reg.lc <= word_mask &&
          (reg.stack[reg.sp & (stack_entries - 1)] >> word_bits) == region.entry &&
-         (context.exit_requested == nullptr || !*context.exit_requested);
+         (context.exit_requested == nullptr || !*context.exit_requested) &&
+         cyclic_roots(reg, region);
 }
 
 bool host_storage(const Cpu &cpu,
@@ -139,6 +153,50 @@ bool reverse_address(const Registers &reg, ResidentRegion &region, const unsigne
   return true;
 }
 
+Word iteration_limit(const Registers &reg, const ResidentRegion &region, const unsigned index) {
+  const auto modifier = reg.m[index] & modifier_mask;
+  if (region.prefix[index] || modifier == 0 || modifier >= multiple_wrap_bit) { return word_mask; }
+  const auto &delta = region.graph.addresses[index];
+  const auto n = delta.offsets != 0 ? reg.n[index] : 0;
+  std::uint64_t step = 0;
+  if (n >= sign24_bit || !scaled_offset(delta, n, step)) { return 0; }
+  if (step == 0) { return word_mask; }
+  const auto initial = reg.r[index];
+  const auto begin = initial & ~(std::bit_ceil(modifier + 1) - 1);
+  const auto limit = begin + modifier + 1;
+  if (initial >= limit) { return 0; }
+  const auto room = limit - initial;
+  auto count = static_cast<Word>(room / step);
+  if (count == 0 || room % step != 0) { return count; }
+  for (const auto &stream : region.graph.streams) {
+    if (stream.address != index) { continue; }
+    std::uint64_t offset = 0;
+    if (!scaled_offset({.units = stream.units, .offsets = stream.offsets}, n, offset)) { return 0; }
+    if (offset == step) { return count - 1; }
+  }
+  return count;
+}
+
+Word bounded_iterations(const Registers &reg, const ResidentRegion &region, Word count) {
+  if (region.nested) { return count; }
+  if (region.graph.reduction.valid()) { count = std::min(count, maximum_reduction_iterations); }
+  for (unsigned index = 0; index < agu_registers; ++index) {
+    count = std::min(count, iteration_limit(reg, region, index));
+  }
+  return count;
+}
+
+bool reduction_bound(const Registers &reg, const ResidentRegion &region) {
+  if (!region.graph.reduction.valid()) { return true; }
+  const auto current = region.graph.reduction_register == 0 ? reg.a : reg.b;
+  const auto value = std::bit_cast<std::int64_t>(current) >> padding_bits;
+  const auto count = std::int64_t{region.frame.iterations};
+  constexpr auto unit = std::int64_t{1} << word_bits;
+  constexpr auto sign = std::int64_t{1} << (accumulator_bits - 1);
+  return value >= -sign - (count * minimum_word * unit) &&
+         value <= sign - 1 - (count * maximum_word * unit);
+}
+
 bool address(const Registers &reg, ResidentRegion &region, const unsigned index) {
   if ((region.reverse_addresses & (Word{1} << index)) != 0) {
     return reverse_address(reg, region, index);
@@ -155,13 +213,17 @@ bool address(const Registers &reg, ResidentRegion &region, const unsigned index)
   // of the final parent; only the next parent's prefix resets it again.
   const auto distance = region.prefix[index] ? step : iterations * step;
   if (distance > word_mask - initial) { return false; }
-  const auto final = initial + distance;
+  auto final = initial + distance;
   const auto modifier = reg.m[index] & modifier_mask;
   if (step != 0 && modifier != modifier_mask) {
     if (modifier == 0 || modifier >= multiple_wrap_bit) { return false; }
     const auto begin = initial & ~(std::bit_ceil(modifier + 1) - 1);
     const auto limit = begin + modifier + 1;
-    if (initial >= limit || final >= limit) { return false; }
+    if (initial >= limit || final > limit) { return false; }
+    if (final == limit) {
+      if (region.nested || region.prefix[index]) { return false; }
+      final = begin;
+    }
   }
   region.frame.addresses[index] = static_cast<Word>(final);
   return true;
@@ -279,6 +341,22 @@ bool independent(const RegionFootprint &left, const RegionFootprint &right) {
          right.inner_span < right.stride && later_span < left.stride - distance;
 }
 
+bool ordered_alias(const ResidentRegion &region, const std::size_t left, const std::size_t right) {
+  const auto left_write = region.graph.streams[left].write;
+  if (left_write && region.graph.streams[right].write) { return false; }
+  const auto load = left_write ? right : left;
+  const auto store = left_write ? left : right;
+  return region.memory_order[load] < region.memory_order[store];
+}
+
+bool independent(const ResidentRegion &region, const std::size_t left, const std::size_t right) {
+  const auto &first = region.footprints[left];
+  const auto &second = region.footprints[right];
+  return independent(first, second) &&
+         (region.lanes != 4 || region.interleaved.empty() || first.first != second.first ||
+          ordered_alias(region, left, right));
+}
+
 bool streams(const Registers &reg, ResidentRegion &region) {
   // Scratch storage is sized during translation, never allocated by execution.
   for (std::size_t index = 0; index < region.graph.streams.size(); ++index) {
@@ -296,7 +374,7 @@ bool streams(const Registers &reg, ResidentRegion &region) {
     }
     for (std::size_t other = 0; other < index; ++other) {
       if (!region.graph.streams[index].write && !region.graph.streams[other].write) { continue; }
-      if (!independent(current, region.footprints[other])) { return false; }
+      if (!independent(region, index, other)) { return false; }
     }
   }
   return true;
@@ -368,17 +446,25 @@ std::uint64_t guest(const std::uint64_t raw, const GraphValue value) {
   return (canonical << value.scale) & accumulator_mask;
 }
 
-Word flags(const std::array<std::uint64_t, 3> &values, const ValueGraph &graph) {
+Word numeric_flags(const std::uint64_t value) {
+  Word result = value == 0 ? zero : 0;
+  if ((value & (std::uint64_t{1} << sign_bit)) != 0) { result |= negative; }
+  if ((value >> extension_shift) != 0 && (value >> extension_shift) != extension_mask) {
+    result |= extension;
+  }
+  if (((value >> extension_shift) & 1U) == ((value >> (extension_shift - 1)) & 1U)) {
+    result |= unnormalized;
+  }
+  return result;
+}
+
+Word flags(const std::array<std::uint64_t, 4> &values, const ValueGraph &graph) {
   Word result = 0;
   if (graph.flags.valid()) {
     const auto value = guest(values[0], graph.flags);
-    if (value == 0) { result |= zero; }
-    if ((value & (std::uint64_t{1} << sign_bit)) != 0) { result |= negative; }
-    if ((value >> extension_shift) != 0 && (value >> extension_shift) != extension_mask) {
-      result |= extension;
-    }
-    if (((value >> extension_shift) & 1U) == ((value >> (extension_shift - 1)) & 1U)) {
-      result |= unnormalized;
+    result = numeric_flags(value);
+    if (graph.overflow_input.valid() && guest(values[3], graph.overflow_input) != value) {
+      result |= overflow;
     }
   }
   if (graph.carry == GraphCarry::unchanged || graph.carry == GraphCarry::zero) { return result; }
@@ -426,17 +512,34 @@ void stack(Registers &reg, const ResidentRegion &region, const Word changed) {
   reg.sc -= 2;
 }
 
+Word reduce(Registers &reg, const ResidentRegion &region) {
+  auto &destination = region.graph.reduction_register == 0 ? reg.a : reg.b;
+  const auto current = std::bit_cast<std::int64_t>(destination) >> padding_bits;
+  std::int64_t sum = 0;
+  for (unsigned lane = 0; lane < region.lanes; ++lane) { sum += region.frame.reduction[lane]; }
+  const auto total = current + (sum * (std::int64_t{1} << region.graph.reduction.scale));
+  const auto value = static_cast<std::uint64_t>(total) & accumulator_mask;
+  const auto operand = guest(region.frame.reduction_operand, region.graph.reduction);
+  const auto preceding = (value + (accumulator_mask + 1) - operand) & accumulator_mask;
+  destination = value << padding_bits;
+  return numeric_flags(value) | static_cast<Word>((preceding + operand) >> accumulator_bits);
+}
+
 void commit(Cpu &cpu, NativeContext &context, const ResidentRegion &region) {
   auto &reg = cpu.reg;
   const auto &frame = region.frame;
   Word changed = region.graph.flags.valid() ? arithmetic_status : 0;
   if (region.graph.carry != GraphCarry::unchanged) { changed |= carry; }
+  auto final_flags = flags(frame.flags, region.graph);
+  if (region.graph.reduction.valid()) {
+    changed |= arithmetic_status | carry;
+    final_flags = reduce(reg, region);
+  }
   // Inner SSL is the state before the final iteration, before publishing its flags.
   reg.lc -= frame.iterations;
   stack(reg, region, changed);
   const auto loop_bits = reg.sr & loop_status;
-  reg.sr = (reg.sr & ~changed) | sticky(region, frame.growth, frame.limits, 4) |
-           flags(frame.flags, region.graph);
+  reg.sr = (reg.sr & ~changed) | sticky(region, frame.growth, frame.limits, 4) | final_flags;
   reg.sr = (reg.sr & ~loop_status) | loop_bits;
   for (unsigned index = 0; index < region.graph.registers.size(); ++index) {
     const auto value = region.graph.registers[index];
@@ -473,14 +576,16 @@ std::uint32_t run_resident_region(Cpu *const cpu,
                                   NativeContext *const context,
                                   ResidentRegion *const region) noexcept {
   if (!header(*cpu, *context, *region) || !memory(*cpu, *context, *region)) { return 0; }
-  const auto count = std::min(cpu->reg.lc, context->budget / region->graph.instructions);
+  const auto count = bounded_iterations(
+      cpu->reg, *region, std::min(cpu->reg.lc, context->budget / region->graph.instructions));
   if (!select_lanes(*region, count)) { return 0; }
   region->frame.iterations = count - (count % region->lanes);
   if (region->frame.iterations == 0 || region->native[region->lanes / 2] == nullptr ||
       (region->frame.iterations == cpu->reg.lc && cpu->reg.sc < 2) ||
       (region->nested &&
        (region->frame.iterations != cpu->reg.lc || cpu->reg.sc >= stack_entries - 2)) ||
-      !cursors(cpu->reg, *region) || !streams(cpu->reg, *region)) {
+      !reduction_bound(cpu->reg, *region) || !cursors(cpu->reg, *region) ||
+      !streams(cpu->reg, *region)) {
     return 0;
   }
   if (region->nested && region->lanes == 1) {

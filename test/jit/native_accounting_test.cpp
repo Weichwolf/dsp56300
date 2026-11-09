@@ -7,7 +7,11 @@
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
+#if defined(__aarch64__)
+#include "jit/a64/emitter.hpp"
+#else
 #include "jit/emitter.hpp"
+#endif
 #include "jit/resident.hpp"
 #include "loop_frames.hpp"
 #include "native/direct.hpp"
@@ -26,6 +30,7 @@
 #include <iostream>
 #include <limits>
 #include <span>
+#include <stdexcept>
 #include <vector>
 
 namespace dsp56300::test {
@@ -435,6 +440,12 @@ void direct_shape(const Shape shape) {
   const auto ops = operations(shape);
   const detail::JitRuntime runtime{
       .execute = forbidden, .moves = forbidden, .memory = banks(memory)};
+#if defined(__aarch64__)
+  detail::a64::Emitter emitter;
+  const auto bytes = emitter.generate_guarded(ops, runtime, register_model::seed(0).m);
+  if (!bytes) { throw std::runtime_error("A64 guarded accounting admission failed"); }
+  const native::Direct code(*bytes);
+#else
   detail::BlockEmitter emitter(runtime,
                                register_model::seed(0).m,
                                detail::RegionMode::guarded,
@@ -455,6 +466,7 @@ void direct_shape(const Shape shape) {
     require(emitter.word_reuse() == (shape.word_reuse != detail::WordReuseMode::disabled),
             "Only cost-admitted repeated words populate extra native slots");
   }
+#endif
   for (Word flags = 0; flags <= status_byte; ++flags) {
     direct_case(code,
                 memory,
@@ -724,11 +736,19 @@ public:
                core->registers() == expected && core->progress() == progress;
     if (observed && accept && patch) { core->write(Space::program, extension_address, datum); }
     value = datum;
+#if defined(__aarch64__)
+    asm volatile("movi v16.16b, #255\n\tmovi v17.16b, #0\n\t"
+                 "movi v18.16b, #255\n\tmovi v19.16b, #0"
+                 :
+                 :
+                 : "v16", "v17", "v18", "v19");
+#else
     asm volatile("pcmpeqd %%xmm8, %%xmm8\n\tpxor %%xmm9, %%xmm9\n\t"
                  "pcmpeqd %%xmm10, %%xmm10\n\tpxor %%xmm11, %%xmm11"
                  :
                  :
                  : "xmm8", "xmm9", "xmm10", "xmm11");
+#endif
     return observed && accept;
   }
 

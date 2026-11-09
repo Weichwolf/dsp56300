@@ -45,8 +45,25 @@ void Emitter::begin() {
 
 void Emitter::snapshot() {
   for (std::size_t index = 0; index < held.size(); ++index) {
+    if ((old_inputs_ & (Word{1} << index)) == 0) { continue; }
     code_.store(held[index].first, Reg::sp, index * sizeof(std::uint64_t), Access::doubleword);
   }
+}
+
+void Emitter::read_old(const Reg result, const unsigned bank) {
+  if ((old_inputs_ & (Word{1} << bank)) == 0) {
+    code_.move(result, held.at(bank).first);
+  } else {
+    code_.load(result, Reg::sp, bank * sizeof(std::uint64_t), Access::doubleword);
+  }
+}
+
+void Emitter::restore() {
+  for (std::size_t pair = 0; pair < Frame::pairs; ++pair) { code_.pop(Reg::zr, Reg::x17); }
+  for (const auto reg : std::views::reverse(saved)) {
+    code_.pop(reg, static_cast<Reg>(static_cast<unsigned>(reg) + 1));
+  }
+  code_.pop(Reg::fp, Reg::lr);
 }
 
 void Emitter::publish() {
@@ -149,11 +166,7 @@ std::vector<std::uint8_t> Emitter::generate(const std::span<const BlockInstructi
   code_.bind(done_);
   publish();
   code_.move(Reg::x0, retired, Width::w32);
-  for (std::size_t pair = 0; pair < Frame::pairs; ++pair) { code_.pop(Reg::zr, Reg::x17); }
-  for (const auto reg : std::views::reverse(saved)) {
-    code_.pop(reg, static_cast<Reg>(static_cast<unsigned>(reg) + 1));
-  }
-  code_.pop(Reg::fp, Reg::lr);
+  restore();
   code_.return_();
   return code_.bytes();
 }

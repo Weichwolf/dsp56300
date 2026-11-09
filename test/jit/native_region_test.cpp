@@ -8,7 +8,11 @@
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
+#if defined(__aarch64__)
+#include "jit/a64/emitter.hpp"
+#else
 #include "jit/emitter.hpp"
+#endif
 #include "jit/resident.hpp"
 #include "loop_frames.hpp"
 #include "native/direct.hpp"
@@ -24,6 +28,7 @@
 #include <iostream>
 #include <limits>
 #include <span>
+#include <stdexcept>
 #include <vector>
 
 namespace dsp56300::test {
@@ -346,10 +351,17 @@ void direct_shape(
       .memory = {{{.data = memory.bank(false).data(), .words = memory.limits[0]},
                   {.data = memory.bank(true).data(), .words = memory.limits[1]}}}};
   const auto ops = operations(mode, loop, shape);
+#if defined(__aarch64__)
+  detail::a64::Emitter emitter;
+  const auto bytes = emitter.generate_guarded(ops, runtime, modifiers(shape));
+  if (!bytes) { throw std::runtime_error("A64 guarded mixed RAM admission failed"); }
+  const native::Direct code(bytes.value());
+#else
   detail::BlockEmitter emitter(runtime, modifiers(shape), detail::RegionMode::guarded);
   const native::Direct code(emitter.generate(ops));
   require(emitter.guarded_region() && emitter.cached_status() && emitter.packed_retirement(),
           "Actual guarded bytes qualify held status and helper-free packed retirement");
+#endif
   for (Word flags = 0; flags <= status_byte; ++flags) {
     direct_case(code, memory, mode, loop, {.flags = flags, .bodies = 3}, shape);
   }

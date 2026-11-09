@@ -53,7 +53,7 @@ void Emitter::memory_move(const BlockInstruction &operation) {
   const auto space = (opcode & (1U << 19)) != 0 ? Space::y : Space::x;
   if (load) {
     if (extended && form.mode == 6 && form.index == 4) {
-      code_.constant(Reg::x0, instruction.extension);
+      code_.constant(Reg::x0, instruction.extension & word_mask);
     } else {
       memory(operation, {.space = space});
     }
@@ -100,7 +100,7 @@ void Emitter::memory_transfer(const BlockInstruction &operation) {
   if (control) { space = (opcode & (1U << 6)) != 0 ? Space::y : Space::x; }
   if (load) {
     if (immediate) {
-      code_.constant(Reg::x0, instruction.extension);
+      code_.constant(Reg::x0, instruction.extension & word_mask);
     } else {
       memory(operation, {.space = space});
     }

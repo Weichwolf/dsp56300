@@ -12,6 +12,7 @@
 #include "value_graph.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -54,8 +55,12 @@ bool nested(const std::span<const Word> program,
   body_state.la = last;
   body_state.sr = setup.mode | loop_flag;
   const auto body = parse_block(program, body_state, runtime);
-  auto graph = value_graph(body);
-  if (!graph) { return false; }
+  auto graph = value_graph(body, resident_region_support());
+  if (!graph || graph->reduction.valid() ||
+      std::ranges::any_of(graph->address_constants,
+                          [](const auto &value) { return value.has_value(); })) {
+    return false;
+  }
   region.inner_entry = body_state.pc;
   body_state.pc = (last + 1) & word_mask;
   body_state.la = setup.loop_address;
@@ -88,8 +93,8 @@ bool nested(const std::span<const Word> program,
   const auto instructions = (std::uint64_t{graph->instructions} * count) + overhead;
   if (!std::in_range<Word>(instructions)) { return false; }
   graph->instructions = static_cast<Word>(instructions);
+  region.extra_cycles = (graph->extra_cycles * count) + cycles - overhead;
   region.graph = std::move(*graph);
-  region.extra_cycles = cycles - overhead;
   region.inner_iterations = count;
   region.last = setup.loop_address;
   region.nested = true;
@@ -100,7 +105,9 @@ bool roots(ResidentRegion &region, const Registers &state) {
   for (const auto &stream : region.graph.streams) {
     const auto &delta = region.graph.addresses[stream.address];
     if ((state.m[stream.address] & modifier_mask) == 0 && delta.offsets != 0) {
-      if (region.nested || delta.units != 0 || stream.write) { return false; }
+      if (region.nested || region.prefix[stream.address] || delta.units != 0 || stream.write) {
+        return false;
+      }
       region.reverse_addresses |= Word{1} << stream.address;
     }
     const auto index = stream.space == Space::x ? 0U : 1U;
@@ -122,6 +129,38 @@ bool roots(ResidentRegion &region, const Registers &state) {
   region.footprints.resize(region.graph.streams.size());
   return true;
 }
+
+struct CyclicRoot {
+  unsigned address;
+  Word period;
+};
+
+bool cyclic_streams(const ValueGraph &graph, const CyclicRoot cycle) {
+  bool found = false;
+  for (const auto &stream : graph.streams) {
+    if (stream.address != cycle.address) { continue; }
+    if (stream.write || stream.offsets != 0 || stream.units >= cycle.period) { return false; }
+    found = true;
+  }
+  return found;
+}
+
+void fold_cycles(ResidentRegion &region, const Registers &state) {
+  if (region.nested) { return; }
+  for (unsigned index = 0; index < agu_registers; ++index) {
+    const auto modifier = state.m[index] & modifier_mask;
+    const auto period = modifier + 1;
+    auto &delta = region.graph.addresses[index];
+    if (region.prefix[index] || modifier == 0 || modifier >= multiple_wrap_bit ||
+        delta.offsets != 0 || delta.units != period ||
+        (state.r[index] & (std::bit_ceil(period) - 1)) != 0 ||
+        !cyclic_streams(region.graph, {.address = index, .period = period})) {
+      continue;
+    }
+    region.periods[index] = period;
+    delta = {};
+  }
+}
 } // namespace
 
 std::unique_ptr<ResidentRegion>
@@ -136,11 +175,14 @@ resident_region_plan(const std::span<const Word> program,
   region->last = operations.back().loop_address;
   region->mode = operations.front().mode;
   if (!nested(program, state, runtime, operations, *region)) {
-    auto graph = value_graph(operations);
+    auto graph = value_graph(operations, resident_region_support());
     if (!graph) { return nullptr; }
+    region->extra_cycles = graph->extra_cycles;
+    region->prefix = graph->address_constants;
     region->graph = std::move(*graph);
   }
   region->growth_shift = growth_shift(region->graph);
+  fold_cycles(*region, state);
   if (!roots(*region, state)) { return nullptr; }
   return region;
 }

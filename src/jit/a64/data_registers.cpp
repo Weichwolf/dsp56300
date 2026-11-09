@@ -14,11 +14,19 @@ void Emitter::transfer_word(const Reg value, const Word mode) {
       main_shift + ((mode & scale_down) != 0 ? 1U : 0U) - ((mode & scale_up) != 0 ? 1U : 0U);
   constexpr unsigned normal_growth = 53;
   const auto growth_shift = shift + normal_growth - main_shift;
-  code_.extract(Reg::x9, value, growth_shift, 1, Width::x64);
-  code_.extract(Reg::x10, value, growth_shift + 1, 1, Width::x64);
-  code_.alu(Alu::bit_xor, Reg::x9, Reg::x9, Reg::x10);
-  code_.shift(Shift::left, Reg::x9, Reg::x9, 7);
-  code_.alu(Alu::bit_or, status, status, Reg::x9);
+  const auto width =
+      guarded() ? value_proof_.transfer_widths[value == accumulator_a ? 0U : 1U] : accumulator_bits;
+  if (width > growth_shift - padding_bits + 1) {
+    code_.extract(Reg::x9, value, growth_shift, 1, Width::x64);
+    code_.extract(Reg::x10, value, growth_shift + 1, 1, Width::x64);
+    code_.alu(Alu::bit_xor, Reg::x9, Reg::x9, Reg::x10);
+    code_.shift(Shift::left, Reg::x9, Reg::x9, 7);
+    code_.alu(Alu::bit_or, status, status, Reg::x9);
+  }
+  if (width <= shift - padding_bits + word_bits) {
+    code_.extract(Reg::x0, value, shift, word_bits, Width::x64);
+    return;
+  }
   code_.shift(Shift::arithmetic, Reg::x0, value, shift, Width::x64);
   code_.constant(Reg::x1, static_cast<std::uint64_t>(maximum_word));
   code_.compare(Reg::x0, Reg::x1, Width::x64);

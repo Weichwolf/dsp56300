@@ -25,7 +25,7 @@ std::optional<Word> Core::Impl::jit_program(void *owner, const Word address) noe
 }
 
 void Core::Impl::observe_program_word(const Word address) const noexcept {
-  if (code_pages && address <= word_mask) { code_pages->set(address >> code_page_shift); }
+  if (code_pages && address <= word_mask) { (*code_pages)[address >> code_page_shift] = true; }
 }
 
 void Core::Impl::synchronize_program_view() {

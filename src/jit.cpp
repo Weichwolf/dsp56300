@@ -7,6 +7,7 @@
 #include "jit/arena.hpp"
 #include "jit/block.hpp"
 #include "jit/index.hpp"
+#include "jit/resident_region.hpp"
 #include "translation.hpp"
 
 #include <array>
@@ -22,9 +23,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <exception>
-#endif
-#if defined(__x86_64__)
-#include "jit/resident_region.hpp"
 #endif
 #if defined(__x86_64__) && defined(__linux__)
 #include "mac_batch.hpp"
@@ -44,10 +42,9 @@ enum class EntryKind : std::uint8_t { ordinary, repeat, vector };
 struct Block {
   std::vector<BlockInstruction> operations;
   const void *entry = nullptr;
+  std::unique_ptr<ResidentRegion> region;
 #if defined(__aarch64__)
   EntryKind kind = EntryKind::ordinary;
-#else
-  std::unique_ptr<ResidentRegion> region;
 #endif
 };
 }
@@ -96,11 +93,15 @@ Block *Jit::Impl::compile() {
   block->operations = parse_block(program, cpu.reg, context.runtime, callbacks);
   if (block->operations.empty()) { return nullptr; }
 #if defined(__aarch64__)
-  if (auto *existing = reuse(block->operations, EntryKind::ordinary)) { return existing; }
+  block->region = resident_region_plan(program, cpu.reg, context.runtime, block->operations);
+  if (!block->region) {
+    if (auto *existing = reuse(block->operations, EntryKind::ordinary)) { return existing; }
+  }
 #endif
   auto bytes = emit_block(block->operations, context.runtime, cpu.reg.m);
 #if defined(__x86_64__)
   block->region = resident_region_plan(program, cpu.reg, context.runtime, block->operations);
+#endif
   if (block->region) {
     auto &region = *block->region;
     const auto full_width = 1U << (region.native.size() - 1);
@@ -116,10 +117,12 @@ Block *Jit::Impl::compile() {
     }
     bytes = select_resident_region(region, bytes);
   }
-#endif
-  std::span<const BlockInstruction> admission;
 #if defined(__x86_64__)
-  if (!block->region || !block->region->nested) { admission = block->operations; }
+  const std::span<const BlockInstruction> admission = block->region && block->region->nested
+                                                          ? std::span<const BlockInstruction>{}
+                                                          : block->operations;
+#else
+  const std::span<const BlockInstruction> admission;
 #endif
   block->entry = arena.append(admit_cycles(bytes, admission));
   return retain(std::move(block));
@@ -129,7 +132,8 @@ Block *Jit::Impl::compile() {
 Block *Jit::Impl::reuse(const std::span<const BlockInstruction> operations,
                         const EntryKind kind) const {
   for (const auto &block : storage) {
-    if (block->kind != kind) { continue; }
+    // Nested regions retain child code beyond this operation span.
+    if (block->kind != kind || block->region) { continue; }
     const auto equal = [](const BlockInstruction &left, const BlockInstruction &right) {
       return left.instruction == right.instruction && left.pc == right.pc &&
              left.mode == right.mode && left.loop_address == right.loop_address;

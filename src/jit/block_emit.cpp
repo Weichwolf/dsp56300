@@ -19,6 +19,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <utility>
 #include <vector>
 #if !defined(__aarch64__)
 #include <algorithm>
@@ -63,10 +64,14 @@ std::vector<std::uint8_t> admit_cycles(const std::span<const std::uint8_t> body,
 }
 
 std::vector<std::uint8_t> emit_block(const std::span<const BlockInstruction> operations,
-                                     const JitRuntime & /*runtime*/,
-                                     const std::array<Word, agu_registers> & /*modifiers*/) {
+                                     const JitRuntime &runtime,
+                                     const std::array<Word, agu_registers> &modifiers) {
   a64::Emitter emitter;
-  return emitter.generate_chained(operations);
+  auto bytes = emitter.generate_chained(operations);
+  if (operations.size() == 1) { return a64::select_mac_batch(operations.front(), bytes); }
+  a64::Emitter guarded;
+  auto fast = guarded.generate_guarded(operations, runtime, modifiers, bytes);
+  return fast ? std::move(*fast) : bytes;
 }
 
 std::vector<std::uint8_t> emit_repeat(const BlockInstruction &operation,

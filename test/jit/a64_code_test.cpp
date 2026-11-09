@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "jit/a64/code.hpp"
+#include "jit/a64/neon.hpp"
 
 #include <array>
 #include <cstddef>
@@ -10,8 +11,10 @@
 #if defined(__aarch64__)
 #include "jit/arena.hpp"
 
+#include <algorithm>
 #include <bit>
 #include <type_traits>
+#include <vector>
 #endif
 
 namespace {
@@ -96,6 +99,136 @@ void bit_encodings() {
   constexpr std::array<std::uint32_t, 4> expected{0x5ac01020, 0xdac01020, 0x5ac00020, 0xdac00020};
   for (std::size_t index = 0; index < expected.size(); ++index) {
     require(instruction(code, index) == expected[index], "A64 CLZ/RBIT encoding differs from ISA");
+  }
+}
+
+void packed_encodings() {
+  Code code;
+  Neon neon(code);
+  neon.binary(VectorOp::add_words, Vec{0}, Vec{1}, Vec{2});
+  neon.binary(VectorOp::subtract_words, Vec{0}, Vec{1}, Vec{2});
+  neon.binary(VectorOp::multiply_words, Vec{0}, Vec{1}, Vec{2});
+  neon.binary(VectorOp::multiply_upper, Vec{0}, Vec{1}, Vec{2});
+  neon.extend(Vec{0}, Vec{1}, true);
+  neon.narrow(Vec{0}, Vec{1}, true);
+  neon.broadcast(Vec{0}, Reg::x1, true);
+  neon.insert(Vec{0}, Reg::x1, 3, true);
+  neon.extract(Reg::x0, Vec{1}, 3, true);
+  constexpr unsigned rounding_shift = 23;
+  neon.round_narrow(Vec{0}, Vec{1}, rounding_shift);
+  neon.round_narrow(Vec{0}, Vec{1}, rounding_shift, true);
+  constexpr std::array<std::uint32_t, 11> expected{0x4ea28420,
+                                                   0x6ea28420,
+                                                   0x4ea29c20,
+                                                   0x4ea2c020,
+                                                   0x4f20a420,
+                                                   0x4ea12820,
+                                                   0x4e040c20,
+                                                   0x4e1c1c20,
+                                                   0x0e1c3c20,
+                                                   0x0f298c20,
+                                                   0x4f298c20};
+  for (std::size_t index = 0; index < expected.size(); ++index) {
+    require(instruction(code, index) == expected[index], "Packed NEON encoding differs from ISA");
+  }
+}
+
+void accumulate_encodings() {
+  Code code;
+  Neon neon(code);
+  neon.binary(VectorOp::multiply_add, Vec{0}, Vec{1}, Vec{2});
+  neon.binary(VectorOp::multiply_add_upper, Vec{0}, Vec{1}, Vec{2});
+  neon.binary(VectorOp::multiply_subtract, Vec{0}, Vec{1}, Vec{2});
+  neon.binary(VectorOp::multiply_subtract_upper, Vec{0}, Vec{1}, Vec{2});
+  constexpr std::array<std::uint32_t, 4> expected{0x0ea28020, 0x4ea28020, 0x0ea2a020, 0x4ea2a020};
+  for (std::size_t index = 0; index < expected.size(); ++index) {
+    require(instruction(code, index) == expected[index],
+            "NEON widening accumulation differs from ISA");
+  }
+}
+
+void stack_encodings() {
+  Code code;
+  Neon neon(code);
+  neon.push_doubles(Vec{8}, Vec{9});
+  neon.pop_doubles(Vec{8}, Vec{9});
+  constexpr std::array<std::uint32_t, 2> expected{0x6dbf27e8, 0x6cc127e8};
+  require(instruction(code, 0) == expected[0] && instruction(code, 1) == expected[1],
+          "NEON paired doubleword stack operations differ from ISA");
+}
+
+void selection_encodings() {
+  Code code;
+  Neon neon(code);
+  constexpr Vec first{24};
+  neon.binary(VectorOp::greater, Vec{0}, Vec{1}, Vec{2});
+  neon.binary(VectorOp::bit_insert, Vec{0}, Vec{1}, Vec{2});
+  neon.load_interleaved(first, Reg::x10);
+  neon.store_interleaved(first, Reg::x10);
+  neon.binary(VectorOp::unzip_even, Vec{0}, Vec{1}, Vec{2});
+  neon.binary(VectorOp::unzip_odd, Vec{0}, Vec{1}, Vec{2});
+  neon.binary(VectorOp::zip_low, Vec{0}, Vec{1}, Vec{2});
+  neon.binary(VectorOp::zip_high, Vec{0}, Vec{1}, Vec{2});
+  constexpr std::array<std::uint32_t, 8> expected{0x4ee23420,
+                                                  0x6ea21c20,
+                                                  0x4c400958,
+                                                  0x4c000958,
+                                                  0x4e821820,
+                                                  0x4e825820,
+                                                  0x4e823820,
+                                                  0x4e827820};
+  for (std::size_t index = 0; index < expected.size(); ++index) {
+    require(instruction(code, index) == expected[index],
+            "NEON comparison and insertion differ from assembler reference");
+  }
+}
+
+void immediate_encodings() {
+  constexpr std::array<std::uint32_t, 6> values{
+      1, 0x007fffff, 0xff800000, 0x80000000, 0x12ff, 0xffffedff};
+  constexpr std::array<std::uint32_t, 6> expected{
+      0x4f000420, 0x4f03d7e0, 0x6f03d7e0, 0x4f046400, 0x4f00c640, 0x6f002640};
+  Code code;
+  Neon neon(code);
+  for (const auto value : values) {
+    require(neon.constant_words(Vec{0}, value), "Directed NEON immediate must be encodable");
+  }
+  for (std::size_t index = 0; index < expected.size(); ++index) {
+    require(instruction(code, index) == expected[index], "NEON immediate differs from ISA");
+  }
+}
+
+void neon_encodings() {
+  Code code;
+  Neon neon(code);
+  neon.binary(VectorOp::add, Vec{0}, Vec{1}, Vec{2});
+  neon.binary(VectorOp::subtract, Vec{0}, Vec{1}, Vec{2});
+  neon.binary(VectorOp::bit_and, Vec{0}, Vec{1}, Vec{2});
+  neon.binary(VectorOp::bit_or, Vec{0}, Vec{1}, Vec{2});
+  neon.binary(VectorOp::bit_xor, Vec{0}, Vec{1}, Vec{2});
+  neon.shift(Vec{0}, Vec{1}, Shift::left, 9);
+  neon.shift(Vec{0}, Vec{1}, Shift::right, 9);
+  neon.shift(Vec{0}, Vec{1}, Shift::arithmetic, 9);
+  neon.shift(Vec{0}, Vec{1}, Shift::left, 8, true);
+  neon.shift(Vec{0}, Vec{1}, Shift::arithmetic, 8, true);
+  neon.narrow(Vec{0}, Vec{1});
+  neon.extend(Vec{0}, Vec{1});
+  neon.binary(VectorOp::multiply, Vec{0}, Vec{1}, Vec{2});
+  neon.broadcast(Vec{0}, Reg::x1);
+  neon.insert(Vec{0}, Reg::x1, 1);
+  neon.extract(Reg::x1, Vec{0}, 1);
+  neon.load(Vec{0}, Reg::x1, 32);
+  neon.store(Vec{0}, Reg::x1, 32);
+  neon.load(Vec{0}, Reg::x1, 8, true);
+  neon.binary(VectorOp::maximum, Vec{0}, Vec{1}, Vec{2});
+  neon.binary(VectorOp::minimum, Vec{0}, Vec{1}, Vec{2});
+  constexpr std::array<std::uint32_t, 21> expected{
+      0x4ee28420, 0x6ee28420, 0x4e221c20, 0x4ea21c20, 0x6e221c20, 0x4f495420, 0x6f770420,
+      0x4f770420, 0x4f285420, 0x4f380420, 0x0ea12820, 0x0f20a420, 0x0ea2c020, 0x4e080c20,
+      0x4e181c20, 0x4e183c01, 0x3dc00820, 0x3d800820, 0xfd400420, 0x4ea26420, 0x4ea26c20};
+  for (std::size_t index = 0; index < expected.size(); ++index) {
+    require(instruction(code, index) == expected[index],
+            "NEON encoding differs from independent assembler reference");
   }
 }
 
@@ -211,6 +344,170 @@ void execute_bits() {
   }
 }
 
+void execute_stack() {
+  constexpr std::uint64_t left = 0x0123456789abcdef;
+  constexpr std::uint64_t right = 0xfedcba9876543210;
+  std::array<std::uint64_t, 6> data{left, 0, right, 0, 0, 0};
+  Code code;
+  Neon neon(code);
+  neon.load(Vec{0}, Reg::x0);
+  neon.load(Vec{1}, Reg::x0, 16);
+  neon.push_doubles(Vec{0}, Vec{1});
+  neon.zero(Vec{0});
+  neon.zero(Vec{1});
+  neon.pop_doubles(Vec{0}, Vec{1});
+  neon.store(Vec{0}, Reg::x0, 32, true);
+  neon.store(Vec{1}, Reg::x0, 5 * sizeof(std::uint64_t), true);
+  code.load(Reg::x0, Reg::x0, 32, Access::doubleword);
+  code.return_();
+  dsp56300::detail::ExecutableArena arena;
+  require(dsp56300_a64_test_enter(arena.append(code.bytes()),
+                                  reinterpret_cast<std::uintptr_t>(data.data()),
+                                  0) == left &&
+              data[4] == left && data[5] == right,
+          "NEON paired stack operations preserve both doublewords and balance SP");
+}
+
+void execute_immediates() {
+  constexpr std::array<std::uint32_t, 15> values{0,
+                                                 1,
+                                                 255,
+                                                 0x80000000,
+                                                 0x007fffff,
+                                                 0xff800000,
+                                                 0x0012ffff,
+                                                 0x12ff,
+                                                 0xffedffff,
+                                                 0xffffedff,
+                                                 0x1234ffff,
+                                                 0x12345678,
+                                                 0xabcdef01,
+                                                 0xffffffff,
+                                                 0xffff0000};
+  dsp56300::detail::ExecutableArena arena;
+  for (const auto value : values) {
+    Code code;
+    Neon neon(code);
+    constexpr std::array unsupported{0x1234ffffU, 0x12345678U, 0xabcdef01U};
+    const bool supported = std::ranges::find(unsupported, value) == unsupported.end();
+    require(neon.constant_words(Vec{0}, value) == supported,
+            "NEON constant selection must accept exactly the directed architectural immediates");
+    if (!supported) {
+      require(code.size() == 0, "Unencodable NEON immediates must leave code untouched");
+      continue;
+    }
+    neon.store(Vec{0}, Reg::x0);
+    code.return_();
+    std::array<std::uint32_t, 4> result{};
+    static_cast<void>(dsp56300_a64_test_enter(
+        arena.append(code.bytes()), reinterpret_cast<std::uintptr_t>(result.data()), 0));
+    require(std::ranges::all_of(result, [value](const auto lane) { return lane == value; }),
+            "NEON immediates preserve every bit of each word lane");
+  }
+}
+
+void execute_packed() {
+  struct alignas(16) Data {
+    std::array<std::int32_t, 4> left, right;
+    std::array<std::int64_t, 4> product{};
+    std::array<std::int32_t, 4> sum{}, difference{}, low_product{}, narrowed{}, inserted{},
+        broadcast{}, rounded{};
+  };
+
+  constexpr Data initial{
+      .left = {-2147483647 - 1, -1, 2147483647, 0x12345678},
+      .right = {-2147483647 - 1, 2147483647, -2, std::bit_cast<std::int32_t>(0x87654321U)}};
+  auto data = initial;
+  constexpr Vec narrowed{17};
+  constexpr Vec inserted{18};
+  constexpr Vec broadcast{19};
+  constexpr Vec rounded{20};
+  constexpr unsigned rounding_shift = 23;
+  Code code;
+  Neon neon(code);
+  neon.load(Vec{0}, Reg::x0, offsetof(Data, left));
+  neon.load(Vec{1}, Reg::x0, offsetof(Data, right));
+  neon.binary(VectorOp::multiply, Vec{2}, Vec{0}, Vec{1});
+  neon.binary(VectorOp::multiply_upper, Vec{3}, Vec{0}, Vec{1});
+  neon.store(Vec{2}, Reg::x0, offsetof(Data, product));
+  neon.store(Vec{3}, Reg::x0, offsetof(Data, product) + 16);
+  neon.binary(VectorOp::add_words, Vec{4}, Vec{0}, Vec{1});
+  neon.store(Vec{4}, Reg::x0, offsetof(Data, sum));
+  neon.binary(VectorOp::subtract_words, Vec{5}, Vec{0}, Vec{1});
+  neon.store(Vec{5}, Reg::x0, offsetof(Data, difference));
+  neon.binary(VectorOp::multiply_words, Vec{6}, Vec{0}, Vec{1});
+  neon.store(Vec{6}, Reg::x0, offsetof(Data, low_product));
+  neon.extend(Vec{7}, Vec{0});
+  neon.extend(Vec{16}, Vec{0}, true);
+  neon.narrow(narrowed, Vec{7});
+  neon.narrow(narrowed, Vec{16}, true);
+  neon.store(narrowed, Reg::x0, offsetof(Data, narrowed));
+  for (unsigned lane = 0; lane < 4; ++lane) {
+    code.constant(Reg::x9, static_cast<std::uint32_t>(data.right[lane]));
+    neon.insert(inserted, Reg::x9, lane, true);
+    neon.extract(Reg::x9, inserted, lane, true);
+    code.store(Reg::x9, Reg::x0, offsetof(Data, inserted) + (lane * sizeof(std::int32_t)));
+  }
+  neon.broadcast(broadcast, Reg::x1, true);
+  neon.store(broadcast, Reg::x0, offsetof(Data, broadcast));
+  neon.round_narrow(rounded, Vec{2}, rounding_shift);
+  neon.round_narrow(rounded, Vec{3}, rounding_shift, true);
+  neon.store(rounded, Reg::x0, offsetof(Data, rounded));
+  code.return_();
+  dsp56300::detail::ExecutableArena arena;
+  constexpr std::uint32_t repeated = 0xfedcba98;
+  static_cast<void>(dsp56300_a64_test_enter(
+      arena.append(code.bytes()), reinterpret_cast<std::uintptr_t>(&data), repeated));
+  for (unsigned lane = 0; lane < 4; ++lane) {
+    const auto left = std::int64_t{data.left[lane]};
+    const auto right = std::int64_t{data.right[lane]};
+    require(
+        data.product[lane] == left * right &&
+            static_cast<std::uint32_t>(data.low_product[lane]) ==
+                static_cast<std::uint32_t>(left * right) &&
+            static_cast<std::uint32_t>(data.sum[lane]) ==
+                static_cast<std::uint32_t>(left + right) &&
+            static_cast<std::uint32_t>(data.difference[lane]) ==
+                static_cast<std::uint32_t>(left - right) &&
+            data.narrowed[lane] == data.left[lane] && data.inserted[lane] == data.right[lane] &&
+            static_cast<std::uint32_t>(data.broadcast[lane]) == repeated &&
+            static_cast<std::uint32_t>(data.rounded[lane]) ==
+                static_cast<std::uint32_t>(
+                    (left * right + (std::int64_t{1} << (rounding_shift - 1))) >> rounding_shift),
+        "Packed NEON preserves signed products, word arithmetic, all lanes and conversions");
+  }
+}
+
+void execute_neon_memory() {
+  dsp56300::detail::ExecutableArena arena;
+  constexpr std::size_t large_offset = 65536;
+  constexpr std::uint64_t guard = 0xabcdef0123456789;
+  constexpr std::uint64_t value = 0x8123456789abcdef;
+  std::vector<std::uint64_t> memory((large_offset / sizeof(value)) + 4, guard);
+  for (const auto offset : {std::size_t{16}, large_offset}) {
+    for (const bool words : {false, true}) {
+      std::ranges::fill(memory, guard);
+      Code code;
+      Neon neon(code);
+      neon.broadcast(Vec{0}, Reg::x1);
+      neon.store(Vec{0}, Reg::x0, offset, words);
+      neon.load(Vec{1}, Reg::x0, offset, words);
+      neon.extract(Reg::x0, Vec{1}, words ? 0U : 1U);
+      code.return_();
+      const auto *entry = arena.append(code.bytes());
+      require(dsp56300_a64_test_enter(
+                  entry, reinterpret_cast<std::uintptr_t>(memory.data()), value) == value,
+              "NEON memory preserves exact small and expanded displacements");
+      const auto first = offset / sizeof(value);
+      const auto last = first + (words ? 1U : 2U);
+      for (std::size_t index = 0; index < memory.size(); ++index) {
+        require(memory[index] == (index >= first && index < last ? value : guard),
+                "NEON stores preserve every word outside the selected lane extent");
+      }
+    }
+  }
+}
+
 void execute() {
   dsp56300::detail::ExecutableArena arena;
   Code code;
@@ -249,10 +546,20 @@ int main() {
     fixups();
     barrel_encodings();
     bit_encodings();
+    neon_encodings();
+    packed_encodings();
+    immediate_encodings();
+    accumulate_encodings();
+    stack_encodings();
+    selection_encodings();
 #if defined(__aarch64__)
     execute();
     execute_barrels();
     execute_bits();
+    execute_neon_memory();
+    execute_packed();
+    execute_immediates();
+    execute_stack();
 #endif
     std::cout << "A64 encoding and branch checks passed.\n";
   } catch (const std::exception &error) {

@@ -14,6 +14,11 @@ namespace dsp56300::detail::a64 {
 void Emitter::paired_address(const BlockInstruction &operation,
                              const AddressForm form,
                              const std::size_t offset) {
+  if (guarded()) {
+    effective(operation, form);
+    code_.store(Reg::x0, Reg::sp, offset);
+    return;
+  }
   code_.load(Reg::x0, cpu, offsetof(Registers, r) + (form.index * sizeof(Word)));
   code_.store(Reg::x0, Reg::sp, offset);
   if (form.mode == 4) { return; }
@@ -75,6 +80,12 @@ void Emitter::paired_move(const BlockInstruction &operation) {
   const BusOperand x{.space = Space::x, .write = (opcode & (1U << 15)) == 0};
   const BusOperand y{.space = Space::y, .write = (opcode & (1U << 22)) == 0};
   paired_capture(operation, xreg, x);
+  if (guarded()) {
+    paired_capture(operation, yreg, y);
+    paired_commit(operation, xreg, x);
+    paired_commit(operation, yreg, y);
+    return;
+  }
   Label both;
   Label complete;
   code_.constant(Reg::x17, io_begin);

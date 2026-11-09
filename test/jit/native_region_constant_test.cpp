@@ -7,7 +7,11 @@
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
+#if defined(__aarch64__)
+#include "jit/a64/emitter.hpp"
+#else
 #include "jit/emitter.hpp"
+#endif
 #include "jit/resident.hpp"
 #include "loop_frames.hpp"
 #include "native/direct.hpp"
@@ -26,6 +30,7 @@
 #include <limits>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <vector>
 
 namespace dsp56300::test {
@@ -275,10 +280,17 @@ void direct_shape(const Shape shape, const bool alias, const bool shortened) {
   const auto plan = detail::resident_plan(ops, runtime.memory, modifiers(shape));
   require(plan.valid && plan.addresses[shape.index].constant == (shape.value & word_mask),
           "The proof records the actual 24-bit assignment instead of constraining old R");
+#if defined(__aarch64__)
+  detail::a64::Emitter emitter;
+  const auto bytes = emitter.generate_guarded(ops, runtime, modifiers(shape));
+  if (!bytes) { throw std::runtime_error("A64 guarded constant RAM admission failed"); }
+  const native::Direct code(bytes.value());
+#else
   detail::BlockEmitter emitter(runtime, modifiers(shape), detail::RegionMode::guarded);
   const native::Direct code(emitter.generate(ops));
   require(emitter.guarded_region() && emitter.cached_status() && emitter.packed_retirement(),
           "The tested bytes are actual helper-free guarded regions with held status");
+#endif
   for (Word flags = 0; flags <= status_byte; ++flags) {
     direct_case(code, memory, shape, {.flags = flags});
   }
@@ -312,6 +324,32 @@ void direct_matrix() {
     direct_mode(mode);
     direct_mode(mode | saturation_model::mode);
   }
+}
+
+void immediate_word_width() {
+  constexpr Word raw = 0xff000020;
+  const Shape shape{.value = raw};
+  auto ops = operations(shape);
+  ops.resize(1);
+  detail::Cpu cpu;
+  auto expected = initial(shape, {});
+  cpu.reg = expected;
+  cpu.reg.a <<= detail::padding_bits;
+  cpu.reg.b <<= detail::padding_bits;
+#if defined(__aarch64__)
+  detail::a64::Emitter emitter;
+#else
+  detail::BlockEmitter emitter({.memory = {}});
+#endif
+  const native::Direct code(emitter.generate(ops));
+  detail::NativeContext context{.runtime = {.memory = {}}, .budget = 1};
+  const auto retired = code.enter(cpu, context);
+  cpu.reg.a >>= detail::padding_bits;
+  cpu.reg.b >>= detail::padding_bits;
+  expected.r[0] = raw & word_mask;
+  expected.pc += 2;
+  require(retired == 1 && cpu.reg == expected && cpu.instructions == 1 && cpu.cycles == 2,
+          "Ordinary long address assignment discards bits outside the architectural word");
 }
 
 void boundary_shapes() {
@@ -422,6 +460,7 @@ int main() {
   try {
     dsp56300::test::admission();
     dsp56300::test::direct_matrix();
+    dsp56300::test::immediate_word_width();
     dsp56300::test::boundary_shapes();
     for (const auto backend : {dsp56300::Backend::jit}) {
       {

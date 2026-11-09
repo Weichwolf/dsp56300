@@ -6,9 +6,13 @@
 #include "dsp56300/memory.hpp"
 #include "jit.hpp"
 #include "jit/a64/code.hpp"
+#include "jit/resident.hpp"
+#include "jit/value_ranges.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -53,7 +57,7 @@ enum class Flow : std::uint8_t { sequential, control, context, owner };
 
 struct Frame {
   static constexpr std::size_t address = 40, other_address = 44, value = 48, other_value = 56,
-                               secondary = 64, access = 80;
+                               secondary = 64, iterations = 72, access = 80;
   static constexpr std::size_t pairs = (access + sizeof(NativeAccess) + 15) / 16;
 };
 
@@ -67,6 +71,9 @@ struct MemoryLabels {
   Label &unmapped;
 };
 
+[[nodiscard]] std::vector<std::uint8_t> select_mac_batch(const BlockInstruction &operation,
+                                                         std::span<const std::uint8_t> fallback);
+
 class Emitter {
 public:
   [[nodiscard]] std::vector<std::uint8_t> generate(std::span<const BlockInstruction> operations);
@@ -74,9 +81,32 @@ public:
   generate_chained(std::span<const BlockInstruction> operations);
   [[nodiscard]] std::vector<std::uint8_t> generate_repeat(const BlockInstruction &operation);
   [[nodiscard]] std::vector<std::uint8_t> generate_vector(const BlockInstruction &operation);
+  [[nodiscard]] std::optional<std::vector<std::uint8_t>>
+  generate_guarded(std::span<const BlockInstruction> operations,
+                   const JitRuntime &runtime,
+                   const std::array<Word, agu_registers> &modifiers,
+                   std::span<const std::uint8_t> fallback = {});
 
 private:
-  enum class Entry : std::uint8_t { block, repeat, vector, chained };
+  enum class Entry : std::uint8_t { block, repeat, vector, chained, guarded };
+
+  [[nodiscard]] bool guarded() const noexcept { return entry_ == Entry::guarded; }
+
+  [[nodiscard]] static bool guardable(const BlockInstruction &operation);
+  [[nodiscard]] static Word written_flags(const BlockInstruction &operation);
+  [[nodiscard]] static std::vector<Word> plan_flags(std::span<const BlockInstruction> operations);
+  void guard_storage();
+  void guard_loop(Label &failed);
+  void guard_address(std::size_t index, bool repeated, Label &failed);
+  void guard_addresses(bool repeated, Label &failed);
+  void guard_iterations(std::span<const BlockInstruction> operations);
+  void guarded_body(std::span<const BlockInstruction> operations);
+  void guarded_finish(std::span<const std::uint8_t> fallback);
+  void guarded_retire(std::span<const BlockInstruction> operations);
+  void guarded_memory(BusOperand operand);
+  void guarded_effective(AddressForm form);
+  void restore();
+  void read_old(Reg result, unsigned bank);
   [[nodiscard]] bool prepare_instruction(const BlockInstruction &operation);
   [[nodiscard]] bool prepare_vector(const BlockInstruction &operation);
   void vector_operation(const BlockInstruction &operation);
@@ -213,5 +243,10 @@ private:
   Flow flow_ = Flow::sequential;
   Label *failure_ = nullptr;
   Entry entry_ = Entry::block;
+  JitRuntime runtime_;
+  ResidentPlan region_;
+  NativeValueProof value_proof_;
+  Word old_inputs_ = 15;
+  Word live_flags_ = overflow | zero | negative | unnormalized | extension | carry;
 };
 }

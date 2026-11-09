@@ -3,6 +3,7 @@
 #include "value_graph.hpp"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -33,8 +34,10 @@ struct ReverseCursor {
 struct RegionFrame {
   std::array<RegionCursor, 2 * agu_registers> cursors;
   std::array<std::uint64_t, 6> invariants{}, results{};
-  std::array<std::uint64_t, 3> flags{}, preceding_flags{};
+  std::array<std::uint64_t, 4> flags{}, preceding_flags{};
   std::array<Word, agu_registers> addresses{};
+  alignas(16) std::array<std::int32_t, 4> reduction{};
+  std::uint64_t reduction_operand = 0;
   RegionVector growth, limits, preceding_growth, preceding_limits;
   const std::uint64_t *constants = nullptr;
   const std::uint64_t *offsets = nullptr;
@@ -48,6 +51,16 @@ struct RegionFootprint {
   std::uint64_t bytes = 0, stride = 0, inner_span = 0;
 };
 
+struct RegionQuad {
+  std::array<std::size_t, 8> nodes{};
+  Word fields = 0;
+  bool store = false;
+
+  [[nodiscard]] std::span<const std::size_t> members() const noexcept {
+    return std::span(nodes).first(fields);
+  }
+};
+
 struct ResidentRegion {
   ValueGraph graph;
   JitRuntime runtime;
@@ -56,9 +69,12 @@ struct ResidentRegion {
   std::vector<RegionFootprint> footprints;
   std::vector<unsigned> stream_roots;
   std::vector<std::uint64_t> constants, offsets;
+  std::vector<RegionQuad> interleaved;
+  std::vector<std::size_t> memory_order;
   std::vector<RegionVector> spills;
   std::array<std::optional<Word>, agu_registers> prefix{};
   std::array<GraphAddress, agu_registers> inner_addresses{};
+  std::array<Word, agu_registers> periods{};
   RegionFrame frame;
   Word entry = 0, last = 0, mode = 0, inner_entry = 0, extra_cycles = 0, inner_iterations = 1;
   Word reverse_addresses = 0;
@@ -66,6 +82,8 @@ struct ResidentRegion {
   std::array<const void *, 3> native{};
   unsigned lanes = 4, growth_shift = 0;
 };
+
+[[nodiscard]] GraphSupport resident_region_support() noexcept;
 
 [[nodiscard]] std::unique_ptr<ResidentRegion>
 resident_region_plan(std::span<const Word> program,
