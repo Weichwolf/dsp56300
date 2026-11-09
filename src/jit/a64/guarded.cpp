@@ -112,6 +112,7 @@ void Emitter::guarded_retire(const std::span<const BlockInstruction> operations)
   for (const auto &operation : operations) { cycles += operation.instruction.cycles; }
   for (const auto &[offset, amount] :
        {std::pair{offsetof(Cpu, instructions), count}, std::pair{offsetof(Cpu, cycles), cycles}}) {
+    if (deferred_instructions_ && offset == offsetof(Cpu, instructions)) { continue; }
     code_.load(Reg::x9, cpu, offset, Access::doubleword);
     code_.constant(Reg::x17, amount);
     code_.alu(Alu::add, Reg::x9, Reg::x9, Reg::x17, Width::x64);
@@ -172,6 +173,7 @@ Emitter::generate_guarded(const std::span<const BlockInstruction> operations,
     return std::nullopt;
   }
   entry_ = Entry::guarded;
+  deferred_instructions_ = true;
   runtime_ = runtime;
   begin();
   guard_storage();

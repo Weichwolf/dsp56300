@@ -41,6 +41,10 @@ void Emitter::begin() {
   code_.load(pc, cpu, offsetof(Registers, pc));
   code_.constant(retired, 0);
   code_.load(remaining, context, offsetof(NativeContext, budget));
+  if (deferred_instructions_) {
+    code_.load(Reg::x17, cpu, offsetof(Cpu, instructions), Access::doubleword);
+    code_.store(Reg::x17, Reg::sp, Frame::instructions, Access::doubleword);
+  }
 }
 
 void Emitter::snapshot() {
@@ -67,6 +71,11 @@ void Emitter::restore() {
 }
 
 void Emitter::publish() {
+  if (deferred_instructions_) {
+    code_.load(Reg::x17, Reg::sp, Frame::instructions, Access::doubleword);
+    code_.alu(Alu::add, Reg::x17, Reg::x17, retired, Width::x64);
+    code_.store(Reg::x17, cpu, offsetof(Cpu, instructions), Access::doubleword);
+  }
   for (const auto &[reg, offset] : held) { code_.store(reg, cpu, offset, Access::doubleword); }
   code_.store(status, cpu, offsetof(Registers, sr));
   code_.store(pc, cpu, offsetof(Registers, pc));
@@ -88,6 +97,7 @@ void Emitter::retire(const BlockInstruction &operation) {
   for (const auto &[offset, count] :
        {std::pair{offsetof(Cpu, instructions), 1U},
         std::pair{offsetof(Cpu, cycles), unsigned{operation.instruction.cycles}}}) {
+    if (deferred_instructions_ && offset == offsetof(Cpu, instructions)) { continue; }
     code_.load(Reg::x9, cpu, offset, Access::doubleword);
     code_.add(Reg::x9, Reg::x9, static_cast<std::uint16_t>(count), Width::x64);
     code_.store(Reg::x9, cpu, offset, Access::doubleword);
@@ -133,6 +143,7 @@ bool Emitter::prepare_instruction(const BlockInstruction &operation) {
 std::vector<std::uint8_t> Emitter::generate(const std::span<const BlockInstruction> operations) {
   if (operations.empty()) { throw std::invalid_argument("Cannot emit an empty A64 DSP block"); }
   const bool chained = entry_ == Entry::chained;
+  deferred_instructions_ = entry_ == Entry::repeat || operations.size() >= 4;
   Label header;
   Label dispatch;
   begin();
