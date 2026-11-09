@@ -9,6 +9,20 @@
 #include <optional>
 
 namespace dsp56300 {
+namespace {
+// RAM grants also cover cold instruction helpers. Real device/denied accesses
+// retain callbacks, including executable-alias writes and unknown words.
+const MemoryWindow *window_for(Io *const io, const Space space, const Word address) noexcept {
+  if (io == nullptr || space == Space::program || address >= detail::io_begin) { return nullptr; }
+  for (const auto &window : io->memory_windows(space)) {
+    if (address >= window.address && address - window.address < window.words.size()) {
+      return &window;
+    }
+  }
+  return nullptr;
+}
+}
+
 void Core::request_yield() noexcept {
   if (!impl_->executing) { return; }
   impl_->yield_requested = true;
@@ -48,6 +62,12 @@ Word Core::Impl::read_external(const Space space, const Word address) {
   if (space == Space::program && cacheable(address) && icache) {
     if (const auto cached = icache->peek(address)) { return *cached; }
   }
+  if (const auto *window = window_for(io, space, address)) {
+    const auto offset = address - window->address;
+    if (window->known.empty() || (offset < window->known.size() && window->known[offset] != 0)) {
+      return window->words[offset] & word_mask;
+    }
+  }
   Word value = 0;
   if (address > word_mask || io == nullptr || !io->read(space, address, current_pc, value)) {
     const bool peripheral = space != Space::program && address >= detail::io_begin;
@@ -58,6 +78,15 @@ Word Core::Impl::read_external(const Space space, const Word address) {
 
 void Core::Impl::write_external(const Space space, const Word address, const Word value) {
   if (fault.kind != FaultKind::none) { return; }
+  if (const auto *window = window_for(io, space, address);
+      window != nullptr && window->writable && !window->aliases_program) {
+    const auto offset = address - window->address;
+    if (window->known.empty() || offset < window->known.size()) {
+      window->words[offset] = value & word_mask;
+      if (!window->known.empty()) { window->known[offset] = 1; }
+      return;
+    }
+  }
   if (address > word_mask || io == nullptr ||
       !io->write(space, address, current_pc, value & word_mask)) {
     const bool peripheral = space != Space::program && address >= detail::io_begin;

@@ -40,6 +40,11 @@ at real interrupt-mask changes and return before another instruction when an IRQ
 needs arbitration. The consumer owns priority and acknowledgement; the core owns
 eligibility, REP, interrupt shadows and native vector entry.
 
+Native instructions and cold helpers consume the same current RAM grants.
+Known reads and writable non-program-alias stores use borrowed memory directly.
+Insufficient grants retain owned callbacks, including unknown words, denied
+writes and executable aliases; genuine stores update their knowledge bytes.
+
 Measure realistic continuous workloads against matched optimized host ASM with
 identical inputs, relevant semantics and independently checked results. Report
 cold translation, warm execution, API/boundary costs, code size and each slow case.

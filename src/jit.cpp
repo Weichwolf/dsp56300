@@ -7,7 +7,6 @@
 #include "jit/arena.hpp"
 #include "jit/block.hpp"
 #include "jit/index.hpp"
-#include "jit/resident.hpp"
 #include "jit/resident_region.hpp"
 #include "translation.hpp"
 
@@ -21,6 +20,8 @@
 #include <utility>
 #include <vector>
 #if defined(__aarch64__)
+#include "jit/resident.hpp"
+
 #include <algorithm>
 #include <cstddef>
 #include <exception>

@@ -321,6 +321,72 @@ void live_flags_and_loop_frames() {
   }
 }
 
+void arithmetic_control_prefixes() {
+  constexpr Word prefix = 3;
+  constexpr Word cleared_flags = flag_z | flag_u;
+  constexpr Word changed_flags = flag_z | flag_u | flag_v | flag_n | flag_e;
+  for (const auto form : forms) {
+    for (const bool call : {false, true}) {
+      for (unsigned selector = 0; selector <= always; ++selector) {
+        const auto shape = make(form, call, selector);
+        std::array<Word, entry + 4> program{};
+        program[entry - prefix] = opcode(Opcode::clr_a);
+        program[entry - 2] = opcode(Opcode::clr_b);
+        program[entry - 1] = isa::nop.front();
+        program[entry] = shape.opcode;
+        if (shape.words == 2) { program[entry + 1] = shape.extra; }
+        Core core(Memory::unified(program));
+        for (const Word carry : {0U, flag_c}) {
+          auto initial = seed(shape, {.sr = initial_status | flag_l | flag_s | carry});
+          initial.pc = entry - prefix;
+          initial.sc = 2;
+          auto before_branch = initial;
+          before_branch.a = before_branch.b = 0;
+          before_branch.sr = (initial.sr & ~changed_flags) | cleared_flags;
+          const auto expected = predict(before_branch, shape);
+          core.set_registers(initial);
+          const auto before = core.progress();
+          const auto result = core.run(4);
+          require(result.retired == 4 && result.fault.kind == FaultKind::none &&
+                      core.registers() == expected &&
+                      result.progress == Progress{.instructions = before.instructions + 4,
+                                                  .estimated_cycles = before.estimated_cycles +
+                                                                      prefix + shape.cycles},
+                  "Packed native branch/call exits retain live ALU flags, stack and exact cycles");
+        }
+      }
+    }
+  }
+}
+
+void stack_fault_prefixes() {
+  constexpr Word cleared_status = 0x315;
+  for (const bool returning : {false, true}) {
+    std::array<Word, entry + 5> program{};
+    const auto shape = make(Form::short_address, true);
+    program[entry] = opcode(Opcode::clr_a);
+    program[entry + 1] = isa::nop.front();
+    program[entry + 2] = isa::nop.front();
+    program[entry + 3] = returning ? isa::rts.front() : shape.opcode;
+    for (const auto pointer : {0U, 15U, 63U}) {
+      auto initial = seed(shape, {.sr = initial_status | flag_c, .sp = pointer});
+      initial.sc = returning ? 0U : static_cast<Word>(stack_entries - 1);
+      auto expected = initial;
+      expected.a = 0;
+      expected.sr = cleared_status;
+      expected.pc = returning ? entry + 4 : destination;
+      Core core(Memory::unified(program));
+      core.set_registers(initial);
+      const auto result = core.run(4);
+      require(result.retired == 3 && result.fault.kind == FaultKind::stack &&
+                  result.fault.pc == entry + 3 && result.fault.address == entry + 3 &&
+                  result.fault.value == pointer && core.registers() == expected &&
+                  result.progress == Progress{.instructions = 3, .estimated_cycles = 3},
+              "A failed native call/return publishes exactly its preceding ALU and clock prefix");
+    }
+  }
+}
+
 void warm_calls() {
   std::array<Word, entry + 2> program{};
   constexpr Word outer = 32;
@@ -373,6 +439,8 @@ int main() {
     branches(make(Form::absolute, true, always, entry, distant));
     returns();
     stack_faults();
+    arithmetic_control_prefixes();
+    stack_fault_prefixes();
     warm_calls();
     live_flags_and_loop_frames();
     std::cout << checks << " native/public control checks passed\n";

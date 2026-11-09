@@ -69,7 +69,16 @@ struct MemoryIo final : Io {
     return true;
   }
 
-  bool write(Space /*space*/, Word /*address*/, Word /*pc*/, Word /*value*/) noexcept override {
+  bool
+  write(const Space space, const Word address, Word /*pc*/, const Word value) noexcept override {
+    if (callback_core != nullptr && space == Space::x && address == io_address) {
+      ++callbacks;
+      callback_pc = callback_core->registers().pc;
+      callback_progress = callback_core->progress();
+      callback_output = value;
+      callback_core->request_yield();
+      return true;
+    }
     return false;
   }
 
@@ -88,7 +97,7 @@ struct MemoryIo final : Io {
   std::size_t program_words = memory_words;
   Core *callback_core = nullptr;
   unsigned callbacks = 0;
-  Word callback_pc = 0;
+  Word callback_pc = 0, callback_output = 0;
   Progress callback_progress{};
   std::uint64_t revision = 0;
 
@@ -119,11 +128,60 @@ void owned_loop_access() {
   const auto x = memory.x;
   const auto y = memory.y;
   const auto result = core.run(10);
-  require(result.fault.kind == FaultKind::none && result.retired == 1 && result.yielded &&
-              memory.callbacks == 1 && memory.callback_pc == start + 1 &&
-              memory.callback_progress == Progress{} && core.registers() == expected &&
-              memory.x == x && memory.y == y,
+  const auto actual = core.registers();
+  const bool valid = result.fault.kind == FaultKind::none && result.retired == 1 &&
+                     result.yielded && memory.callbacks == 1 && memory.callback_pc == start + 1 &&
+                     memory.callback_progress == Progress{} && actual == expected &&
+                     memory.x == x && memory.y == y;
+  if (!valid) {
+    std::cerr << "callback: fault=" << static_cast<unsigned>(result.fault.kind)
+              << " retired=" << result.retired << " yielded=" << result.yielded
+              << " calls=" << memory.callbacks << " observed-PC=" << memory.callback_pc
+              << " observed-count=" << memory.callback_progress.instructions
+              << " observed-cycles=" << memory.callback_progress.estimated_cycles
+              << " PC=" << actual.pc << '/' << expected.pc << " SR=" << actual.sr << '/'
+              << expected.sr << " A=" << actual.a << '/' << expected.a << " B=" << actual.b << '/'
+              << expected.b << '\n';
+  }
+  require(valid,
           "A real loop I/O callback observes exact state and yields before the next instruction");
+}
+
+void owned_loop_store() {
+  MemoryIo memory;
+  memory.program[start] = store;
+  memory.windows_[2].known = memory.known;
+  memory.known.fill(0);
+  Core core(Memory::external(), &memory);
+  memory.callback_core = &core;
+  auto initial = register_model::seed(0);
+  initial.sr |= Word{1} << 15;
+  initial.la = start + 1;
+  initial.lc = 5;
+  initial.r[0] = io_address;
+  initial.r[4] = 4;
+  initial.a = std::uint64_t{callback_value} << word_bits;
+  initial.b = std::uint64_t{ram_value} << word_bits;
+  initial.stack[2] = std::uint64_t{start} << word_bits;
+  core.set_registers(initial);
+  auto expected = initial;
+  const auto output = register_model::bus_word(expected, initial.b);
+  ++expected.r[0];
+  ++expected.r[4];
+  ++expected.pc;
+  const auto x = memory.x;
+  auto y = memory.y;
+  y[4] = register_model::bus_word(expected, initial.a);
+  auto known = memory.known;
+  known[4] = 1;
+  const auto result = core.run(10);
+  require(result.fault.kind == FaultKind::none && result.retired == 1 && result.yielded &&
+              result.progress == Progress{.instructions = 1, .estimated_cycles = 1} &&
+              memory.callbacks == 1 && memory.callback_pc == start + 1 &&
+              memory.callback_progress == Progress{} && memory.callback_output == output &&
+              core.registers() == expected && memory.x == x && memory.y == y &&
+              memory.known == known,
+          "A mixed I/O/RAM store completes both ports and initializes only its granted RAM word");
 }
 
 void model_step(Registers &state, ExpectedMemory &memory) {
@@ -320,6 +378,7 @@ int main() try {
   dsp56300::test::rebound_windows();
   dsp56300::test::revoked_windows();
   dsp56300::test::owned_loop_access();
+  dsp56300::test::owned_loop_store();
   dsp56300::test::rejected_windows();
   for (const dsp56300::Word first : {4U, 28U, 36U}) {
     for (const dsp56300::Word count : {1U, 2U, 3U, 5U, 8U}) {
