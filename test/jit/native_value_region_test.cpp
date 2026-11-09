@@ -149,15 +149,18 @@ public:
   explicit Machine(const bool shared,
                    const Shape shape = Shape::product,
                    const bool mapped = false,
-                   const Word origin = 0)
+                   const Word origin = 0,
+                   const bool tracked = true)
       : code_(instructions(shape)),
         windows_{MemoryWindow{.address = origin,
                               .words = std::span(x_).subspan(origin),
-                              .known = std::span(x_known_).subspan(origin),
+                              .known = tracked ? std::span(x_known_).subspan(origin)
+                                               : std::span<std::uint8_t>{},
                               .writable = true},
                  MemoryWindow{.address = origin,
                               .words = (shared ? std::span(x_) : std::span(y_)).subspan(origin),
-                              .known = std::span(y_known_).subspan(origin),
+                              .known = tracked ? std::span(y_known_).subspan(origin)
+                                               : std::span<std::uint8_t>{},
                               .writable = true}},
         mapped_(mapped),
         core_(mapped ? Memory::external()
@@ -367,6 +370,10 @@ void placements(Machine &machine, Point point) {
 }
 
 void mapped_cases() {
+  for (const bool shared : {false, true}) {
+    Machine initialized(shared, Shape::product, true, 0, false);
+    counts(initialized, {.shared = shared});
+  }
   constexpr Word packet_tail = 33;
   for (const bool shared : {false, true}) {
     for (const auto shape : {Shape::product,

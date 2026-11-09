@@ -27,6 +27,23 @@ using x64::Width;
 constexpr unsigned group_and = 4;
 constexpr auto r_offset = offsetof(Cpu, reg) + offsetof(Registers, r);
 constexpr std::array<std::uint8_t, 4> landing{0xf3, 0x0f, 0x1e, 0xfa};
+
+JitRuntime resident_runtime(JitRuntime runtime) {
+  for (std::size_t bank = 0; bank < runtime.memory.size(); ++bank) {
+    if (runtime.windows[bank].empty()) { continue; }
+    // A fully initialized, writable zero-based window has the same direct
+    // indexing contract as ordinary RAM. Only the guarded region uses this
+    // projection; its rejected entry retains the original sparse-map code.
+    const auto found = std::ranges::find_if(runtime.windows[bank], [](const auto &window) {
+      return window.address == 0 && window.known.empty() && window.writable &&
+             !window.aliases_program;
+    });
+    if (found == runtime.windows[bank].end()) { continue; }
+    runtime.memory[bank] = {.data = found->words.data(), .words = found->words.size()};
+    runtime.windows[bank] = {};
+  }
+  return runtime;
+}
 }
 
 std::vector<std::uint8_t> BlockEmitter::generate(const std::span<const BlockInstruction> operations,
@@ -59,9 +76,10 @@ BlockEmitter::generate_selected(const std::span<const BlockInstruction> operatio
   region_mode_ = RegionMode::ordinary;
   auto ordinary = generate_body(operations);
   if (!packed_retirement_) { return ordinary; }
-  region_ = resident_plan(operations, runtime_.memory, modifiers_);
+  const auto runtime = resident_runtime(runtime_);
+  region_ = resident_plan(operations, runtime.memory, modifiers_);
   if (!region_.valid) { return ordinary; }
-  BlockEmitter fast(runtime_,
+  BlockEmitter fast(runtime,
                     modifiers_,
                     RegionMode::guarded,
                     residency_mode_,
@@ -87,10 +105,12 @@ std::optional<std::vector<std::uint8_t>>
 BlockEmitter::generate_guarded(const std::span<const BlockInstruction> operations,
                                const std::span<const std::uint8_t> checked) {
   if (operations.empty() || checked.empty()) { return std::nullopt; }
-  region_ = resident_plan(operations, runtime_.memory, modifiers_);
+  const auto runtime = resident_runtime(runtime_);
+  region_ = resident_plan(operations, runtime.memory, modifiers_);
   if (!region_.valid) { return std::nullopt; }
   loop_size_ = at_loop_end(operations.back()) ? static_cast<Word>(operations.size()) : 0;
   if (!admit_packed_retirement(operations)) { return std::nullopt; }
+  runtime_ = runtime;
   region_mode_ = RegionMode::guarded;
   entry_admitted_ = true;
   const auto guarded = generate_body(operations);

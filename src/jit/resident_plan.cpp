@@ -108,8 +108,9 @@ ResidentPlan resident_plan(const std::span<const BlockInstruction> operations,
     pc = (pc + operation.instruction.words) & word_mask;
   }
   region.loop = at_loop_end(operations.back());
-  region.valid = region.transfers >= minimum_transfers &&
-                 std::ranges::all_of(region.addresses, address_supported);
+  region.valid =
+      (region.transfers >= minimum_transfers || (region.loop && region.transfers != 0)) &&
+      std::ranges::all_of(region.addresses, address_supported);
   return region;
 }
 } // namespace dsp56300::detail
