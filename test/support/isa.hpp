@@ -412,6 +412,8 @@ enum class Opcode : std::uint32_t {
   move_address_update = 0x204000,
   move_displacement_long = 0x0a7080,
   move_displacement_short = 0x020080,
+  move_immediate_n0 = 0x380000,
+  move_immediate_r0 = 0x300000,
   move_immediate_x0 = 0x240000,
   move_long = 0x400000,
   move_none = 0x200000,

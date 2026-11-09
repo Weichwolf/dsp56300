@@ -6,6 +6,7 @@
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
+#include "isa.hpp"
 #include "jit.hpp"
 #include "jit/emitter.hpp"
 #include "memory_arena.hpp"
@@ -16,6 +17,7 @@
 #include "support.hpp"
 #include "translation.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -117,6 +119,104 @@ std::uint32_t forbidden(void *const owner,
   return 0;
 }
 
+Word short_encoding(const unsigned selector, const Word value) {
+  const auto base = selector < n0 ? isa::Opcode::move_immediate_r0 : isa::Opcode::move_immediate_n0;
+  return static_cast<Word>(base) | ((selector % 8) << 16) | (value << 8);
+}
+
+void short_admission() {
+  for (unsigned selector = 0; selector < 32; ++selector) {
+    for (Word value = 0; value <= status_byte; ++value) {
+      auto instruction =
+          detail::decode(static_cast<Word>(isa::Opcode::move_immediate_x0) | (value << 8));
+      constexpr Word selector_mask = 31U << 16;
+      instruction.opcode = (instruction.opcode & ~selector_mask) | (selector << 16);
+      const auto plan = detail::plan_address_immediate(instruction);
+      require(plan.valid() == (selector >= 16),
+              "Short address constants admit R/N only, excluding data and control operands");
+      if (!plan.valid()) { continue; }
+      require(plan.destination == selector && plan.value == value && instruction.words == 1 &&
+                  instruction.cycles == 1 && detail::analyze_dataflow(instruction).move_writes == 0,
+              "Every unsigned byte and address selector retains exact width, cost and effects");
+      instruction.opcode |= 1;
+      require(!detail::plan_address_immediate(instruction).valid(),
+              "An accompanying ALU operation needs its complete parallel lowering");
+      instruction.opcode &= ~Word{1};
+      instruction.words = 2;
+      require(!detail::plan_address_immediate(instruction).valid(),
+              "Short assignments never consume an extension word");
+      instruction.words = 1;
+      instruction.operation = detail::Operation::nop;
+      require(!detail::plan_address_immediate(instruction).valid(),
+              "A short opcode alone cannot override its decoded operation");
+    }
+  }
+}
+
+void short_public() {
+  constexpr std::array constants{0U, 1U, 0x7fU, 0x80U, 0xffU};
+  constexpr Word keep_flags = flag_s | flag_l | flag_c | flag_n | flag_z;
+  for (unsigned selector = 16; selector < 32; ++selector) {
+    for (const auto value : constants) {
+      std::array<Word, start + 2> code{};
+      code[start] = short_encoding(selector, value);
+      Core core(Memory::unified(code));
+      for (const auto mode : modes) {
+        const auto initial = register_model::seed(mode | keep_flags);
+        auto expected = initial;
+        register_model::write(expected, selector, value);
+        ++expected.pc;
+        core.set_registers(initial);
+        const auto before = core.progress();
+        const auto result = core.run(1);
+        require(result.retired == 1 && result.fault.kind == FaultKind::none &&
+                    core.registers() == expected &&
+                    result.progress == Progress{.instructions = before.instructions + 1,
+                                                .estimated_cycles = before.estimated_cycles + 1},
+                "Public short constants write an unsigned integer and preserve every other field");
+      }
+    }
+  }
+}
+
+void short_native() {
+  constexpr Word keep_flags = flag_s | flag_l | flag_c | flag_n | flag_z;
+  for (unsigned selector = 16; selector < 32; ++selector) {
+    for (const auto value : {0U, 1U, 0x7fU, 0x80U, 0xffU}) {
+      for (const auto mode : modes) {
+        auto initial = register_model::seed(mode | keep_flags);
+        initial.pc = word_mask;
+        auto expected = initial;
+        register_model::write(expected, selector, value);
+        expected.pc = 0;
+        detail::Cpu cpu;
+        cpu.reg = initial;
+        cpu.reg.a <<= detail::padding_bits;
+        cpu.reg.b <<= detail::padding_bits;
+        cpu.instructions = maximum;
+        cpu.cycles = maximum;
+        cpu.repeat_completed = cpu.interrupt_inhibited = true;
+        Probe probe;
+        const detail::BlockInstruction operation{
+            .instruction = detail::decode(short_encoding(selector, value)),
+            .pc = word_mask,
+            .mode = mode};
+        detail::BlockEmitter emitter(
+            {.owner = &probe, .execute = forbidden, .moves = forbidden, .memory = {}});
+        const native::Direct native(emitter.generate(std::array{operation}));
+        detail::NativeContext context{.runtime = {.owner = &probe, .memory = {}}, .budget = 1};
+        require(native.enter(cpu, context) == 1 && probe.calls == 0,
+                "Short address constants execute without general instruction or move helpers");
+        cpu.reg.a >>= detail::padding_bits;
+        cpu.reg.b >>= detail::padding_bits;
+        require(cpu.reg == expected && cpu.instructions == 0 && cpu.cycles == 0 &&
+                    !cpu.repeat_completed && !cpu.interrupt_inhibited,
+                "Native short assignments preserve flags and independently wrapped PC/progress");
+      }
+    }
+  }
+}
+
 struct Shape {
   unsigned selector = 16;
   Word value = 0, mode = 0, first = start;
@@ -164,6 +264,64 @@ void finish_loop(Registers &state) {
   state.sr = (state.sr & ~loop_bits) | (static_cast<Word>(saved) & loop_bits);
   state.la = static_cast<Word>(previous >> word_bits);
   state.lc = static_cast<Word>(previous) & word_mask;
+}
+
+constexpr Word short_address_value = 0x80;
+constexpr Word short_offset_value = 0xff;
+
+Registers short_loop_state(Registers state, const Word budget) {
+  if (budget == 0) { return state; }
+  constexpr Word first = start + 2;
+  state.stack[3] = (std::uint64_t{state.la} << word_bits) | state.lc;
+  state.stack[4] = (std::uint64_t{first} << word_bits) | state.sr;
+  state.sp += 2;
+  state.sc += 2;
+  state.pc = first;
+  state.la = first + 2;
+  state.lc = 3;
+  state.sr |= loop_flag;
+  for (Word index = 1; index < budget; ++index) {
+    const auto position = (index - 1) % 3;
+    if (position == 0) { state.r[0] = short_address_value; }
+    if (position == 1) { state.n[7] = short_offset_value; }
+    ++state.pc;
+    if (position != 2) { continue; }
+    if (state.lc > 1) {
+      --state.lc;
+      state.pc = first;
+    } else {
+      finish_loop(state);
+    }
+  }
+  return state;
+}
+
+void short_loop_prefixes() {
+  constexpr Word count = 3;
+  constexpr Word ending = start + 4;
+  const std::array code{static_cast<Word>(isa::Opcode::do_immediate) | (count << 8),
+                        ending,
+                        short_encoding(16, short_address_value),
+                        short_encoding(n7, short_offset_value),
+                        isa::nop.front()};
+  std::array<Word, start + code.size()> program{};
+  std::ranges::copy(code, program.begin() + start);
+  Core core(Memory::unified(program));
+  for (const auto mode : modes) {
+    const auto initial = register_model::seed(mode | flag_l | flag_s);
+    for (Word budget = 0; budget <= 1 + count * 3; ++budget) {
+      const auto expected = short_loop_state(initial, budget);
+      const auto cycles = budget == 0 ? 0 : budget + 4;
+      core.set_registers(initial);
+      const auto before = core.progress();
+      const auto result = core.run(budget);
+      require(result.retired == budget && result.fault.kind == FaultKind::none &&
+                  core.registers() == expected &&
+                  result.progress == Progress{.instructions = before.instructions + budget,
+                                              .estimated_cycles = before.estimated_cycles + cycles},
+              "Every short-assignment loop prefix retains counters, flags, frames and final pop");
+    }
+  }
 }
 
 void direct_case(const native::Direct &code, const Shape shape, const Invocation input) {
@@ -525,6 +683,10 @@ void wrapped_and_unsupported(const TestOptions options) {
 int main() {
   try {
     dsp56300::test::admission();
+    dsp56300::test::short_admission();
+    dsp56300::test::short_public();
+    dsp56300::test::short_native();
+    dsp56300::test::short_loop_prefixes();
     dsp56300::test::direct_matrix();
     for (const auto backend : {dsp56300::Backend::jit}) {
       {
