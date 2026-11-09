@@ -6,6 +6,7 @@
 #include "jit.hpp"
 #include "jit/arena.hpp"
 #include "jit/block.hpp"
+#include "jit/index.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
 #include "support.hpp"
@@ -22,7 +23,6 @@ namespace dsp56300::test {
 namespace {
 constexpr Word low = 0x100, middle = 0x300, high = 0x10000;
 constexpr std::size_t program_words = high + 2;
-constexpr unsigned directory_shift = 16;
 constexpr Word maximum_grant = 33;
 constexpr Word add = isa::opcode<isa::Opcode::add_x0_a>()[0];
 constexpr Word negate = isa::opcode<isa::Opcode::neg_b>()[0];
@@ -39,9 +39,8 @@ std::uint32_t forbidden(void * /*owner*/,
 struct Harness {
   std::vector<Word> program = std::vector<Word>(program_words);
   std::array<Word, 8> x{}, y{};
-  std::array<detail::NativePage, addresses.size()> pages{};
-  std::array<detail::NativeDirectory, 2> directories{};
-  detail::NativeIndex index{};
+  std::array<const void *, addresses.size()> entries{};
+  detail::NativeTable table{3};
   detail::ExecutableArena arena;
   detail::JitRuntime runtime{
       .execute = forbidden,
@@ -62,11 +61,8 @@ struct Harness {
       const auto operations = detail::parse_block(program, state, runtime);
       require(operations.size() == 2, "Natural native blocks retain arithmetic and their jump");
       const auto *entry = arena.append(detail::emit_block(operations, runtime, state.m));
-      pages[slot][pc & status_byte] = entry;
-      directories[pc >> directory_shift][(pc >> detail::native_page_shift) & status_byte] =
-          static_cast<const void *>(pages[slot].data());
-      index[pc >> directory_shift] =
-          static_cast<const void *>(directories[pc >> directory_shift].data());
+      entries[slot] = entry;
+      table.insert(pc, entry);
     }
   }
 };
@@ -111,7 +107,7 @@ void run(Harness &harness, const RunInput input) {
   detail::NativeContext context{.runtime = harness.runtime};
   const auto expected = predict(initial, input.retired);
   const auto retired =
-      detail::enter_blocks(harness.pages[2][0], cpu, context, input.budget, harness.index);
+      detail::enter_blocks(harness.entries[2], cpu, context, input.budget, harness.table.index());
   cpu.reg.a >>= detail::padding_bits;
   cpu.reg.b >>= detail::padding_bits;
   require(retired == input.retired && cpu.reg == expected.registers &&
@@ -131,18 +127,10 @@ void cases(const Word mode) {
   for (Word budget = 0; budget <= maximum_grant; ++budget) {
     run(harness, {.mode = mode, .budget = budget, .retired = budget});
   }
-  const auto *const root = harness.index[0];
-  harness.index[0] = nullptr;
+  harness.table.insert(low, nullptr);
   run(harness, {.mode = mode, .budget = 9, .retired = 2});
-  harness.index[0] = root;
-  const auto *page = harness.directories[0][1];
-  harness.directories[0][1] = nullptr;
-  run(harness, {.mode = mode, .budget = 9, .retired = 2});
-  harness.directories[0][1] = page;
-  const auto *entry = harness.pages[0][0];
-  harness.pages[0][0] = nullptr;
-  run(harness, {.mode = mode, .budget = 9, .retired = 2});
-  harness.pages[0][0] = entry;
+  harness.table.insert(low, harness.entries[0]);
+  run(harness, {.mode = mode, .budget = 9, .retired = 9});
   require(harness.program == program, "Native dispatch never rewrites its original program");
 }
 }

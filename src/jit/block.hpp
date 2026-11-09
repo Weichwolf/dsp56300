@@ -15,9 +15,14 @@ namespace dsp56300::detail {
 inline constexpr unsigned native_page_shift = 8;
 inline constexpr std::size_t native_page_entries = 1U << native_page_shift;
 using NativePage = std::array<const void *, native_page_entries>;
-using NativeDirectory = NativePage;
-using NativeIndex = NativePage;
-using NativeCatalog = NativePage;
+
+struct NativeIndex {
+  const void *const *entries = nullptr;
+
+  [[nodiscard]] const void *const *data() const noexcept { return entries; }
+};
+
+using NativeCatalog = NativeIndex;
 
 [[nodiscard]] std::vector<BlockInstruction> parse_block(std::span<const Word> program,
                                                         const Registers &state,

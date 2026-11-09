@@ -20,6 +20,11 @@ Changed executable identities require an explicit owner transition; unrelated
 programs use a fresh core. Consider eager reachable-code preparation or persistent
 caching only when measured first-use latency justifies it.
 
+On Linux x86-64, resolve 24-bit PCs with one indexed load from a non-executable,
+demand-zero target table. Physical target pages follow inserted entries rather
+than the full address span. Keep sparse radix routing for numeric/loop contexts
+and for other hosts.
+
 Keep live values in GPR/SIMD registers across instructions and backedges. Preserve
 old operands, aliases, flags and ordered effects. Eliminate dead work and hoist
 bounds/permission checks only with valid proofs. Exact faults, interrupts and
