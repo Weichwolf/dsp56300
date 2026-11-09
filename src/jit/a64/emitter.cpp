@@ -7,6 +7,7 @@
 #include "instruction.hpp"
 #include "jit.hpp"
 #include "jit/a64/code.hpp"
+#include "jit/dataflow.hpp"
 
 #include <array>
 #include <cstddef>
@@ -118,7 +119,9 @@ void Emitter::finish_instruction(const BlockInstruction &operation) {
   if (!is_repeat(operation.instruction.operation)) {
     code_.store(Reg::zr, cpu, offsetof(Cpu, repeat_completed), Access::byte);
   }
-  finish_loop(operation);
+  if (entry_ != Entry::chained || flow_ != Flow::sequential || at_loop_end(operation)) {
+    finish_loop(operation);
+  }
   retire(operation);
 }
 
@@ -150,6 +153,7 @@ std::vector<std::uint8_t> Emitter::generate(const std::span<const BlockInstructi
   code_.bind(header);
   for (const auto &item : operations) {
     if (!prepare_instruction(item)) { continue; }
+    old_inputs_ = analyze_dataflow(item.instruction).old_inputs;
     snapshot();
     flow_ = Flow::sequential;
     if (entry_ == Entry::vector) {
@@ -162,7 +166,7 @@ std::vector<std::uint8_t> Emitter::generate(const std::span<const BlockInstructi
     code_.branch_zero_far(Reg::x17, done_, Width::w32, true);
     if (flow_ == Flow::owner || flow_ == Flow::context) {
       code_.branch(done_);
-    } else {
+    } else if (!chained || flow_ == Flow::control || at_loop_end(item)) {
       code_.constant(Reg::x17, (item.pc + item.instruction.words) & word_mask);
       code_.compare(pc, Reg::x17);
       code_.branch_far(Condition::not_equal, chained ? dispatch : done_);

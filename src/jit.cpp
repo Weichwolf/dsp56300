@@ -121,13 +121,9 @@ Block *Jit::Impl::compile() {
     }
     bytes = select_resident_region(region, bytes);
   }
-#if defined(__x86_64__)
   const std::span<const BlockInstruction> admission = block->region && block->region->nested
                                                           ? std::span<const BlockInstruction>{}
                                                           : block->operations;
-#else
-  const std::span<const BlockInstruction> admission;
-#endif
   block->entry = arena.append(admit_cycles(bytes, admission));
   return retain(std::move(block));
 }
