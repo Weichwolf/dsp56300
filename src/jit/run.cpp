@@ -13,7 +13,6 @@
 #define DSP56300_RUN_PC_OFFSET 128
 #define DSP56300_RUN_SR_OFFSET 132
 #define DSP56300_RUN_LA_OFFSET 140
-#define DSP56300_RUN_NUMERIC_MODE_MASK 0x326c00
 #define DSP56300_RUN_BUDGET_OFFSET 152
 #define DSP56300_RUN_BOUNDARY_OFFSET 156
 #define DSP56300_RUN_STRING_VALUE(value) #value
@@ -31,7 +30,6 @@ static_assert(static_cast<unsigned>(NativeBoundary::owner) == 1);
 static_assert(static_cast<unsigned>(NativeBoundary::none) == 0);
 static_assert(sizeof(void *) == 8 && native_page_shift == 8);
 static_assert(sizeof(NativePage) == native_page_entries * sizeof(void *));
-static_assert(numeric_mode_mask == DSP56300_RUN_NUMERIC_MODE_MASK);
 
 extern "C" void dsp56300_enter_resident_region(const void *, RegionFrame *) noexcept;
 extern "C" std::uint32_t dsp56300_enter_generated(const void *, Cpu *, NativeContext *) noexcept;
@@ -44,7 +42,6 @@ extern "C" std::uint32_t dsp56300_run_blocks(const void *,
 asm(".equ dsp56300_run_pc," DSP56300_RUN_STRING(DSP56300_RUN_PC_OFFSET) "\n");
 asm(".equ dsp56300_run_sr," DSP56300_RUN_STRING(DSP56300_RUN_SR_OFFSET) "\n");
 asm(".equ dsp56300_run_la," DSP56300_RUN_STRING(DSP56300_RUN_LA_OFFSET) "\n");
-asm(".equ dsp56300_run_numeric_mask," DSP56300_RUN_STRING(DSP56300_RUN_NUMERIC_MODE_MASK) "\n");
 asm(".equ dsp56300_run_budget," DSP56300_RUN_STRING(DSP56300_RUN_BUDGET_OFFSET) "\n");
 asm(".equ dsp56300_run_boundary," DSP56300_RUN_STRING(DSP56300_RUN_BOUNDARY_OFFSET) "\n");
 asm(".pushsection .text\n"
@@ -78,20 +75,7 @@ asm(".pushsection .text\n"
     "push %r13\n"
     "push %r14\n"
     "push %r15\n"
-    "sub $72,%rsp\n"
-    // The catalog is immutable during this call. Retain four complete context
-    // keys and their tables on this frame; never reuse them after owner return.
-    // The upper word is active/inactive LA, the lower word the raw numeric
-    // mode bits. An all-ones tag cannot match either kind of valid context.
-    "movq $-1,(%rsp)\n"
-    "movq $0,8(%rsp)\n"
-    "movq $-1,16(%rsp)\n"
-    "movq $0,24(%rsp)\n"
-    "movq $-1,32(%rsp)\n"
-    "movq $0,40(%rsp)\n"
-    "movq $-1,48(%rsp)\n"
-    "movq $0,56(%rsp)\n"
-    "movl $0,64(%rsp)\n"
+    "sub $8,%rsp\n"
     "mov %rdi,%rax\n"
     "mov %rsi,%r12\n"
     "mov %rdx,%r13\n"
@@ -117,30 +101,6 @@ asm(".pushsection .text\n"
     "jz .Ldsp56300_run_done\n"
     "mov dsp56300_run_sr(%r12),%eax\n"
     "mov %eax,%edx\n"
-    "and $dsp56300_run_numeric_mask,%edx\n"
-    "test $0x8000,%eax\n"
-    "jz .Ldsp56300_run_inactive_loop\n"
-    "mov dsp56300_run_la(%r12),%eax\n"
-    "cmp $0xffffff,%eax\n"
-    "ja .Ldsp56300_run_done\n"
-    "jmp .Ldsp56300_run_context_tag\n"
-    ".Ldsp56300_run_inactive_loop:\n"
-    "mov $0x1000000,%eax\n"
-    ".Ldsp56300_run_context_tag:\n"
-    "shl $32,%rax\n"
-    "or %rdx,%rax\n"
-    "cmp (%rsp),%rax\n"
-    "je .Ldsp56300_run_cached_first\n"
-    "cmp 16(%rsp),%rax\n"
-    "je .Ldsp56300_run_cached_second\n"
-    "cmp 32(%rsp),%rax\n"
-    "je .Ldsp56300_run_cached_third\n"
-    "cmp 48(%rsp),%rax\n"
-    "je .Ldsp56300_run_cached_fourth\n"
-    "mov %rax,%r10\n"
-    // Only a cold context needs the compact radix-catalog key.
-    "mov %edx,%eax\n"
-    "mov %eax,%edx\n"
     "shr $10,%edx\n"
     "and $3,%edx\n"
     "mov %eax,%ecx\n"
@@ -155,8 +115,15 @@ asm(".pushsection .text\n"
     "shr $15,%ecx\n"
     "and $96,%ecx\n"
     "or %ecx,%edx\n"
-    "mov %r10,%rax\n"
-    "shr $32,%rax\n"
+    "test $0x8000,%eax\n"
+    "jz .Ldsp56300_run_inactive_loop\n"
+    "mov dsp56300_run_la(%r12),%eax\n"
+    "cmp $0xffffff,%eax\n"
+    "ja .Ldsp56300_run_done\n"
+    "jmp .Ldsp56300_run_context_key\n"
+    ".Ldsp56300_run_inactive_loop:\n"
+    "mov $0x1000000,%eax\n"
+    ".Ldsp56300_run_context_key:\n"
     "shl $7,%eax\n"
     "or %edx,%eax\n"
     "mov %eax,%edx\n"
@@ -180,28 +147,7 @@ asm(".pushsection .text\n"
     "mov (%rdx,%rax,8),%rdx\n"
     "test %rdx,%rdx\n"
     "jz .Ldsp56300_run_done\n"
-    "mov 64(%rsp),%ecx\n"
-    "mov %ecx,%r11d\n"
-    "add $1,%ecx\n"
-    "and $3,%ecx\n"
-    "mov %ecx,64(%rsp)\n"
-    "shl $4,%r11d\n"
-    "mov %r10,(%rsp,%r11)\n"
-    "mov %rdx,8(%rsp,%r11)\n"
     "mov %rdx,%r14\n"
-    "jmp .Ldsp56300_run_context_ready\n"
-    ".Ldsp56300_run_cached_first:\n"
-    "mov 8(%rsp),%r14\n"
-    "jmp .Ldsp56300_run_context_ready\n"
-    ".Ldsp56300_run_cached_second:\n"
-    "mov 24(%rsp),%r14\n"
-    "jmp .Ldsp56300_run_context_ready\n"
-    ".Ldsp56300_run_cached_third:\n"
-    "mov 40(%rsp),%r14\n"
-    "jmp .Ldsp56300_run_context_ready\n"
-    ".Ldsp56300_run_cached_fourth:\n"
-    "mov 56(%rsp),%r14\n"
-    ".Ldsp56300_run_context_ready:\n"
     "movb $0,dsp56300_run_boundary(%r13)\n"
     ".Ldsp56300_run_same_context:\n"
     "mov dsp56300_run_pc(%r12),%eax\n"
@@ -212,7 +158,7 @@ asm(".pushsection .text\n"
     "jnz .Ldsp56300_run_next\n"
     ".Ldsp56300_run_done:\n"
     "mov %ebx,%eax\n"
-    "add $72,%rsp\n"
+    "add $8,%rsp\n"
     "pop %r15\n"
     "pop %r14\n"
     "pop %r13\n"
@@ -272,6 +218,5 @@ std::uint32_t enter_blocks(const void *const entry,
 #undef DSP56300_RUN_BOUNDARY_OFFSET
 #undef DSP56300_RUN_BUDGET_OFFSET
 #undef DSP56300_RUN_LA_OFFSET
-#undef DSP56300_RUN_NUMERIC_MODE_MASK
 #undef DSP56300_RUN_SR_OFFSET
 #undef DSP56300_RUN_PC_OFFSET
