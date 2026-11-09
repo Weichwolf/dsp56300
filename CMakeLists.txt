@@ -78,6 +78,7 @@ add_library(dsp56300_core STATIC
   src/jit/x64/flags.cpp
   src/jit/move.cpp src/jit/resident_plan.cpp src/jit/dataflow.cpp src/jit/value_ranges.cpp src/jit/word_reuse.cpp src/jit/x64/move.cpp src/jit/x64/memory_windows.cpp
   src/jit/x64/resident_emit.cpp
+  src/jit/x64/window_reuse.cpp
   src/jit/x64/region_guards.cpp src/jit/x64/loop_window.cpp
   src/jit/x64/values.cpp
   src/jit/x64/address.cpp src/jit/x64/registers.cpp src/jit/x64/long_move.cpp
@@ -547,6 +548,9 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   add_executable(dsp56300_native_move_test test/jit/native_move_test.cpp)
   target_link_libraries(dsp56300_native_move_test PRIVATE dsp56300::core)
   add_test(NAME native-move-boundaries COMMAND dsp56300_native_move_test)
+  add_executable(dsp56300_window_reuse_test test/jit/window_reuse_test.cpp)
+  target_link_libraries(dsp56300_window_reuse_test PRIVATE dsp56300::core)
+  add_test(NAME native-window-witnesses COMMAND dsp56300_window_reuse_test)
   add_executable(dsp56300_native_logic_test test/jit/native_logic_test.cpp)
   target_link_libraries(dsp56300_native_logic_test PRIVATE dsp56300::core)
   add_test(NAME native-word-logic COMMAND dsp56300_native_logic_test)

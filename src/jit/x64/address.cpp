@@ -322,6 +322,13 @@ void BlockEmitter::move_effective(const NativeMove &move) {
 void BlockEmitter::move_memory_guard(const NativeMove &move, x64::Label &slow) {
   const auto address = move.space == Space::x ? Reg::cx : Reg::r8;
   if (!runtime_.windows.at(move.space == Space::x ? 0 : 1).empty()) {
+    const auto bank = move.space == Space::x ? 0U : 1U;
+    if ((window_restore_ & (Word{1} << bank)) != 0) {
+      code_.packed_to(address, move.space == Space::x ? x64::Xmm::x14 : x64::Xmm::x15);
+      code_.binary(op_test, {.destination = address, .source = address});
+      code_.jump_if(Branch::equal, slow);
+      return;
+    }
     window_guard(move, slow);
     return;
   }

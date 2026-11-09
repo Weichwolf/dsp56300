@@ -59,6 +59,12 @@ public:
   [[nodiscard]] bool loop_window() const noexcept { return loop_window_; }
 
 private:
+  struct WindowReuse {
+    Word capture = 0, restore = 0;
+  };
+
+  [[nodiscard]] std::vector<WindowReuse>
+  plan_window_reuse(std::span<const BlockInstruction> operations) const;
   [[nodiscard]] static bool lowerable(const BlockInstruction &operation);
   [[nodiscard]] static bool saturation_supported(const BlockInstruction &operation);
   [[nodiscard]] static bool has_moves(const BlockInstruction &operation);
@@ -193,6 +199,8 @@ private:
   WordReuseMode word_mode_;
   LoopWindowMode window_mode_;
   bool loop_window_ = false;
+  Word window_capture_ = 0;
+  Word window_restore_ = 0;
   Word word_valid_ = 0, word_populate_ = 0, word_selected_ = 0;
   bool reused_words_ = false;
   NativeValueProof value_proof_;

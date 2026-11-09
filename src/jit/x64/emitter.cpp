@@ -532,6 +532,7 @@ void BlockEmitter::emit_nops(const std::span<const BlockInstruction> operations,
 }
 
 void BlockEmitter::emit_operations(const std::span<const BlockInstruction> operations) {
+  const auto windows = plan_window_reuse(operations);
   const auto flags = plan_flags(operations);
   const auto effects = word_effects(operations);
   const auto populations = word_mode_ != WordReuseMode::disabled
@@ -550,6 +551,8 @@ void BlockEmitter::emit_operations(const std::span<const BlockInstruction> opera
   NativeValueRanges ranges;
   for (std::size_t operation_index = 0; operation_index < operations.size(); ++operation_index) {
     const auto &operation = operations[operation_index];
+    window_capture_ = windows[operation_index].capture;
+    window_restore_ = windows[operation_index].restore;
     if (bounds_ == ExecutionBounds::precise) { budget_guard(); }
     const auto nops = !repeat_mode_ ? nop_count(operations.subspan(operation_index)) : 0;
     if (nops > 1) {

@@ -49,6 +49,7 @@ bool BlockEmitter::direct_memory(const BlockInstruction &operation) const {
 void BlockEmitter::window_known(const NativeMove &move,
                                 const MemoryWindow &window,
                                 x64::Label &slow) {
+  const bool save = !move.load || (window_capture_ & (Word{1} << bank(move))) != 0;
   if (!window.known.empty()) {
     code_.constant(Reg::r9, reinterpret_cast<std::uintptr_t>(window.known.data()));
     code_.binary(op_add, {.destination = Reg::r9, .source = Reg::ax});
@@ -56,10 +57,9 @@ void BlockEmitter::window_known(const NativeMove &move,
       code_.load(Reg::r11, Reg::r9, 0, Width::byte);
       code_.immediate(group_cmp, Reg::r11, 0, Width::dword);
       code_.jump_if(Branch::equal, slow);
-    } else {
-      code_.store(Reg::r13, known_offset(move), Reg::r9);
     }
-  } else if (!move.load && tracks_writes(runtime_.windows.at(bank(move)))) {
+    if (save) { code_.store(Reg::r13, known_offset(move), Reg::r9); }
+  } else if (save && tracks_writes(runtime_.windows.at(bank(move)))) {
     code_.store_constant(Reg::r13, known_offset(move), Width::qword, 0);
   }
 }
@@ -86,6 +86,15 @@ void BlockEmitter::window_guard(const NativeMove &move, x64::Label &slow) {
     code_.constant(Reg::r11, reinterpret_cast<std::uintptr_t>(window.words.data()));
     code_.binary(op_add, {.destination = Reg::ax, .source = Reg::r11});
     code_.mov({.destination = address, .source = Reg::ax});
+    if ((window_capture_ & (Word{1} << bank(move))) != 0) {
+      const auto slot = move.space == Space::x ? x64::Xmm::x14 : x64::Xmm::x15;
+      if (window.writable && !window.aliases_program) {
+        code_.packed_from<64>(slot, address);
+      } else {
+        code_.constant(Reg::r11, 0);
+        code_.packed_from<64>(slot, Reg::r11);
+      }
+    }
     code_.jump(done);
     code_.bind(next);
   }
