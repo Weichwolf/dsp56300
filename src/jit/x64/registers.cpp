@@ -9,12 +9,13 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 
 namespace dsp56300::detail {
 namespace {
 using x64::Reg;
 using x64::Width;
-constexpr unsigned op_or = 0x09, op_xor = 0x31;
+constexpr unsigned op_and = 0x21, op_or = 0x09, op_xor = 0x31;
 constexpr unsigned group_add = 0, group_and = 4, group_xor = 6, group_cmp = 7;
 constexpr unsigned shift_left = 4, shift_right = 5, shift_arithmetic = 7;
 constexpr unsigned aligned_growth_shift = 53, low_word_shift = 40;
@@ -111,6 +112,26 @@ void BlockEmitter::move_read_register(const Reg value, const NativeMove &move, c
 void BlockEmitter::move_write_register(const Reg value, const unsigned reg) {
   if (reg >= r_register_base && reg < m_register_base) {
     code_.store(Reg::r12, bank_offset(reg), value, Width::dword);
+    return;
+  }
+  if (reg >= a0_register && reg <= b1_register) {
+    constexpr std::array shifts{padding_bits, accumulator_bits, main_shift};
+    constexpr Word extension_mask = 0xff;
+    const auto shift = shifts.at((reg - a0_register) / 2);
+    const auto mask = reg == a2_register || reg == b2_register ? extension_mask : word_mask;
+    code_.mov({.destination = Reg::r9, .source = value});
+    code_.immediate(group_and, Reg::r9, mask, Width::dword);
+    code_.shift(shift_left, Reg::r9, shift);
+    current_value(Reg::ax, reg & 1U);
+    code_.constant(Reg::r10, ~(std::uint64_t{mask} << shift));
+    code_.binary(op_and, {.destination = Reg::ax, .source = Reg::r10});
+    code_.binary(op_or, {.destination = Reg::ax, .source = Reg::r9});
+    if (loop_residency_) {
+      store_accumulator((reg & 1U) != 0, Reg::ax);
+    } else {
+      const auto offset = (reg & 1U) == 0 ? offsetof(Registers, a) : offsetof(Registers, b);
+      code_.store(Reg::r12, offsetof(Cpu, reg) + offset, Reg::ax);
+    }
     return;
   }
   if (reg >= a_register) {
