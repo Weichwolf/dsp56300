@@ -4,7 +4,9 @@
 #include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "isa.hpp"
 #include "memory_arena.hpp"
+#include "native_sequence_model.hpp"
 #include "register_model.hpp"
 #include "support.hpp"
 
@@ -88,6 +90,7 @@ public:
     ++reads;
     last = {.space = space, .address = address, .pc = pc};
     value = datum;
+    if (yield && core != nullptr) { core->request_yield(); }
     return true;
   }
 
@@ -111,6 +114,8 @@ public:
 
   Word reads = 0;
   Access last;
+  Core *core = nullptr;
+  bool yield = false;
 };
 
 struct IoInput {
@@ -155,6 +160,50 @@ void io_boundary() {
   }
   core.reset();
   io_case(core, port, {.ring = true, .ordinary = true});
+}
+
+void ram_to_observer(const bool yield) {
+  Port port;
+  Machine machine(&port);
+  port.core = &machine.core;
+  constexpr Word addition = static_cast<Word>(isa::Opcode::add_x0_a);
+  constexpr Word transfer = static_cast<Word>(isa::Opcode::move_x_effective) | (1U << 15) |
+                            (3U << 11) | (addition & status_byte);
+  constexpr std::array program{transfer,
+                               static_cast<Word>(isa::Opcode::nop),
+                               static_cast<Word>(isa::Opcode::jmp_absolute_short) | (start + 3)};
+  machine.core.load(Space::program, start, program);
+  auto initial = initial_state();
+  initial.r[0] = 7;
+  machine.x[7] = other_datum;
+  machine.core.set_registers(initial);
+  require(machine.core.run(1).retired == 1 && port.reads == 0,
+          "The same immutable entry first executes direct RAM without a callback");
+
+  initial.r[0] = io_begin;
+  machine.core.set_registers(initial);
+  port.yield = yield;
+  auto expected = initial;
+  sequence_model::alu(expected, initial, addition);
+  expected.x = (initial.x & ~std::uint64_t{word_mask}) | datum;
+  ++expected.r[0];
+  expected.pc = start + (yield ? 1U : 3U);
+  const auto before = machine.core.state().progress;
+  const auto result = machine.core.run(3);
+  const Word retired = yield ? 1U : 3U;
+  require(result.retired == retired && result.yielded == yield &&
+              result.fault.kind == FaultKind::none && machine.core.registers() == expected &&
+              result.progress ==
+                  Progress{.instructions = before.instructions + retired,
+                           .estimated_cycles = before.estimated_cycles + (yield ? 1U : 5U)} &&
+              port.reads == 1 && port.last.pc == start,
+          "A warm RAM entry retains a real observer's yield after its complete parallel ALU");
+  if (yield) {
+    expected.pc = start + 3;
+    require(machine.core.run(2).retired == 2 && machine.core.registers() == expected &&
+                port.reads == 1,
+            "Resumption executes the untouched successor without repeating the observer");
+  }
 }
 
 struct AliasInput {
@@ -520,6 +569,8 @@ int main() {
       dsp56300::test::rejected_address(mode, true, maximum_ring);
     }
     dsp56300::test::io_boundary();
+    dsp56300::test::ram_to_observer(false);
+    dsp56300::test::ram_to_observer(true);
     dsp56300::test::exact_word_access();
     dsp56300::test::raw_word_mask();
     dsp56300::test::program_alias(false);

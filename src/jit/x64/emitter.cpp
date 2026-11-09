@@ -430,7 +430,11 @@ void BlockEmitter::retire(const BlockInstruction &operation, const bool publish)
   }
   retire_progress(operation);
   if (!coalesced_accounting_) { code_.raw(increment_retired); } // INC R15D.
-  if (observable_moves(operation) && (!at_loop_end(operation) || loop_size_ != 0)) {
+  // Direct RAM cannot request a yield. Its rejected guard executes the complete
+  // instruction through general_moves() and exits before reaching this retire.
+  const bool returning_observer = range_mode_ != RangeMode::automatic || !direct_memory(operation);
+  if (observable_moves(operation) && returning_observer &&
+      (!at_loop_end(operation) || loop_size_ != 0)) {
     code_.load(Reg::ax, Reg::r13, offsetof(NativeContext, exit_requested));
     code_.memory_immediate(group_cmp, Reg::ax, 0, Width::byte, 0);
     exit_if(Branch::not_equal);
