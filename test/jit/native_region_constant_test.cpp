@@ -9,6 +9,8 @@
 #include "jit.hpp"
 #if defined(__aarch64__)
 #include "jit/a64/emitter.hpp"
+
+#include <stdexcept>
 #else
 #include "jit/emitter.hpp"
 #endif
@@ -30,7 +32,6 @@
 #include <limits>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <vector>
 
 namespace dsp56300::test {

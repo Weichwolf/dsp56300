@@ -17,6 +17,7 @@
 #include "jit/resident_region.hpp"
 
 #include <memory>
+#include <stdexcept>
 #endif
 
 #include <algorithm>
@@ -25,7 +26,6 @@
 #include <cstdint>
 #include <exception>
 #include <iostream>
-#include <stdexcept>
 #include <vector>
 
 namespace dsp56300::test {

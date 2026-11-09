@@ -25,7 +25,6 @@
 #include <algorithm>
 #include <limits>
 #include <stdexcept>
-#include <utility>
 #endif
 
 namespace dsp56300::detail {
