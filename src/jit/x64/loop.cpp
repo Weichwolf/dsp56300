@@ -45,6 +45,9 @@ Word setup_end(const BlockInstruction &operation) {
 }
 
 bool BlockEmitter::is_loop_setup(const BlockInstruction &operation) {
+  if (operation.instruction.operation == Operation::repeat_immediate) {
+    return operation.instruction.words == 1 && !at_loop_end(operation);
+  }
   return operation.instruction.operation == Operation::loop_immediate &&
          operation.instruction.words == 2 && setup_count(operation) != 0 &&
          !at_loop_end(operation) && setup_end(operation) != ((operation.pc + 1) & word_mask);
@@ -63,6 +66,29 @@ void BlockEmitter::loop_push(const Reg frame) {
 }
 
 void BlockEmitter::loop_setup(const BlockInstruction &operation) {
+  if (operation.instruction.operation == Operation::repeat_immediate) {
+    constexpr Word zero_count = 65536;
+    const auto count = setup_count(operation);
+    const auto next = (operation.pc + 1) & word_mask;
+    code_.load(Reg::ax, Reg::r12, lc_offset, Width::dword);
+    code_.store(Reg::r12, offsetof(Cpu, repeat_lc), Reg::ax, Width::dword);
+    code_.store_constant(
+        Reg::r12, offsetof(Cpu, repeat_remaining), Width::dword, count == 0 ? zero_count : count);
+    code_.store_constant(Reg::r12, offsetof(Cpu, repeat_pc), Width::dword, next);
+    code_.store_constant(Reg::r12, offsetof(Cpu, repeat_loaded), Width::byte, 0);
+    code_.store_constant(Reg::r12, offsetof(Cpu, interrupt_inhibited), Width::byte, 0);
+    code_.store_constant(Reg::r12, lc_offset, Width::dword, count);
+    code_.store_constant(Reg::r12, pc_offset, Width::dword, next);
+    code_.store_constant(Reg::r13,
+                         offsetof(NativeContext, boundary),
+                         Width::byte,
+                         static_cast<Word>(NativeBoundary::owner));
+    // REP retains the previous completion marker until its first body retires.
+    retire_progress(operation);
+    code_.immediate(group_add, Reg::r15, 1, Width::dword);
+    code_.jump(exits_.at(dirty_accumulators()));
+    return;
+  }
   x64::Label slow;
   // A failed second push must retain the general executor's first push and LC.
   // Guard the complete capacity before making any native change.
