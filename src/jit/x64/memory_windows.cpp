@@ -51,8 +51,10 @@ void BlockEmitter::window_known(const NativeMove &move,
                                 x64::Label &slow) {
   const bool save = !move.load || (window_capture_ & (Word{1} << bank(move))) != 0;
   if (!window.known.empty()) {
-    code_.constant(Reg::r9, reinterpret_cast<std::uintptr_t>(window.known.data()));
-    code_.binary(op_add, {.destination = Reg::r9, .source = Reg::ax});
+    const bool absolute = move.address.mode == 6 && move.address.index == 0;
+    const auto offset = absolute ? move.address.extra - window.address : 0U;
+    code_.constant(Reg::r9, reinterpret_cast<std::uintptr_t>(window.known.data() + offset));
+    if (!absolute) { code_.binary(op_add, {.destination = Reg::r9, .source = Reg::ax}); }
     if (move.load) {
       code_.load(Reg::r11, Reg::r9, 0, Width::byte);
       code_.immediate(group_cmp, Reg::r11, 0, Width::dword);
@@ -74,29 +76,43 @@ void BlockEmitter::window_candidate(const NativeMove &move,
   code_.jump_if(Branch::above_equal, next);
 }
 
+void BlockEmitter::capture_window(const NativeMove &move, const MemoryWindow &window) {
+  if ((window_capture_ & (Word{1} << bank(move))) == 0) { return; }
+  const auto slot = move.space == Space::x ? x64::Xmm::x14 : x64::Xmm::x15;
+  if (window.writable && !window.aliases_program) {
+    code_.packed_from<64>(slot, move.space == Space::x ? Reg::cx : Reg::r8);
+  } else {
+    code_.constant(Reg::r11, 0);
+    code_.packed_from<64>(slot, Reg::r11);
+  }
+}
+
 void BlockEmitter::window_guard(const NativeMove &move, x64::Label &slow) {
   const auto address = move.space == Space::x ? Reg::cx : Reg::r8;
+  const bool absolute = move.address.mode == 6 && move.address.index == 0;
   x64::Label done;
   for (const auto &window : runtime_.windows.at(bank(move))) {
     if (!move.load && (!window.writable || window.aliases_program)) { continue; }
-    x64::Label next;
-    window_candidate(move, window, next);
-    window_known(move, window, slow);
-    code_.shift(shift_left, Reg::ax, word_scale);
-    code_.constant(Reg::r11, reinterpret_cast<std::uintptr_t>(window.words.data()));
-    code_.binary(op_add, {.destination = Reg::ax, .source = Reg::r11});
-    code_.mov({.destination = address, .source = Reg::ax});
-    if ((window_capture_ & (Word{1} << bank(move))) != 0) {
-      const auto slot = move.space == Space::x ? x64::Xmm::x14 : x64::Xmm::x15;
-      if (window.writable && !window.aliases_program) {
-        code_.packed_from<64>(slot, address);
-      } else {
-        code_.constant(Reg::r11, 0);
-        code_.packed_from<64>(slot, Reg::r11);
-      }
+    if (absolute && (move.address.extra < window.address ||
+                     move.address.extra - window.address >= window.words.size())) {
+      continue;
     }
+    const auto offset = absolute ? move.address.extra - window.address : 0U;
+    x64::Label next;
+    if (!absolute) { window_candidate(move, window, next); }
+    window_known(move, window, slow);
+    if (absolute) {
+      code_.constant(address, reinterpret_cast<std::uintptr_t>(window.words.data() + offset));
+    } else {
+      code_.shift(shift_left, Reg::ax, word_scale);
+      code_.constant(Reg::r11, reinterpret_cast<std::uintptr_t>(window.words.data()));
+      code_.binary(op_add, {.destination = Reg::ax, .source = Reg::r11});
+      code_.mov({.destination = address, .source = Reg::ax});
+    }
+    capture_window(move, window);
     code_.jump(done);
     code_.bind(next);
+    if (absolute) { break; }
   }
   code_.jump(slow);
   code_.bind(done);

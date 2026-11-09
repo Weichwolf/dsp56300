@@ -4,6 +4,7 @@
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "external_run_fixture.hpp"
+#include "isa.hpp"
 #include "memory_window_workloads.hpp"
 #include "register_model.hpp"
 #include "support.hpp"
@@ -118,15 +119,17 @@ public:
   }
 };
 
-Word transfer(const unsigned reg, const bool load, const bool y) {
-  constexpr Word memory_move = 0x406000;
+Word transfer(const unsigned reg, const bool load, const bool y, const bool absolute = false) {
+  constexpr Word register_field = Word{7} << 16;
+  constexpr Word memory_move = static_cast<Word>(isa::Opcode::move_x_effective) & ~register_field;
   constexpr Word high_register_mask = 0x18;
   constexpr Word load_bit = 0x8000;
   constexpr Word y_bit = 0x80000;
   constexpr Word xor_alu = 0x43;
   constexpr unsigned high_register_shift = 17;
-  return memory_move | ((reg & 7U) << 16) | ((reg & high_register_mask) << high_register_shift) |
-         (load ? load_bit : 0U) | (y ? y_bit : 0U) | xor_alu;
+  return memory_move | ((absolute ? 6U : 4U) << 11) | ((reg & 7U) << 16) |
+         ((reg & high_register_mask) << high_register_shift) | (load ? load_bit : 0U) |
+         (y ? y_bit : 0U) | xor_alu;
 }
 
 void xor_old(Registers &expected, const Registers &old) {
@@ -141,7 +144,7 @@ void xor_old(Registers &expected, const Registers &old) {
 
 struct TransferCase {
   unsigned reg = 4;
-  bool load = false, y = false;
+  bool load = false, y = false, absolute = false;
   Word mode = 0;
   std::size_t range = 0, index = 0;
 };
@@ -151,6 +154,11 @@ void one_transfer(TestCore &core, Memory &memory, const TransferCase input) {
   auto &window = bank.windows[input.range];
   auto initial = register_model::seed(input.mode | flag_s | flag_l);
   initial.r[0] = window.address + static_cast<Word>(input.index);
+  if (input.absolute) {
+    const std::array code{transfer(input.reg, input.load, input.y, true), initial.r[0]};
+    memory.code(code);
+    initial.r[0] = port;
+  }
   core.set_registers(initial);
   window.words[input.index] = datum;
   if (!window.known.empty()) { window.known[input.index] = input.load ? 1 : 0; }
@@ -169,6 +177,7 @@ void one_transfer(TestCore &core, Memory &memory, const TransferCase input) {
     }
   }
   xor_old(expected, initial);
+  if (input.absolute) { ++expected.pc; }
 
   const auto reads = memory.reads;
   const auto writes = memory.writes;
@@ -212,7 +221,7 @@ void transfer_cases(TestCore &core, Memory &memory, TransferCase input) {
   }
 }
 
-void transfers() {
+void transfers(const bool absolute) {
   Memory memory;
   TestCore core(memory, {});
   for (const bool y : {false, true}) {
@@ -220,7 +229,7 @@ void transfers() {
       for (const unsigned reg : {4U, 5U, 6U, 7U, 14U, 15U}) {
         const std::array program{transfer(reg, load, y)};
         memory.code(program);
-        transfer_cases(core, memory, {.reg = reg, .load = load, .y = y});
+        transfer_cases(core, memory, {.reg = reg, .load = load, .y = y, .absolute = absolute});
       }
     }
   }
@@ -323,11 +332,13 @@ void aliased_pair() {
           "Both ports capture the genuine old shared word before the native store commits");
 }
 
-void callback_rebinding() {
+void callback_rebinding(const bool absolute) {
   Memory memory;
   constexpr Word set_r0 = 0x60f400;
   constexpr Word load = 0x44e000;
-  const std::array program{store, set_r0, low_base, load};
+  const auto absolute_load = transfer(4, true, false, true) & ~status_byte;
+  const std::array program = absolute ? std::array{store, absolute_load, low_base, isa::nop[0]}
+                                      : std::array{store, set_r0, low_base, load};
   memory.code(program);
   memory.remap_on_port = true;
   memory.storage[0].low[0] = datum;
@@ -338,7 +349,7 @@ void callback_rebinding() {
   auto expected = register_model::seed(0);
   expected.r[0] = port;
   core.set_registers(expected);
-  expected.r[0] = low_base;
+  if (!absolute) { expected.r[0] = low_base; }
   register_model::write(expected, 4, other);
   expected.pc += static_cast<Word>(program.size());
   const auto actual = core.run(3);
@@ -395,13 +406,14 @@ void ordinary_buffers() {
           "The real ordinary-buffer fallback retains its precise fail-stop read");
 }
 
-void refusals() {
+void refusals(const bool absolute) {
   constexpr std::array<Word, 4> addresses{
       low_base - 1, low_base + static_cast<Word>(words), rom_base, port};
   for (const Word address : addresses) {
     Memory memory;
-    constexpr std::array program{store};
-    memory.code(program);
+    const std::array program{absolute ? transfer(4, false, false, true) & ~status_byte : store,
+                             address};
+    memory.code(std::span(program).first(absolute ? 2U : 1U));
     TestCore core(memory);
     auto initial = register_model::seed(0);
     initial.r[0] = address;
@@ -415,10 +427,11 @@ void refusals() {
   }
 }
 
-void rebinding() {
+void rebinding(const bool absolute) {
   Memory memory;
-  constexpr std::array program{Word{0x44e000}};
-  memory.code(program);
+  const std::array program{
+      absolute ? transfer(4, true, false, true) & ~status_byte : Word{0x44e000}, low_base};
+  memory.code(std::span(program).first(absolute ? 2U : 1U));
   memory.storage[0].low[0] = datum;
   memory.storage[0].low_known[0] = 1;
   memory.storage[0].high[0] = other;
@@ -443,6 +456,37 @@ void rebinding() {
   require(core.run(1).retired == 1 && (core.registers().x & word_mask) == datum &&
               memory.reads == 0,
           "A subsequent explicit descriptor revision rebinds the original storage");
+}
+
+void absolute_live_data() {
+  Memory memory;
+  const std::array program{transfer(4, true, false, true) & ~status_byte, low_base};
+  memory.code(program);
+  TestCore core(memory);
+  auto initial = register_model::seed(0);
+  initial.r[0] = port;
+  auto &storage = memory.storage[0];
+  storage.low_known[0] = 1;
+  for (const Word value : {datum, other}) {
+    storage.low[0] = value;
+    core.set_registers(initial);
+    auto expected = initial;
+    expected.pc += 2;
+    register_model::write(expected, 4, value);
+    const auto result = core.run(1);
+    require(result.retired == 1 && result.fault.kind == FaultKind::none &&
+                core.registers() == expected && memory.reads == 0,
+            "An embedded absolute address still reads each current word without owner callbacks");
+  }
+  storage.low_known[0] = 0;
+  core.set_registers(initial);
+  const auto stopped = core.run(1);
+  require(stopped.retired == 0 && memory.reads == 1 &&
+              stopped.fault == Fault{.kind = FaultKind::memory_read,
+                                     .space = Space::x,
+                                     .address = low_base,
+                                     .pc = start},
+          "Live knowledge revocation still refuses the warmed absolute load at its actual PC");
 }
 
 void executable_alias() {
@@ -509,15 +553,20 @@ void malformed() {
 
 int main() {
   try {
-    dsp56300::test::transfers();
+    dsp56300::test::transfers(false);
+    dsp56300::test::transfers(true);
     dsp56300::test::unknown_and_dma();
     dsp56300::test::paired_guards();
     dsp56300::test::aliased_pair();
-    dsp56300::test::callback_rebinding();
+    dsp56300::test::callback_rebinding(false);
+    dsp56300::test::callback_rebinding(true);
     dsp56300::test::all_known_writes();
     dsp56300::test::ordinary_buffers();
-    dsp56300::test::refusals();
-    dsp56300::test::rebinding();
+    dsp56300::test::refusals(false);
+    dsp56300::test::refusals(true);
+    dsp56300::test::rebinding(false);
+    dsp56300::test::rebinding(true);
+    dsp56300::test::absolute_live_data();
     dsp56300::test::executable_alias();
     dsp56300::test::domain_kernels();
     dsp56300::test::malformed();

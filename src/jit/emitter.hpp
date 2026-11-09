@@ -111,6 +111,7 @@ private:
   void window_guard(const NativeMove &move, x64::Label &slow);
   void window_candidate(const NativeMove &move, const MemoryWindow &window, x64::Label &next);
   void window_known(const NativeMove &move, const MemoryWindow &window, x64::Label &slow);
+  void capture_window(const NativeMove &move, const MemoryWindow &window);
   void mark_window_written(const NativeMove &move);
   void move_profiled_next(const NativeMove &move, Word modifier);
   void move_delta(const NativeMove &move);
