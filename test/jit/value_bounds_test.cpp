@@ -52,10 +52,25 @@ enum class Shape : std::uint8_t {
   mac,
   negative_mac,
   rounded_mac,
+  independent_mac,
+  independent_negative_mac,
+  independent_rounded_mac,
   rounded_product,
   dual_product,
   dual_negative_product
 };
+
+bool independent_shape(const Shape shape) {
+  return shape == Shape::independent_mac || shape == Shape::independent_negative_mac ||
+         shape == Shape::independent_rounded_mac;
+}
+
+Word accumulate_opcode(const Shape shape) {
+  const bool negative = shape == Shape::negative_mac || shape == Shape::independent_negative_mac;
+  const bool rounded = shape == Shape::rounded_mac || shape == Shape::independent_rounded_mac;
+  return static_cast<Word>(isa::Opcode::mac_register_a) | (5U << 4) | (negative ? 4U : 0U) |
+         (rounded ? 1U : 0U);
+}
 
 Program program(const Shape shape,
                 const unsigned shifts,
@@ -77,9 +92,11 @@ Program program(const Shape shape,
   } else if (shape == Shape::sum || shape == Shape::difference) {
     code[2] =
         static_cast<Word>(shape == Shape::sum ? isa::Opcode::add_y0_a : isa::Opcode::sub_y0_a);
+  } else if (independent_shape(shape)) {
+    code[1] = static_cast<Word>(isa::Opcode::tfr_x1_a);
+    code[2] = accumulate_opcode(shape);
   } else if (shape == Shape::mac || shape == Shape::negative_mac || shape == Shape::rounded_mac) {
-    code[2] = static_cast<Word>(isa::Opcode::mac_register_a) | (5U << 4) |
-              (shape == Shape::negative_mac ? 4U : 0U) | (shape == Shape::rounded_mac ? 1U : 0U);
+    code[2] = accumulate_opcode(shape);
   } else {
     code[1] = static_cast<Word>(isa::Opcode::mpy_register_a) | (5U << 4) |
               (shape == Shape::negative_product ? 4U : 0U) |
@@ -172,6 +189,7 @@ public:
       : code_(program(shape, shifts, rounded, mirrored, reset)),
         mirrored_(mirrored),
         reset_(reset),
+        independent_(independent_shape(shape)),
         ring_(ring),
         core_(Memory::separate({.program = p_, .x = x_, .y = y_})) {
     std::ranges::copy(code_, p_.begin() + start);
@@ -188,6 +206,11 @@ public:
     auto initial = register_model::seed(point.mode | point.sticky);
     initial.sr |= loop_flag;
     initial.b = 0;
+    if (independent_) {
+      initial.x =
+          (initial.x & word_mask) |
+          (std::uint64_t{samples[(point.left + point.right) % samples.size()]} << word_bits);
+    }
     initial.r[0] = input;
     initial.r[4] = reset_ ? word_mask : input;
     initial.r[1] = initial.r[5] = output;
@@ -320,7 +343,7 @@ private:
   std::array<std::unique_ptr<detail::ResidentRegion>, 4> regions_;
 #endif
   const Program code_;
-  bool mirrored_, reset_;
+  bool mirrored_, reset_, independent_;
   Word ring_;
   std::array<Word, memory_words> p_{};
   Data x_{}, y_{};
@@ -359,6 +382,9 @@ int main() {
                               Shape::mac,
                               Shape::negative_mac,
                               Shape::rounded_mac,
+                              Shape::independent_mac,
+                              Shape::independent_negative_mac,
+                              Shape::independent_rounded_mac,
                               Shape::rounded_product,
                               Shape::dual_product,
                               Shape::dual_negative_product}) {

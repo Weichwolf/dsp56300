@@ -46,4 +46,8 @@ Prove dependencies and ranges before batching independent loop iterations;
 retain exact feedback, lane effects and partial exits. Cover FIR, biquad, FFT,
 nonlinear feedback, communications, transforms and control workloads.
 
+Prove every accumulator prefix before reducing channel results. Structured RAM
+loads and stores require both iteration independence and preserved read/write
+order for aliases. Retain ordered native execution when either proof fails.
+
 Primary references: references.json.

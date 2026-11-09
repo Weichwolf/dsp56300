@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -31,6 +32,12 @@ GraphBounds aligned_bounds(GraphBounds bounds, const unsigned shift) {
   bounds.low *= factor;
   bounds.high *= factor;
   return bounds;
+}
+
+unsigned signed_width(const GraphBounds bounds) {
+  const auto low = static_cast<std::uint64_t>(bounds.low < 0 ? -(bounds.low + 1) : bounds.low);
+  const auto high = static_cast<std::uint64_t>(bounds.high < 0 ? -(bounds.high + 1) : bounds.high);
+  return static_cast<unsigned>(std::bit_width(std::max(low, high))) + 1;
 }
 
 std::int64_t rounded_bound(const std::int64_t value, const unsigned bits, const Word mode) {
@@ -130,6 +137,7 @@ private:
   [[nodiscard]] GraphValue saturate(GraphValue value, bool rounded);
   [[nodiscard]] bool moves(const BlockInstruction &operation, Slots &old);
   [[nodiscard]] bool arithmetic(Word code, Slots &old);
+  [[nodiscard]] bool reduction(const BlockInstruction &operation, Slots &old);
   [[nodiscard]] bool product(AluOperands operands, Slots &old);
   [[nodiscard]] GraphValue operand(InputOperand input, Slots &old);
   ValueGraph graph_;
@@ -294,11 +302,17 @@ bool ValueGraphBuilder::moves(const BlockInstruction &operation, Slots &old) {
 
 GraphValue
 ValueGraphBuilder::sum(const GraphValue left, const GraphValue right, const bool subtract) {
+  if (!valid_) { return {}; }
   if (right.width == 0) { return left; }
   if (left.width == 0 && !subtract) { return right; }
   const auto scale = std::min(left.scale, right.scale);
-  const auto width =
-      std::max(left.width + left.scale - scale, right.width + right.scale - scale) + 1;
+  const auto left_bounds = aligned_bounds(bounds_[left.node], left.scale - scale);
+  const auto right_bounds = aligned_bounds(bounds_[right.node], right.scale - scale);
+  const auto result = subtract ? GraphBounds{.low = left_bounds.low - right_bounds.high,
+                                             .high = left_bounds.high - right_bounds.low}
+                               : GraphBounds{.low = left_bounds.low + right_bounds.low,
+                                             .high = left_bounds.high + right_bounds.high};
+  const auto width = signed_width(result);
   return node(
       subtract ? GraphOp::subtract : GraphOp::add, {.scale = scale, .width = width}, {left, right});
 }
@@ -413,6 +427,22 @@ bool ValueGraphBuilder::arithmetic(const Word code, Slots &old) {
   return valid_;
 }
 
+bool ValueGraphBuilder::reduction(const BlockInstruction &operation, Slots &old) {
+  const auto opcode = operation.instruction.opcode;
+  const auto selector = (opcode >> 4) & 7U;
+  const auto destination = accumulator_slot + ((opcode >> 3) & 1U);
+  if (!support_.reductions || (mode_ & arithmetic_saturation) != 0 ||
+      (opcode & upper_move_mask) != no_move_group || (opcode & product_bit) != 0 ||
+      (opcode & 7U) != 0 || selector < 4 || graph_.registers[destination].valid()) {
+    return false;
+  }
+  graph_.reduction = operand({.selector = selector, .destination = destination}, old);
+  graph_.reduction_register = destination - accumulator_slot;
+  graph_.flags = graph_.overflow_input = {};
+  graph_.carry = GraphCarry::unchanged;
+  return valid_;
+}
+
 std::optional<ValueGraph>
 ValueGraphBuilder::build(const std::span<const BlockInstruction> operations) {
   if (operations.empty() || !at_loop_end(operations.back())) { return std::nullopt; }
@@ -431,9 +461,9 @@ ValueGraphBuilder::build(const std::span<const BlockInstruction> operations) {
   graph_.extra_cycles = static_cast<Word>(cycles - operations.size());
   for (const auto &operation : operations) {
     auto old = graph_.registers;
-    if (!moves(operation, old) || !arithmetic(operation.instruction.opcode & byte_mask, old)) {
-      return std::nullopt;
-    }
+    if (!moves(operation, old)) { return std::nullopt; }
+    if (&operation == &operations.back() && reduction(operation, old)) { continue; }
+    if (!arithmetic(operation.instruction.opcode & byte_mask, old)) { return std::nullopt; }
   }
   if (!std::ranges::any_of(graph_.streams, &GraphStream::write)) { return std::nullopt; }
   graph_.instructions = static_cast<Word>(operations.size());

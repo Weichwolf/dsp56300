@@ -152,6 +152,16 @@ void Neon::store(const Vec operand, const Reg base, const std::size_t offset, co
   memory(operand, base, offset, words, MemoryOp::store);
 }
 
+void Neon::load_interleaved(const Vec first, const Reg base) {
+  constexpr std::uint32_t ld4 = 0x4c400800;
+  code_.word(ld4 | (static_cast<unsigned>(base) << source_shift) | reg(first));
+}
+
+void Neon::store_interleaved(const Vec first, const Reg base) {
+  constexpr std::uint32_t st4 = 0x4c000800;
+  code_.word(st4 | (static_cast<unsigned>(base) << source_shift) | reg(first));
+}
+
 void Neon::push_doubles(const Vec left, const Vec right) {
   constexpr std::uint32_t stp = 0x6dbf03e0;
   constexpr unsigned pair_shift = 10;

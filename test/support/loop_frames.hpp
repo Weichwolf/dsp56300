@@ -3,6 +3,7 @@
 #pragma once
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "support.hpp"
 
 namespace dsp56300::test::loop_frames {
 inline constexpr Word loop_bits = (1U << 15) | (1U << 16);

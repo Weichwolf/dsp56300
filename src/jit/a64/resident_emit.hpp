@@ -16,6 +16,7 @@ inline constexpr unsigned region_values = 12;
 inline constexpr Vec first_scratch{24}, second_scratch{25}, growth_register{26}, limit_register{28},
     one_register{31};
 inline constexpr Vec saturation_high{22}, saturation_low{23};
+inline constexpr Vec reduction_register{22};
 
 struct StreamSlice {
   unsigned stream, part;
@@ -46,6 +47,13 @@ private:
   void pin(GraphValue value);
   void liveness();
   void fuse_products();
+  void plan_interleaved();
+  [[nodiscard]] std::optional<RegionQuad>
+  interleaved_root(std::size_t root, const std::vector<std::size_t> &order) const;
+  void preserve_growth(bool restore);
+  void load_interleaved(const RegionQuad &group);
+  void store_interleaved(const RegionQuad &group);
+  void emit_interleaved(const RegionQuad &group);
   void operands(const GraphNode &node);
   [[nodiscard]] unsigned allocate();
   [[nodiscard]] Vec read(GraphValue value, unsigned part = 0);
@@ -55,6 +63,7 @@ private:
   [[nodiscard]] bool compact(GraphValue value) const;
   [[nodiscard]] Vec aligned_words(GraphValue value, unsigned scale, Vec scratch);
   void emit_words(const GraphNode &node, Vec target);
+  void reduce();
   void word_words(const GraphNode &node, Vec target, bool transfer = true);
   void saturate_words(const GraphNode &node, Vec target);
   void saturate(const GraphNode &node, Vec target, unsigned part);
@@ -104,6 +113,7 @@ private:
   std::vector<GraphBounds> bounds_;
   std::vector<bool> needed_, compact_;
   std::vector<std::size_t> last_, locations_, spill_slots_, fused_;
+  std::vector<std::size_t> interleaved_;
   std::array<std::size_t, region_values> owners_{};
   std::array<std::size_t, 3> inputs_{};
 };

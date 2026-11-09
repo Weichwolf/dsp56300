@@ -83,8 +83,13 @@ void RegionEmitter::emit_body() {
         node = no_value;
       }
     }
-    if (needed_[current_]) { emit(region_.graph.nodes[current_]); }
+    if (interleaved_[current_] != no_value) {
+      emit_interleaved(region_.interleaved[interleaved_[current_]]);
+    } else if (needed_[current_]) {
+      emit(region_.graph.nodes[current_]);
+    }
   }
+  reduce();
 }
 
 std::vector<std::uint8_t> RegionEmitter::generate() {
@@ -100,6 +105,7 @@ std::vector<std::uint8_t> RegionEmitter::generate() {
     constant(saturation_high, high);
     constant(saturation_low, low);
   }
+  if (region_.graph.reduction.valid()) { neon_.zero(reduction_register); }
   for (unsigned part = 0; part < 2; ++part) {
     neon_.zero(growth_register + part);
     neon_.zero(limit_register + part);
@@ -150,6 +156,9 @@ std::vector<std::uint8_t> RegionEmitter::generate() {
     }
   }
   outputs(lanes_ - 1, false);
+  if (region_.graph.reduction.valid()) {
+    neon_.store(reduction_register, Reg::x0, offsetof(RegionFrame, reduction));
+  }
   if (region_.nested && !inner_vector_) { outputs(lanes_ - 2, true); }
   save_events(false);
   restore();
@@ -160,7 +169,9 @@ std::vector<std::uint8_t> RegionEmitter::generate() {
 
 namespace dsp56300::detail {
 GraphSupport resident_region_support() noexcept {
-  return {.numeric_modes = rounding_mode | arithmetic_saturation, .address_constants = true};
+  return {.numeric_modes = rounding_mode | arithmetic_saturation,
+          .address_constants = true,
+          .reductions = true};
 }
 
 std::vector<std::uint8_t> emit_resident_region(ResidentRegion &region, const unsigned lanes) {

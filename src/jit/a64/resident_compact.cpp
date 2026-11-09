@@ -15,6 +15,14 @@ bool RegionEmitter::compact(const GraphValue value) const {
   return compact_.at(value.node);
 }
 
+void RegionEmitter::reduce() {
+  const auto value = region_.graph.reduction;
+  if (!value.valid()) { return; }
+  inputs_.fill(no_value);
+  inputs_[0] = value.node;
+  neon_.binary(VectorOp::add_words, reduction_register, reduction_register, read(value));
+}
+
 Vec RegionEmitter::aligned_words(const GraphValue value, const unsigned scale, const Vec scratch) {
   auto source = read(value);
   if (!compact(value)) {

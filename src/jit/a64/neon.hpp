@@ -22,6 +22,10 @@ enum class VectorOp : std::uint32_t {
   bit_or = 0x4ea01c00,
   bit_xor = 0x6e201c00,
   bit_insert = 0x6ea01c00,
+  unzip_even = 0x4e801800,
+  unzip_odd = 0x4e805800,
+  zip_low = 0x4e803800,
+  zip_high = 0x4e807800,
   greater = 0x4ee03400,
   maximum = 0x4ea06400,
   minimum = 0x4ea06c00,
@@ -51,6 +55,8 @@ public:
   void extract(Reg destination, Vec operand, unsigned lane, bool words = false);
   void load(Vec destination, Reg base, std::size_t offset = 0, bool words = false);
   void store(Vec operand, Reg base, std::size_t offset = 0, bool words = false);
+  void load_interleaved(Vec first, Reg base);
+  void store_interleaved(Vec first, Reg base);
   void push_doubles(Vec left, Vec right);
   void pop_doubles(Vec left, Vec right);
 

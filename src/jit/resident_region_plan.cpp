@@ -12,6 +12,7 @@
 #include "value_graph.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -55,8 +56,9 @@ bool nested(const std::span<const Word> program,
   body_state.sr = setup.mode | loop_flag;
   const auto body = parse_block(program, body_state, runtime);
   auto graph = value_graph(body, resident_region_support());
-  if (!graph || std::ranges::any_of(graph->address_constants,
-                                    [](const auto &value) { return value.has_value(); })) {
+  if (!graph || graph->reduction.valid() ||
+      std::ranges::any_of(graph->address_constants,
+                          [](const auto &value) { return value.has_value(); })) {
     return false;
   }
   region.inner_entry = body_state.pc;
@@ -127,6 +129,38 @@ bool roots(ResidentRegion &region, const Registers &state) {
   region.footprints.resize(region.graph.streams.size());
   return true;
 }
+
+struct CyclicRoot {
+  unsigned address;
+  Word period;
+};
+
+bool cyclic_streams(const ValueGraph &graph, const CyclicRoot cycle) {
+  bool found = false;
+  for (const auto &stream : graph.streams) {
+    if (stream.address != cycle.address) { continue; }
+    if (stream.write || stream.offsets != 0 || stream.units >= cycle.period) { return false; }
+    found = true;
+  }
+  return found;
+}
+
+void fold_cycles(ResidentRegion &region, const Registers &state) {
+  if (region.nested) { return; }
+  for (unsigned index = 0; index < agu_registers; ++index) {
+    const auto modifier = state.m[index] & modifier_mask;
+    const auto period = modifier + 1;
+    auto &delta = region.graph.addresses[index];
+    if (region.prefix[index] || modifier == 0 || modifier >= multiple_wrap_bit ||
+        delta.offsets != 0 || delta.units != period ||
+        (state.r[index] & (std::bit_ceil(period) - 1)) != 0 ||
+        !cyclic_streams(region.graph, {.address = index, .period = period})) {
+      continue;
+    }
+    region.periods[index] = period;
+    delta = {};
+  }
+}
 } // namespace
 
 std::unique_ptr<ResidentRegion>
@@ -148,6 +182,7 @@ resident_region_plan(const std::span<const Word> program,
     region->graph = std::move(*graph);
   }
   region->growth_shift = growth_shift(region->graph);
+  fold_cycles(*region, state);
   if (!roots(*region, state)) { return nullptr; }
   return region;
 }

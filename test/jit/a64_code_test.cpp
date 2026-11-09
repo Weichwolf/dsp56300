@@ -160,9 +160,23 @@ void stack_encodings() {
 void selection_encodings() {
   Code code;
   Neon neon(code);
+  constexpr Vec first{24};
   neon.binary(VectorOp::greater, Vec{0}, Vec{1}, Vec{2});
   neon.binary(VectorOp::bit_insert, Vec{0}, Vec{1}, Vec{2});
-  constexpr std::array<std::uint32_t, 2> expected{0x4ee23420, 0x6ea21c20};
+  neon.load_interleaved(first, Reg::x10);
+  neon.store_interleaved(first, Reg::x10);
+  neon.binary(VectorOp::unzip_even, Vec{0}, Vec{1}, Vec{2});
+  neon.binary(VectorOp::unzip_odd, Vec{0}, Vec{1}, Vec{2});
+  neon.binary(VectorOp::zip_low, Vec{0}, Vec{1}, Vec{2});
+  neon.binary(VectorOp::zip_high, Vec{0}, Vec{1}, Vec{2});
+  constexpr std::array<std::uint32_t, 8> expected{0x4ee23420,
+                                                  0x6ea21c20,
+                                                  0x4c400958,
+                                                  0x4c000958,
+                                                  0x4e821820,
+                                                  0x4e825820,
+                                                  0x4e823820,
+                                                  0x4e827820};
   for (std::size_t index = 0; index < expected.size(); ++index) {
     require(instruction(code, index) == expected[index],
             "NEON comparison and insertion differ from assembler reference");

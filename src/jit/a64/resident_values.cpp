@@ -19,8 +19,9 @@ RegionEmitter::RegionEmitter(ResidentRegion &region, const unsigned lanes)
     : region_(region),
       lanes_(region.nested && lanes == 1 ? 4U : lanes),
       parts_(lanes_ == 4 ? 2U : 1U),
-      value_registers_((region.mode & arithmetic_saturation) != 0 ? region_values - 1
-                                                                  : region_values),
+      value_registers_((region.mode & arithmetic_saturation) != 0 || region.graph.reduction.valid()
+                           ? region_values - 1
+                           : region_values),
       inner_vector_(region.nested && lanes == 1),
       bounds_(graph_bounds(region.graph, region.mode)),
       needed_(region.graph.nodes.size()),
@@ -28,7 +29,8 @@ RegionEmitter::RegionEmitter(ResidentRegion &region, const unsigned lanes)
       last_(region.graph.nodes.size()),
       locations_(region.graph.nodes.size(), no_value),
       spill_slots_(region.graph.nodes.size(), no_value),
-      fused_(region.graph.nodes.size(), no_value) {
+      fused_(region.graph.nodes.size(), no_value),
+      interleaved_(region.graph.nodes.size(), no_value) {
   owners_.fill(no_value);
   inputs_.fill(no_value);
   liveness();
@@ -36,6 +38,7 @@ RegionEmitter::RegionEmitter(ResidentRegion &region, const unsigned lanes)
     compact_[index] = bounds_[index].low >= std::numeric_limits<std::int32_t>::min() &&
                       bounds_[index].high <= std::numeric_limits<std::int32_t>::max();
   }
+  plan_interleaved();
   fuse_products();
 }
 
@@ -52,6 +55,7 @@ void RegionEmitter::liveness() {
   }
   pin(graph.flags);
   pin(graph.overflow_input);
+  pin(graph.reduction);
   if (graph.carry != GraphCarry::unchanged && graph.carry != GraphCarry::zero) {
     for (const auto value : graph.carry_inputs) { pin(value); }
   }
@@ -347,6 +351,8 @@ void RegionEmitter::outputs(const unsigned lane, const bool preceding) {
   publish(region_.graph.flags, {.offset = base, .lane = lane});
   publish(region_.graph.overflow_input,
           {.offset = base + (3 * sizeof(std::uint64_t)), .lane = lane});
+  publish(region_.graph.reduction,
+          {.offset = offsetof(RegionFrame, reduction_operand), .lane = lane});
   if (region_.graph.carry == GraphCarry::unchanged || region_.graph.carry == GraphCarry::zero) {
     return;
   }

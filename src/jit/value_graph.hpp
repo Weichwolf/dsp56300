@@ -63,6 +63,8 @@ struct ValueGraph {
   std::array<GraphValue, 6> registers{};
   std::array<GraphAddress, agu_registers> addresses{};
   GraphValue flags, overflow_input;
+  GraphValue reduction;
+  unsigned reduction_register = 0;
   GraphCarry carry = GraphCarry::unchanged;
   std::array<GraphValue, 2> carry_inputs{};
   Word instructions = 0, extra_cycles = 0, changed_registers = 0, invariant_registers = 0;
@@ -79,6 +81,7 @@ struct GraphBounds {
 struct GraphSupport {
   Word numeric_modes = rounding_mode;
   bool address_constants = false;
+  bool reductions = false;
 };
 
 // Compile-time graph construction. Unproved arithmetic or iteration dependencies
