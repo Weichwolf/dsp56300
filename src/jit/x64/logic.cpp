@@ -22,6 +22,10 @@ constexpr Word logical_changed = negative | zero | overflow;
 }
 
 bool BlockEmitter::is_logic(const BlockInstruction &operation) {
+  if (operation.instruction.operation == Operation::immediate_alu) {
+    const auto kind = operation.instruction.opcode & 7U;
+    return kind == 2 || kind == 3 || kind == 6;
+  }
   if (operation.instruction.operation != Operation::parallel) { return false; }
   const auto alu = operation.instruction.opcode & byte_mask;
   if ((alu & product_bit) != 0) { return false; }
@@ -65,10 +69,16 @@ void BlockEmitter::logic(const BlockInstruction &operation) {
   if ((opcode & alu_mask) == complement) {
     code_.immediate(group_xor, Reg::r11, word_mask, Width::dword);
   } else {
-    const auto source = (opcode >> 4) & 7U;
-    value(Reg::dx, (source & 1U) + 2, has_moves(operation));
-    if (source >= 6) { code_.shift(shift_right, Reg::dx, word_bits); }
-    code_.immediate(group_and, Reg::dx, word_mask, Width::dword);
+    const auto &decoded = operation.instruction;
+    if (decoded.operation == Operation::immediate_alu) {
+      const auto operand = decoded.words == 2 ? decoded.extension : (opcode >> 8) & six_bit_mask;
+      code_.constant(Reg::dx, operand & word_mask);
+    } else {
+      const auto source = (opcode >> 4) & 7U;
+      value(Reg::dx, (source & 1U) + 2, has_moves(operation));
+      if (source >= 6) { code_.shift(shift_right, Reg::dx, word_bits); }
+      code_.immediate(group_and, Reg::dx, word_mask, Width::dword);
+    }
     const auto kind = opcode & 7U;
     unsigned function = op_and;
     if (kind == 2) {

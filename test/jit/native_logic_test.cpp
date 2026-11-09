@@ -3,6 +3,7 @@
 #include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "isa.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
 #include "saturation_model.hpp"
@@ -12,6 +13,7 @@
 #include <cstdint>
 #include <exception>
 #include <iostream>
+#include <span>
 
 namespace dsp56300::test {
 namespace {
@@ -199,6 +201,168 @@ void product_chains() {
   }
 }
 
+void immediate_model(Registers &state,
+                     const Function function,
+                     const Word operand,
+                     const bool destination_b,
+                     const Word words) {
+  auto &accumulator = destination_b ? state.b : state.a;
+  auto middle = static_cast<Word>((accumulator >> word_bits) & word_mask);
+  if (function == Function::bit_and) {
+    middle &= operand;
+  } else if (function == Function::bit_or) {
+    middle |= operand;
+  } else {
+    middle ^= operand;
+  }
+  accumulator = (accumulator & ~middle_mask) | (std::uint64_t{middle} << word_bits);
+  constexpr Word changed = 0x0e;
+  constexpr Word negative_flag = 8;
+  constexpr Word zero_flag = 4;
+  state.sr = (state.sr & ~changed) | ((middle & sign24) != 0 ? negative_flag : 0U) |
+             (middle == 0 ? zero_flag : 0U);
+  state.pc += words;
+}
+
+struct ImmediateInput {
+  Function function;
+  Word operand, words;
+  bool destination_b;
+};
+
+void immediate_patterns(Machine &machine, const ImmediateInput input) {
+  for (const auto mode : modes) {
+    for (const bool sm : {false, true}) {
+      for (const Word flags : {0U, 0x55U, 0xaaU, status_byte}) {
+        for (const auto raw : seeds) {
+          auto initial = register_model::seed(mode);
+          initial.sr = mode | flags | (sm ? bfu_model::sm : 0U);
+          (input.destination_b ? initial.b : initial.a) = raw;
+          auto expected = initial;
+          immediate_model(
+              expected, input.function, input.operand, input.destination_b, input.words);
+          machine.core.set_registers(initial);
+          const auto before = machine.core.progress();
+          const auto result = machine.core.run(1);
+          require(result.retired == 1 && result.fault.kind == FaultKind::none &&
+                      machine.core.registers() == expected &&
+                      result.progress ==
+                          Progress{.instructions = before.instructions + 1,
+                                   .estimated_cycles = before.estimated_cycles + input.words},
+                  "Immediate logic changes only A1/B1 and N/Z/V, preserving full state");
+        }
+      }
+    }
+  }
+}
+
+void immediate_forms() {
+  struct Form {
+    isa::Opcode opcode;
+    Function function;
+    bool long_form;
+  };
+
+  constexpr std::array forms{Form{.opcode = isa::Opcode::and_immediate_short,
+                                  .function = Function::bit_and,
+                                  .long_form = false},
+                             Form{.opcode = isa::Opcode::or_immediate_short,
+                                  .function = Function::bit_or,
+                                  .long_form = false},
+                             Form{.opcode = isa::Opcode::eor_immediate_short,
+                                  .function = Function::bit_xor,
+                                  .long_form = false},
+                             Form{.opcode = isa::Opcode::and_immediate_long,
+                                  .function = Function::bit_and,
+                                  .long_form = true},
+                             Form{.opcode = isa::Opcode::or_immediate_long,
+                                  .function = Function::bit_or,
+                                  .long_form = true},
+                             Form{.opcode = isa::Opcode::eor_immediate_long,
+                                  .function = Function::bit_xor,
+                                  .long_form = true}};
+  constexpr std::array operands{0U, 1U, 31U, 32U, 63U, sign24 - 1, sign24, word_mask};
+  constexpr Word maximum_short_operand = 63;
+  Machine machine;
+  for (const auto form : forms) {
+    for (const bool destination_b : {false, true}) {
+      for (const Word operand : operands) {
+        if (!form.long_form && operand > maximum_short_operand) { continue; }
+        const Word words = form.long_form ? 2U : 1U;
+        const auto opcode = static_cast<Word>(form.opcode) | (destination_b ? 8U : 0U) |
+                            (form.long_form ? 0U : operand << 8U);
+        const std::array program{opcode, operand};
+        machine.core.load(Space::program, start, std::span(program).first(words));
+        immediate_patterns(machine,
+                           {.function = form.function,
+                            .operand = operand,
+                            .words = words,
+                            .destination_b = destination_b});
+      }
+    }
+  }
+}
+
+void immediate_chain_case(Machine &machine, const Registers initial) {
+  constexpr Word high_operand = 0x800080;
+  constexpr Word short_operand = 63;
+  const std::array inputs{
+      ImmediateInput{
+          .function = Function::bit_and, .operand = 32, .words = 1, .destination_b = false},
+      ImmediateInput{
+          .function = Function::bit_or, .operand = high_operand, .words = 2, .destination_b = true},
+      ImmediateInput{.function = Function::bit_xor,
+                     .operand = short_operand,
+                     .words = 1,
+                     .destination_b = false},
+      ImmediateInput{
+          .function = Function::bit_and, .operand = sign24 - 1, .words = 2, .destination_b = true}};
+  auto expected = initial;
+  Word count = 0;
+  Word cycles = 0;
+  for (const auto input : inputs) {
+    immediate_model(expected, input.function, input.operand, input.destination_b, input.words);
+    ++count;
+    cycles += input.words;
+    machine.core.set_registers(initial);
+    const auto before = machine.core.progress();
+    const auto result = machine.core.run(count);
+    require(result.retired == count && result.fault.kind == FaultKind::none &&
+                machine.core.registers() == expected &&
+                result.progress == Progress{.instructions = before.instructions + count,
+                                            .estimated_cycles = before.estimated_cycles + cycles},
+            "Mixed immediate forms preserve exact prefixes and cached accumulator/flag state");
+    machine.core.set_registers(initial);
+    const auto timed = machine.core.run_until(machine.core.progress().estimated_cycles + cycles);
+    require(timed.retired == count && timed.fault.kind == FaultKind::none &&
+                machine.core.registers() == expected,
+            "A native immediate chain returns at its exact base-cycle boundary");
+  }
+}
+
+void immediate_chains() {
+  constexpr Word high_operand = 0x800080;
+  constexpr Word short_operand = 63;
+  const std::array program{static_cast<Word>(isa::Opcode::and_immediate_short) | (32U << 8U),
+                           static_cast<Word>(isa::Opcode::or_immediate_long) | 8U,
+                           high_operand,
+                           static_cast<Word>(isa::Opcode::eor_immediate_short) |
+                               (short_operand << 8U),
+                           static_cast<Word>(isa::Opcode::and_immediate_long) | 8U,
+                           sign24 - 1};
+  Machine machine;
+  machine.core.load(Space::program, start, program);
+  for (const auto mode : modes) {
+    for (const bool sm : {false, true}) {
+      for (const Word flags : {0U, status_byte}) {
+        auto initial = register_model::seed(mode);
+        initial.sr = mode | flags | (sm ? bfu_model::sm : 0U);
+        immediate_chain_case(machine, initial);
+      }
+    }
+  }
+}
+
 }
 }
 
@@ -208,6 +372,8 @@ int main() {
       dsp56300::test::single_forms();
       dsp56300::test::parallel_transfers();
       dsp56300::test::product_chains();
+      dsp56300::test::immediate_forms();
+      dsp56300::test::immediate_chains();
     }
     std::cout << dsp56300::test::checks << " independent native word-logic checks passed\n";
   } catch (const std::exception &error) {

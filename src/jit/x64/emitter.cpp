@@ -139,14 +139,17 @@ bool BlockEmitter::lowerable(const BlockInstruction &operation) {
   if (is_loop_setup(operation) || is_bits(operation) || is_peripheral_register(operation)) {
     return true;
   }
-  if (decoded.operation == Operation::immediate_alu) { return is_addition(operation); }
+  if (decoded.operation == Operation::immediate_alu) {
+    return is_addition(operation) || is_logic(operation);
+  }
   if (decoded.operation != Operation::parallel) { return false; }
   const auto opcode = decoded.opcode;
   if ((opcode & if_mask) == if_group) { return false; }
   // Exclude all PCU register operands: they can modify control/stack state.
-  if ((opcode & memory_group_mask) == memory_group && (opcode & long_selector_mask) != 0) {
-    const auto reg = ((opcode >> 16) & 7) | ((opcode >> 17) & high_register_mask);
-    if (reg >= m_register_base) { return false; }
+  const auto reg = ((opcode >> 16) & 7) | ((opcode >> 17) & high_register_mask);
+  if ((opcode & memory_group_mask) == memory_group && (opcode & long_selector_mask) != 0 &&
+      reg >= m_register_base) {
+    return false;
   }
   const auto alu = opcode & byte_mask;
   if (alu == 0) {
