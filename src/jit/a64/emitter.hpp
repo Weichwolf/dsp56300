@@ -84,7 +84,7 @@ public:
   [[nodiscard]] std::vector<std::uint8_t> generate_vector(const BlockInstruction &operation);
   [[nodiscard]] std::optional<std::vector<std::uint8_t>>
   generate_guarded(std::span<const BlockInstruction> operations,
-                   const JitRuntime &runtime,
+                   const JitRuntime &supplied,
                    const std::array<Word, agu_registers> &modifiers,
                    std::span<const std::uint8_t> fallback = {});
 

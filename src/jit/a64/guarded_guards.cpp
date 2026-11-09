@@ -16,9 +16,6 @@
 
 namespace dsp56300::detail::a64 {
 void Emitter::guard_storage() {
-  code_.load(
-      Reg::x9, context, offsetof(NativeContext, bus) + offsetof(NativeBus, external), Access::byte);
-  code_.branch_zero_far(Reg::x9, done_, Width::w32, true);
   code_.load(Reg::x9, cpu, offsetof(Cpu, repeat_remaining));
   code_.branch_zero_far(Reg::x9, done_, Width::w32, true);
   for (const auto &memory : runtime_.memory) {

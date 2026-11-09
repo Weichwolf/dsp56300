@@ -88,6 +88,21 @@ bool address_supported(const RegionAddress &address) {
 }
 }
 
+JitRuntime resident_runtime(JitRuntime runtime) {
+  for (std::size_t bank = 0; bank < runtime.memory.size(); ++bank) {
+    if (runtime.windows[bank].empty()) { continue; }
+    // Only the entry-guarded region receives this view; rejected entries retain sparse guards.
+    const auto found = std::ranges::find_if(runtime.windows[bank], [](const auto &window) {
+      return window.address == 0 && window.known.empty() && window.writable &&
+             !window.aliases_program;
+    });
+    if (found == runtime.windows[bank].end()) { continue; }
+    runtime.memory[bank] = {.data = found->words.data(), .words = found->words.size()};
+    runtime.windows[bank] = {};
+  }
+  return runtime;
+}
+
 ResidentPlan resident_plan(const std::span<const BlockInstruction> operations,
                            const std::array<JitMemory, 2> &memory,
                            const std::array<Word, agu_registers> &modifiers) {

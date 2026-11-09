@@ -164,9 +164,10 @@ void Emitter::guarded_finish(const std::span<const std::uint8_t> fallback) {
 
 std::optional<std::vector<std::uint8_t>>
 Emitter::generate_guarded(const std::span<const BlockInstruction> operations,
-                          const JitRuntime &runtime,
+                          const JitRuntime &supplied,
                           const std::array<Word, agu_registers> &modifiers,
                           const std::span<const std::uint8_t> fallback) {
+  const auto runtime = resident_runtime(supplied);
   region_ = resident_plan(operations, runtime.memory, modifiers);
   if (!region_.valid || !std::in_range<Word>(operations.size()) ||
       !std::ranges::all_of(operations, guardable)) {

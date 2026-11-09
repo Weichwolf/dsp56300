@@ -27,6 +27,7 @@ struct ResidentPlan {
   bool valid = false, loop = false;
 };
 
+[[nodiscard]] JitRuntime resident_runtime(JitRuntime runtime);
 [[nodiscard]] ResidentPlan resident_plan(std::span<const BlockInstruction> operations,
                                          const std::array<JitMemory, 2> &memory,
                                          const std::array<Word, agu_registers> &modifiers);

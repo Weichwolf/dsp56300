@@ -7,6 +7,7 @@
 #include "jit/arena.hpp"
 #include "jit/block.hpp"
 #include "jit/index.hpp"
+#include "jit/resident.hpp"
 #include "jit/resident_region.hpp"
 #include "translation.hpp"
 
@@ -45,6 +46,7 @@ struct Block {
   std::unique_ptr<ResidentRegion> region;
 #if defined(__aarch64__)
   EntryKind kind = EntryKind::ordinary;
+  std::array<JitMemory, 2> memory{};
 #endif
 };
 }
@@ -86,7 +88,8 @@ struct Jit::Impl {
 Block *Jit::Impl::compile() {
   auto block = std::make_unique<Block>();
 #if defined(__aarch64__)
-  const bool callbacks = context.events.io != nullptr || context.bus.external;
+  const bool callbacks = (context.events.io != nullptr || context.bus.external) &&
+                         active_loop_address(cpu.reg) == inactive_loop;
 #else
   constexpr bool callbacks = false;
 #endif
@@ -131,9 +134,17 @@ Block *Jit::Impl::compile() {
 #if defined(__aarch64__)
 Block *Jit::Impl::reuse(const std::span<const BlockInstruction> operations,
                         const EntryKind kind) const {
+  const auto memory = resident_runtime(context.runtime).memory;
+  const auto same_memory = [](const JitMemory &left, const JitMemory &right) {
+    return left.data == right.data && left.words == right.words &&
+           left.aliases_program == right.aliases_program;
+  };
   for (const auto &block : storage) {
     // Nested regions retain child code beyond this operation span.
-    if (block->kind != kind || block->region) { continue; }
+    if (block->kind != kind || block->region ||
+        !std::ranges::equal(block->memory, memory, same_memory)) {
+      continue;
+    }
     const auto equal = [](const BlockInstruction &left, const BlockInstruction &right) {
       return left.instruction == right.instruction && left.pc == right.pc &&
              left.mode == right.mode && left.loop_address == right.loop_address;
@@ -220,6 +231,9 @@ void Jit::reset() {
 }
 
 Block *Jit::Impl::retain(std::unique_ptr<Block> block) {
+#if defined(__aarch64__)
+  block->memory = resident_runtime(context.runtime).memory;
+#endif
   auto *const entry = block.get();
   storage.push_back(std::move(block));
   return entry;
