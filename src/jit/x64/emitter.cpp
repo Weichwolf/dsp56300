@@ -182,13 +182,6 @@ void BlockEmitter::store_accumulator(const bool destination_b, const Reg source)
   accumulator_dirty_.at(index) = true;
 }
 
-void BlockEmitter::invalidate_moved_accumulators() {
-  if (loop_residency_) { return; }
-  for (unsigned index = 0; index < accumulator_dirty_.size(); ++index) {
-    if ((dataflow_.move_writes & (Word{1} << index)) != 0) { accumulator_dirty_.at(index) = false; }
-  }
-}
-
 Word BlockEmitter::dirty_accumulators() const {
   return (accumulator_dirty_[0] ? 1U : 0U) | (accumulator_dirty_[1] ? 2U : 0U);
 }
@@ -578,7 +571,6 @@ void BlockEmitter::emit_operations(const std::span<const BlockInstruction> opera
       if (boundary_operation(operation, publish_pc(operations, operation_index))) { continue; }
       loop_guard(operation);
       if (has_moves(operation)) { moves(operation); }
-      invalidate_moved_accumulators();
       native(operation);
       retire(operation,
              bounds_ == ExecutionBounds::precise || publish_pc(operations, operation_index));

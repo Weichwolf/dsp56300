@@ -101,12 +101,6 @@ void BlockEmitter::long_commit(const NativeMoves &moves) {
     code_.shift(shift_left, Reg::ax, 2 * padding_bits);
     code_.shift(shift_arithmetic, Reg::ax, padding_bits);
   }
-  if (loop_residency_) {
-    store_accumulator(b, Reg::ax);
-  } else {
-    code_.store(Reg::r12,
-                offsetof(Cpu, reg) + (b ? offsetof(Registers, b) : offsetof(Registers, a)),
-                Reg::ax);
-  }
+  store_accumulator(b, Reg::ax);
 }
 } // namespace dsp56300::detail

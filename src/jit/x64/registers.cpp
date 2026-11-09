@@ -126,23 +126,17 @@ void BlockEmitter::move_write_register(const Reg value, const unsigned reg) {
     code_.constant(Reg::r10, ~(std::uint64_t{mask} << shift));
     code_.binary(op_and, {.destination = Reg::ax, .source = Reg::r10});
     code_.binary(op_or, {.destination = Reg::ax, .source = Reg::r9});
-    if (loop_residency_) {
-      store_accumulator((reg & 1U) != 0, Reg::ax);
-    } else {
-      const auto offset = (reg & 1U) == 0 ? offsetof(Registers, a) : offsetof(Registers, b);
-      code_.store(Reg::r12, offsetof(Cpu, reg) + offset, Reg::ax);
-    }
+    store_accumulator((reg & 1U) != 0, Reg::ax);
     return;
   }
   if (reg >= a_register) {
     code_.mov({.destination = Reg::ax, .source = value});
     code_.shift(shift_left, Reg::ax, low_word_shift);
     code_.shift(shift_arithmetic, Reg::ax, padding_bits);
-    if (loop_residency_) {
-      store_accumulator(reg == b_register, Reg::ax);
-      return;
-    }
-  } else if ((reg & 1U) != 0) {
+    store_accumulator(reg == b_register, Reg::ax);
+    return;
+  }
+  if ((reg & 1U) != 0) {
     code_.load(Reg::ax, Reg::r12, bank_offset(reg), Width::dword);
     code_.immediate(group_and, Reg::ax, word_mask, Width::dword);
     code_.mov({.destination = Reg::r9, .source = value});

@@ -159,7 +159,6 @@ private:
   void value(x64::Reg destination, unsigned index, bool latched);
   void current_value(x64::Reg destination, unsigned index);
   void store_accumulator(bool destination_b, x64::Reg source);
-  void invalidate_moved_accumulators();
   [[nodiscard]] Word dirty_accumulators() const;
   void flush_accumulators(Word mask);
   void exit_if(x64::Branch condition);

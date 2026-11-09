@@ -2,6 +2,7 @@
 #include "move.hpp"
 
 #include "architecture.hpp"
+#include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "jit.hpp"
 #include "jit/code.hpp"
@@ -9,6 +10,7 @@
 #include "jit/resident.hpp"
 #include "value_ranges.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <span>
 
@@ -41,6 +43,15 @@ void BlockEmitter::general_moves(const BlockInstruction &operation) {
   // partial fault state rather than flushing pre-transfer cached operands.
   code_.jump_if(Branch::equal, exits_[0]);
   restore_inputs();
+  // A moves-only helper rejoins native ALU code with fresh destinations.
+  // Its rejected prefix exits above without overwriting partial fault state.
+  for (unsigned index = 0; index < accumulator_dirty_.size(); ++index) {
+    if (accumulator_dirty_.at(index) || (dataflow_.move_writes & (Word{1} << index)) != 0) {
+      const auto offset = index == 0 ? offsetof(Registers, a) : offsetof(Registers, b);
+      code_.load(index == 0 ? Reg::bp : Reg::bx, Reg::r12, offsetof(Cpu, reg) + offset);
+      accumulator_dirty_.at(index) = true;
+    }
+  }
 }
 
 void BlockEmitter::move_capture(const NativeMove &move, const Word mode) {
@@ -146,8 +157,10 @@ void BlockEmitter::moves(const BlockInstruction &operation) {
   x64::Label slow;
   x64::Label done;
   const auto first_guard = ring_guards_.size();
+  const auto incoming = accumulator_dirty_;
   move_guards(plan, slow);
   move_values(plan, operation.mode);
+  const auto completed = accumulator_dirty_;
   code_.jump(done);
   code_.bind(slow);
   // Late ring checks retain this instruction's target after its local label dies.
@@ -155,7 +168,11 @@ void BlockEmitter::moves(const BlockInstruction &operation) {
     ring_guards_[index].slow.offset = slow.offset;
     ring_guards_[index].slow.bound = true;
   }
+  // The rejected RAM path has not executed any native transfer. Publish only
+  // the incoming values before calling its actual observer or fault handler.
+  accumulator_dirty_ = incoming;
   general_moves(operation);
+  accumulator_dirty_ = completed;
   code_.bind(done);
 }
 } // namespace dsp56300::detail
