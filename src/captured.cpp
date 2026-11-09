@@ -66,6 +66,7 @@ RunResult Core::run_instruction(const InstructionWords words) {
     throw std::invalid_argument("Captured execution differs from ordinary CPU fetch ownership");
   }
   const detail::ExecutionGuard guard(impl_->executing);
+  const auto previous_status = impl_->cpu.reg.sr;
   impl_->synchronize_program_view();
   impl_->yield_requested = false;
   RunResult result;
@@ -82,10 +83,12 @@ RunResult Core::run_instruction(const InstructionWords words) {
   assert(result.retired == 1 || impl_->fault.kind != FaultKind::none);
   impl_->synchronize_cache_mode();
   impl_->synchronize_program_view();
+  impl_->check_interrupt_window(previous_status);
 #else
   if (result.retired == 0 && impl_->fault.kind == FaultKind::none) {
     impl_->step_decoded(decoded);
     impl_->synchronize_program_view();
+    impl_->check_interrupt_window(previous_status);
     if (impl_->fault.kind == FaultKind::none) { result.retired = 1; }
   }
 #endif

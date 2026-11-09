@@ -56,6 +56,7 @@ struct Core::Impl {
   [[nodiscard]] std::uint32_t run_repeat_native(std::uint32_t instructions);
   [[nodiscard]] Word fetch_program(Word address);
   void observe_program_word(Word address) noexcept;
+  void check_interrupt_window(Word previous_status) noexcept;
   [[nodiscard]] Word read_external(Space space, Word address);
   void write_external(Space space, Word address, Word value);
   void execute_processing(const detail::Instruction &decoded);
