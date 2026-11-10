@@ -8,6 +8,7 @@
 #include "instruction.hpp"
 #include "jit.hpp"
 #include "program_cache.hpp"
+#include "semantic.hpp"
 #include "vector_state.hpp"
 
 #include <array>
@@ -85,6 +86,9 @@ struct Core::Impl {
   [[nodiscard]] detail::Instruction instruction(Word pc);
   void step();
   void step_decoded(const detail::Instruction &decoded);
+  void step_semantic(const detail::Instruction &decoded);
+  [[nodiscard]] static detail::SemanticResult
+  semantic_execute(void *owner, const detail::Instruction &decoded) noexcept;
 #if defined(__aarch64__)
   void step_native(const detail::Instruction &decoded);
 #endif

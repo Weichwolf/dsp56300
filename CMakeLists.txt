@@ -68,7 +68,7 @@ else()
     src/jit/run.cpp src/jit/x64/mac_batch_avx2.cpp src/jit/x64/resident_region_emit.cpp)
 endif()
 add_library(dsp56300_core STATIC
-  src/core.cpp src/captured.cpp src/repeat.cpp
+  src/core.cpp src/semantic.cpp src/captured.cpp src/repeat.cpp
   src/memory_windows.cpp src/external_memory.cpp src/state.cpp
   src/fetch.cpp src/jit/preparation.cpp src/jit/llvm/runtime.cpp
   src/jit/llvm/region.cpp src/jit/llvm/region_plan.cpp src/jit/llvm/alu.cpp src/instruction_shape.cpp src/transfer_info.cpp

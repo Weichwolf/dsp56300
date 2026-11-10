@@ -207,45 +207,7 @@ void Core::Impl::step_decoded(const detail::Instruction &decoded) {
 #if defined(__aarch64__)
   step_native(decoded);
 #else
-  current_pc = cpu.reg.pc;
-  const bool repeating = cpu.repeat_remaining != 0;
-  if (repeating && (decoded.words != 1 || !detail::repeatable(decoded.operation))) {
-    fail(FaultKind::invalid_instruction, Space::program, current_pc, decoded.opcode);
-    return;
-  }
-  current_words = decoded.words;
-
-  cpu.interrupt_inhibited = false;
-  cpu.reg.pc = (current_pc + decoded.words) & word_mask;
-  execute_operation(decoded);
-
-  synchronize_cache_mode();
-  if (fault.kind != FaultKind::none) { return; }
-  if (repeating) {
-
-    cpu.repeat_opcode = decoded.opcode;
-    repeated = decoded;
-    cpu.repeat_loaded = true;
-    --cpu.repeat_remaining;
-    if (cpu.repeat_remaining != 0) {
-
-      cpu.reg.lc = cpu.repeat_remaining;
-      cpu.reg.pc = current_pc;
-
-      retire_instruction(decoded.cycles);
-      return;
-    }
-
-    cpu.reg.lc = cpu.repeat_lc;
-    cpu.repeat_completed = true;
-    cpu.repeat_loaded = false;
-  } else if (!detail::is_repeat(decoded.operation)) {
-
-    cpu.repeat_completed = false;
-  }
-  finish_loop();
-
-  if (fault.kind == FaultKind::none) { retire_instruction(decoded.cycles); }
+  step_semantic(decoded);
 #endif
 }
 
