@@ -184,7 +184,6 @@ const void *LlvmCompiler::install(LlvmModule &module) {
   const std::unique_ptr<std::remove_pointer_t<LLVMPassBuilderOptionsRef>,
                         LlvmDelete<LLVMDisposePassBuilderOptions>>
       options(LLVMCreatePassBuilderOptions());
-  LLVMPassBuilderOptionsSetVerifyEach(options.get(), 1);
   check(LLVMRunPasses(module.code(),
                       address_sanitizer ? "default<O3>,asan" : "default<O3>",
                       impl_->machine.get(),
