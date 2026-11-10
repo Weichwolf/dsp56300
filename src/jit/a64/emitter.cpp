@@ -34,7 +34,7 @@ void Emitter::begin() {
   for (const auto reg : saved) {
     code_.push(reg, static_cast<Reg>(static_cast<unsigned>(reg) + 1));
   }
-  for (std::size_t pair = 0; pair < Frame::pairs; ++pair) { code_.push(Reg::zr, Reg::x17); }
+  code_.subtract(Reg::sp, Reg::sp, Frame::pairs * 2 * sizeof(std::uint64_t), Width::x64);
   code_.move(cpu, Reg::x0);
   code_.move(context, Reg::x1);
   for (const auto &[reg, offset] : held) { code_.load(reg, cpu, offset, Access::doubleword); }

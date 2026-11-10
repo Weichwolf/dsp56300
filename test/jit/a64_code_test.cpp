@@ -206,6 +206,21 @@ void stack_encodings() {
           "NEON paired doubleword stack operations differ from ISA");
 }
 
+void subtract_encodings() {
+  constexpr std::uint16_t maximum = 0xfff;
+  constexpr std::array<std::uint32_t, 2> expected{0xd10203ff, 0x513ffc20};
+  Code code;
+  code.subtract(Reg::sp, Reg::sp, 128, Width::x64);
+  code.subtract(Reg::x0, Reg::x1, maximum);
+  require(instruction(code, 0) == expected[0] && instruction(code, 1) == expected[1],
+          "Subtract immediate must encode SP and full 12-bit word immediates exactly");
+  bool rejected = false;
+  try {
+    code.subtract(Reg::sp, Reg::sp, 0x1000, Width::x64);
+  } catch (const std::invalid_argument &) { rejected = true; }
+  require(rejected && code.size() == 8, "Oversized subtraction must leave emitted code intact");
+}
+
 void selection_encodings() {
   Code code;
   Neon neon(code);
@@ -650,6 +665,36 @@ void execute_neon_memory() {
   }
 }
 
+void execute_scratch() {
+  dsp56300::detail::ExecutableArena arena;
+  constexpr std::array<std::uint16_t, 3> extents{16, 128, 4080};
+  for (const auto bytes : extents) {
+    Code code;
+    code.write_flags(Reg::x1);
+    code.add(Reg::x2, Reg::sp, 0, Width::x64);
+    code.subtract(Reg::sp, Reg::sp, bytes, Width::x64);
+    code.add(Reg::x3, Reg::sp, 0, Width::x64);
+    code.alu(Alu::subtract, Reg::x2, Reg::x2, Reg::x3, Width::x64);
+    code.store(Reg::x2, Reg::x0, 0, Access::doubleword);
+    code.store(Reg::x0, Reg::sp, bytes - sizeof(std::uint64_t), Access::doubleword);
+    code.load(Reg::x2, Reg::sp, bytes - sizeof(std::uint64_t), Access::doubleword);
+    code.add(Reg::sp, Reg::sp, bytes, Width::x64);
+    code.store(Reg::x2, Reg::x0, sizeof(std::uint64_t), Access::doubleword);
+    code.read_flags(Reg::x2);
+    code.store(Reg::x2, Reg::x0, 2 * sizeof(std::uint64_t), Access::doubleword);
+    code.return_();
+    const auto *entry = arena.append(code.bytes());
+    for (unsigned status = 0; status < 16; ++status) {
+      const auto flags = std::uint64_t{status} << 28;
+      std::array<std::uint64_t, 3> output{};
+      const auto pointer = reinterpret_cast<std::uintptr_t>(output.data());
+      static_cast<void>(dsp56300_a64_test_enter(entry, pointer, flags));
+      require(output == std::array<std::uint64_t, 3>{bytes, pointer, flags},
+              "Scratch reservation must preserve exact SP extent, stack storage and every NZCV");
+    }
+  }
+}
+
 void execute() {
   dsp56300::detail::ExecutableArena arena;
   Code code;
@@ -694,6 +739,7 @@ int main() {
     immediate_encodings();
     accumulate_encodings();
     stack_encodings();
+    subtract_encodings();
     selection_encodings();
 #if defined(__aarch64__)
     execute();
@@ -704,6 +750,7 @@ int main() {
     execute_packed();
     execute_immediates();
     execute_stack();
+    execute_scratch();
 #endif
     std::cout << "A64 encoding and branch checks passed.\n";
   } catch (const std::exception &error) {

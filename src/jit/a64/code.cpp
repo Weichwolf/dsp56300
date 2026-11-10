@@ -145,6 +145,17 @@ void Code::add(const Reg target, const Reg source, const std::uint16_t value, co
        (reg(source) << register_shift) | reg(target));
 }
 
+void Code::subtract(const Reg target,
+                    const Reg source,
+                    const std::uint16_t value,
+                    const Width width) {
+  constexpr std::uint32_t opcode = 0x51000000;
+  constexpr unsigned maximum = 0xfff;
+  if (value > maximum) { throw std::invalid_argument("A64 subtract immediate exceeds 12 bits"); }
+  word(wide(width) | opcode | (std::uint32_t{value} << immediate_shift) |
+       (reg(source) << register_shift) | reg(target));
+}
+
 void Code::extract(const Reg target,
                    const Reg source,
                    const unsigned first,
