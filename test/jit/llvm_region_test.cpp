@@ -36,6 +36,7 @@ constexpr Word target_slot = 48, clobber_slot = 52, store_slot = 24, outer_tail 
 constexpr Word narrow_ring = 0x8003, wide_ring = 0x800f;
 constexpr unsigned high_register_mask = 0x18, high_register_shift = 17, y_space_bit = 19;
 constexpr unsigned r1 = 17, r2 = 18, n1 = 25, long_sign_bit = 47;
+constexpr unsigned x_selector_shift = 18;
 constexpr std::array modes{0U, mode_down, mode_up, mode_rm, mode_rm | mode_down, mode_rm | mode_up};
 using Data = std::array<std::array<Word, size>, 2>;
 using Knowledge = std::array<std::array<std::uint8_t, size>, 2>;
@@ -61,6 +62,7 @@ struct Input {
   Tail tail = Tail::conditional_register;
   bool at_tail = false;
   Word loop_count = 7;
+  bool test_flags = false;
 };
 
 bool absolute(const Input input) {
@@ -110,11 +112,13 @@ Word long_move(const Input input, const bool load) {
 std::array<Word, length + 1> program(const Input input) {
   const auto pair = named(Opcode::move_xy) | (1U << 15) | (1U << 22) | (2U << 8) | (2U << 13) |
                     (1U << 11) | (1U << 20);
-  const auto product = (named(Opcode::mpy_register_a) & status_byte) | (5U << 4);
-  const auto mac = (named(Opcode::mac_register_a) & status_byte) | (6U << 4);
+  const auto product = input.test_flags ? named(Opcode::tst_a) & status_byte
+                                        : (named(Opcode::mpy_register_a) & status_byte) | (5U << 4);
+  const auto mac = input.test_flags ? named(Opcode::tst_b) & status_byte
+                                    : (named(Opcode::mac_register_a) & status_byte) | (6U << 4);
   const auto moved = (named(Opcode::move_register_x0_x1) & ~((31U << 13) | (31U << 8))) |
                      (r1 << 13) | (5U << 8) | mac;
-  return {pair | product,
+  return {pair | product | (input.test_flags ? 2U << x_selector_shift : 0U),
           named(input.left ? Opcode::asl_immediate : Opcode::asr_immediate) | (input.shift << 1) |
               (input.source_b ? 1U << 7 : 0U) | (input.destination_b ? 1U : 0U),
           long_move(input, true),
@@ -306,7 +310,7 @@ void model_step(Registers &state, Data &data, const Input input) {
     case 0: {
       const auto xa = effective(state, 2, 1) - base;
       const auto ya = effective(state, 6, 1) - base;
-      register_model::write(state, 4, x.at(xa));
+      register_model::write(state, input.test_flags ? 14U : 4U, x.at(xa));
       register_model::write(state, 6, y.at(ya));
       break;
     }
@@ -450,6 +454,53 @@ void prefixes(const Input input, const Word mode) {
           "Warm execution retains the original prepared code");
 }
 
+void resumed_do_body() {
+  const Input input{.at_tail = true};
+  Fixture fixture(input);
+  fixture.p[entry + length - 1] = named(Opcode::nop);
+  Core core(Memory::external(), &fixture);
+  const auto seed = initial(input, 0);
+  core.set_registers(seed);
+  const std::array entries{entry};
+  require(core.prepare(entries).prepared_entries == 1, "Prepare a complete one-pass DO body");
+  require(core.run(1).retired == 1, "Pause inside the complete prepared body");
+  const auto paused = core.state();
+  const std::array suffix{entry + 1};
+  const auto report = core.prepare(suffix);
+  require(report.failure == Fault{} && report.prepared_entries == 0 && report.native_bytes == 0 &&
+              core.registers() == paused.registers && core.progress() == paused.progress,
+          "A resume suffix does not create another LLVM DO body or execute guest work");
+  auto wanted = seed;
+  auto data = fixture.data;
+  for (unsigned i = 0; i < length - 1; ++i) { model_step(wanted, data, input); }
+  ++wanted.pc;
+  finish_loop(wanted, input);
+  const auto result = core.run(length - 1);
+  require(result.fault == Fault{} && result.retired == length - 1 && core.registers() == wanted &&
+              fixture.data == data && result.progress.instructions == length &&
+              result.progress.estimated_cycles == length,
+          "A resumed ordinary suffix finishes with the exact registers, RAM and DO effects");
+}
+
+void ordinary_copy_region() {
+  Fixture fixture({});
+  fixture.p[entry] = scalar_load(4, 5);
+  fixture.p[entry + 1] = named(Opcode::jmp_effective) | (4U << 11) | (1U << 8);
+  Core core(Memory::external(), &fixture);
+  const auto seed = initial({}, 0);
+  core.set_registers(seed);
+  const std::array entries{entry};
+  const auto report = core.prepare(entries);
+  require(report.failure == Fault{} && report.prepared_entries == 0 && report.native_bytes == 0,
+          "A scalar copy/control region retains its existing native lowering");
+  auto wanted = seed;
+  register_model::write(wanted, 4, fixture.data[0][target_slot]);
+  wanted.pc = seed.r[1];
+  const auto result = core.run(2);
+  require(result.fault == Fault{} && result.retired == 2 && core.registers() == wanted,
+          "Declining LLVM for a scalar copy preserves its native instrument work");
+}
+
 void admission_failures() {
   Fixture fixture({});
   const auto seed = initial({}, 0);
@@ -527,6 +578,8 @@ void unknown_target_prefix() {
 int main() try {
   for (const auto mode : modes) {
     direct({}, mode);
+    direct({.test_flags = true}, mode);
+    prefixes({.test_flags = true}, mode);
     direct({.modifier = narrow_ring, .offset = word_mask}, mode);
     direct({.modifier = wide_ring, .offset = 9, .alias = true}, mode);
     prefixes({}, mode);
@@ -554,6 +607,8 @@ int main() try {
     direct({.flags = forever, .at_tail = true, .loop_count = count}, 0);
     prefixes({.at_tail = true, .loop_count = count}, 0);
   }
+  resumed_do_body();
+  ordinary_copy_region();
   admission_failures();
   unknown_target_prefix();
 } catch (const std::exception &error) {

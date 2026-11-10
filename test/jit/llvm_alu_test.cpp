@@ -31,14 +31,14 @@ using V = LLVMValueRef;
 constexpr std::array modes{0U, mode_down, mode_up, mode_rm, mode_rm | mode_down, mode_rm | mode_up};
 constexpr unsigned x_perturb_shift = 18, y_perturb_shift = 23;
 constexpr std::array arithmetic{
-    clr_a,    clr_b,    rnd_a,    rnd_b,    abs_a,    abs_b,    neg_a,    neg_b,    asr_a,
-    asr_b,    asl_a,    asl_b,    tfr_a_b,  tfr_b_a,  tfr_x0_a, tfr_x0_b, tfr_x1_a, tfr_x1_b,
-    tfr_y0_a, tfr_y0_b, tfr_y1_a, tfr_y1_b, add_a_b,  add_b_a,  add_x_a,  add_x_b,  add_y_a,
-    add_y_b,  add_x0_a, add_x0_b, add_x1_a, add_x1_b, add_y0_a, add_y0_b, add_y1_a, add_y1_b,
-    sub_a_b,  sub_b_a,  sub_x_a,  sub_x_b,  sub_y_a,  sub_y_b,  sub_x0_a, sub_x0_b, sub_x1_a,
-    sub_x1_b, sub_y0_a, sub_y0_b, sub_y1_a, sub_y1_b, cmp_a_b,  cmp_b_a,  cmp_x0_a, cmp_x0_b,
-    cmp_x1_a, cmp_x1_b, cmp_y0_a, cmp_y0_b, cmp_y1_a, cmp_y1_b, adc_x_a,  adc_x_b,  adc_y_a,
-    adc_y_b,  sbc_x_a,  sbc_x_b,  sbc_y_a,  sbc_y_b};
+    tst_a,    tst_b,    clr_a,    clr_b,    rnd_a,    rnd_b,    abs_a,    abs_b,    neg_a,
+    neg_b,    asr_a,    asr_b,    asl_a,    asl_b,    tfr_a_b,  tfr_b_a,  tfr_x0_a, tfr_x0_b,
+    tfr_x1_a, tfr_x1_b, tfr_y0_a, tfr_y0_b, tfr_y1_a, tfr_y1_b, add_a_b,  add_b_a,  add_x_a,
+    add_x_b,  add_y_a,  add_y_b,  add_x0_a, add_x0_b, add_x1_a, add_x1_b, add_y0_a, add_y0_b,
+    add_y1_a, add_y1_b, sub_a_b,  sub_b_a,  sub_x_a,  sub_x_b,  sub_y_a,  sub_y_b,  sub_x0_a,
+    sub_x0_b, sub_x1_a, sub_x1_b, sub_y0_a, sub_y0_b, sub_y1_a, sub_y1_b, cmp_a_b,  cmp_b_a,
+    cmp_x0_a, cmp_x0_b, cmp_x1_a, cmp_x1_b, cmp_y0_a, cmp_y0_b, cmp_y1_a, cmp_y1_b, adc_x_a,
+    adc_x_b,  adc_y_a,  adc_y_b,  sbc_x_a,  sbc_x_b,  sbc_y_a,  sbc_y_b};
 constexpr std::array products{mpy_register_a,
                               mpy_register_b,
                               mpyr_register_a,

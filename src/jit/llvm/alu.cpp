@@ -19,6 +19,7 @@ constexpr Word alu_mask = 0xf7, product_bit = 0x80;
 constexpr unsigned bus_shift = word_bits + padding_bits, integer_shift = 55;
 
 enum AluCode : std::uint8_t {
+  test = 0x03,
   rounded = 0x11,
   clear = 0x13,
   complement = 0x17,
@@ -144,6 +145,7 @@ Result Alu::sum(const Word code, const Banks &before, const unsigned destination
 
 std::optional<Result> Alu::unary(const Word code, V value) {
   switch (code & alu_mask) {
+    case test: return Result{.value = value, .compare = true};
     case clear: return Result{.value = ir_.getInt64(0)};
     case rounded: return Result{.value = value};
     case absolute:
@@ -299,7 +301,7 @@ bool supported_alu(const Word opcode) {
   const auto code = opcode & byte_mask;
   const auto form = code & alu_mask;
   if (code == 0 || (code & product_bit) != 0 || transfer(code) || logical(code)) { return true; }
-  if (form == clear || form == rounded || form == absolute || form == negate ||
+  if (form == test || form == clear || form == rounded || form == absolute || form == negate ||
       form == shift_right || form == shift_left) {
     return true;
   }

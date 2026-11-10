@@ -163,6 +163,7 @@ RegionControl control(const BlockInstruction &operation) {
 bool append(RegionPlan &plan, const BlockInstruction &operation) {
   const auto &instruction = operation.instruction;
   if (instruction.operation == Operation::arithmetic_shift_immediate) {
+    plan.computation = true;
     constexpr Word count_mask = 63;
     if (((instruction.opcode >> 1) & count_mask) >= accumulator_bits) { return false; }
     plan.steps.push_back({});
@@ -173,6 +174,7 @@ bool append(RegionPlan &plan, const BlockInstruction &operation) {
     return false;
   }
   const auto moves = plan_moves(instruction);
+  plan.computation = plan.computation || moves.long_pair || (instruction.opcode & byte_mask) != 0;
   const auto registers = plan_register_move(instruction);
   if (!append_moves(plan, moves)) { return false; }
   if (registers.valid() &&

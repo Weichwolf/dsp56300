@@ -130,6 +130,9 @@ inline void alu(Registers &state, const Registers &old, const Word opcode) {
     result.full = value / 2 - (value % 2 < 0 ? 1 : 0);
     result.carry_changed = true;
     result.carry = raw % 2 != 0;
+  } else if (kind == 3) {
+    result.full = signed56((code & 8U) != 0 ? old.b : old.a);
+    result.compare = true;
   } else if (kind == clear) {
     result.full = 0;
   } else if (kind == absolute || kind == negate || kind == round) {

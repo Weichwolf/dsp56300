@@ -36,7 +36,7 @@ struct RegionPlan {
   std::array<bool, agu_registers> changed_r{}, changed_n{}, agu{};
   RegionControl control;
   Word cost = 0, count = 0;
-  bool batch = false;
+  bool batch = false, computation = false;
 };
 
 [[nodiscard]] bool permitted(const MemoryWindow &window, bool writing);

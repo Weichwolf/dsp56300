@@ -646,7 +646,10 @@ bool region_candidate(const std::span<const BlockInstruction> operations,
                       const JitRuntime &runtime,
                       const bool complete_loop) {
   const auto plan = plan_region(operations, runtime);
-  return plan && (!plan->batch || complete_loop);
+  if (!plan || (!plan->batch && !plan->computation)) { return false; }
+  // A partial execution grant can resume inside a previously prepared DO body.
+  // Keep its ordinary suffix; do not translate each suffix into another LLVM loop.
+  return complete_loop || plan->control.valid || !at_loop_end(operations.back());
 }
 
 std::optional<PreparedRegion> compile_region(std::unique_ptr<LlvmCompiler> &compiler,
