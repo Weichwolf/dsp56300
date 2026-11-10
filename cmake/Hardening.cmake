@@ -15,14 +15,6 @@ check_cxx_source_compiles("#include <cstddef>
 int main() { return 0; }" DSP56300_USE_LIBSTDCXX)
 
 add_library(dsp56300_hardening INTERFACE)
-set(LLVM19_RESOURCE_DIR "$ENV{LLVM19_RESOURCE_DIR}" CACHE PATH "Optional LLVM 19 resource directory")
-if(LLVM19_RESOURCE_DIR)
-  if(NOT EXISTS "${LLVM19_RESOURCE_DIR}/include/stddef.h")
-    message(FATAL_ERROR "LLVM19_RESOURCE_DIR must contain LLVM 19 headers and runtimes")
-  endif()
-  target_compile_options(dsp56300_hardening INTERFACE "-resource-dir=${LLVM19_RESOURCE_DIR}")
-  target_link_options(dsp56300_hardening INTERFACE "-resource-dir=${LLVM19_RESOURCE_DIR}")
-endif()
 target_compile_options(dsp56300_hardening INTERFACE
   -fstack-protector-strong
   -Wformat=2 -Werror=format-security $<$<CONFIG:Debug>:-O1>)
@@ -45,12 +37,3 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   target_link_options(dsp56300_hardening INTERFACE
     -Wl,-z,relro -Wl,-z,now -Wl,-z,noexecstack)
 endif()
-
-# Static dependencies keep their upstream exports independent of project targets.
-function(dsp56300_harden_native target)
-  target_compile_options(${target} PRIVATE
-    "$<TARGET_GENEX_EVAL:${target},$<TARGET_PROPERTY:dsp56300_hardening,INTERFACE_COMPILE_OPTIONS>>")
-  target_compile_definitions(${target} PRIVATE
-    "$<TARGET_GENEX_EVAL:${target},$<TARGET_PROPERTY:dsp56300_hardening,INTERFACE_COMPILE_DEFINITIONS>>")
-  set_target_properties(${target} PROPERTIES POSITION_INDEPENDENT_CODE ON)
-endfunction()

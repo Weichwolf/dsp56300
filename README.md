@@ -15,9 +15,10 @@ cmake --build --preset release --target bench
 ```
 
 `strict` enables ASan/UBSan; `thread` selects separate TSan. Ccache is used when
-available. On macOS use `brew install llvm@19 ninja ccache`. When required by the
-macOS version, set `LLVM19_RESOURCE_DIR` from `python3 tools/darwin_runtime.py`
-before configuring strict; the tool prepares the patched LLVM 19 sanitizer runtime.
+available. Use the packaged LLVM 19 toolchain; on macOS install it with
+`brew install llvm@19 ninja ccache`. LLVM and compiler-rt are not built from source.
+Sanitizers cover project code and explicitly instrumented generated JIT code,
+not packaged third-party libraries.
 
 ## Use
 

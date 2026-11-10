@@ -34,8 +34,11 @@ explicit; report every slow scenario and first-use miss, not averages alone.
 >=70% realistic warm host-ASM throughput is a reference, not an integration gate.
 Optimize continuous meaningful workloads across domains; SIMD is optional.
 
-Use strict builds and affected independent correctness/sanitizer tests before
-publishing code. Tests remain required while Blofeld is below real time.
+Prioritize complete instrument behavior and sustained throughput. Use strict
+builds and focused independent Release checks for affected code. Routine
+sanitizers may wait for the instrument goal; earlier runs need a concrete
+technical reason. Cover our code and emitted JIT code, not packaged foreign
+libraries; never rebuild LLVM/compiler-rt as part of the toolchain.
 Manufacturer assets and application program extracts stay outside source/tests.
 The Blofeld consumer requires >=4x sustainable offline instrument throughput and
 bounded live latency; isolated core benchmarks do not establish that result.

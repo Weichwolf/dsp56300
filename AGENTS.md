@@ -19,9 +19,12 @@
 - Speak German with the user; code, comments, documentation and commits are English.
 - C++23, LLVM 19, CMake/Ninja; strict warnings/linking, clang-format, zero-finding
   clang-tidy, functions <=120 lines. Never suppress or weaken checks.
-- Use Release for performance. Test affected core semantics independently and with
-  ASan/UBSan, including native dependencies; use separate TSan for concurrent code.
-  Keep checks focused; no GitHub workflows.
+- Prioritize complete instrument functionality and >=4x sustained MIDI-to-WAV
+  throughput. Use Release and focused independent checks while iterating. Strict
+  build/test rules cover our code; use packaged foreign libraries, never rebuild
+  LLVM/compiler-rt or instrument foreign code. Defer routine sanitizers until the
+  instrument goal; earlier ASan/UBSan/TSan runs need a concrete defect/risk reason.
+  Sanitizer coverage includes our generated JIT code. No GitHub workflows.
 - Blofeld firmware probes stop within 10 host seconds and fail unless playable.
   Until real time, no long firmware runs or unchanged failed-probe repetitions.
 - Telemetry is runtime-selectable and off by default; no hot-path statistics.
