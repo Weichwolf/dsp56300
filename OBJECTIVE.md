@@ -17,6 +17,14 @@ Keep native registers live, RAM direct and translations immutable and retained.
 Use natural control-flow regions without instruction-count translation caps.
 Do not hide ISA helper gaps, fabricate retirement or discard supported operations.
 
+Provide an explicit side-effect-free preparation phase before execution. Discover
+reachable instructions from established entries without running guest/device
+operations or scanning data; retain unresolved and indirect frontiers. Lift exact
+ISA semantics into LLVM 19 CFG/SSA, optimize and lower for the native host. Keep
+LLVM types private and preparation ownership stopped; failures must not mutate
+architectural state or progress. Preparation time has no fixed artificial cap.
+Retain exact instruction/cycle prefixes and ordered effects in optimized regions.
+
 Provide reproducible independently authored fixtures using test/support/isa.hpp;
 organize test/isa, test/core, test/jit, test/bench and test/support consistently.
 The bench target reports cold/warm latency, packet deadlines, guest instructions

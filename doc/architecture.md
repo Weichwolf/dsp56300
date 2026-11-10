@@ -17,8 +17,24 @@ Compile from actual code entries along natural control flow. Retain immutable
 translations for the core lifetime and link successors natively. No instruction
 count caps, budget-specific recompilation, continuous hashing or cache eviction.
 Changed executable identities require an explicit owner transition; unrelated
-programs use a fresh core. Consider eager reachable-code preparation or persistent
-caching only when measured first-use latency justifies it.
+programs use a fresh core. Provide explicit preparation before execution: capture
+initialized immutable code from established entries, share decoded fetch metadata
+with ordinary compilation, and follow explicit direct branch/call/return-site
+edges. Keep unknown code, register/stack targets, IRQs and implicit REP/DO flow
+unresolved until their contracts are proved. Never scan unrelated data or execute
+guest instructions, I/O or clocks during preparation.
+
+Lift exact fixed-width ISA semantics into LLVM 19 CFG/SSA, preserving flags,
+aliases, ordered effects and precise event/cycle prefixes. Use constant/range
+propagation, dead-store elimination, forwarding and loop optimization before
+native lowering; optimizing the C++ emitter alone is insufficient. Both hosts
+share this semantic pipeline; target lowering and native execution ABI differ.
+Install code only at a stopped owner boundary after validating the captured code
+revision. Compilation failure leaves architecture/progress unchanged. Keep LLVM
+handles private, instrument emitted native code explicitly in sanitizer builds,
+and initialize LLVM once per process before parallel preparation. Core destruction
+must not shut down LLVM while another core owns code. Preparation has no fixed
+time cap; persistent caching is optional when measured latency justifies it.
 
 On Linux x86-64, resolve both 24-bit PCs and complete 32-bit numeric/loop keys
 with one indexed load from non-executable, demand-zero target tables. Reserve

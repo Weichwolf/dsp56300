@@ -2,6 +2,7 @@
 #include "architecture.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "fetch.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
 #include "jit/block.hpp"
@@ -11,7 +12,6 @@
 #include "transfers.hpp"
 #include "translation.hpp"
 
-#include <optional>
 #include <span>
 #include <vector>
 
@@ -46,23 +46,14 @@ std::vector<BlockInstruction> parse_block(const std::span<const Word> program,
                                           const Registers &state,
                                           const JitRuntime &runtime,
                                           const bool callback_boundaries) {
-  const auto word = [&](const Word address) -> std::optional<Word> {
-    if (runtime.program != nullptr) { return runtime.program(runtime.owner, address); }
-    return address < program.size() ? std::optional(program[address] & word_mask) : std::nullopt;
-  };
   std::vector<BlockInstruction> operations;
   auto pc = state.pc;
   const auto mode = state.sr & numeric_mode_mask;
   const auto loop_address = active_loop_address(state);
   while (true) {
-    const auto opcode = word(pc);
-    if (!opcode) { break; }
-    auto decoded = decode(*opcode);
-    if (decoded.words == 2) {
-      const auto following = word((pc + 1) & word_mask);
-      if (!following) { break; }
-      decoded.extension = *following;
-    }
+    const auto capture = capture_instruction(program, pc, runtime);
+    if (capture.failure.kind != FaultKind::none) { break; }
+    const auto &decoded = capture.instruction;
     operations.push_back(
         {.instruction = decoded, .pc = pc, .mode = mode, .loop_address = loop_address});
     if (terminates(decoded) || at_loop_end(operations.back()) ||

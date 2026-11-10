@@ -61,6 +61,7 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
 endif()
 add_library(dsp56300_core STATIC
   src/core.cpp src/captured.cpp src/repeat.cpp src/memory_windows.cpp src/external_memory.cpp src/state.cpp
+  src/fetch.cpp src/jit/preparation.cpp
              src/instruction_shape.cpp
   src/transfer_info.cpp src/transfer_parallel.cpp src/transfer_special.cpp
   src/transfer_description.cpp src/arithmetic.cpp src/saturation.cpp src/shifts.cpp
@@ -115,6 +116,10 @@ add_custom_target(${DSP56300_FORMAT_TARGET}
   VERBATIM)
 
 if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
+  add_executable(dsp56300_preparation_graph_test test/jit/preparation_graph_test.cpp)
+  target_include_directories(dsp56300_preparation_graph_test PRIVATE src/jit)
+  target_link_libraries(dsp56300_preparation_graph_test PRIVATE dsp56300::core)
+  add_test(NAME preparation-control-flow COMMAND dsp56300_preparation_graph_test)
   add_executable(dsp56300_executable_arena_test test/jit/executable_arena_test.cpp)
   target_include_directories(dsp56300_executable_arena_test PRIVATE src)
   target_link_libraries(dsp56300_executable_arena_test PRIVATE dsp56300::core)
