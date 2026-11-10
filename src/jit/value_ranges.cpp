@@ -202,7 +202,7 @@ void NativeValueRanges::moves(const Instruction &instruction) {
   }
   const auto reg = plan_register_move(instruction);
   if (reg.valid()) {
-    if (reg.destination >= a_register) {
+    if (reg.destination == a_register || reg.destination == b_register) {
       widths_.at(reg.destination - a_register) = double_word_bits;
     }
     return;

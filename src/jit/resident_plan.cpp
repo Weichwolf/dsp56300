@@ -57,10 +57,11 @@ bool moves(ResidentPlan &region,
            const std::array<JitMemory, 2> &memory,
            const std::array<Word, agu_registers> &modifiers) {
   if (instruction.operation != Operation::parallel ||
-      (instruction.opcode & upper_move_mask) == no_move_group ||
-      plan_register_move(instruction).valid()) {
+      (instruction.opcode & upper_move_mask) == no_move_group) {
     return true;
   }
+  const auto registers = plan_register_move(instruction);
+  if (registers.valid()) { return registers.destination < r_register_base; }
   const auto immediate = plan_address_immediate(instruction);
   if (immediate.valid()) {
     if (immediate.destination >= n_register_base) { return false; }

@@ -94,6 +94,10 @@ std::optional<LoopPlan> plan_loop(const std::span<const BlockInstruction> operat
     auto moves = plan_moves(instruction);
     const auto registers = plan_register_move(instruction);
     if (moves.long_pair || !append_moves(plan, moves)) { return {}; }
+    if (registers.valid() &&
+        (!data_register(registers.source) || !data_register(registers.destination))) {
+      return {};
+    }
     if (instruction.operation == Operation::parallel && moves.count == 0 && !registers.valid() &&
         (instruction.opcode & upper_move_mask) != no_move_group) {
       return {};
