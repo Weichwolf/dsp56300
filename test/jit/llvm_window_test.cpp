@@ -435,8 +435,18 @@ void cross_space_cursor(const Forms forms) {
   shifted.m[0] = 3;
   detail::Cpu nonlinear{.reg = shifted};
   const auto rejected_before = fallback_calls;
-  require(detail::enter_block(image->entry, nonlinear, owner) == 0 &&
-              fallback_calls == rejected_before + 1 && nonlinear.reg == shifted &&
+  const auto actual = detail::enter_block(image->entry, nonlinear, owner);
+  if (forms.load == 4 && forms.store == 4) {
+    wanted.m[0] = 3;
+    nonlinear.reg.a >>= detail::padding_bits;
+    nonlinear.reg.b >>= detail::padding_bits;
+    require(
+        actual == 6 && fallback_calls == rejected_before && nonlinear.reg == wanted &&
+            y == expected_y && nonlinear.instructions == 6 && nonlinear.cycles == cycles,
+        "Pure indirect transfers preserve exact execution independently of the unused modifier");
+    return;
+  }
+  require(actual == 0 && fallback_calls == rejected_before + 1 && nonlinear.reg == shifted &&
               nonlinear.cycles == 0 && nonlinear.instructions == 0,
           "Nonlinear modifiers retain exact ordinary execution without speculative memory work");
 }
