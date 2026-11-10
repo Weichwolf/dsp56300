@@ -62,6 +62,7 @@ endif()
 add_library(dsp56300_core STATIC
   src/core.cpp src/captured.cpp src/repeat.cpp src/memory_windows.cpp src/external_memory.cpp src/state.cpp
   src/fetch.cpp src/jit/preparation.cpp
+  src/jit/llvm/runtime.cpp
              src/instruction_shape.cpp
   src/transfer_info.cpp src/transfer_parallel.cpp src/transfer_special.cpp
   src/transfer_description.cpp src/arithmetic.cpp src/saturation.cpp src/shifts.cpp
@@ -92,6 +93,7 @@ add_library(dsp56300::core ALIAS dsp56300_core)
 target_include_directories(dsp56300_core PUBLIC include)
 target_compile_features(dsp56300_core PUBLIC cxx_std_23)
 target_link_libraries(dsp56300_core PUBLIC dsp56300_quality)
+include(cmake/OptimizingJit.cmake)
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
   target_compile_options(dsp56300_core PUBLIC $<$<CONFIG:Release>:-mcpu=native>)
 else()
@@ -116,6 +118,17 @@ add_custom_target(${DSP56300_FORMAT_TARGET}
   VERBATIM)
 
 if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
+  foreach(owner IN ITEMS a b)
+    add_library(dsp56300_llvm_owner_${owner} STATIC test/support/llvm_owner_${owner}.cpp)
+    target_include_directories(dsp56300_llvm_owner_${owner} PRIVATE src test/support)
+    target_include_directories(dsp56300_llvm_owner_${owner} SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
+    target_link_libraries(dsp56300_llvm_owner_${owner} PRIVATE dsp56300::core)
+  endforeach()
+  add_executable(dsp56300_llvm_runtime_test test/jit/llvm_runtime_test.cpp)
+  target_include_directories(dsp56300_llvm_runtime_test SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
+  target_link_libraries(dsp56300_llvm_runtime_test PRIVATE dsp56300::core
+    dsp56300_llvm_owner_a dsp56300_llvm_owner_b)
+  add_test(NAME optimizing-jit-runtime COMMAND dsp56300_llvm_runtime_test)
   add_executable(dsp56300_preparation_graph_test test/jit/preparation_graph_test.cpp)
   target_include_directories(dsp56300_preparation_graph_test PRIVATE src/jit)
   target_link_libraries(dsp56300_preparation_graph_test PRIVATE dsp56300::core)

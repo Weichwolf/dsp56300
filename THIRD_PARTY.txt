@@ -5,7 +5,14 @@ from the GPL-3.0-only source identified by repository 1424544107, revision
 2978c190143ef757189b3b82eb0e9350720eb954. Immutable source attribution:
 https://api.github.com/repositories/1424544107/git/commits/2978c190143ef757189b3b82eb0e9350720eb954
 No board emulation is copied.
-The DSP emulator has no dependency on another DSP emulator or JIT library.
+The DSP emulator has no dependency on another DSP emulator.
+
+LLVM 19 compiler support:
+  https://llvm.org/
+  Apache-2.0 with LLVM exceptions; full notice: LICENSES/LLVM.txt.
+  The cold optimizing compiler uses the installed shared LLVM development package
+  through its supported C API. No LLVM source is built, patched or instrumented.
+  LLVM does not supply the guest ISA implementation or device behavior.
 
 Manufacturer programs and source extracts are not used by this project's tests
 or benchmarks. All distributed DSP test programs are authored independently.

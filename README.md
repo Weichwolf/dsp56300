@@ -5,7 +5,8 @@ macOS ARM64, GPL-3.0-only. See OBJECTIVE.md for complete-ISA acceptance.
 
 ## Build
 
-LLVM 19, CMake, Ninja, clang-format-19 and clang-tidy-19 are required.
+LLVM 19.1 development headers/shared library, the LLVM 19 toolchain, CMake, Ninja,
+clang-format-19 and clang-tidy-19 are required.
 
 ```sh
 cmake --preset release
