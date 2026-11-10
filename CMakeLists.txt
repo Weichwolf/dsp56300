@@ -126,8 +126,14 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   endforeach()
   add_executable(dsp56300_llvm_runtime_test test/jit/llvm_runtime_test.cpp)
   target_include_directories(dsp56300_llvm_runtime_test SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
-  target_link_libraries(dsp56300_llvm_runtime_test PRIVATE dsp56300::core
-    dsp56300_llvm_owner_a dsp56300_llvm_owner_b)
+  target_link_libraries(dsp56300_llvm_runtime_test PRIVATE
+    dsp56300_llvm_owner_a dsp56300_llvm_owner_b dsp56300::core)
+  if(APPLE)
+    find_library(DSP56300_EXPERIMENTAL_LIBRARY NAMES c++experimental
+      HINTS "${DSP56300_LLVM_BIN}/../lib/c++" REQUIRED)
+    target_compile_options(dsp56300_llvm_runtime_test PRIVATE -fexperimental-library)
+    target_link_libraries(dsp56300_llvm_runtime_test PRIVATE "${DSP56300_EXPERIMENTAL_LIBRARY}")
+  endif()
   add_test(NAME optimizing-jit-runtime COMMAND dsp56300_llvm_runtime_test)
   add_executable(dsp56300_preparation_graph_test test/jit/preparation_graph_test.cpp)
   target_include_directories(dsp56300_preparation_graph_test PRIVATE src/jit)
