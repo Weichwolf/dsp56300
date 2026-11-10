@@ -46,11 +46,13 @@ CycleCosts cycle_costs(const std::span<const BlockInstruction> operations) {
   // A DO endpoint can repeat inside the entry. Fused nested regions use the
   // default ISA bound because their retained body includes additional code.
 #if defined(__aarch64__)
-  const bool repeating = at_loop_end(operations.back());
+  const bool bounded = std::ranges::all_of(operations, [](const auto &operation) {
+    return repeatable(operation.instruction.operation) && !at_loop_end(operation);
+  });
 #else
-  const bool repeating = at_loop_end(operations.back()) || BlockEmitter::closed_jump(operations);
+  const bool bounded = !at_loop_end(operations.back()) && !BlockEmitter::closed_jump(operations);
 #endif
-  const bool finite = !repeating && std::in_range<std::int32_t>(total);
+  const bool finite = bounded && std::in_range<std::int32_t>(total);
   return {.maximum = maximum, .complete = finite ? static_cast<Word>(total) : 0U};
 }
 }
@@ -63,6 +65,8 @@ std::vector<std::uint8_t> admit_cycles(const std::span<const std::uint8_t> body,
   Code code;
   Label ready;
   Label empty;
+  Label partial;
+  Label bounded;
   const auto costs = cycle_costs(operations);
   code.load(Reg::x9, Reg::x1, offsetof(NativeContext, cycle_deadline), Access::doubleword);
   code.add(Reg::x10, Reg::x9, 1, Width::x64);
@@ -71,11 +75,20 @@ std::vector<std::uint8_t> admit_cycles(const std::span<const std::uint8_t> body,
   code.compare(Reg::x9, Reg::x10, Width::x64);
   code.branch_far(Condition::below_equal, empty);
   code.alu(Alu::subtract, Reg::x9, Reg::x9, Reg::x10, Width::x64);
+  if (costs.complete != 0) {
+    code.constant(Reg::x10, costs.complete);
+    code.compare(Reg::x9, Reg::x10, Width::x64);
+    code.branch(Condition::no_carry, partial);
+    code.constant(Reg::x9, operations.size());
+    code.branch(bounded);
+    code.bind(partial);
+  }
   const auto shift = static_cast<unsigned>(std::bit_width(costs.maximum - 1U));
   if (shift != 0) { code.shift(Shift::right, Reg::x9, Reg::x9, shift, Width::x64); }
   code.constant(Reg::x10, 1);
   code.compare(Reg::x9, Reg::x10, Width::x64);
   code.select(Reg::x9, Reg::x10, Reg::x9, Condition::no_carry, Width::x64);
+  code.bind(bounded);
   code.load(Reg::x10, Reg::x1, offsetof(NativeContext, budget));
   code.compare(Reg::x9, Reg::x10, Width::x64);
   code.select(Reg::x9, Reg::x10, Reg::x9, Condition::above, Width::x64);

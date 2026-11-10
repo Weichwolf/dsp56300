@@ -5,6 +5,7 @@
 #include "instruction.hpp"
 #include "jit.hpp"
 #include "jit/a64/emitter.hpp"
+#include "jit/block.hpp"
 #include "native/direct.hpp"
 #include "support.hpp"
 
@@ -117,6 +118,50 @@ void repeated() {
     }
   }
 }
+
+void finite_admission() {
+  constexpr Word assign_r0 = 0x60f400;
+  constexpr Word ccr_mask = 255;
+  constexpr std::array<Word, 3> words{0, assign_r0, 0};
+  constexpr std::array<Word, 4> lengths{0, 1, 3, 4};
+  constexpr std::array<Word, 4> cycles{0, 1, 3, 4};
+  std::array<detail::BlockInstruction, words.size()> ops{};
+  for (std::size_t index = 0; index < ops.size(); ++index) {
+    auto instruction = detail::decode(words[index]);
+    instruction.extension = datum;
+    require(instruction.words == lengths[index + 1] - lengths[index] &&
+                instruction.cycles == cycles[index + 1] - cycles[index],
+            "Authored NOP/MOVE/NOP lengths and costs are independently fixed");
+    ops[index] = {.instruction = instruction, .pc = start + lengths[index]};
+  }
+  detail::a64::Emitter emitter;
+  const native::Direct code(detail::admit_cycles(emitter.generate_chained(ops), ops));
+  constexpr std::array<std::uint64_t, 3> beginnings{
+      0, std::uint64_t{1} << 32, std::numeric_limits<std::uint64_t>::max() - 8};
+  for (const auto beginning : beginnings) {
+    for (const auto credit : {4U, 5U, 6U}) {
+      for (Word budget = 0; budget <= 6; ++budget) {
+        for (Word ccr = 0; ccr <= ccr_mask; ++ccr) {
+          detail::Cpu cpu;
+          cpu.reg.pc = start;
+          cpu.reg.sr = ccr;
+          cpu.instructions = cpu.cycles = beginning;
+          auto expected = cpu.reg;
+          const auto count = std::min(budget, Word{3});
+          expected.pc += lengths[count];
+          if (count >= 2) { expected.r[0] = datum; }
+          detail::NativeContext context{
+              .runtime = {}, .budget = budget, .cycle_deadline = beginning + credit};
+          require(code.enter(cpu, context) == count && cpu.reg == expected &&
+                      cpu.instructions == beginning + count &&
+                      cpu.cycles == beginning + cycles[count] &&
+                      context.failure.kind == FaultKind::none,
+                  "A complete finite block fits its exact mixed cost in one native entry");
+        }
+      }
+    }
+  }
+}
 }
 }
 
@@ -127,6 +172,7 @@ int main() try {
     dsp56300::test::ordinary(true, true, chained);
   }
   dsp56300::test::repeated();
+  dsp56300::test::finite_admission();
   std::cout << dsp56300::test::checks << " ARM64 progress publication checks passed\n";
 } catch (const std::exception &error) {
 
