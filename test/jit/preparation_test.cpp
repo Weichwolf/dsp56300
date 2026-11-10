@@ -188,9 +188,13 @@ struct External final : Io {
     return true;
   }
 
-  bool write(Space /*space*/, Word /*address*/, Word /*pc*/, Word /*value*/) noexcept override {
+  bool
+  write(const Space space, const Word address, Word /*pc*/, const Word value) noexcept override {
     ++accesses;
-    return false;
+    if (space != Space::program || address >= fixture.program.size()) { return false; }
+    fixture.program[address] = value;
+    ++program_writes;
+    return true;
   }
 
   bool bit(Space /*space*/,
@@ -210,6 +214,7 @@ struct External final : Io {
   Core *reentrant_core = nullptr;
   mutable Fault reentrant_failure;
   unsigned accesses = 0;
+  unsigned program_writes = 0;
 };
 
 void external_bindings() {
@@ -310,6 +315,60 @@ void native_setup_join() {
               fixture.x == x && fixture.y == y,
           "Actual native DO setup joins the prepared body and restores its real outer frame");
 }
+
+void program_write_reinstallation() {
+  External memory;
+  constexpr Word writer = entry + 8;
+  constexpr Word absolute = 0x30;
+  constexpr Word x0 = 4;
+  constexpr Word register_change = (1U << 18) | (1U << 16);
+  const auto changed_load = memory.fixture.program[entry] ^ register_change;
+  memory.fixture.program[writer] =
+      static_cast<Word>(isa::Opcode::movem_effective) | (absolute << 8) | x0;
+  memory.fixture.program[writer + 1] = entry;
+  memory.fixture.program[writer + 2] = isa::rts.front();
+  Core core(Memory::external(), &memory);
+  auto writing = test::register_model::seed(0);
+  writing.pc = writer;
+  writing.x = changed_load;
+  core.set_registers(writing);
+  constexpr std::array<Word, 1> entries{setup};
+  require(core.prepare(entries).prepared_entries == 1,
+          "Prepare the original RAM loop before a genuine P write");
+  const auto store_result = core.run(1);
+  require(
+      store_result.retired == 1 && store_result.fault == Fault{} && memory.program_writes == 1 &&
+          memory.fixture.program[entry] == changed_load && memory.revision == 0,
+      "Native MOVEM changes observed program bytes without a host revision or preparation call");
+  memory.fixture.routing.reversed_load = true;
+  const auto verify = [&](const Word grant, const bool cycles) {
+    memory.fixture.reset_data();
+    auto expected_x = memory.fixture.x;
+    auto expected_y = memory.fixture.y;
+    auto expected = memory.fixture.state({.count = 5});
+    core.set_registers(expected);
+    for (Word index = 0; index < grant; ++index) {
+      memory.fixture.step(expected, expected_x, expected_y);
+    }
+    const auto before = core.progress();
+    const auto result = cycles ? core.run_until(before.estimated_cycles + grant) : core.run(grant);
+    require(result.retired == grant && result.fault == Fault{} && core.registers() == expected &&
+                memory.fixture.x == expected_x && memory.fixture.y == expected_y &&
+                core.progress() == Progress{.instructions = before.instructions + grant,
+                                            .estimated_cycles = before.estimated_cycles + grant},
+            "Post-write execution follows new ISA bytes with exact prefixes, full state and memory "
+            "effects");
+  };
+  verify(2, false);
+  const auto restored = core.prepare(entries);
+  require(restored.prepared_entries == 1 && restored.native_bytes == 0,
+          "A cold miss after a real P write must already reinstall optimized code before another "
+          "prepare");
+  for (Word prefix = 0; prefix <= 10; ++prefix) {
+    verify(prefix, false);
+    verify(prefix, true);
+  }
+}
 }
 
 int main() try {
@@ -328,6 +387,7 @@ int main() try {
   independent_entries();
   changing_revision();
   native_setup_join();
+  program_write_reinstallation();
   std::cout << test::checks << " independent preparation checks passed\n";
 } catch (const std::exception &error) {
 

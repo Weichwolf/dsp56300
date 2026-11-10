@@ -56,6 +56,9 @@ linear cursors; other operations retain their native execution path. Preparation
 reports installed entries, unresolved coverage, newly emitted text and a
 non-latching diagnostic. Code remains owned by Core; changed external mappings
 require a new `Io::program_revision()` before preparation or execution.
+After preparation, genuine program/mapping invalidations retain their checks;
+eligible cold loop entries optimize again when reached. Other native region
+lowering remains available for unsupported optimizing cases.
 
 Benchmarks check independent results and report cold/warm timing and matched
 JIT/host ratios (`100 * host_time / jit_time`). Hardware factors use stated models,
