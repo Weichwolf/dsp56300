@@ -158,8 +158,10 @@ double numeric_time(const std::string_view name, const BinaryCase &item, const b
 
 HostStreamTimes measure_numeric_host(const std::string_view name, const BinaryCase &item) {
   require(item.initial.n[7] == iir_stream::stream_frames, "Native timing covers two input seconds");
-  return {.scalar_seconds = numeric_time(name, item, false),
+  const auto cpp = numeric_time(name, item, false);
+  return {.scalar_seconds = cpp,
           .asm_seconds = numeric_time(name, item, true),
+          .cpp_seconds = cpp,
           .scope = "fixed-point-algorithm-and-memory",
           .implementation = "handwritten-scalar-asm-and-cpp"};
 }

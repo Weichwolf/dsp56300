@@ -150,6 +150,7 @@ HostStreamTimes measure_spectral_host(const BinaryCase &item) {
   HostStreamTimes result{.scalar_seconds = measure<Kernel::scalar>(item),
                          .scope = "fixed-point-algorithm-and-memory",
                          .implementation = "compiler-and-handwritten-spectrum-asm"};
+  result.cpp_seconds = result.scalar_seconds;
   if (host_vector_available()) {
     result.vector_seconds = measure<Kernel::vector>(item);
     result.asm_seconds = measure<Kernel::assembly>(item);

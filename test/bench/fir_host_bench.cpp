@@ -84,7 +84,7 @@ void guarded_inputs(const BinaryCase &item) {
   }
   const GuardedWords data(data_words);
   const GuardedWords coefficients(coefficient_words);
-  for (const auto host_isa : {HostIsa::scalar, HostIsa::vector}) {
+  for (const auto host_isa : {HostIsa::scalar, HostIsa::vector, HostIsa::cpp}) {
     if (host_isa == HostIsa::vector && !vector_supported()) { continue; }
     const auto result = execute(item.initial, data.view(), coefficients.view(), host_isa);
     check(result.registers == item.expected && result.output == item.after[0].words[0],
@@ -121,7 +121,7 @@ public:
         std::span<const Word>(host_memory_[2]).subspan(item.initial.r[4], item.budget - 4);
     auto expected = initial;
     patch(expected, item.after);
-    for (const auto host_isa : {HostIsa::scalar, HostIsa::vector}) {
+    for (const auto host_isa : {HostIsa::scalar, HostIsa::vector, HostIsa::cpp}) {
       if (host_isa == HostIsa::vector && !vector_supported()) { continue; }
       run_host(item, host_isa);
       check(host_memory_ == expected,
@@ -191,14 +191,17 @@ void benchmark(Replay &replay, const BinaryCase &item) {
   std::array<double, trials> core_times{};
   std::array<double, trials> scalar_times{};
   std::array<double, trials> vector_times{};
+  std::array<double, trials> cpp_times{};
   const bool vectors = vector_supported();
-  const unsigned engines = vectors ? 3U : 2U;
+  const unsigned engines = vectors ? 4U : 3U;
   for (unsigned trial = 0; trial < trials; ++trial) {
     const auto invoke = [&](const unsigned engine) {
       if (engine == 0) {
         core_times[trial] = measure([&] { replay.run_core(item); });
       } else if (engine == 1) {
         scalar_times[trial] = measure([&] { replay.run_host(item, HostIsa::scalar); });
+      } else if (engine == 2) {
+        cpp_times[trial] = measure([&] { replay.run_host(item, HostIsa::cpp); });
       } else {
         vector_times[trial] = measure([&] { replay.run_host(item, HostIsa::vector); });
       }
@@ -208,8 +211,10 @@ void benchmark(Replay &replay, const BinaryCase &item) {
   std::ranges::sort(core_times);
   std::ranges::sort(scalar_times);
   std::ranges::sort(vector_times);
+  std::ranges::sort(cpp_times);
   const auto core = core_times[trials / 2];
   const auto scalar = scalar_times[trials / 2];
+  const auto cpp = cpp_times[trials / 2];
   const auto vector = vectors ? vector_times[trials / 2] : 0;
   const bool vector_faster = vectors && vector < scalar;
   const auto host = vector_faster ? vector : scalar;
@@ -221,6 +226,7 @@ void benchmark(Replay &replay, const BinaryCase &item) {
         "Warm measurements retain exact instruction/cycle charges and publish no native code");
   constexpr double million = 1000000.0;
   std::cout << item.name << " core_s=" << core << " host_s=" << host << " host_scalar_s=" << scalar
+            << " host_cpp_o3_s=" << cpp << " jit_to_cpp_o3_percent=" << cpp / core * 100.0
             << " host_" << host_vector_name << "_s=" << vector
             << " host_isa=" << (vector_faster ? host_vector_name : "scalar")
             << " jit_to_host_percent=" << host / core * 100.0
@@ -275,6 +281,7 @@ int main(const int argc, const char *const *const argv) {
     std::cout << std::setprecision(9)
               << "scope=reset+run+full-register/output-check; immutable-code-and-inputs; "
                  "warm-translation; best-qualified-scalar/SIMD-host-asm; median-nine; "
+                 "host-cpp=clang19-O3; llvm-preparation=not-requested; "
                  "intermediate-dead-flags-elided-but-sticky-L-preserved; "
                  "full-memory-and-cycle-checks-outside-timing; FIR-only-not-performance-gate\n";
     dsp56300::test::fir_host::run(dsp56300::test::read_fixture(argv[1]), argc == 3);

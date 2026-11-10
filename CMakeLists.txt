@@ -829,6 +829,7 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
     test/bench/fir_stream_host.cpp test/bench/fir_host.cpp ${dsp56300_fir_vector_source}
     test/bench/numeric_stream_host.cpp ${dsp56300_numeric_host_source} test/bench/spectral_stream_host.cpp
     ${dsp56300_spectral_host_source})
+  target_compile_options(dsp56300_continuous_bench PRIVATE -O3)
   target_link_libraries(dsp56300_continuous_bench PRIVATE dsp56300::core dsp56300_fixture_format)
   add_executable(dsp56300_numeric_host_test test/bench/numeric_host_test.cpp
     ${dsp56300_numeric_host_source})
@@ -885,6 +886,7 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   add_executable(dsp56300_fir_host_bench test/bench/fir_host_bench.cpp test/bench/fir_host.cpp
     ${dsp56300_fir_vector_source})
   target_link_libraries(dsp56300_fir_host_bench PRIVATE dsp56300::core dsp56300_fixture_format)
+  target_compile_options(dsp56300_fir_host_bench PRIVATE -O3)
   add_test(NAME fir-matched-host-asm COMMAND dsp56300_fir_host_bench
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/fir.d56" --verify)
   add_custom_target(${DSP56300_TOOL_PREFIX}bench-fir-host

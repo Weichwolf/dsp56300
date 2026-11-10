@@ -83,6 +83,19 @@ Accumulator products(const std::span<const Word> data,
                      const std::span<const Word> coefficients,
                      const HostIsa host_isa) {
   Kernel state;
+  if (host_isa == HostIsa::cpp) {
+    constexpr std::int64_t padding = std::int64_t{1} << (64 - accumulator_bits + 1);
+    for (std::size_t index = 0; index < data.size(); ++index) {
+      const auto product =
+          signed24(data[index] & word_mask) * signed24(coefficients[index] & word_mask) * padding;
+      std::int64_t sum;
+      const bool overflow = __builtin_add_overflow(state.accumulated.sum, product, &sum);
+      state.accumulated.sum = sum;
+      state.accumulated.overflow |= static_cast<std::uint64_t>(overflow);
+    }
+    state.accumulated.sum >>= 64 - accumulator_bits;
+    return state.accumulated;
+  }
   if (host_isa == HostIsa::vector && data.size() >= host_vector_words) {
     vector_products(state, data, coefficients);
   }

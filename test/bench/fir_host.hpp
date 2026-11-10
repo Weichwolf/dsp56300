@@ -6,7 +6,7 @@
 #include <span>
 
 namespace dsp56300::test::fir_host {
-enum class HostIsa : unsigned char { scalar, vector };
+enum class HostIsa : unsigned char { scalar, vector, cpp };
 
 [[nodiscard]] bool vector_supported() noexcept;
 

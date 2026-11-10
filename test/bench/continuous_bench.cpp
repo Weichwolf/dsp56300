@@ -246,7 +246,10 @@ bool run(const BinaryCase &item, const Engine engine, const Workload spec) {
   auto fastest = host.vector_seconds > 0 ? std::min(host.scalar_seconds, host.vector_seconds)
                                          : host.scalar_seconds;
   if (host.asm_seconds > 0) { fastest = std::min(fastest, host.asm_seconds); }
-  std::cout << "  host_scalar_s=" << host.scalar_seconds << " host_" << host_vector_name
+  require(host.cpp_seconds > 0, "Each continuous workload requires a verified C++ host reference");
+  std::cout << "  host_cpp_o3_s=" << host.cpp_seconds
+            << " jit_to_cpp_o3_percent=" << 100.0 * host.cpp_seconds / result.wall
+            << " host_scalar_s=" << host.scalar_seconds << " host_" << host_vector_name
             << "_s=" << host.vector_seconds;
   if (host.asm_seconds > 0) {
     std::cout << " host_asm_s=" << host.asm_seconds
@@ -329,6 +332,7 @@ int execute(const int argc, const char *const *const argv) {
             << "No host register/RAM restoration, no repeated calls of a completed program.\n"
             << "Wall includes run calls, clocks and budget checks; no overhead subtraction.\n"
             << "Process CPU includes all process threads; no board/wait-state or energy claim.\n"
+            << "guest_path=production-native llvm_preparation=not-requested host_cpp=clang19-O3\n"
             << "reference_hz=" << reference_hz << " reference_model=ISA-base-cycles\n"
             << "Deadline policy=" << policy << "; base cycles exclude pipeline/bus stalls.\n";
   const auto met = run_cases(cases, spec, {.backend = backend, .chosen = chosen, .all = all});
