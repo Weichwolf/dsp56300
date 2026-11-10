@@ -277,6 +277,39 @@ void independent_entries() {
               core.progress() == before.progress && core.state().failure == Fault{},
           "An invalid seed retains its diagnostic without losing an independent valid loop");
 }
+
+void native_setup_join() {
+  Fixture fixture({}, false);
+  fixture.reset_data();
+  Core core(Memory::separate({.program = fixture.program, .x = fixture.x, .y = fixture.y}));
+  constexpr std::array<Word, 1> entries{setup};
+  require(core.prepare(entries).prepared_entries == 1, "Prepare a body before its DO executes");
+  auto initial = fixture.state({.count = previous_lc});
+  initial.pc = setup;
+  initial.la = previous_la;
+  initial.sr = inherited_flags;
+  initial.sp = initial.sc = 0;
+  core.set_registers(initial);
+  auto expected = initial;
+  expected.pc = entry;
+  expected.la = entry + 1;
+  expected.lc = 3;
+  expected.sr |= loop_flag;
+  expected.sp = expected.sc = 2;
+  expected.stack[1] = (std::uint64_t{previous_la} << test::word_bits) | previous_lc;
+  expected.stack[2] = (std::uint64_t{entry} << test::word_bits) | initial.sr;
+  auto x = fixture.x;
+  auto y = fixture.y;
+  for (unsigned index = 0; index < 6; ++index) { fixture.step(expected, x, y); }
+  const auto result = core.run(7);
+  constexpr std::uint64_t setup_cycles = 5;
+  constexpr std::uint64_t body_cycles = 6;
+  require(result.retired == 7 && result.fault == Fault{} && core.registers() == expected &&
+              result.progress ==
+                  Progress{.instructions = 7, .estimated_cycles = setup_cycles + body_cycles} &&
+              fixture.x == x && fixture.y == y,
+          "Actual native DO setup joins the prepared body and restores its real outer frame");
+}
 }
 
 int main() try {
@@ -294,6 +327,7 @@ int main() try {
   external_bindings();
   independent_entries();
   changing_revision();
+  native_setup_join();
   std::cout << test::checks << " independent preparation checks passed\n";
 } catch (const std::exception &error) {
 
