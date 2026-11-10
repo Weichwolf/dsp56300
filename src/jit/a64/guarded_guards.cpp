@@ -6,6 +6,7 @@
 #include "jit.hpp"
 #include "jit/a64/code.hpp"
 #include "jit/a64/emitter.hpp"
+#include "jit/resident.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -55,6 +56,33 @@ void Emitter::guard_loop(Label &failed) {
   code_.bind(continuing);
 }
 
+void Emitter::guard_signed_address(const RegionAddress &address,
+                                   const bool repeated,
+                                   Label &failed) {
+  const bool varying = repeated && !address.constant && address.displacement != 0;
+  if (varying) {
+    code_.load(Reg::x10, Reg::sp, Frame::iterations);
+    code_.subtract(Reg::x10, Reg::x10, 1, Width::x64);
+    code_.constant(Reg::x11, static_cast<std::uint64_t>(address.displacement));
+    code_.multiply(Reg::x10, Reg::x10, Reg::x11, Width::x64);
+  }
+  code_.constant(Reg::x17, static_cast<std::uint64_t>(address.minimum));
+  code_.alu(Alu::add, Reg::x11, Reg::x9, Reg::x17, Width::x64);
+  if (varying && address.displacement < 0) {
+    code_.alu(Alu::add, Reg::x11, Reg::x11, Reg::x10, Width::x64);
+  }
+  code_.compare(Reg::x11, Reg::zr, Width::x64);
+  code_.branch_far(Condition::less, failed);
+  code_.constant(Reg::x17, static_cast<std::uint64_t>(address.maximum));
+  code_.alu(Alu::add, Reg::x11, Reg::x9, Reg::x17, Width::x64);
+  if (varying && address.displacement > 0) {
+    code_.alu(Alu::add, Reg::x11, Reg::x11, Reg::x10, Width::x64);
+  }
+  code_.constant(Reg::x17, address.bound);
+  code_.compare(Reg::x11, Reg::x17, Width::x64);
+  code_.branch_far(Condition::carry, failed);
+}
+
 void Emitter::guard_address(const std::size_t index, const bool repeated, Label &failed) {
   const auto &address = region_.addresses.at(index);
   const auto offset = index * sizeof(Word);
@@ -69,6 +97,10 @@ void Emitter::guard_address(const std::size_t index, const bool repeated, Label 
     code_.constant(Reg::x9, *address.constant);
   } else {
     code_.load(Reg::x9, cpu, offsetof(Registers, r) + offset);
+  }
+  if (address.retreats) {
+    guard_signed_address(address, repeated, failed);
+    return;
   }
   if (address.updated && address.modifier != modifier_mask) {
     const auto length = address.modifier + 1;

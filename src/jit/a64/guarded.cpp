@@ -209,7 +209,7 @@ Emitter::generate_guarded(const std::span<const BlockInstruction> operations,
                           const std::array<Word, agu_registers> &modifiers,
                           const std::span<const std::uint8_t> fallback) {
   const auto runtime = resident_runtime(supplied);
-  region_ = resident_plan(operations, runtime.memory, modifiers);
+  region_ = resident_plan(operations, runtime.memory, modifiers, RegionAddressing::bidirectional);
   if (!region_.valid || !std::in_range<Word>(operations.size()) ||
       !std::ranges::all_of(operations, guardable)) {
     return std::nullopt;

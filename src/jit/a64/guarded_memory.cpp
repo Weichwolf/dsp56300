@@ -21,6 +21,8 @@ void Emitter::guarded_effective(const AddressForm form) {
   if (form.mode == 1) {
     code_.load(Reg::x9, cpu, offsetof(Registers, n) + offset);
     code_.alu(Alu::add, Reg::x9, Reg::x0, Reg::x9);
+  } else if (form.mode == 2 || form.mode == 7) {
+    code_.subtract(Reg::x9, Reg::x0, 1);
   } else {
     code_.add(Reg::x9, Reg::x0, 1);
     const auto modifier = region_.addresses.at(form.index).modifier;
@@ -37,6 +39,7 @@ void Emitter::guarded_effective(const AddressForm form) {
   }
   mask(Reg::x9, Reg::x9, word_mask, Width::w32);
   code_.store(Reg::x9, cpu, offsetof(Registers, r) + offset);
+  if (form.mode == 7) { code_.move(Reg::x0, Reg::x9); }
 }
 
 void Emitter::guarded_memory(const BusOperand operand) {

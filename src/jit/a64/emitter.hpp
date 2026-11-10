@@ -102,6 +102,7 @@ private:
   void guard_storage();
   void guard_loop(Label &failed);
   void guard_address(std::size_t index, bool repeated, Label &failed);
+  void guard_signed_address(const RegionAddress &address, bool repeated, Label &failed);
   void guard_addresses(bool repeated, Label &failed);
   void guard_iterations(std::span<const BlockInstruction> operations);
   void guarded_body(std::span<const BlockInstruction> operations);

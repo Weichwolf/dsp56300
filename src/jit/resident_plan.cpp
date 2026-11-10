@@ -17,10 +17,27 @@ namespace dsp56300::detail {
 namespace {
 constexpr Word minimum_transfers = 8;
 
+void unit_extent(RegionAddress &address, const Word mode) {
+  if (mode == 7) { --address.displacement; }
+  if (!address.accessed) {
+    address.minimum = address.maximum = address.displacement;
+  } else {
+    address.minimum = std::min(address.minimum, address.displacement);
+    address.maximum = std::max(address.maximum, address.displacement);
+  }
+  if (mode == 3) {
+    ++address.displacement;
+  } else if (mode == 2) {
+    --address.displacement;
+  }
+  if (mode == 2 || mode == 7) { address.updated = address.retreats = true; }
+}
+
 bool transfer(ResidentPlan &region,
               const NativeMove &move,
               const JitMemory &memory,
-              const std::array<Word, agu_registers> &modifiers) {
+              const std::array<Word, agu_registers> &modifiers,
+              const RegionAddressing addressing) {
   // An R/N load can replace a later cursor/stride inside this region. Keep
   // ordinary per-access guards until its loaded value has a region proof.
   if (move.load && move.reg >= r_register_base) { return false; }
@@ -31,8 +48,12 @@ bool transfer(ResidentPlan &region,
   const auto &form = move.address;
   ++region.transfers;
   if (form.mode == 6) { return form.index == 0 && form.extra < bound; }
-  if (form.mode != 1 && form.mode != 3 && form.mode != 4) { return false; }
+  if (form.mode != 1 && form.mode != 3 && form.mode != 4 &&
+      (addressing != RegionAddressing::bidirectional || (form.mode != 2 && form.mode != 7))) {
+    return false;
+  }
   auto &address = region.addresses.at(form.index);
+  unit_extent(address, form.mode);
   address.accessed = true;
   address.modifier = modifiers.at(form.index) & modifier_mask;
   address.bound = std::min(address.bound, bound);
@@ -55,7 +76,8 @@ bool transfer(ResidentPlan &region,
 bool moves(ResidentPlan &region,
            const Instruction &instruction,
            const std::array<JitMemory, 2> &memory,
-           const std::array<Word, agu_registers> &modifiers) {
+           const std::array<Word, agu_registers> &modifiers,
+           const RegionAddressing addressing) {
   if (instruction.operation != Operation::parallel ||
       (instruction.opcode & upper_move_mask) == no_move_group) {
     return true;
@@ -73,7 +95,7 @@ bool moves(ResidentPlan &region,
   const auto plan = plan_moves(instruction);
   if (plan.count == 0 || plan.long_pair) { return false; }
   for (const auto &move : std::span(plan.transfers).first(plan.count)) {
-    if (!transfer(region, move, memory.at(move.space == Space::x ? 0 : 1), modifiers)) {
+    if (!transfer(region, move, memory.at(move.space == Space::x ? 0 : 1), modifiers, addressing)) {
       return false;
     }
   }
@@ -82,6 +104,9 @@ bool moves(ResidentPlan &region,
 
 bool address_supported(const RegionAddress &address) {
   if (!address.accessed) { return true; }
+  if (address.retreats) {
+    return address.modifier == modifier_mask && address.stride_steps == 0 && address.bound != 0;
+  }
   if (address.stride_steps != 0 && address.modifier != modifier_mask) { return false; }
   if (!address.updated || address.modifier == modifier_mask) { return address.linear_limit != 0; }
   return address.modifier > 0 && address.modifier < multiple_wrap_bit &&
@@ -106,7 +131,8 @@ JitRuntime resident_runtime(JitRuntime runtime) {
 
 ResidentPlan resident_plan(const std::span<const BlockInstruction> operations,
                            const std::array<JitMemory, 2> &memory,
-                           const std::array<Word, agu_registers> &modifiers) {
+                           const std::array<Word, agu_registers> &modifiers,
+                           const RegionAddressing addressing) {
   ResidentPlan region;
   if (operations.empty()) { return region; }
   auto pc = operations.front().pc;
@@ -118,7 +144,7 @@ ResidentPlan resident_plan(const std::span<const BlockInstruction> operations,
         operation.pc != pc || operation.mode != operations.front().mode ||
         operation.loop_address != operations.front().loop_address ||
         (at_loop_end(operation) && index + 1 != operations.size()) ||
-        !moves(region, operation.instruction, memory, modifiers)) {
+        !moves(region, operation.instruction, memory, modifiers, addressing)) {
       return {};
     }
     pc = (pc + operation.instruction.words) & word_mask;

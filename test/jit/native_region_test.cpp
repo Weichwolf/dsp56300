@@ -69,7 +69,8 @@ enum class Shape : std::uint8_t {
   mixed,
   y_strided,
   terminal_stride,
-  terminal_y_stride
+  terminal_y_stride,
+  bidirectional
 };
 constexpr std::array shapes{Shape::unit,
                             Shape::strided,
@@ -113,6 +114,19 @@ Step pair(const Transfer x, const Transfer y, const Word alu) {
           .count = 2};
 }
 
+void reverse_ports(Step &step, std::array<unsigned, agu_registers> &visits) {
+  for (auto &port : std::span(step.ports).first(step.count)) {
+    if (port.mode != 3 || (port.index != 0 && port.index != 4)) { continue; }
+    const auto phase = visits[port.index]++ % 4;
+    port.mode = 2;
+    if (phase == 0 || phase == 3) {
+      port.mode = 3;
+    } else if (phase == 2 && step.count == 1) {
+      port.mode = 7;
+    }
+  }
+}
+
 std::vector<Step> trace(const Shape shape = Shape::unit) {
   std::vector<Step> result{
       single({}, mac_round_a),
@@ -133,6 +147,7 @@ std::vector<Step> trace(const Shape shape = Shape::unit) {
       single({.reg = 6, .index = 4, .y = true}, mac_round_a),
       single({.reg = 14, .index = 1, .load = false}, add_a_b),
       single({.reg = 5, .index = 2, .mode = 4}, adc_x_b)};
+  std::array<unsigned, agu_registers> visits{};
   for (std::size_t index = 0; index < result.size(); ++index) {
     auto &step = result[index];
     for (auto &port : std::span(step.ports).first(step.count)) {
@@ -144,6 +159,7 @@ std::vector<Step> trace(const Shape shape = Shape::unit) {
         if (shape == Shape::terminal_y_stride) { port.y = true; }
       }
     }
+    if (shape == Shape::bidirectional) { reverse_ports(step, visits); }
     step = step.count == 2 ? pair(step.ports[0], step.ports[1], step.word & status_byte)
                            : single(step.ports[0], step.word & status_byte);
   }
@@ -155,7 +171,7 @@ std::array<Word, agu_registers> modifiers(const Shape shape = Shape::unit) {
   result.fill(word_mask);
   result[2] =
       terminal(shape) ? word_mask : reserved_modifier; // No-update addresses must not depend on M.
-  result[4] = shape == Shape::y_strided ? word_mask : ring;
+  result[4] = shape == Shape::y_strided || shape == Shape::bidirectional ? word_mask : ring;
   return result;
 }
 
@@ -177,6 +193,13 @@ struct Memory {
   }
 };
 
+Word step_cycles(const Step step) {
+  for (const auto &port : std::span(step.ports).first(step.count)) {
+    if (port.mode == 7) { return 2; }
+  }
+  return 1;
+}
+
 void execute(Registers &state, Memory &memory, const Step step) {
   const auto old = state;
   std::array<Word, 2> addresses{};
@@ -190,6 +213,7 @@ void execute(Registers &state, Memory &memory, const Step step) {
                                                     .offset = state.n[port.index],
                                                     .mode = port.mode});
     }
+    if (port.mode == 7) { addresses[index] = state.r[port.index]; }
     values[index] = port.load ? memory.bank(port.y)[addresses[index]] & word_mask
                               : register_model::read(state, port.reg);
   }
@@ -213,7 +237,7 @@ operations(const Word mode, const bool loop, const Shape shape = Shape::unit) {
   for (std::size_t index = 0; index < steps.size(); ++index) {
     auto decoded = detail::decode(steps[index].word);
     require(decoded.operation == detail::Operation::parallel && decoded.words == 1 &&
-                decoded.cycles == 1,
+                decoded.cycles == step_cycles(steps[index]),
             "Every independently encoded region step has its declared operation and base cost");
     result.push_back({.instruction = decoded,
                       .pc = start + static_cast<Word>(index),
@@ -232,7 +256,8 @@ struct Input {
 bool admitted(const Registers &state, const bool loop, const Shape shape, const Memory &memory) {
   if ((loop && !loop_frames::admitted(state)) || (state.m[0] & low_modifier) != low_modifier ||
       (state.m[1] & low_modifier) != low_modifier ||
-      (state.m[4] & low_modifier) != (shape == Shape::y_strided ? low_modifier : ring) ||
+      (state.m[4] & low_modifier) !=
+          (shape == Shape::y_strided || shape == Shape::bidirectional ? low_modifier : ring) ||
       (terminal(shape) && (state.m[2] & low_modifier) != low_modifier) ||
       ((shape == Shape::strided || shape == Shape::mixed) &&
        (state.n[0] >= sign24 || state.n[1] >= sign24)) ||
@@ -240,7 +265,7 @@ bool admitted(const Registers &state, const bool loop, const Shape shape, const 
     return false;
   }
   const auto base = (state.r[4] / 32) * 32;
-  if (shape != Shape::y_strided &&
+  if (shape != Shape::y_strided && shape != Shape::bidirectional &&
       (state.r[4] >= base + ring + 1 || base + ring + 1 > memory.limits[1])) {
     return false;
   }
@@ -249,11 +274,12 @@ bool admitted(const Registers &state, const bool loop, const Shape shape, const 
     for (unsigned index = 0; index < step.count; ++index) {
       const auto &port = step.ports[index];
       const auto cursor = cursors[port.index];
-      if (cursor >= memory.limits[port.y ? 1 : 0]) { return false; }
-      cursors[port.index] = address_model::updated({.modifier = state.m[port.index],
-                                                    .cursor = cursor,
-                                                    .offset = state.n[port.index],
-                                                    .mode = port.mode});
+      const auto next = address_model::updated({.modifier = state.m[port.index],
+                                                .cursor = cursor,
+                                                .offset = state.n[port.index],
+                                                .mode = port.mode});
+      if ((port.mode == 7 ? next : cursor) >= memory.limits[port.y ? 1 : 0]) { return false; }
+      cursors[port.index] = next;
     }
   }
   return true;
@@ -300,8 +326,12 @@ void direct_case(const native::Direct &code,
   cpu.cycles = maximum - 3;
   cpu.repeat_completed = cpu.interrupt_inhibited = true;
   Word retired = 0;
+  std::uint64_t cycles = 0;
   while (input.bodies * size - retired >= size && admitted(expected, loop, shape, actual_memory)) {
-    for (const auto step : steps) { execute(expected, expected_memory, step); }
+    for (const auto step : steps) {
+      execute(expected, expected_memory, step);
+      cycles += step_cycles(step);
+    }
     retired += size;
     if (!loop) { break; }
     if (expected.lc == 1) {
@@ -317,9 +347,8 @@ void direct_case(const native::Direct &code,
   cpu.reg.b >>= detail::padding_bits;
   require(result == retired && cpu.reg == expected && actual_memory.words == expected_memory.words,
           "Guarded bytes preserve complete independent state, old inputs and ordered RAM aliases");
-  require(cpu.instructions == sum(maximum - 2, retired) &&
-              cpu.cycles == sum(maximum - 3, retired) && cpu.repeat_completed == (retired == 0) &&
-              cpu.interrupt_inhibited == (retired == 0),
+  require(cpu.instructions == sum(maximum - 2, retired) && cpu.cycles == sum(maximum - 3, cycles) &&
+              cpu.repeat_completed == (retired == 0) && cpu.interrupt_inhibited == (retired == 0),
           "Initial/backedge guard rejection preserves exact progress, moves and exclusion fields");
 }
 
@@ -398,6 +427,75 @@ void direct_shape(
   stride_matrix(code, memory, mode, loop, shape);
 }
 
+#if defined(__aarch64__)
+void bidirectional_shape(const Word mode, const bool loop, const bool alias) {
+  constexpr auto shape = Shape::bidirectional;
+  constexpr std::array cursors{0U, 1U, 2U, 32U, 96U, 126U, 127U, 128U, io_begin, word_mask};
+  constexpr std::array counts{0U, 1U, 2U, 3U, 5U, word_mask};
+  Memory memory{.alias = alias};
+  const detail::JitRuntime runtime{
+      .memory = {{{.data = memory.bank(false).data(), .words = ram_words},
+                  {.data = memory.bank(true).data(), .words = ram_words}}}};
+  const auto ops = operations(mode, loop, shape);
+  const auto mods = modifiers(shape);
+  require(
+      !detail::resident_plan(ops, runtime.memory, mods).valid &&
+          detail::resident_plan(ops, runtime.memory, mods, detail::RegionAddressing::bidirectional)
+              .valid,
+      "Signed extents require an explicit backend capability; default admission is unchanged");
+  for (const Word modifier : {0U, 3U, 0x800fU, reserved_modifier}) {
+    auto changed = mods;
+    changed[0] = modifier;
+    require(!detail::resident_plan(
+                 ops, runtime.memory, changed, detail::RegionAddressing::bidirectional)
+                 .valid,
+            "Signed linear extents cannot invent modulo or reverse-addressing proofs");
+  }
+  auto strided = ops;
+  strided.front().instruction = detail::decode(single({.mode = 1}, mac_round_a).word);
+  require(
+      !detail::resident_plan(strided, runtime.memory, mods, detail::RegionAddressing::bidirectional)
+           .valid,
+      "A variable N stride mixed with negative steps retains precise execution");
+  detail::a64::Emitter emitter;
+  const auto bytes = emitter.generate_guarded(ops, runtime, mods);
+  if (!bytes) {
+    throw std::runtime_error("Signed unit extents admit a complete mixed-direction RAM body");
+  }
+  const native::Direct code(bytes.value());
+  for (Word flags = 0; flags <= status_byte; ++flags) {
+    direct_case(
+        code, memory, mode, loop, {.r0 = 32, .m4 = word_mask, .flags = flags, .bodies = 3}, shape);
+  }
+  for (const Word r0 : cursors) {
+    for (const Word r4 : cursors) {
+      for (const Word lc : counts) {
+        direct_case(
+            code,
+            memory,
+            mode,
+            loop,
+            {.r0 = r0, .r4 = r4, .m4 = word_mask, .flags = status_byte, .lc = lc, .bodies = 5},
+            shape);
+      }
+    }
+  }
+  for (const Word modifier : {0U, 3U, 0x800fU, word_mask, high_linear}) {
+    direct_case(
+        code, memory, mode, loop, {.r0 = 32, .m0 = modifier, .m4 = word_mask, .bodies = 3}, shape);
+    direct_case(code, memory, mode, loop, {.r0 = 32, .m4 = modifier, .bodies = 3}, shape);
+  }
+}
+
+void bidirectional_matrix() {
+  for (const auto mode : modes) {
+    for (const bool loop : {false, true}) {
+      for (const bool alias : {false, true}) { bidirectional_shape(mode, loop, alias); }
+    }
+  }
+}
+#endif
+
 void direct_matrix() {
   for (const auto mode : modes) {
     for (const bool loop : {false, true}) {
@@ -453,7 +551,7 @@ Registers initial(const Word mode, const Shape shape = Shape::unit) {
   state.n[0] = 2;
   state.n[1] = 3;
   state.n[2] = word_mask;
-  state.r[0] = 0;
+  state.r[0] = shape == Shape::bidirectional ? 32U : 0U;
   state.r[1] = output_begin;
   state.r[2] = 64;
   state.r[4] = shape == Shape::y_strided ? coefficient_begin : near_end;
@@ -488,8 +586,10 @@ void prefixes(const Backend backend, const Word mode, const Shape shape) {
     memory.initialize();
     auto expected_memory = memory;
     auto expected = state;
+    std::uint64_t cycles = 0;
     for (const auto step : std::span(steps).first(budget)) {
       execute(expected, expected_memory, step);
+      cycles += step_cycles(step);
     }
     core.set_registers(state);
     const auto base = core.progress();
@@ -497,7 +597,7 @@ void prefixes(const Backend backend, const Word mode, const Shape shape) {
     require(run.retired == budget && run.fault.kind == FaultKind::none &&
                 core.registers() == expected && memory.words == expected_memory.words &&
                 run.progress == Progress{.instructions = base.instructions + budget,
-                                         .estimated_cycles = base.estimated_cycles + budget},
+                                         .estimated_cycles = base.estimated_cycles + cycles},
             "Every warm API budget exposes exact full state, sticky flags and all RAM");
     require(codegen::publications() == publications,
             "Whole and partial memory-region grants retain the same published translations");
@@ -739,6 +839,9 @@ int main() {
     dsp56300::test::paired_matrix();
     dsp56300::test::admission();
     dsp56300::test::direct_matrix();
+#if defined(__aarch64__)
+    dsp56300::test::bidirectional_matrix();
+#endif
     for (const auto backend : {dsp56300::Backend::jit}) {
       for (const auto mode : dsp56300::test::modes) {
         for (const auto shape : dsp56300::test::shapes) {
@@ -746,6 +849,11 @@ int main() {
           dsp56300::test::changed_offsets(backend, mode, shape);
         }
       }
+#if defined(__aarch64__)
+      for (const auto mode : dsp56300::test::modes) {
+        dsp56300::test::prefixes(backend, mode, dsp56300::test::Shape::bidirectional);
+      }
+#endif
       dsp56300::test::interrupt_boundary(backend);
       for (const bool accept : {false, true}) {
         for (const bool replace_next : {false, true}) {
