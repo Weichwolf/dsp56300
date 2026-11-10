@@ -98,12 +98,11 @@ void Emitter::guard_address(const std::size_t index, const bool repeated, Label 
   } else {
     code_.load(Reg::x9, cpu, offsetof(Registers, r) + offset);
   }
-  if (address.retreats) {
-    guard_signed_address(address, repeated, failed);
-    return;
-  }
   if (address.updated && address.modifier != modifier_mask) {
-    const auto length = address.modifier + 1;
+    const auto length =
+        ((address.modifier & multiple_wrap_bit) != 0 ? address.modifier & multiple_wrap_mask
+                                                     : address.modifier) +
+        1;
     const auto span = std::bit_ceil(length) - 1;
     mask(Reg::x10, Reg::x9, word_mask & ~span);
     code_.constant(Reg::x17, length);
@@ -113,6 +112,10 @@ void Emitter::guard_address(const std::size_t index, const bool repeated, Label 
     code_.branch_far(Condition::above, failed);
     code_.compare(Reg::x9, Reg::x10);
     code_.branch_far(Condition::carry, failed);
+    return;
+  }
+  if (address.retreats) {
+    guard_signed_address(address, repeated, failed);
     return;
   }
   const bool window = repeated && address.updated && !address.constant;

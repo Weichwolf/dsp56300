@@ -25,8 +25,15 @@ void Emitter::guarded_effective(const AddressForm form) {
     code_.subtract(Reg::x9, Reg::x0, 1);
   } else {
     code_.add(Reg::x9, Reg::x0, 1);
-    const auto modifier = region_.addresses.at(form.index).modifier;
-    if (modifier != modifier_mask) {
+  }
+  const auto modifier = region_.addresses.at(form.index).modifier;
+  if (modifier != modifier_mask) {
+    if ((modifier & multiple_wrap_bit) != 0) {
+      const auto span = modifier & multiple_wrap_mask;
+      mask(Reg::x9, Reg::x9, span);
+      mask(Reg::x10, Reg::x0, word_mask & ~span);
+      code_.alu(Alu::bit_or, Reg::x9, Reg::x9, Reg::x10);
+    } else {
       const auto length = modifier + 1;
       const auto span = std::bit_ceil(length) - 1;
       mask(Reg::x10, Reg::x0, word_mask & ~span);

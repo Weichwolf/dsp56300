@@ -14,7 +14,7 @@ namespace dsp56300::detail {
 enum class RegionMode : unsigned char { automatic, ordinary, guarded };
 enum class LoopResidency : unsigned char { automatic, disabled };
 enum class LoopWindowMode : unsigned char { automatic, disabled };
-enum class RegionAddressing : unsigned char { forward, bidirectional };
+enum class RegionAddressing : unsigned char { forward, bidirectional, masked_rings };
 
 struct RegionAddress {
   Word bound = io_begin, linear_limit = io_begin, advances = 0, modifier = 0;

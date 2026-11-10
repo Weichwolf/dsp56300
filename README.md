@@ -65,6 +65,11 @@ After preparation, genuine program/mapping invalidations retain their checks;
 eligible cold loop entries optimize again when reached. Other native region
 lowering remains available for unsupported optimizing cases.
 
+ARM64 native RAM regions also support valid power-of-two multiple-wrap cursors,
+including mixed post-N, unit increment/decrement and pre-decrement accesses.
+Entry guards prove the complete aligned ring lies inside initialized RAM;
+changed modifiers, invalid ranges and partial grants retain precise execution.
+
 Benchmarks check independent results and report cold/warm timing and matched
 JIT/host ratios (`100 * host_time / jit_time`). Hardware factors use stated models,
 not measured device speed. Select cases with DSP56300_BENCH_FILTER;

@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstddef>
 #include <span>
 
@@ -49,7 +50,7 @@ bool transfer(ResidentPlan &region,
   ++region.transfers;
   if (form.mode == 6) { return form.index == 0 && form.extra < bound; }
   if (form.mode != 1 && form.mode != 3 && form.mode != 4 &&
-      (addressing != RegionAddressing::bidirectional || (form.mode != 2 && form.mode != 7))) {
+      (addressing == RegionAddressing::forward || (form.mode != 2 && form.mode != 7))) {
     return false;
   }
   auto &address = region.addresses.at(form.index);
@@ -102,8 +103,14 @@ bool moves(ResidentPlan &region,
   return true;
 }
 
-bool address_supported(const RegionAddress &address) {
+bool address_supported(const RegionAddress &address, const RegionAddressing addressing) {
   if (!address.accessed) { return true; }
+  if (addressing == RegionAddressing::masked_rings && address.updated &&
+      address.modifier != modifier_mask && (address.modifier & multiple_wrap_bit) != 0) {
+    const auto mask = address.modifier & multiple_wrap_mask;
+    return (address.modifier & multiple_reserved_bit) == 0 && mask != 0 &&
+           std::has_single_bit(mask + 1) && mask < address.bound;
+  }
   if (address.retreats) {
     return address.modifier == modifier_mask && address.stride_steps == 0 && address.bound != 0;
   }
@@ -152,7 +159,9 @@ ResidentPlan resident_plan(const std::span<const BlockInstruction> operations,
   region.loop = at_loop_end(operations.back());
   region.valid =
       (region.transfers >= minimum_transfers || (region.loop && region.transfers != 0)) &&
-      std::ranges::all_of(region.addresses, address_supported);
+      std::ranges::all_of(region.addresses, [addressing](const auto &address) {
+        return address_supported(address, addressing);
+      });
   return region;
 }
 } // namespace dsp56300::detail
