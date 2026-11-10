@@ -20,10 +20,12 @@ Changed executable identities require an explicit owner transition; unrelated
 programs use a fresh core. Consider eager reachable-code preparation or persistent
 caching only when measured first-use latency justifies it.
 
-On Linux x86-64, resolve 24-bit PCs with one indexed load from a non-executable,
-demand-zero target table. Physical target pages follow inserted entries rather
-than the full address span. Keep sparse radix routing for numeric/loop contexts
-and for other hosts.
+On Linux x86-64, resolve both 24-bit PCs and complete 32-bit numeric/loop keys
+with one indexed load from non-executable, demand-zero target tables. Reserve
+128 MiB of virtual addresses per PC table and 32 GiB for the core's context
+catalog, without committing RAM or swap for untouched entries. Physical backing
+follows populated pages; clearing visits installed targets rather than the whole
+key range. Mapping failures remain visible. Other hosts retain sparse radix routing.
 
 Keep live values in GPR/SIMD registers across instructions and backedges. Preserve
 old operands, aliases, flags and ordered effects. Eliminate dead work and hoist

@@ -39,11 +39,23 @@ void table(const unsigned levels) {
     first.insert(pc, &first_token);
   }
   require(first.index().data() == view, "Clearing and reinsertion preserve the native table view");
+#if defined(__x86_64__) && defined(__linux__)
+  for (const auto pc : pcs) {
+    require(view[pc] == first.find(pc), "Native indexed loads see the authoritative target");
+  }
+#endif
   if (levels == 4) {
     for (const auto key : {0x1000000U, 0x80000000U, 0xffffffffU}) {
       first.insert(key, &first_token);
       require(first.find(key) == &first_token && second.find(key) == nullptr,
               "Context catalog retains its full 32-bit key range");
+#if defined(__x86_64__) && defined(__linux__)
+      require(view[key] == &first_token, "Native indexed catalog loads preserve high key bits");
+#endif
+    }
+    first.clear();
+    for (const auto key : {0x1000000U, 0x80000000U, 0xffffffffU}) {
+      require(first.find(key) == nullptr, "Clearing the catalog removes every high-key target");
     }
   }
   if (levels == 3) {
@@ -53,11 +65,6 @@ void table(const unsigned levels) {
       first.insert(0x1000000, &first_token);
     } catch (const std::out_of_range &) { rejected = true; }
     require(rejected, "The PC table rejects a target beyond its address space");
-#if defined(__x86_64__) && defined(__linux__)
-    for (const auto pc : pcs) {
-      require(view[pc] == first.find(pc), "Native indexed loads see the authoritative target");
-    }
-#endif
   }
 }
 }
