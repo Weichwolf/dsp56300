@@ -45,9 +45,10 @@ CycleCosts cycle_costs(const std::span<const BlockInstruction> operations) {
   }
   // A DO endpoint can repeat inside the entry. Fused nested regions use the
   // default ISA bound because their retained body includes additional code.
-  bool repeating = at_loop_end(operations.back());
-#if !defined(__aarch64__)
-  repeating |= BlockEmitter::closed_jump(operations);
+#if defined(__aarch64__)
+  const bool repeating = at_loop_end(operations.back());
+#else
+  const bool repeating = at_loop_end(operations.back()) || BlockEmitter::closed_jump(operations);
 #endif
   const bool finite = !repeating && std::in_range<std::int32_t>(total);
   return {.maximum = maximum, .complete = finite ? static_cast<Word>(total) : 0U};

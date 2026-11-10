@@ -70,15 +70,32 @@ void Emitter::paired_move(const BlockInstruction &operation) {
   const auto ymode = (opcode >> 20) & 3U;
   const auto index = (opcode >> 8) & 7U;
   const auto yindex = ((opcode >> 13) & 3U) + (index < 4 ? 4U : 0U);
-  paired_address(operation, {.mode = xmode == 0 ? 4U : xmode, .index = index}, Frame::address);
-  paired_address(
-      operation, {.mode = ymode == 0 ? 4U : ymode, .index = yindex}, Frame::other_address);
   constexpr std::array xregs{x0_register, x1_register, a_register, b_register};
   constexpr std::array yregs{y0_register, y1_register, a_register, b_register};
   const auto xreg = xregs.at((opcode >> 18) & 3U);
   const auto yreg = yregs.at((opcode >> 16) & 3U);
   const BusOperand x{.space = Space::x, .write = (opcode & (1U << 15)) == 0};
   const BusOperand y{.space = Space::y, .write = (opcode & (1U << 22)) == 0};
+  const AddressForm xform{.mode = xmode == 0 ? 4U : xmode, .index = index};
+  const AddressForm yform{.mode = ymode == 0 ? 4U : ymode, .index = yindex};
+  // Guarded RAM cannot alias registers, so equal directions can commit in port order.
+  if (guarded() && x.write == y.write) {
+    const auto transfer =
+        [&](const unsigned reg, const BusOperand operand, const AddressForm form) {
+          if (operand.write) {
+            read_register(operation, reg);
+            code_.move(Reg::x1, Reg::x0, Width::w32);
+          }
+          effective(operation, form);
+          memory(operation, operand);
+          if (!operand.write) { write_register(operation, reg); }
+        };
+    transfer(xreg, x, xform);
+    transfer(yreg, y, yform);
+    return;
+  }
+  paired_address(operation, xform, Frame::address);
+  paired_address(operation, yform, Frame::other_address);
   paired_capture(operation, xreg, x);
   if (guarded()) {
     paired_capture(operation, yreg, y);

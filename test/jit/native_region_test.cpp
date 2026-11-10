@@ -107,7 +107,8 @@ Step pair(const Transfer x, const Transfer y, const Word alu) {
   const auto yreg = y.reg < 8 ? y.reg - 6 : y.reg - 12;
   return {.word = 0x800000 | ((y.mode == 4 ? 0U : y.mode) << pair_y_mode_shift) |
                   ((x.mode == 4 ? 0U : x.mode) << 11) | (xreg << pair_x_shift) | (yreg << 16) |
-                  (x.load ? 0x8000U : 0U) | (y.load ? 0x400000U : 0U) | alu,
+                  (x.index << 8) | ((y.index % 4) << 13) | (x.load ? 0x8000U : 0U) |
+                  (y.load ? 0x400000U : 0U) | alu,
           .ports = {x, y},
           .count = 2};
 }
@@ -658,11 +659,84 @@ void interrupt_boundary(const Backend backend) {
   require(core.run(1).retired == 1 && core.registers() == expected && core.interrupt_ready(),
           "Foreground execution releases vector exclusion after a guarded region");
 }
+
+void paired_case(const Word point) {
+  constexpr std::array xregs{4U, 5U, 14U, 15U};
+  constexpr std::array yregs{6U, 7U, 14U, 15U};
+  constexpr Word count = 4;
+  const Word mode = (point & 128U) != 0 ? mode_rm : 0U;
+  const bool advancing = (point & 256U) != 0;
+  const unsigned xindex = (point & 1024U) != 0 ? 4U : 0U;
+  const unsigned yindex = xindex == 0 ? 4U : 0U;
+  Memory actual{.alias = (point & 64U) != 0};
+  actual.initialize();
+  for (std::size_t index = 0; index < actual.words.size(); index += 3) {
+    actual.words[index] ^= sign24;
+  }
+  auto expected_memory = actual;
+  auto expected = register_model::seed(mode);
+  expected.sr = mode | ((point & 2U) != 0 ? status_byte : 0U);
+  expected.m.fill(word_mask);
+  expected.r[0] = expected.r[4] = 9;
+  expected.n[0] = expected.n[4] = 2;
+  const auto step = pair({.reg = xregs[point & 3U],
+                          .index = xindex,
+                          .mode = advancing ? 3U : 4U,
+                          .load = (point & 16U) == 0},
+                         {.reg = yregs[(point >> 2) & 3U],
+                          .index = yindex,
+                          .mode = advancing ? 1U : 4U,
+                          .y = true,
+                          .load = (point & 32U) == 0},
+                         (point & 512U) != 0 ? mac_a : 0U);
+  std::array<detail::BlockInstruction, count> ops{};
+  for (Word index = 0; index < count; ++index) {
+    const auto decoded = detail::decode(step.word);
+    require(decoded.operation == detail::Operation::parallel && decoded.words == 1 &&
+                decoded.cycles == 1,
+            "Authored paired matrix has one-word, one-cycle parallel transfers");
+    ops[index] = {.instruction = decoded, .pc = start + index, .mode = mode};
+  }
+  const detail::JitRuntime runtime{
+      .memory = {{{.data = actual.bank(false).data(), .words = ram_words},
+                  {.data = actual.bank(true).data(), .words = ram_words}}}};
+#if defined(__aarch64__)
+  detail::a64::Emitter emitter;
+  const auto bytes = emitter.generate_guarded(ops, runtime, expected.m);
+  if (!bytes) { throw std::runtime_error("Paired matrix guarded RAM admission failed"); }
+  const native::Direct code(bytes.value());
+#else
+  detail::BlockEmitter emitter(runtime, expected.m, detail::RegionMode::guarded);
+  const native::Direct code(emitter.generate(ops));
+  require(emitter.guarded_region(), "Paired matrix admits a real guarded RAM body");
+#endif
+  detail::Cpu cpu;
+  cpu.reg = expected;
+  cpu.reg.a <<= detail::padding_bits;
+  cpu.reg.b <<= detail::padding_bits;
+  cpu.repeat_completed = cpu.interrupt_inhibited = true;
+  for (Word index = 0; index < count; ++index) { execute(expected, expected_memory, step); }
+  detail::NativeContext context{.runtime = {.memory = {}}, .budget = count};
+  require(code.enter(cpu, context) == count, "Guarded paired matrix retires its complete body");
+  cpu.reg.a >>= detail::padding_bits;
+  cpu.reg.b >>= detail::padding_bits;
+  require(cpu.reg == expected && actual.words == expected_memory.words &&
+              cpu.instructions == count && cpu.cycles == count && !cpu.repeat_completed &&
+              !cpu.interrupt_inhibited,
+          "Same-register and aliased pairs preserve parallel inputs, flags and ordered writes");
+}
+
+void paired_matrix() {
+  constexpr Word cases = 16 * 4 * 2 * 2 * 2 * 2 * 2;
+  for (Word point = 0; point < cases; ++point) { paired_case(point); }
+}
+
 } // namespace
 } // namespace dsp56300::test
 
 int main() {
   try {
+    dsp56300::test::paired_matrix();
     dsp56300::test::admission();
     dsp56300::test::direct_matrix();
     for (const auto backend : {dsp56300::Backend::jit}) {
