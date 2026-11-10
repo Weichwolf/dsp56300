@@ -75,7 +75,9 @@ std::vector<std::uint8_t> admit_cycles(const std::span<const std::uint8_t> body,
   code.compare(Reg::x9, Reg::x10, Width::x64);
   code.branch_far(Condition::below_equal, empty);
   code.alu(Alu::subtract, Reg::x9, Reg::x9, Reg::x10, Width::x64);
-  if (costs.complete != 0) {
+  const auto shift = static_cast<unsigned>(std::bit_width(costs.maximum - 1U));
+  const auto rounded_cost = std::uint64_t{operations.size()} << shift;
+  if (costs.complete != 0 && costs.complete < rounded_cost) {
     code.constant(Reg::x10, costs.complete);
     code.compare(Reg::x9, Reg::x10, Width::x64);
     code.branch(Condition::no_carry, partial);
@@ -83,7 +85,6 @@ std::vector<std::uint8_t> admit_cycles(const std::span<const std::uint8_t> body,
     code.branch(bounded);
     code.bind(partial);
   }
-  const auto shift = static_cast<unsigned>(std::bit_width(costs.maximum - 1U));
   if (shift != 0) { code.shift(Shift::right, Reg::x9, Reg::x9, shift, Width::x64); }
   code.constant(Reg::x10, 1);
   code.compare(Reg::x9, Reg::x10, Width::x64);
