@@ -135,6 +135,16 @@ void prefixes(const Word mode, const bool alias) {
   Core core(Memory::separate({.program = fixture.p,
                               .x = fixture.x,
                               .y = alias ? std::span(fixture.x) : std::span(fixture.y)}));
+  auto suffix = Fixture::state({.mode = mode});
+  ++suffix.pc;
+  core.set_registers(suffix);
+  const auto suffix_progress = core.progress();
+  constexpr std::array suffix_entries{entry + 1};
+  const auto refused = core.prepare(suffix_entries);
+  require(refused.failure == Fault{} && refused.prepared_entries == 0 &&
+              refused.native_bytes == 0 && core.registers() == suffix &&
+              core.progress() == suffix_progress,
+          "A known suffix is not a whole-loop optimization entry and emits no unusable LLVM body");
   core.set_registers(Fixture::state({.mode = mode}));
   const auto before = core.state();
   constexpr std::array entries{entry};

@@ -46,6 +46,11 @@ struct Mapping {
 
 enum class EntryKind : std::uint8_t { ordinary, repeat, vector };
 
+bool whole_loop_entry(const Registers &state) {
+  return (state.sr & loop_flag) != 0 && state.sc >= 2 &&
+         state.stack[state.sp % stack_entries] >> word_bits == state.pc;
+}
+
 struct Block {
   std::vector<BlockInstruction> operations;
   const void *entry = nullptr;
@@ -121,8 +126,8 @@ Block *Jit::Impl::compile(const Registers &state, const bool requested) {
 #endif
   block->operations = parse_block(program, state, context.runtime, callbacks);
   if (block->operations.empty()) { return nullptr; }
-  const bool optimize =
-      requested || (preparation_requested && loop_candidate(block->operations, context.runtime));
+  const bool optimize = requested || (preparation_requested && whole_loop_entry(state) &&
+                                      loop_candidate(block->operations, context.runtime));
 #if defined(__aarch64__)
   if (!optimize) {
     block->region = resident_region_plan(program, state, context.runtime, block->operations);
@@ -398,7 +403,7 @@ PreparationReport Jit::prepare(const std::span<const Word> established_entries,
                       .pc = state.pc};
     return report;
   }
-  if ((state.sr & loop_flag) != 0) { install(state); }
+  if (whole_loop_entry(state)) { install(state); }
   for (const auto &operation : graph.instructions) {
     const auto kind = operation.instruction.operation;
     if (kind != Operation::loop_immediate && kind != Operation::loop_register &&
