@@ -29,6 +29,7 @@
 #include <llvm/Support/MemoryBufferRef.h>
 #include <llvm/TargetParser/Triple.h>
 #include <memory>
+#include <set>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -71,6 +72,53 @@ Buffer buffer(const std::span<const std::byte> bytes) {
 std::vector<std::byte> bytes(LLVMMemoryBufferRef buffer) {
   const auto *first = reinterpret_cast<const std::byte *>(LLVMGetBufferStart(buffer));
   return {first, first + LLVMGetBufferSize(buffer)};
+}
+
+bool absolute_pointer(LLVMValueRef value, std::set<LLVMValueRef> &visited) {
+  if (LLVMIsConstant(value) == 0 || !visited.insert(value).second) { return false; }
+  if (LLVMIsAConstantExpr(value) != nullptr && LLVMGetConstOpcode(value) == LLVMIntToPtr) {
+    auto *integer = LLVMGetOperand(value, 0);
+    if (LLVMIsAConstantInt(integer) != nullptr && LLVMIsNull(integer) == 0) { return true; }
+  }
+  const auto count = LLVMGetNumOperands(value);
+  for (int index = 0; index < count; ++index) {
+    if (absolute_pointer(LLVMGetOperand(value, static_cast<unsigned>(index)), visited)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void relocatable(LLVMModuleRef module) {
+  std::set<LLVMValueRef> visited;
+  const auto require = [&](LLVMValueRef value) {
+    if (absolute_pointer(value, visited)) {
+      throw std::runtime_error("Native object contains an absolute host pointer");
+    }
+  };
+  for (auto *global = LLVMGetFirstGlobal(module); global != nullptr;
+       global = LLVMGetNextGlobal(global)) {
+    require(global);
+  }
+  for (auto *function = LLVMGetFirstFunction(module); function != nullptr;
+       function = LLVMGetNextFunction(function)) {
+    for (auto *block = LLVMGetFirstBasicBlock(function); block != nullptr;
+         block = LLVMGetNextBasicBlock(block)) {
+      for (auto *instruction = LLVMGetFirstInstruction(block); instruction != nullptr;
+           instruction = LLVMGetNextInstruction(instruction)) {
+        const auto count = LLVMGetNumOperands(instruction);
+        if (LLVMGetInstructionOpcode(instruction) == LLVMIntToPtr) {
+          auto *integer = LLVMGetOperand(instruction, 0);
+          if (LLVMIsAConstantInt(integer) != nullptr && LLVMIsNull(integer) == 0) {
+            throw std::runtime_error("Native object contains an absolute host pointer");
+          }
+        }
+        for (int index = 0; index < count; ++index) {
+          require(LLVMGetOperand(instruction, static_cast<unsigned>(index)));
+        }
+      }
+    }
+  }
 }
 
 struct TargetIdentity {
@@ -162,7 +210,7 @@ TargetMachine native_machine() {
                                                features.get(),
                                                LLVMCodeGenLevelAggressive,
                                                LLVMRelocPIC,
-                                               LLVMCodeModelJITDefault));
+                                               LLVMCodeModelSmall));
   if (!result) { throw std::runtime_error("LLVM 19 cannot create the native target machine"); }
   return result;
 }
@@ -296,6 +344,23 @@ LlvmCompiler::LlvmCompiler() : impl_(std::make_unique<Impl>()) {
 
 LlvmCompiler::~LlvmCompiler() = default;
 
+void LlvmCompiler::define(const std::string &name, const void *address) {
+  if (name.empty() || address == nullptr) {
+    throw std::invalid_argument("A native binding needs a name and function address");
+  }
+  LLVMOrcCSymbolMapPair symbol{.Name = LLVMOrcLLJITMangleAndIntern(impl_->jit, name.c_str()),
+                               .Sym = {.Address = std::bit_cast<std::uintptr_t>(address),
+                                       .Flags = {.GenericFlags = LLVMJITSymbolGenericFlagsExported |
+                                                                 LLVMJITSymbolGenericFlagsCallable,
+                                                 .TargetFlags = 0}}};
+  auto *definition = LLVMOrcAbsoluteSymbols(&symbol, 1);
+  auto *error = LLVMOrcJITDylibDefine(LLVMOrcLLJITGetMainJITDylib(impl_->jit), definition);
+  if (error != nullptr) {
+    LLVMOrcDisposeMaterializationUnit(definition);
+    check(error);
+  }
+}
+
 std::uint64_t LlvmCompiler::native_bytes() const noexcept {
   return impl_->text_bytes;
 }
@@ -339,7 +404,10 @@ const void *LlvmCompiler::install(LlvmModule &module) {
 }
 
 std::vector<std::byte> LlvmCompiler::object(LlvmModule &module) {
+  if (module.code() == nullptr) { throw std::logic_error("LLVM module was already transferred"); }
+  relocatable(module.code());
   impl_->prepare(module);
+  relocatable(module.code());
   char *message = nullptr;
   LLVMMemoryBufferRef exported = nullptr;
   const auto failed = LLVMTargetMachineEmitToMemoryBuffer(

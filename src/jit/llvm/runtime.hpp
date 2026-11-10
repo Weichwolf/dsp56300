@@ -41,6 +41,9 @@ public:
   ~LlvmCompiler();
   LlvmCompiler(const LlvmCompiler &) = delete;
   LlvmCompiler &operator=(const LlvmCompiler &) = delete;
+  // Bind a named native function before materialization. Objects retain symbol
+  // relocations; mutable instance pointers remain arguments to generated code.
+  void define(const std::string &name, const void *address);
   // Verify exact semantic IR, optimize with the native target, materialize now.
   // The single exported entry has the module's name. Code lives with this owner.
   [[nodiscard]] const void *install(LlvmModule &module);

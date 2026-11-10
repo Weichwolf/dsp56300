@@ -170,6 +170,79 @@ void exported_code() {
   check(first);
 }
 
+std::uint32_t host_calls = 0;
+
+std::uint32_t host_boundary(const std::uint32_t value) noexcept {
+  ++host_calls;
+  return value ^ mask;
+}
+
+void lift_boundary(LlvmModule &module) {
+  auto *const context = module.context();
+  std::array types{LLVMInt32TypeInContext(context)};
+  auto *type = LLVMFunctionType(types.front(), types.data(), types.size(), 0);
+  auto *host = LLVMAddFunction(module.code(), "native_host_boundary", type);
+  auto *function = LLVMAddFunction(module.code(), module.name().c_str(), type);
+  auto *entry = LLVMAppendBasicBlockInContext(context, function, "entry");
+  const std::unique_ptr<std::remove_pointer_t<LLVMBuilderRef>, DisposeBuilder> builder(
+      LLVMCreateBuilderInContext(context));
+  LLVMPositionBuilderAtEnd(builder.get(), entry);
+  std::array values{LLVMGetParam(function, 0)};
+  LLVMBuildRet(
+      builder.get(),
+      LLVMBuildCall2(builder.get(), type, host, values.data(), values.size(), "host_result"));
+}
+
+void named_boundaries() {
+  LlvmCompiler compiler;
+  LlvmModule module("bound_entry");
+  lift_boundary(module);
+  const auto object = compiler.object(module);
+  require(!module.bitcode().empty(), "Native emission retains valid optimized bitcode");
+  const auto *address = std::bit_cast<const void *>(&host_boundary);
+  constexpr std::array values{0U, 1U, mask, std::numeric_limits<std::uint32_t>::max()};
+  compiler.define("native_host_boundary", address);
+  const auto bound = std::bit_cast<Function>(compiler.install_object(object, module.name()));
+  const auto before = host_calls;
+  for (const auto value : values) {
+    require(bound(value) == (value ^ mask), "A named native boundary receives exact arguments");
+  }
+  require(host_calls - before == values.size(), "Native calls preserve every host side effect");
+  LlvmCompiler independent;
+  independent.define("native_host_boundary", address);
+  const auto function = std::bit_cast<Function>(independent.install_object(object, module.name()));
+  require(function(mask) == 0, "The same relocatable object binds independently in another owner");
+  bool rejected = false;
+  try {
+    independent.define("native_host_boundary", address);
+  } catch (const std::runtime_error &) { rejected = true; }
+  require(rejected && function(0) == mask, "Duplicate binding retains the existing native target");
+}
+
+void bound_pointer_rejection() {
+  LlvmCompiler compiler;
+  LlvmModule module("instance_pointer");
+  auto *context = module.context();
+  auto *type = LLVMFunctionType(LLVMInt32TypeInContext(context), nullptr, 0, 0);
+  auto *function = LLVMAddFunction(module.code(), module.name().c_str(), type);
+  auto *entry = LLVMAppendBasicBlockInContext(context, function, "entry");
+  const std::unique_ptr<std::remove_pointer_t<LLVMBuilderRef>, DisposeBuilder> builder(
+      LLVMCreateBuilderInContext(context));
+  LLVMPositionBuilderAtEnd(builder.get(), entry);
+  auto *pointer = LLVMConstIntToPtr(LLVMConstInt(LLVMInt64TypeInContext(context), 4096, 0),
+                                    LLVMPointerTypeInContext(context, 0));
+  LLVMBuildRet(
+      builder.get(),
+      LLVMBuildLoad2(builder.get(), LLVMInt32TypeInContext(context), pointer, "captured_instance"));
+  const auto before = module.bitcode();
+  bool rejected = false;
+  try {
+    static_cast<void>(compiler.object(module));
+  } catch (const std::runtime_error &) { rejected = true; }
+  require(rejected && module.bitcode() == before && compiler.native_bytes() == 0,
+          "An absolute instance pointer cannot enter a relocatable artifact");
+}
+
 void independent_owners() {
   require(dsp56300::test::llvm_flag_a() == dsp56300::test::llvm_flag_b(),
           "Separate static core archives must share exactly one target initializer flag");
@@ -202,6 +275,8 @@ void independent_owners() {
 int main() try {
   independent_owners();
   exported_code();
+  named_boundaries();
+  bound_pointer_rejection();
 } catch (const std::exception &error) {
 
   std::cerr << error.what() << '\n';
