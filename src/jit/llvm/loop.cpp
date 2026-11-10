@@ -12,7 +12,6 @@
 #include "jit/llvm/builder.hpp"
 #include "jit/llvm/runtime.hpp"
 #include "jit/move.hpp"
-#include "jit/resident.hpp"
 
 #include <algorithm>
 #include <array>
@@ -49,11 +48,63 @@ struct LoopPlan {
 
   std::span<const BlockInstruction> operations;
   std::vector<Step> steps;
-  std::array<JitMemory, 2> memory;
+  std::array<std::vector<MemoryWindow>, 2> windows;
   std::array<std::array<Word, agu_registers>, 2> accesses{};
+  std::array<std::array<Word, agu_registers>, 2> first_offsets{};
+  std::array<std::array<bool, agu_registers>, 2> writes{};
   std::array<Word, agu_registers> deltas{};
   Word cost = 0, count = 0;
 };
+
+bool permitted(const MemoryWindow &window, const bool writing) {
+  return !window.words.empty() && window.address < io_begin &&
+         window.words.size() <= io_begin - window.address &&
+         (window.known.empty() || window.known.size() == window.words.size()) &&
+         (!writing || (window.writable && !window.aliases_program));
+}
+
+auto declared_windows(const JitRuntime &runtime) {
+  std::array<std::vector<MemoryWindow>, 2> result;
+  for (std::size_t bank = 0; bank < result.size(); ++bank) {
+    if (!runtime.windows[bank].empty()) {
+      result[bank].assign(runtime.windows[bank].begin(), runtime.windows[bank].end());
+      continue;
+    }
+    const auto &memory = runtime.memory[bank];
+    if (memory.data != nullptr && memory.words != 0) {
+      result[bank].push_back({.words = {memory.data, std::min(memory.words, std::size_t{io_begin})},
+                              .known = {},
+                              .writable = true,
+                              .aliases_program = memory.aliases_program});
+    }
+  }
+  return result;
+}
+
+bool stable_knowledge(const LoopPlan &plan) {
+  std::vector<std::span<const std::byte>> masks;
+  for (const auto &bank : plan.windows) {
+    for (const auto &window : bank) {
+      if (!window.known.empty()) { masks.push_back(std::as_bytes(window.known)); }
+    }
+  }
+  for (std::size_t bank = 0; bank < plan.windows.size(); ++bank) {
+    if (!std::ranges::any_of(plan.writes[bank], [](const bool writing) { return writing; })) {
+      continue;
+    }
+    for (const auto &window : plan.windows[bank]) {
+      if (!permitted(window, true)) { continue; }
+      const auto data = std::bit_cast<std::uintptr_t>(window.words.data());
+      for (const auto mask : masks) {
+        const auto known = std::bit_cast<std::uintptr_t>(mask.data());
+        if (data <= known ? known - data < window.words.size_bytes() : data - known < mask.size()) {
+          return false;
+        }
+      }
+    }
+  }
+  return true;
+}
 
 bool append_moves(LoopPlan &plan, const NativeMoves &moves) {
   Word changed_addresses = 0;
@@ -63,10 +114,17 @@ bool append_moves(LoopPlan &plan, const NativeMoves &moves) {
       return false;
     }
     const auto bank = move.space == Space::x ? 0U : 1U;
-    const auto &memory = plan.memory[bank];
-    if (memory.data == nullptr || (!move.load && memory.aliases_program)) { return false; }
+    if (!std::ranges::any_of(plan.windows[bank], [&move](const auto &window) {
+          return permitted(window, !move.load);
+        })) {
+      return false;
+    }
     auto &extent = plan.accesses[bank][move.address.index];
+    if (extent == 0) {
+      plan.first_offsets[bank][move.address.index] = plan.deltas[move.address.index];
+    }
     extent = std::max(extent, plan.deltas[move.address.index] + 1);
+    plan.writes[bank][move.address.index] = plan.writes[bank][move.address.index] || !move.load;
     if (move.address.mode == 3) { ++plan.deltas[move.address.index]; }
     changed_addresses |= 1U << move.address.index;
   }
@@ -81,7 +139,7 @@ std::optional<LoopPlan> plan_loop(const std::span<const BlockInstruction> operat
       (mode & (scale_down | scale_up)) == (scale_down | scale_up)) {
     return {};
   }
-  LoopPlan plan{.operations = operations, .steps = {}, .memory = resident_runtime(runtime).memory};
+  LoopPlan plan{.operations = operations, .steps = {}, .windows = declared_windows(runtime)};
   auto pc = operations.front().pc;
   for (const auto &operation : operations) {
     const auto &instruction = operation.instruction;
@@ -106,6 +164,7 @@ std::optional<LoopPlan> plan_loop(const std::span<const BlockInstruction> operat
     plan.cost += instruction.cycles;
     ++plan.count;
   }
+  if (!stable_knowledge(plan)) { return {}; }
   return plan;
 }
 
@@ -122,6 +181,12 @@ public:
   }
 
 private:
+  struct Bounds {
+    V first = nullptr, last = nullptr;
+  };
+
+  V boolean(const bool value) { return LLVMConstInt(ir_.getIntNTy(1), value ? 1U : 0U, 0); }
+
   static LLVMValueRef make_function(LlvmModule &module) {
     auto *pointer = LLVMPointerTypeInContext(module.context(), 0);
     std::array arguments{pointer, pointer};
@@ -201,35 +266,105 @@ private:
     for (const auto offset : {offsetof(Cpu, processing), offsetof(Cpu, debug_flags)}) {
       require(ir_.CreateICmpEQ(load(8, offset), ir_.getInt8(0)));
     }
-    memory_guards();
+    for (unsigned index = 0; index < agu_registers; ++index) {
+      cursors_[index] = reg(32, offsetof(Registers, r) + (index * sizeof(Word)));
+      if (plan_.accesses[0][index] == 0 && plan_.accesses[1][index] == 0) { continue; }
+      auto *modifier = reg(32, offsetof(Registers, m) + (index * sizeof(Word)));
+      require(ir_.CreateICmpEQ(ir_.CreateAnd(modifier, ir_.getInt32(modifier_mask)),
+                               ir_.getInt32(modifier_mask)));
+    }
+  }
+
+  V known_words(const MemoryWindow &window, const Bounds bounds, const bool writing) {
+    if (window.known.empty()) { return boolean(true); }
+    auto *prior = LLVMGetInsertBlock(ir_.get());
+    auto *condition = LLVMAppendBasicBlockInContext(context_, function_, "known_condition");
+    auto *body = LLVMAppendBasicBlockInContext(context_, function_, "known_body");
+    auto *next = LLVMAppendBasicBlockInContext(context_, function_, "known_next");
+    auto *done = LLVMAppendBasicBlockInContext(context_, function_, "known_done");
+    LLVMBuildBr(ir_.get(), condition);
+    ir_.SetInsertPoint(condition);
+    auto *index = LLVMBuildPhi(ir_.get(), ir_.getInt64Ty(), "known_index");
+    auto *first = bounds.first;
+    LLVMAddIncoming(index, &first, &prior, 1);
+    LLVMBuildCondBr(ir_.get(), ir_.CreateICmpULT(index, bounds.last), body, done);
+    ir_.SetInsertPoint(body);
+    auto *base = LLVMConstIntToPtr(ir_.getInt64(std::bit_cast<std::uintptr_t>(window.known.data())),
+                                   ir_.getPtrTy());
+    auto *value = ir_.CreateLoad(ir_.getInt8Ty(), ir_.CreateGEP(ir_.getInt8Ty(), base, index));
+    // Ordinary stores normalize knowledge to one. Only canonical destination
+    // bytes can omit that metadata write on the optimized path.
+    auto *valid =
+        writing ? ir_.CreateICmpEQ(value, ir_.getInt8(1)) : ir_.CreateICmpNE(value, ir_.getInt8(0));
+    LLVMBuildCondBr(ir_.get(), valid, next, done);
+    ir_.SetInsertPoint(next);
+    auto *following = ir_.CreateAdd(index, ir_.getInt64(1));
+    LLVMAddIncoming(index, &following, &next, 1);
+    LLVMBuildBr(ir_.get(), condition);
+    ir_.SetInsertPoint(done);
+    auto *known = LLVMBuildPhi(ir_.get(), ir_.getIntNTy(1), "known_range");
+    auto *success = boolean(true);
+    auto *failure = boolean(false);
+    LLVMAddIncoming(known, &success, &condition, 1);
+    LLVMAddIncoming(known, &failure, &body, 1);
+    return known;
+  }
+
+  V select_window(const std::span<const MemoryWindow> windows,
+                  const Bounds bounds,
+                  const bool writing) {
+    auto *base = LLVMConstNull(ir_.getPtrTy());
+    auto *accepted = boolean(false);
+    for (const auto &window : windows) {
+      if (!permitted(window, writing)) { continue; }
+      auto *begin = ir_.getInt64(window.address);
+      auto *end = ir_.getInt64(window.address + window.words.size());
+      auto *matches = ir_.CreateAnd(ir_.CreateICmpUGE(bounds.first, begin),
+                                    ir_.CreateICmpULT(bounds.last, end));
+      matches = ir_.CreateAnd(matches, ir_.CreateICmpULT(bounds.first, end));
+      const Bounds range{
+          .first = ir_.CreateSelect(matches, ir_.CreateSub(bounds.first, begin), ir_.getInt64(0)),
+          .last =
+              ir_.CreateSelect(matches,
+                               ir_.CreateAdd(ir_.CreateSub(bounds.last, begin), ir_.getInt64(1)),
+                               ir_.getInt64(0))};
+      auto *admitted = ir_.CreateAnd(matches, known_words(window, range, writing));
+      auto *biased = LLVMBuildIntToPtr(
+          ir_.get(),
+          ir_.CreateSub(ir_.getInt64(std::bit_cast<std::uintptr_t>(window.words.data())),
+                        ir_.getInt64(std::uint64_t{window.address} * sizeof(Word))),
+          ir_.getPtrTy(),
+          "");
+      base = ir_.CreateSelect(admitted, biased, base);
+      accepted = ir_.CreateOr(accepted, admitted);
+    }
+    require(accepted);
+    return base;
   }
 
   void memory_guards() {
     for (unsigned index = 0; index < agu_registers; ++index) {
-      cursors_[index] = reg(32, offsetof(Registers, r) + (index * sizeof(Word)));
       for (unsigned bank = 0; bank < 2; ++bank) {
         const auto extent = plan_.accesses[bank][index];
         if (extent == 0) { continue; }
+        auto *origin = ir_.CreateZExt(cursors_[index], ir_.getInt64Ty());
+        auto *first = ir_.CreateAdd(origin, ir_.getInt64(plan_.first_offsets[bank][index]));
         auto *last =
-            ir_.CreateAdd(ir_.CreateZExt(cursors_[index], ir_.getInt64Ty()),
+            ir_.CreateAdd(origin,
                           ir_.CreateAdd(ir_.getInt64(extent - 1),
                                         ir_.CreateMul(ir_.CreateSub(turns_, ir_.getInt64(1)),
                                                       ir_.getInt64(plan_.deltas[index]))));
-        const auto bound = std::min(plan_.memory[bank].words, std::size_t{io_begin});
-        require(ir_.CreateICmpULT(last, ir_.getInt64(bound)));
-        auto *modifier = reg(32, offsetof(Registers, m) + (index * sizeof(Word)));
-        require(ir_.CreateICmpEQ(ir_.CreateAnd(modifier, ir_.getInt32(modifier_mask)),
-                                 ir_.getInt32(modifier_mask)));
+        memory_bases_[bank][index] = select_window(
+            plan_.windows[bank], {.first = first, .last = last}, plan_.writes[bank][index]);
       }
     }
   }
 
   V memory(const NativeMove &move) {
     const auto bank = move.space == Space::x ? 0U : 1U;
-    auto *base = LLVMConstIntToPtr(
-        ir_.getInt64(std::bit_cast<std::uintptr_t>(plan_.memory[bank].data)), ir_.getPtrTy());
-    return ir_.CreateGEP(
-        ir_.getInt32Ty(), base, ir_.CreateZExt(cursors_[move.address.index], ir_.getInt64Ty()));
+    return ir_.CreateGEP(ir_.getInt32Ty(),
+                         memory_bases_[bank][move.address.index],
+                         ir_.CreateZExt(cursors_[move.address.index], ir_.getInt64Ty()));
   }
 
   V read_register(const std::array<V, 4> &values, const unsigned number) {
@@ -331,11 +466,15 @@ private:
   }
 
   void generate(const void *fallback) {
+    auto *windows = LLVMAppendBasicBlockInContext(context_, function_, "windows");
     auto *start = LLVMAppendBasicBlockInContext(context_, function_, "admitted");
     auto *miss = LLVMAppendBasicBlockInContext(context_, function_, "ordinary");
     auto *loop = LLVMAppendBasicBlockInContext(context_, function_, "loop");
     auto *complete = LLVMAppendBasicBlockInContext(context_, function_, "complete");
     admission();
+    LLVMBuildCondBr(ir_.get(), eligible_, windows, miss);
+    ir_.SetInsertPoint(windows);
+    memory_guards();
     LLVMBuildCondBr(ir_.get(), eligible_, start, miss);
     ir_.SetInsertPoint(miss);
     std::array types{ir_.getPtrTy(), ir_.getPtrTy(), ir_.getPtrTy()};
@@ -410,6 +549,7 @@ private:
   V turns_ = nullptr, forever_ = nullptr, finite_count_ = nullptr, eligible_ = nullptr;
   std::array<V, 4> banks_{};
   std::array<V, agu_registers> cursors_{};
+  std::array<std::array<V, agu_registers>, 2> memory_bases_{};
 };
 }
 

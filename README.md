@@ -54,7 +54,9 @@ Unsupported operations fail explicitly.
 device I/O. It installs LLVM O3 code for supported arithmetic and parallel RAM/register
 transfers in natural DO bodies with linear cursors. Multiply/accumulate, rounding,
 add/subtract, comparisons, shifts and logic retain exact flags and old operands;
-other operations retain their native execution path. Preparation
+each used cursor selects a containing declared RAM/ROM window at loop entry,
+checking its complete access range, permissions and initialization. Unknown words,
+cross-window ranges and other unsupported cases keep precise native execution. Preparation
 reports installed entries, unresolved coverage, newly emitted text and a
 non-latching diagnostic. Code remains owned by Core; changed external mappings
 require a new `Io::program_revision()` before preparation or execution.

@@ -1,0 +1,354 @@
+// SPDX-License-Identifier: GPL-3.0-only
+#include "architecture.hpp"
+#include "dsp56300/core.hpp"
+#include "dsp56300/memory.hpp"
+#include "isa.hpp"
+#include "jit.hpp"
+#include "jit/block.hpp"
+#include "jit/llvm/loop.hpp"
+#include "jit/llvm/runtime.hpp"
+#include "loop_frames.hpp"
+#include "register_model.hpp"
+#include "support.hpp"
+
+#include <array>
+#include <bit>
+#include <cstddef>
+#include <cstdint>
+#include <exception>
+#include <iostream>
+#include <memory>
+#include <optional>
+#include <span>
+#include <stdexcept>
+#include <utility>
+
+namespace {
+using namespace dsp56300;
+using namespace dsp56300::test;
+using enum isa::Opcode;
+constexpr Word entry = 8, rom = 0x4000, high = 0xc000, lf = 1U << 15, forever = 1U << 16;
+constexpr Word loads = static_cast<Word>(move_x_effective) | (1U << 15) | (3U << 11);
+constexpr Word stores = static_cast<Word>(move_x_effective) | (3U << 11) | (1U << 8);
+constexpr std::size_t words = 16;
+constexpr Word host_bits = 0xab000000;
+constexpr Word y_bus = 1U << 19;
+constexpr std::array modes{0U, mode_down, mode_up, mode_rm, mode_rm | mode_down, mode_rm | mode_up};
+using Data = std::array<std::array<Word, words>, 3>;
+
+struct Input {
+  Word source = rom + 1, destination = high + 2, count = 3, flags = 0;
+  std::size_t known_index = words;
+  std::uint8_t knowledge = 1;
+};
+
+struct Fixture final : Io {
+  explicit Fixture(const bool aliases = false)
+      : windows{MemoryWindow{.address = 0, .words = data[0], .known = {}, .writable = true},
+                MemoryWindow{.address = rom, .words = data[1], .known = {}},
+                MemoryWindow{.address = high,
+                             .words = data[2],
+                             .known = known,
+                             .writable = true,
+                             .aliases_program = aliases}} {
+    program[entry - 2] = static_cast<Word>(do_immediate) | (3U << 8);
+    program[entry - 1] = entry + 1;
+    program[entry] = loads;
+    program[entry + 1] = stores;
+    program[entry + 2] = static_cast<Word>(rts);
+    reset();
+  }
+
+  void reset(const Input input = {}) {
+    known.fill(1);
+    if (input.known_index < known.size()) { known[input.known_index] = input.knowledge; }
+    for (std::size_t bank = 0; bank < data.size(); ++bank) {
+      for (std::size_t index = 0; index < words; ++index) {
+        data[bank][index] = host_bits | (static_cast<Word>(bank + 1) << word_bits / 2) |
+                            static_cast<Word>(index + 1);
+      }
+    }
+  }
+
+  [[nodiscard]] std::optional<Word> inspect_program(const Word address) const noexcept override {
+    return address < program.size() ? std::optional{program[address]} : std::nullopt;
+  }
+
+  std::span<const MemoryWindow> memory_windows(const Space space) noexcept override {
+    return space == Space::x ? std::span<const MemoryWindow>(windows)
+                             : std::span<const MemoryWindow>{};
+  }
+
+  bool read(Space /*space*/, Word /*address*/, Word /*pc*/, Word & /*value*/) noexcept override {
+    return false;
+  }
+
+  bool write(Space /*space*/, Word /*address*/, Word /*pc*/, Word /*value*/) noexcept override {
+    return false;
+  }
+
+  bool bit(Space /*space*/,
+           Word /*address*/,
+           Word /*pc*/,
+           Word /*index*/,
+           BitAction /*action*/,
+           bool & /*previous*/) noexcept override {
+    return false;
+  }
+
+  [[nodiscard]] detail::JitRuntime runtime() { return {.memory = {}, .windows = {windows, {}}}; }
+
+  std::array<Word, 32> program{};
+  Data data{};
+  std::array<std::uint8_t, words> known{};
+  std::array<MemoryWindow, 3> windows;
+};
+
+Registers initial(const Input input, const Word mode) {
+  auto result = register_model::seed(mode);
+  result.pc = entry;
+  result.la = entry + 1;
+  result.lc = input.count;
+  result.sr = mode | lf | input.flags;
+  result.r[0] = input.source;
+  result.r[1] = input.destination;
+  result.m.fill(word_mask);
+  result.stack[2] = std::uint64_t{entry} << word_bits;
+  return result;
+}
+
+struct Model {
+  Registers reg;
+  Data data;
+  std::array<std::uint8_t, words> known;
+  Fault failure;
+  Word retired = 0;
+};
+
+std::optional<std::pair<std::size_t, std::size_t>> location(const Word address) {
+  constexpr std::array bases{0U, rom, high};
+  for (std::size_t bank = 0; bank < bases.size(); ++bank) {
+    if (address >= bases[bank] && address - bases[bank] < words) {
+      return std::pair{bank, std::size_t{address - bases[bank]}};
+    }
+  }
+  return {};
+}
+
+void step(Model &model, const bool aliases) {
+  const auto pc = model.reg.pc;
+  const bool load = pc == entry;
+  const auto address = model.reg.r[load ? 0U : 1U]++;
+  const auto position = location(address);
+  bool accepted = position.has_value();
+  const auto value = static_cast<Word>(model.reg.x) & word_mask;
+  if (position) {
+    const auto [bank, index] = *position;
+    accepted = load ? bank != 2 || model.known[index] != 0 : bank != 1 && (bank != 2 || !aliases);
+    if (accepted && load) {
+      model.reg.x =
+          (model.reg.x & ~std::uint64_t{word_mask}) | (model.data[bank][index] & word_mask);
+    } else if (accepted) {
+      model.data[bank][index] = value;
+      if (bank == 2) { model.known[index] = 1; }
+    }
+  }
+  ++model.reg.pc;
+  if (!accepted) {
+    model.failure = {.kind = load ? FaultKind::memory_read : FaultKind::memory_write,
+                     .space = Space::x,
+                     .address = address,
+                     .value = load ? 0U : value,
+                     .pc = pc};
+    return;
+  }
+  ++model.retired;
+  if (load) { return; }
+  if ((model.reg.sr & forever) != 0 || model.reg.lc != 1) {
+    model.reg.lc = (model.reg.lc - 1) & word_mask;
+    model.reg.pc = entry;
+  } else {
+    loop_frames::complete(model.reg);
+  }
+}
+
+Model expected(const Fixture &fixture, const Registers &state, const Word budget) {
+  Model result{.reg = state, .data = fixture.data, .known = fixture.known, .failure = {}};
+  for (Word i = 0; i < budget && result.failure == Fault{}; ++i) {
+    step(result, fixture.windows[2].aliases_program);
+  }
+  return result;
+}
+
+unsigned fallback_calls = 0;
+
+std::uint32_t fallback(detail::Cpu * /*cpu*/, detail::NativeContext * /*owner*/) noexcept {
+  ++fallback_calls;
+  return 0;
+}
+
+void direct(Fixture &fixture, const Input input, const Word mode) {
+  fixture.reset(input);
+  const auto state = initial(input, mode);
+  const auto runtime = fixture.runtime();
+  const auto operations = detail::parse_block(fixture.program, state, runtime);
+  std::unique_ptr<detail::LlvmCompiler> compiler;
+  const auto image =
+      detail::compile_loop(compiler, operations, runtime, std::bit_cast<const void *>(&fallback));
+  if (!image) { throw std::runtime_error("Declared windows must admit a whole copy loop"); }
+  const auto wanted = expected(fixture, state, 6);
+  auto shifted = state;
+  shifted.a <<= detail::padding_bits;
+  shifted.b <<= detail::padding_bits;
+  detail::Cpu cpu{.reg = shifted};
+  detail::NativeContext owner{.runtime = {}, .budget = 6, .cycle_deadline = 6};
+  const auto before = fallback_calls;
+  const auto retired = detail::enter_block(image->entry, cpu, owner);
+  cpu.reg.a >>= detail::padding_bits;
+  cpu.reg.b >>= detail::padding_bits;
+  require(retired == 6 && fallback_calls == before && cpu.reg == wanted.reg &&
+              fixture.data == wanted.data && fixture.known == wanted.known &&
+              cpu.instructions == 6 && cpu.cycles == 6,
+          "LLVM selects actual per-cursor windows and executes their body without fallback");
+}
+
+void prefixes(Core &core, Fixture &fixture, const Input input, const Word mode) {
+  const auto total = input.count != 0 && (input.flags & forever) == 0 ? input.count * 2 : 6U;
+  for (Word prefix = 0; prefix <= total; ++prefix) {
+    fixture.reset(input);
+    const auto state = initial(input, mode);
+    const auto wanted = expected(fixture, state, prefix);
+    const bool restart = core.state().failure != Fault{};
+    if (restart) { core.reset(); }
+    core.set_registers(state);
+    if (restart) {
+      constexpr std::array entries{entry};
+      require(core.prepare(entries).prepared_entries == 1,
+              "Reprepare after an explicit fault reset");
+    }
+    const auto before = core.progress();
+    const auto result =
+        prefix % 2 == 0 ? core.run(prefix) : core.run_until(before.estimated_cycles + prefix);
+    if (core.registers() != wanted.reg || result.fault != wanted.failure) {
+      std::cerr << "source/destination/count/flags/mode/prefix=" << input.source << '/'
+                << input.destination << '/' << input.count << '/' << input.flags << '/' << mode
+                << '/' << prefix << " actual PC/R0/R1=" << core.registers().pc << '/'
+                << core.registers().r[0] << '/' << core.registers().r[1]
+                << " expected=" << wanted.reg.pc << '/' << wanted.reg.r[0] << '/' << wanted.reg.r[1]
+                << '\n';
+    }
+    require(result.retired == wanted.retired && result.fault == wanted.failure &&
+                core.registers() == wanted.reg && fixture.data == wanted.data &&
+                fixture.known == wanted.known &&
+                result.progress ==
+                    Progress{.instructions = before.instructions + wanted.retired,
+                             .estimated_cycles = before.estimated_cycles + wanted.retired},
+            "Window admission and exact prefixes preserve permissions, aliases, frames and data");
+  }
+}
+
+void cases(const Word mode) {
+  Fixture fixture;
+  direct(fixture, {}, mode);
+  direct(fixture, {.source = high + 1, .destination = 2}, mode);
+  direct(fixture, {.source = 1, .destination = 2}, mode);
+  direct(
+      fixture, {.source = high + 1, .destination = 2, .known_index = 2, .knowledge = 0x80}, mode);
+  Core core(Memory::external(), &fixture);
+  core.set_registers(initial({}, mode));
+  constexpr std::array entries{entry};
+  const auto state = core.state();
+  const auto data_before = fixture.data;
+  const auto known_before = fixture.known;
+  const auto prepared = core.prepare(entries);
+  const auto again = core.prepare(entries);
+  require(prepared.prepared_entries == 1 && prepared.native_bytes > 0 &&
+              prepared.failure == Fault{} && again.prepared_entries == 1 &&
+              again.native_bytes == 0 && core.registers() == state.registers &&
+              core.progress() == state.progress && fixture.data == data_before &&
+              fixture.known == known_before,
+          "Prepare a windowed loop once without performing any guest execution");
+  constexpr std::array inputs{
+      Input{},
+      Input{.source = rom + 1, .destination = 2},
+      Input{.source = high + 1, .destination = 2},
+      Input{.source = 1, .destination = 2},
+      Input{.destination = rom + 2},
+      Input{.source = rom + words - 1},
+      Input{.destination = high + words - 1},
+      Input{.count = 1},
+      Input{.count = 0},
+      Input{.flags = forever | status_byte},
+      Input{.known_index = 2, .knowledge = 0},
+      Input{.known_index = 2, .knowledge = 0x80},
+      Input{.source = high + 1, .destination = 2, .known_index = 2, .knowledge = 0},
+      Input{.source = high + 1, .destination = 2, .known_index = 2, .knowledge = 0x80}};
+  for (const auto input : inputs) { prefixes(core, fixture, input, mode); }
+  Fixture aliased(true);
+  Core alias_core(Memory::external(), &aliased);
+  alias_core.set_registers(initial({}, mode));
+  require(alias_core.prepare(entries).prepared_entries == 1,
+          "Prepare before selecting the runtime write destination");
+  prefixes(alias_core, aliased, {}, mode);
+}
+
+void knowledge_alias() {
+  Fixture fixture;
+  fixture.windows[2].known = {reinterpret_cast<std::uint8_t *>(fixture.data[2].data()), words};
+  Core core(Memory::external(), &fixture);
+  core.set_registers(initial({}, 0));
+  constexpr std::array entries{entry};
+  const auto report = core.prepare(entries);
+  require(report.failure == Fault{} && report.prepared_entries == 0 && report.native_bytes == 0,
+          "A store aliasing knowledge bytes cannot use invariant initialization admission");
+}
+
+void cross_space_cursor() {
+  std::array<Word, 32> program{};
+  std::array<Word, words> x{};
+  std::array<Word, words> y{};
+  std::array<std::uint8_t, words> known{};
+  known.fill(1);
+  for (std::size_t i = 0; i < words; ++i) { x[i] = static_cast<Word>(i + 1); }
+  program[entry] = loads;
+  program[entry + 1] = (stores & ~(7U << 8)) | y_bus;
+  const MemoryWindow from{.address = rom, .words = x, .known = {}};
+  const MemoryWindow to{.address = rom + 1, .words = y, .known = known, .writable = true};
+  const detail::JitRuntime runtime{.memory = {},
+                                   .windows = {std::span(&from, 1), std::span(&to, 1)}};
+  const auto state = initial({.source = rom}, 0);
+  const auto operations = detail::parse_block(program, state, runtime);
+  std::unique_ptr<detail::LlvmCompiler> compiler;
+  const auto image =
+      detail::compile_loop(compiler, operations, runtime, std::bit_cast<const void *>(&fallback));
+  if (!image) { throw std::runtime_error("One cursor can address both declared Harvard spaces"); }
+  auto wanted = state;
+  wanted.r[0] = rom + 6;
+  wanted.x = (wanted.x & ~std::uint64_t{word_mask}) | x[4];
+  loop_frames::complete(wanted);
+  wanted.pc = entry + 2;
+  auto shifted = state;
+  shifted.a <<= detail::padding_bits;
+  shifted.b <<= detail::padding_bits;
+  detail::Cpu cpu{.reg = shifted};
+  detail::NativeContext owner{.runtime = {}, .budget = 6, .cycle_deadline = 6};
+  const auto before = fallback_calls;
+  const auto retired = detail::enter_block(image->entry, cpu, owner);
+  cpu.reg.a >>= detail::padding_bits;
+  cpu.reg.b >>= detail::padding_bits;
+  std::array<Word, words> expected_y{};
+  for (std::size_t i = 0; i < 6; i += 2) { expected_y[i] = x[i]; }
+  require(retired == 6 && fallback_calls == before && cpu.reg == wanted && y == expected_y,
+          "The second space's first access accounts for the preceding cursor update");
+}
+}
+
+int main() try {
+  for (const auto mode : modes) { cases(mode); }
+  knowledge_alias();
+  cross_space_cursor();
+} catch (const std::exception &error) {
+
+  std::cerr << error.what() << '\n';
+  return 1;
+}
