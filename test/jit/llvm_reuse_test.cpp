@@ -284,6 +284,19 @@ void outside_contexts() {
   }
 }
 
+void explicit_optimization() {
+  Fixture fixture;
+  Core core(Memory::external(), &fixture);
+  const std::array dormant{Word{0}};
+  const auto initial_report = core.prepare(dormant);
+  require(initial_report.failure == Fault{} && initial_report.prepared_entries == 0 &&
+              initial_report.native_bytes == 0,
+          "A dormant CFG does not establish an unrelated arithmetic entry");
+  compare(core, fixture, initial(0, {.active = true, .address = previous_la}), {});
+  // If run() had materialized O3, this explicit preparation would emit no new text.
+  prepare(core, fixture, 0);
+}
+
 void active_origin() {
   Fixture fixture;
   Core core(Memory::external(), &fixture);
@@ -396,6 +409,7 @@ void unknown_prefix() {
 
 int main() try {
   outside_contexts();
+  explicit_optimization();
   active_origin();
   excluded_ends();
   invalidation();

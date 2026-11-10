@@ -34,6 +34,8 @@ Prepare established CFG headers and share one-pass control regions across enclos
 DO contexts only when their current loop end lies outside the complete region.
 An interior or final loop boundary keeps precise specialized execution. Clear shared
 lookup on program/grant invalidation; retained storage is not evidence of a valid view.
+Run optimizing materialization only during explicit stopped-owner preparation.
+Newly reached code uses the fast native emitter rather than blocking execution on O3.
 Install code only at a stopped owner boundary after validating the captured code
 revision. Compilation failure leaves architecture/progress unchanged. Keep LLVM
 handles private, instrument emitted native code explicitly in sanitizer builds,

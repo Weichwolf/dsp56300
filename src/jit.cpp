@@ -110,7 +110,6 @@ struct Jit::Impl {
   std::optional<BlockInstruction> rejected_repeat;
   bool invalidated = false;
   bool exit_requested = false;
-  bool preparation_requested = false;
   NativeContext context;
   std::unique_ptr<LlvmCompiler> compiler;
   ExecutableArena arena;
@@ -131,20 +130,17 @@ Block *Jit::Impl::compile(const Registers &state, const bool requested) {
 #endif
   block->operations = parse_block(program, state, context.runtime, callbacks);
   if (block->operations.empty()) { return nullptr; }
-  const bool optimize =
-      requested || (preparation_requested &&
-                    region_candidate(block->operations, context.runtime, whole_loop_entry(state)));
 #if defined(__aarch64__)
-  if (!optimize) {
+  if (!requested) {
     block->region = resident_region_plan(program, state, context.runtime, block->operations);
   }
-  if (!optimize && !block->region) {
+  if (!requested && !block->region) {
     if (auto *existing = reuse(block->operations, EntryKind::ordinary)) { return existing; }
   }
 #endif
   auto bytes = emit_block(block->operations, context.runtime, state.m);
 #if defined(__x86_64__)
-  if (!optimize) {
+  if (!requested) {
     block->region = resident_region_plan(program, state, context.runtime, block->operations);
   }
 #endif
@@ -162,7 +158,7 @@ Block *Jit::Impl::compile(const Registers &state, const bool requested) {
   if (!block->region) {
     block->direct = static_cast<const std::uint8_t *>(block->entry) + body_offset;
   }
-  if (optimize) {
+  if (requested) {
     if (const auto compiled =
             compile_region(compiler, block->operations, context.runtime, block->entry)) {
       block->entry = compiled->entry;
@@ -304,7 +300,6 @@ void Jit::reset() {
   impl_->rejected_repeat.reset();
   impl_->invalidated = false;
   impl_->exit_requested = false;
-  impl_->preparation_requested = false;
 }
 
 Block *Jit::Impl::retain(std::unique_ptr<Block> block) {
@@ -454,7 +449,6 @@ PreparationReport Jit::prepare(const std::span<const Word> established_entries,
                                const Registers &state,
                                const std::optional<std::uint64_t> revision) {
   auto &self = *impl_;
-  self.preparation_requested = true;
   self.clear_invalidated();
   const auto graph = preparation_graph(self.program, self.context.runtime, established_entries);
   PreparationReport report{.failure = graph.failure};

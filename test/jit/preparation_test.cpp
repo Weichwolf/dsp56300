@@ -360,10 +360,16 @@ void program_write_reinstallation() {
             "effects");
   };
   verify(2, false);
+  const auto before_preparation = core.state();
   const auto restored = core.prepare(entries);
-  require(restored.prepared_entries == 1 && restored.native_bytes == 0,
-          "A cold miss after a real P write must already reinstall optimized code before another "
-          "prepare");
+  require(restored.prepared_entries == 1 && restored.native_bytes > 0 &&
+              core.registers() == before_preparation.registers &&
+              core.progress() == before_preparation.progress,
+          "After a real P write, fast native execution leaves optimizing materialization to "
+          "explicit preparation");
+  const auto repeated = core.prepare(entries);
+  require(repeated.prepared_entries == 1 && repeated.native_bytes == 0,
+          "The explicitly reinstalled image is retained after the genuine code change");
   for (Word prefix = 0; prefix <= 10; ++prefix) {
     verify(prefix, false);
     verify(prefix, true);
