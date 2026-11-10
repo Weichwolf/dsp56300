@@ -80,7 +80,7 @@ set(dsp56300_semantic_sources
   src/transfer_parallel.cpp src/transfer_special.cpp src/viterbi.cpp)
 add_library(dsp56300_semantics OBJECT ${dsp56300_semantic_sources})
 add_library(dsp56300_core STATIC
-  src/jit/preparation.cpp src/jit/llvm/runtime.cpp
+  src/jit/preparation.cpp src/jit/image_plan.cpp src/jit/llvm/runtime.cpp
   src/jit/llvm/region.cpp src/jit/llvm/region_plan.cpp src/jit/llvm/alu.cpp
   src/jit/arena.cpp src/jit/block_parse.cpp src/jit/block_emit.cpp
   src/jit/index.cpp src/jit/move.cpp src/jit/resident_plan.cpp
@@ -148,6 +148,10 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   target_include_directories(dsp56300_preparation_graph_test PRIVATE src/jit)
   target_link_libraries(dsp56300_preparation_graph_test PRIVATE dsp56300::core)
   add_test(NAME preparation-control-flow COMMAND dsp56300_preparation_graph_test)
+  add_executable(dsp56300_image_plan_test test/jit/image_plan_test.cpp)
+  target_include_directories(dsp56300_image_plan_test PRIVATE src test/support)
+  target_link_libraries(dsp56300_image_plan_test PRIVATE dsp56300::core)
+  add_test(NAME explicit-executable-inventory COMMAND dsp56300_image_plan_test)
   add_executable(dsp56300_preparation_test test/jit/preparation_test.cpp)
   target_link_libraries(dsp56300_preparation_test PRIVATE dsp56300::core)
   add_test(NAME optimized-preparation COMMAND dsp56300_preparation_test)
