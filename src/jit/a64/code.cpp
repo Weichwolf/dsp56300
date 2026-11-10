@@ -29,8 +29,10 @@ constexpr unsigned bit_count(const Width width) {
 }
 
 void Code::word(const std::uint32_t value) {
+  const auto begin = bytes_.size();
+  bytes_.resize(begin + instruction_bytes);
   for (unsigned shift = 0; shift < 32; shift += byte_bits) {
-    bytes_.push_back(static_cast<std::uint8_t>((value >> shift) & byte_mask));
+    bytes_[begin + (shift / byte_bits)] = static_cast<std::uint8_t>((value >> shift) & byte_mask);
   }
 }
 
