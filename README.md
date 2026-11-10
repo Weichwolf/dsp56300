@@ -15,6 +15,17 @@ ctest --preset release
 cmake --build --preset release --target bench
 ```
 
+The generic ISA/retirement compiler input is exported from the same Release
+objects as the native library:
+
+```sh
+cmake --build --preset release --target dsp56300-semantic-ir
+```
+
+This emits verified LLVM 19 bitcode at `build/release/semantic/dsp56300.bc`.
+Consumer image compilation specializes that input and combines compatible host
+bindings before O3. Export requires Release ThinLTO.
+
 `strict` enables ASan/UBSan; `thread` selects separate TSan. Ccache is used when
 available. Use the packaged LLVM 19 toolchain; on macOS install it with
 `brew install llvm@19 ninja ccache`. LLVM and compiler-rt are not built from source.

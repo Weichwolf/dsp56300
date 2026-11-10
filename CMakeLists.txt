@@ -67,40 +67,51 @@ else()
     src/jit/x64/batch.cpp src/jit/x64/vector.cpp src/jit/code.cpp
     src/jit/run.cpp src/jit/x64/mac_batch_avx2.cpp src/jit/x64/resident_region_emit.cpp)
 endif()
+set(dsp56300_semantic_sources
+  src/agu.cpp src/arithmetic.cpp src/bit_fields.cpp src/bits.cpp
+  src/cache_control.cpp src/captured.cpp src/conditional.cpp src/control.cpp
+  src/core.cpp src/debugging.cpp src/decode.cpp src/exceptions.cpp
+  src/external_memory.cpp src/fetch.cpp src/immediate.cpp src/instruction_shape.cpp
+  src/integer.cpp src/iteration.cpp src/jit.cpp src/loop.cpp
+  src/memory_windows.cpp src/move.cpp src/processing.cpp src/products.cpp
+  src/program_cache.cpp src/registers.cpp src/repeat.cpp src/runtime.cpp
+  src/saturation.cpp src/semantic.cpp src/shifts.cpp src/state.cpp
+  src/transfer.cpp src/transfer_description.cpp src/transfer_info.cpp
+  src/transfer_parallel.cpp src/transfer_special.cpp src/viterbi.cpp)
+add_library(dsp56300_semantics OBJECT ${dsp56300_semantic_sources})
 add_library(dsp56300_core STATIC
-  src/core.cpp src/semantic.cpp src/captured.cpp src/repeat.cpp
-  src/memory_windows.cpp src/external_memory.cpp src/state.cpp
-  src/fetch.cpp src/jit/preparation.cpp src/jit/llvm/runtime.cpp
-  src/jit/llvm/region.cpp src/jit/llvm/region_plan.cpp src/jit/llvm/alu.cpp src/instruction_shape.cpp src/transfer_info.cpp
-  src/transfer_parallel.cpp src/transfer_special.cpp src/transfer_description.cpp
-  src/arithmetic.cpp src/saturation.cpp src/shifts.cpp
-  src/conditional.cpp src/immediate.cpp src/integer.cpp
-  src/decode.cpp src/move.cpp src/transfer.cpp
-  src/registers.cpp src/agu.cpp src/control.cpp
-  src/exceptions.cpp src/bits.cpp src/bit_fields.cpp
-  src/loop.cpp src/products.cpp src/iteration.cpp
-  src/processing.cpp src/debugging.cpp src/viterbi.cpp
-  src/program_cache.cpp src/cache_control.cpp src/jit.cpp
-  src/runtime.cpp src/jit/arena.cpp src/jit/block_parse.cpp
-  src/jit/block_emit.cpp src/jit/index.cpp src/jit/move.cpp
-  src/jit/resident_plan.cpp src/jit/dataflow.cpp src/jit/value_ranges.cpp
-  src/jit/word_reuse.cpp src/jit/registers.cpp src/jit/mac_batch.cpp
-  src/jit/value_graph.cpp src/jit/resident_region_run.cpp src/jit/resident_region_plan.cpp
+  src/jit/preparation.cpp src/jit/llvm/runtime.cpp
+  src/jit/llvm/region.cpp src/jit/llvm/region_plan.cpp src/jit/llvm/alu.cpp
+  src/jit/arena.cpp src/jit/block_parse.cpp src/jit/block_emit.cpp
+  src/jit/index.cpp src/jit/move.cpp src/jit/resident_plan.cpp
+  src/jit/dataflow.cpp src/jit/value_ranges.cpp src/jit/word_reuse.cpp
+  src/jit/registers.cpp src/jit/mac_batch.cpp src/jit/value_graph.cpp
+  src/jit/resident_region_run.cpp src/jit/resident_region_plan.cpp
   ${dsp56300_native_sources})
 add_library(dsp56300::core ALIAS dsp56300_core)
 target_include_directories(dsp56300_core PUBLIC include)
 target_compile_features(dsp56300_core PUBLIC cxx_std_23)
-target_link_libraries(dsp56300_core PUBLIC dsp56300_quality)
+target_link_libraries(dsp56300_core PUBLIC dsp56300_quality PRIVATE dsp56300_semantics)
 include(cmake/Llvm.cmake)
+foreach(own_target IN ITEMS dsp56300_core dsp56300_semantics)
+  target_include_directories(${own_target} PRIVATE include src src/jit src/jit/x64)
+  target_include_directories(${own_target} SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
+  target_link_libraries(${own_target} PRIVATE dsp56300_quality)
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
+    target_compile_options(${own_target} PRIVATE $<$<CONFIG:Release>:-mcpu=native>)
+  else()
+    target_compile_options(${own_target} PRIVATE $<$<CONFIG:Release>:-march=native>)
+  endif()
+endforeach()
+include(cmake/SemanticIr.cmake)
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
-  target_compile_options(dsp56300_core PUBLIC $<$<CONFIG:Release>:-mcpu=native>)
+  target_compile_options(dsp56300_core INTERFACE $<$<CONFIG:Release>:-mcpu=native>)
 else()
-  target_compile_options(dsp56300_core PUBLIC $<$<CONFIG:Release>:-march=native>)
+  target_compile_options(dsp56300_core INTERFACE $<$<CONFIG:Release>:-march=native>)
 endif()
 if(NOT APPLE)
   target_link_options(dsp56300_core PUBLIC -fuse-ld=lld)
 endif()
-target_include_directories(dsp56300_core PRIVATE src src/jit src/jit/x64)
 
 file(GLOB_RECURSE DSP56300_OWN_FILES CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp"
