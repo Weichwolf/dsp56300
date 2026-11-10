@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "jit/llvm/loop.hpp"
+#include "jit/llvm/region.hpp"
 
 #include "architecture.hpp"
 #include "dsp56300/core.hpp"
@@ -10,10 +10,11 @@
 #include "jit/block.hpp"
 #include "jit/llvm/alu.hpp"
 #include "jit/llvm/builder.hpp"
+#include "jit/llvm/region_plan.hpp"
 #include "jit/llvm/runtime.hpp"
 #include "jit/move.hpp"
+#include "translation.hpp"
 
-#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstddef>
@@ -34,154 +35,10 @@ constexpr std::array<std::size_t, 4> bank_fields{
     offsetof(Registers, a), offsetof(Registers, b), offsetof(Registers, x), offsetof(Registers, y)};
 constexpr Word stack_mask = stack_entries - 1, pointer_mask = 63;
 constexpr unsigned bus_shift = word_bits + padding_bits;
-constexpr Word supported_modes = rounding_mode | scale_down | scale_up;
 
-bool data_register(const unsigned reg) {
-  return (reg >= x0_register && reg <= y1_register) || reg == a_register || reg == b_register;
-}
-
-struct LoopPlan {
-  struct Step {
-    NativeMoves memory;
-    NativeRegisterMove registers;
-  };
-
-  struct Extent {
-    std::int64_t minimum = 0, maximum = 0;
-    bool accessed = false, writing = false;
-  };
-
-  std::span<const BlockInstruction> operations;
-  std::vector<Step> steps;
-  std::array<std::vector<MemoryWindow>, 2> windows;
-  std::array<std::array<Extent, agu_registers>, 2> extents{};
-  std::array<std::int64_t, agu_registers> deltas{};
-  Word cost = 0, count = 0;
-};
-
-bool permitted(const MemoryWindow &window, const bool writing) {
-  return !window.words.empty() && window.address < io_begin &&
-         window.words.size() <= io_begin - window.address &&
-         (window.known.empty() || window.known.size() == window.words.size()) &&
-         (!writing || (window.writable && !window.aliases_program));
-}
-
-auto declared_windows(const JitRuntime &runtime) {
-  std::array<std::vector<MemoryWindow>, 2> result;
-  for (std::size_t bank = 0; bank < result.size(); ++bank) {
-    if (!runtime.windows[bank].empty()) {
-      result[bank].assign(runtime.windows[bank].begin(), runtime.windows[bank].end());
-      continue;
-    }
-    const auto &memory = runtime.memory[bank];
-    if (memory.data != nullptr && memory.words != 0) {
-      result[bank].push_back({.words = {memory.data, std::min(memory.words, std::size_t{io_begin})},
-                              .known = {},
-                              .writable = true,
-                              .aliases_program = memory.aliases_program});
-    }
-  }
-  return result;
-}
-
-bool stable_knowledge(const LoopPlan &plan) {
-  std::vector<std::span<const std::byte>> masks;
-  for (const auto &bank : plan.windows) {
-    for (const auto &window : bank) {
-      if (!window.known.empty()) { masks.push_back(std::as_bytes(window.known)); }
-    }
-  }
-  for (std::size_t bank = 0; bank < plan.windows.size(); ++bank) {
-    if (!std::ranges::any_of(plan.extents[bank],
-                             [](const auto &extent) { return extent.writing; })) {
-      continue;
-    }
-    for (const auto &window : plan.windows[bank]) {
-      if (!permitted(window, true)) { continue; }
-      const auto data = std::bit_cast<std::uintptr_t>(window.words.data());
-      for (const auto mask : masks) {
-        const auto known = std::bit_cast<std::uintptr_t>(mask.data());
-        if (data <= known ? known - data < window.words.size_bytes() : data - known < mask.size()) {
-          return false;
-        }
-      }
-    }
-  }
-  return true;
-}
-
-bool append_moves(LoopPlan &plan, const NativeMoves &moves) {
-  Word changed_addresses = 0;
-  for (const auto &move : std::span(moves.transfers).first(moves.count)) {
-    const auto mode = move.address.mode;
-    if (!data_register(move.reg) || (mode != 2 && mode != 3 && mode != 4 && mode != 7) ||
-        (changed_addresses & (1U << move.address.index)) != 0) {
-      return false;
-    }
-    const auto bank = move.space == Space::x ? 0U : 1U;
-    if (!std::ranges::any_of(plan.windows[bank], [&move](const auto &window) {
-          return permitted(window, !move.load);
-        })) {
-      return false;
-    }
-    auto &delta = plan.deltas[move.address.index];
-    if (mode == 7) { --delta; }
-    auto &extent = plan.extents[bank][move.address.index];
-    if (!extent.accessed) {
-      extent.minimum = extent.maximum = delta;
-    } else {
-      extent.minimum = std::min(extent.minimum, delta);
-      extent.maximum = std::max(extent.maximum, delta);
-    }
-    extent.accessed = true;
-    extent.writing = extent.writing || !move.load;
-    if (mode == 3) { ++delta; }
-    if (mode == 2) { --delta; }
-    changed_addresses |= 1U << move.address.index;
-  }
-  return true;
-}
-
-std::optional<LoopPlan> plan_loop(const std::span<const BlockInstruction> operations,
-                                  const JitRuntime &runtime) {
-  if (operations.empty() || !at_loop_end(operations.back())) { return {}; }
-  const auto mode = operations.front().mode;
-  if ((mode & ~supported_modes) != 0 ||
-      (mode & (scale_down | scale_up)) == (scale_down | scale_up)) {
-    return {};
-  }
-  LoopPlan plan{.operations = operations, .steps = {}, .windows = declared_windows(runtime)};
-  auto pc = operations.front().pc;
-  for (const auto &operation : operations) {
-    const auto &instruction = operation.instruction;
-    if (operation.pc != pc++ || operation.mode != mode ||
-        operation.loop_address != operations.back().loop_address || instruction.words != 1 ||
-        (instruction.operation != Operation::parallel && instruction.operation != Operation::nop) ||
-        !llvm19::supported_alu(instruction.opcode)) {
-      return {};
-    }
-    auto moves = plan_moves(instruction);
-    const auto registers = plan_register_move(instruction);
-    if (moves.long_pair || !append_moves(plan, moves)) { return {}; }
-    if (registers.valid() &&
-        (!data_register(registers.source) || !data_register(registers.destination))) {
-      return {};
-    }
-    if (instruction.operation == Operation::parallel && moves.count == 0 && !registers.valid() &&
-        (instruction.opcode & upper_move_mask) != no_move_group) {
-      return {};
-    }
-    plan.steps.push_back({.memory = moves, .registers = registers});
-    plan.cost += instruction.cycles;
-    ++plan.count;
-  }
-  if (!stable_knowledge(plan)) { return {}; }
-  return plan;
-}
-
-class LoopLifter {
+class RegionLifter {
 public:
-  LoopLifter(LlvmModule &module, const LoopPlan &plan, const void *fallback)
+  RegionLifter(LlvmModule &module, const RegionPlan &plan, const void *fallback)
       : context_(module.context()),
         function_(make_function(module)),
         ir_(context_, LLVMAppendBasicBlockInContext(context_, function_, "entry")),
@@ -262,27 +119,46 @@ private:
                                      ir_.CreateZExt(lc_, ir_.getInt64Ty()));
     forever_ =
         ir_.CreateICmpNE(ir_.CreateAnd(status_, ir_.getInt32(forever_flag)), ir_.getInt32(0));
-    turns_ = ir_.CreateSelect(forever_, turns_, minimum(turns_, finite_count_));
+    turns_ = plan_.batch ? ir_.CreateSelect(forever_, turns_, minimum(turns_, finite_count_))
+                         : minimum(turns_, ir_.getInt64(1));
     eligible_ = ir_.CreateICmpUGT(turns_, ir_.getInt64(0));
-    require(ir_.CreateICmpEQ(ir_.CreateAnd(status_, ir_.getInt32(numeric_mode_mask | loop_flag)),
-                             ir_.getInt32(loop_flag | plan_.operations.front().mode)));
+    require(ir_.CreateICmpEQ(ir_.CreateAnd(status_, ir_.getInt32(numeric_mode_mask)),
+                             ir_.getInt32(plan_.operations.front().mode)));
     require(ir_.CreateICmpEQ(reg(32, offsetof(Registers, pc)),
                              ir_.getInt32(plan_.operations.front().pc)));
-    require(ir_.CreateICmpEQ(reg(32, offsetof(Registers, la)),
-                             ir_.getInt32(plan_.operations.back().loop_address)));
-    require(ir_.CreateICmpEQ(ir_.CreateLShr(saved_, ir_.getInt64(word_bits)),
-                             ir_.getInt64(plan_.operations.front().pc)));
-    require(ir_.CreateICmpUGE(sc_, ir_.getInt32(2)));
+    auto *active_la = ir_.CreateSelect(
+        ir_.CreateICmpNE(ir_.CreateAnd(status_, ir_.getInt32(loop_flag)), ir_.getInt32(0)),
+        reg(32, offsetof(Registers, la)),
+        ir_.getInt32(inactive_loop));
+    require(ir_.CreateICmpEQ(active_la, ir_.getInt32(plan_.operations.front().loop_address)));
+    if (at_loop_end(plan_.operations.back())) { require(ir_.CreateICmpUGE(sc_, ir_.getInt32(2))); }
+    if (plan_.batch) {
+      require(ir_.CreateICmpEQ(ir_.CreateLShr(saved_, ir_.getInt64(word_bits)),
+                               ir_.getInt64(plan_.operations.front().pc)));
+    }
     require(ir_.CreateICmpEQ(load(32, offsetof(Cpu, repeat_remaining)), ir_.getInt32(0)));
     for (const auto offset : {offsetof(Cpu, processing), offsetof(Cpu, debug_flags)}) {
       require(ir_.CreateICmpEQ(load(8, offset), ir_.getInt8(0)));
     }
     for (unsigned index = 0; index < agu_registers; ++index) {
       cursors_[index] = reg(32, offsetof(Registers, r) + (index * sizeof(Word)));
-      if (!plan_.extents[0][index].accessed && !plan_.extents[1][index].accessed) { continue; }
-      auto *modifier = reg(32, offsetof(Registers, m) + (index * sizeof(Word)));
-      require(ir_.CreateICmpEQ(ir_.CreateAnd(modifier, ir_.getInt32(modifier_mask)),
-                               ir_.getInt32(modifier_mask)));
+      strides_[index] = reg(32, offsetof(Registers, n) + (index * sizeof(Word)));
+      if (!plan_.agu[index]) { continue; }
+      auto *modifier = ir_.CreateAnd(reg(32, offsetof(Registers, m) + (index * sizeof(Word))),
+                                     ir_.getInt32(modifier_mask));
+      auto *linear = ir_.CreateICmpEQ(modifier, ir_.getInt32(modifier_mask));
+      if (plan_.batch) { require(linear); }
+      auto *mask = ir_.CreateAnd(modifier, ir_.getInt32(multiple_wrap_mask));
+      auto *ring = ir_.CreateAnd(
+          ir_.CreateICmpEQ(
+              ir_.CreateAnd(modifier, ir_.getInt32(multiple_wrap_bit | multiple_reserved_bit)),
+              ir_.getInt32(multiple_wrap_bit)),
+          ir_.CreateAnd(ir_.CreateICmpNE(mask, ir_.getInt32(0)),
+                        ir_.CreateICmpEQ(ir_.CreateAnd(mask, ir_.CreateAdd(mask, ir_.getInt32(1))),
+                                         ir_.getInt32(0))));
+      require(ir_.CreateOr(linear, ring));
+      masks_[index] = ir_.CreateSelect(linear, ir_.getInt32(word_mask), mask);
+      origins_[index] = ir_.CreateAnd(cursors_[index], ir_.CreateNot(masks_[index]));
     }
   }
 
@@ -353,7 +229,7 @@ private:
     return base;
   }
 
-  void memory_guards() {
+  void batch_memory_guards() {
     for (unsigned index = 0; index < agu_registers; ++index) {
       for (unsigned bank = 0; bank < 2; ++bank) {
         const auto &extent = plan_.extents[bank][index];
@@ -376,15 +252,62 @@ private:
     }
   }
 
-  V memory(const NativeMove &move) {
+  V advanced(V cursor, const AddressForm form) {
+    auto *step = form.mode < 2 || form.mode == 5 ? strides_[form.index] : ir_.getInt32(1);
+    auto *next = form.mode == 0 || form.mode == 2 || form.mode == 7 ? ir_.CreateSub(cursor, step)
+                                                                    : ir_.CreateAdd(cursor, step);
+    return ir_.CreateOr(origins_[form.index], ir_.CreateAnd(next, masks_[form.index]));
+  }
+
+  V effective(std::array<V, agu_registers> &cursors, const AddressForm form) {
+    auto *prior = cursors[form.index];
+    if (form.mode == 4) { return prior; }
+    auto *next = advanced(prior, form);
+    if (form.mode != 5) { cursors[form.index] = next; }
+    return form.mode == 5 || form.mode == 7 ? next : prior;
+  }
+
+  void memory_guards() {
+    if (plan_.batch) {
+      batch_memory_guards();
+      return;
+    }
+    auto proof = cursors_;
+    std::array<std::array<Bounds, agu_registers>, 2> bounds{};
+    for (const auto &step : plan_.steps) {
+      V paired = nullptr;
+      for (const auto &move : std::span(step.memory.transfers).first(step.memory.count)) {
+        auto *at =
+            step.memory.long_pair && paired != nullptr ? paired : effective(proof, move.address);
+        paired = at;
+        auto &range = bounds[move.space == Space::x ? 0U : 1U][move.address.index];
+        auto *wide = ir_.CreateZExt(at, ir_.getInt64Ty());
+        range.first = range.first == nullptr ? wide : minimum(range.first, wide);
+        range.last = range.last == nullptr
+                         ? wide
+                         : ir_.CreateSelect(ir_.CreateICmpUGT(wide, range.last), wide, range.last);
+      }
+    }
+    for (unsigned bank = 0; bank < 2; ++bank) {
+      for (unsigned index = 0; index < agu_registers; ++index) {
+        if (!plan_.extents[bank][index].accessed) { continue; }
+        memory_bases_[bank][index] = select_window(
+            plan_.windows[bank], bounds[bank][index], plan_.extents[bank][index].writing);
+      }
+    }
+  }
+
+  V memory(const NativeMove &move, V at) {
     const auto bank = move.space == Space::x ? 0U : 1U;
     return ir_.CreateGEP(ir_.getInt32Ty(),
                          memory_bases_[bank][move.address.index],
-                         ir_.CreateZExt(cursors_[move.address.index], ir_.getInt64Ty()));
+                         ir_.CreateZExt(at, ir_.getInt64Ty()));
   }
 
   V read_register(const std::array<V, 4> &values, const unsigned number) {
-    if (number >= a_register) {
+    if (number >= n_register_base) { return strides_[number - n_register_base]; }
+    if (number >= r_register_base) { return cursors_[number - r_register_base]; }
+    if (number == a_register || number == b_register) {
       return llvm19::transfer_word(
           ir_, values[number - a_register], plan_.operations.front().mode, status_);
     }
@@ -396,7 +319,15 @@ private:
   }
 
   void write_register(const unsigned number, V word) {
-    if (number >= a_register) {
+    if (number >= n_register_base) {
+      strides_[number - n_register_base] = word;
+      return;
+    }
+    if (number >= r_register_base) {
+      cursors_[number - r_register_base] = word;
+      return;
+    }
+    if (number == a_register || number == b_register) {
       banks_[number - a_register] = ir_.CreateShl(
           ir_.CreateSExt(ir_.CreateTrunc(word, ir_.getIntNTy(word_bits)), ir_.getInt64Ty()),
           ir_.getInt64(bus_shift));
@@ -410,20 +341,99 @@ private:
                      ir_.CreateShl(ir_.CreateZExt(word, ir_.getInt64Ty()), ir_.getInt64(shift)));
   }
 
-  void transfers(const NativeMoves &moves) {
+  V transfer_long(V value) {
+    static_cast<void>(llvm19::transfer_word(ir_, value, plan_.operations.front().mode, status_));
+    const auto mode = plan_.operations.front().mode;
+    const unsigned shift =
+        padding_bits + ((mode & scale_down) != 0 ? 1U : 0U) - ((mode & scale_up) != 0 ? 1U : 0U);
+    auto *scaled = LLVMBuildAShr(ir_.get(), value, ir_.getInt64(shift), "");
+    constexpr auto minimum = -(std::int64_t{1} << (double_word_bits - 1));
+    constexpr auto maximum = (std::int64_t{1} << (double_word_bits - 1)) - 1;
+    auto *low = ir_.getInt64(static_cast<std::uint64_t>(minimum));
+    auto *high = ir_.getInt64(maximum);
+    scaled = ir_.CreateSelect(
+        LLVMBuildICmp(ir_.get(), LLVMIntSLT, scaled, low, ""),
+        low,
+        ir_.CreateSelect(LLVMBuildICmp(ir_.get(), LLVMIntSGT, scaled, high, ""), high, scaled));
+    return ir_.CreateAnd(scaled, ir_.getInt64(long_mask));
+  }
+
+  V long_value(const unsigned selector) {
+    if (selector >= 6) {
+      auto *high = read_register(banks_, selector == 6 ? a_register : b_register);
+      auto *low = read_register(banks_, selector == 6 ? b_register : a_register);
+      return ir_.CreateOr(
+          ir_.CreateShl(ir_.CreateZExt(high, ir_.getInt64Ty()), ir_.getInt64(word_bits)),
+          ir_.CreateZExt(low, ir_.getInt64Ty()));
+    }
+    if (selector == 2 || selector == 3) { return banks_[selector]; }
+    auto *value = banks_[selector & 1U];
+    return selector >= 4 ? transfer_long(value)
+                         : ir_.CreateAnd(ir_.CreateLShr(value, ir_.getInt64(padding_bits)),
+                                         ir_.getInt64(long_mask));
+  }
+
+  void load_long(const unsigned selector, V value) {
+    if (selector == 2 || selector == 3) {
+      banks_[selector] = value;
+      return;
+    }
+    if (selector >= 6) {
+      write_register(
+          selector == 6 ? a_register : b_register,
+          ir_.CreateTrunc(ir_.CreateLShr(value, ir_.getInt64(word_bits)), ir_.getInt32Ty()));
+      write_register(
+          selector == 6 ? b_register : a_register,
+          ir_.CreateAnd(ir_.CreateTrunc(value, ir_.getInt32Ty()), ir_.getInt32(word_mask)));
+      return;
+    }
+    auto *&destination = banks_[selector & 1U];
+    if (selector >= 4) {
+      destination = ir_.CreateShl(
+          ir_.CreateSExt(ir_.CreateTrunc(value, ir_.getIntNTy(double_word_bits)), ir_.getInt64Ty()),
+          ir_.getInt64(padding_bits));
+    } else {
+      destination =
+          ir_.CreateOr(ir_.CreateAnd(destination, ir_.getInt64(~(long_mask << padding_bits))),
+                       ir_.CreateShl(value, ir_.getInt64(padding_bits)));
+    }
+  }
+
+  void long_transfer(const NativeMoves &moves, const Word opcode) {
+    const auto selector = ((opcode >> 16) & 3U) | ((opcode >> 17) & 4U);
+    auto *at = effective(cursors_, moves.transfers[0].address);
+    auto *x = memory(moves.transfers[0], at);
+    auto *y = memory(moves.transfers[1], at);
+    if (moves.transfers[0].load) {
+      auto *high = ir_.CreateAnd(ir_.CreateLoad(ir_.getInt32Ty(), x), ir_.getInt32(word_mask));
+      auto *low = ir_.CreateAnd(ir_.CreateLoad(ir_.getInt32Ty(), y), ir_.getInt32(word_mask));
+      load_long(selector,
+                ir_.CreateOr(
+                    ir_.CreateShl(ir_.CreateZExt(high, ir_.getInt64Ty()), ir_.getInt64(word_bits)),
+                    ir_.CreateZExt(low, ir_.getInt64Ty())));
+    } else {
+      auto *value = long_value(selector);
+      ir_.CreateStore(
+          ir_.CreateTrunc(ir_.CreateLShr(value, ir_.getInt64(word_bits)), ir_.getInt32Ty()), x);
+      ir_.CreateStore(
+          ir_.CreateAnd(ir_.CreateTrunc(value, ir_.getInt32Ty()), ir_.getInt32(word_mask)), y);
+    }
+  }
+
+  void transfers(const NativeMoves &moves, const Word opcode) {
+    if (moves.long_pair) {
+      long_transfer(moves, opcode);
+      return;
+    }
     const auto before = banks_;
     std::array<V, 2> words{};
     std::array<V, 2> pointers{};
     for (unsigned index = 0; index < moves.count; ++index) {
       const auto &move = moves.transfers[index];
-      auto *&cursor = cursors_[move.address.index];
-      if (move.address.mode == 7) { cursor = ir_.CreateSub(cursor, ir_.getInt32(1)); }
-      pointers[index] = memory(move);
+      pointers[index] = memory(move, effective(cursors_, move.address));
       words[index] = move.load ? ir_.CreateAnd(ir_.CreateLoad(ir_.getInt32Ty(), pointers[index]),
                                                ir_.getInt32(word_mask))
                                : read_register(before, move.reg);
-      if (move.address.mode == 3) { cursor = ir_.CreateAdd(cursor, ir_.getInt32(1)); }
-      if (move.address.mode == 2) { cursor = ir_.CreateSub(cursor, ir_.getInt32(1)); }
     }
     for (unsigned index = 0; index < moves.count; ++index) {
       const auto &move = moves.transfers[index];
@@ -435,12 +445,47 @@ private:
     }
   }
 
+  V condition(const unsigned selector) {
+    const auto test = [&](const Word mask) {
+      return ir_.CreateICmpNE(ir_.CreateAnd(status_, ir_.getInt32(mask)), ir_.getInt32(0));
+    };
+    auto *ge = ir_.CreateICmpEQ(test(negative), test(overflow));
+    const std::array truth{ir_.CreateNot(test(carry)),
+                           ge,
+                           ir_.CreateNot(test(zero)),
+                           ir_.CreateNot(test(negative)),
+                           ir_.CreateAnd(ir_.CreateNot(test(zero)), test(unnormalized | extension)),
+                           ir_.CreateNot(test(extension)),
+                           ir_.CreateNot(test(limit)),
+                           ir_.CreateAnd(ge, ir_.CreateNot(test(zero)))};
+    auto *selected = truth[selector & 7U];
+    return (selector & 8U) != 0 ? ir_.CreateNot(selected) : selected;
+  }
+
+  V next_pc() {
+    const auto &last = plan_.operations.back();
+    auto *following = ir_.getInt32((last.pc + last.instruction.words) & word_mask);
+    if (!plan_.control.valid) { return following; }
+    auto *target = plan_.control.reg < agu_registers
+                       ? cursors_[plan_.control.reg]
+                       : ir_.getInt32(plan_.control.target & word_mask);
+    return plan_.control.selector == 16
+               ? target
+               : ir_.CreateSelect(condition(plan_.control.selector), target, following);
+  }
+
   void finish() {
     for (unsigned bank = 0; bank < banks_.size(); ++bank) { put(banks_[bank], bank_fields[bank]); }
     for (unsigned index = 0; index < agu_registers; ++index) {
-      if (plan_.deltas[index] != 0) {
+      if (plan_.extents[0][index].accessed || plan_.extents[1][index].accessed ||
+          plan_.changed_r[index]) {
         put(ir_.CreateAnd(cursors_[index], ir_.getInt32(word_mask)),
             offsetof(Registers, r) + (index * sizeof(Word)));
+      }
+    }
+    for (unsigned index = 0; index < agu_registers; ++index) {
+      if (plan_.changed_n[index]) {
+        put(strides_[index], offsetof(Registers, n) + (index * sizeof(Word)));
       }
     }
     put(status_, offsetof(Registers, sr));
@@ -450,9 +495,23 @@ private:
           offsetof(Cpu, cycles));
     store(ir_.getInt8(0), offsetof(Cpu, repeat_completed));
     store(ir_.getInt8(0), offsetof(Cpu, interrupt_inhibited));
+    auto *pc = next_pc();
+    put(pc, offsetof(Registers, pc));
+    if (!at_loop_end(plan_.operations.back())) {
+      LLVMBuildRet(ir_.get(), ir_.CreateTrunc(retired, ir_.getInt32Ty()));
+      return;
+    }
+    auto *loop_finish = LLVMAppendBasicBlockInContext(context_, function_, "loop_finish");
     auto *done = LLVMAppendBasicBlockInContext(context_, function_, "done");
+    LLVMBuildCondBr(
+        ir_.get(),
+        ir_.CreateICmpEQ(pc, ir_.getInt32((plan_.operations.back().loop_address + 1) & word_mask)),
+        loop_finish,
+        done);
+    ir_.SetInsertPoint(loop_finish);
     auto *restore = LLVMAppendBasicBlockInContext(context_, function_, "restore_loop");
-    put(ir_.getInt32(plan_.operations.front().pc), offsetof(Registers, pc));
+    put(ir_.CreateTrunc(ir_.CreateLShr(saved_, ir_.getInt64(word_bits)), ir_.getInt32Ty()),
+        offsetof(Registers, pc));
     put(ir_.CreateAnd(ir_.CreateSub(lc_, ir_.CreateTrunc(turns_, ir_.getInt32Ty())),
                       ir_.getInt32(word_mask)),
         offsetof(Registers, lc));
@@ -521,14 +580,18 @@ private:
     auto *status = LLVMBuildPhi(ir_.get(), ir_.getInt32Ty(), "status");
     LLVMAddIncoming(status, &status_, &start, 1);
     std::array<V, agu_registers> addresses{};
+    std::array<V, agu_registers> strides{};
     for (unsigned index = 0; index < agu_registers; ++index) {
       addresses[index] = LLVMBuildPhi(ir_.get(), ir_.getInt32Ty(), "cursor");
       LLVMAddIncoming(addresses[index], &cursors_[index], &start, 1);
+      strides[index] = LLVMBuildPhi(ir_.get(), ir_.getInt32Ty(), "stride");
+      LLVMAddIncoming(strides[index], &strides_[index], &start, 1);
     }
     auto *remaining = LLVMBuildPhi(ir_.get(), ir_.getInt64Ty(), "remaining");
     LLVMAddIncoming(remaining, &turns_, &start, 1);
     banks_ = values;
     cursors_ = addresses;
+    strides_ = strides;
     status_ = status;
     for (std::size_t index = 0; index < plan_.steps.size(); ++index) {
       const auto before = banks_;
@@ -536,7 +599,14 @@ private:
       if (step.registers.valid()) {
         write_register(step.registers.destination, read_register(before, step.registers.source));
       }
-      transfers(step.memory);
+      const auto &instruction = plan_.operations[index].instruction;
+      if (instruction.operation == Operation::arithmetic_shift_immediate) {
+        llvm19::lower_arithmetic_shift(
+            ir_, instruction.opcode, plan_.operations[index].mode, banks_, status_);
+        continue;
+      }
+      if (plan_.control.valid && index + 1 == plan_.steps.size()) { continue; }
+      transfers(step.memory, instruction.opcode);
       llvm19::lower_alu(ir_,
                         plan_.operations[index].instruction.opcode,
                         plan_.operations[index].mode,
@@ -549,6 +619,7 @@ private:
     }
     for (unsigned index = 0; index < agu_registers; ++index) {
       LLVMAddIncoming(addresses[index], &cursors_[index], &loop, 1);
+      LLVMAddIncoming(strides[index], &strides_[index], &loop, 1);
     }
     LLVMAddIncoming(status, &status_, &loop, 1);
     auto *left = ir_.CreateSub(remaining, ir_.getInt64(1));
@@ -561,31 +632,34 @@ private:
   LLVMContextRef context_;
   LLVMValueRef function_;
   llvm19::Builder ir_;
-  const LoopPlan &plan_;
+  const RegionPlan &plan_;
   V cpu_, owner_, initial_cycles_ = nullptr, initial_instructions_ = nullptr;
   V status_ = nullptr, lc_ = nullptr, sp_ = nullptr, sc_ = nullptr, saved_ = nullptr;
   V turns_ = nullptr, forever_ = nullptr, finite_count_ = nullptr, eligible_ = nullptr;
   std::array<V, 4> banks_{};
-  std::array<V, agu_registers> cursors_{};
+  std::array<V, agu_registers> cursors_{}, strides_{}, masks_{}, origins_{};
   std::array<std::array<V, agu_registers>, 2> memory_bases_{};
 };
 }
 
-bool loop_candidate(const std::span<const BlockInstruction> operations, const JitRuntime &runtime) {
-  return plan_loop(operations, runtime).has_value();
+bool region_candidate(const std::span<const BlockInstruction> operations,
+                      const JitRuntime &runtime,
+                      const bool complete_loop) {
+  const auto plan = plan_region(operations, runtime);
+  return plan && (!plan->batch || complete_loop);
 }
 
-std::optional<PreparedLoop> compile_loop(std::unique_ptr<LlvmCompiler> &compiler,
-                                         const std::span<const BlockInstruction> operations,
-                                         const JitRuntime &runtime,
-                                         const void *fallback) {
-  const auto plan = plan_loop(operations, runtime);
+std::optional<PreparedRegion> compile_region(std::unique_ptr<LlvmCompiler> &compiler,
+                                             const std::span<const BlockInstruction> operations,
+                                             const JitRuntime &runtime,
+                                             const void *fallback) {
+  const auto plan = plan_region(operations, runtime);
   if (!plan) { return {}; }
   if (!compiler) { compiler = std::make_unique<LlvmCompiler>(); }
   const auto before = compiler->native_bytes();
-  LlvmModule module("dsp_loop_" + std::to_string(std::bit_cast<std::uintptr_t>(fallback)));
-  const LoopLifter lift(module, *plan, fallback);
+  LlvmModule module("dsp_region_" + std::to_string(std::bit_cast<std::uintptr_t>(fallback)));
+  const RegionLifter lift(module, *plan, fallback);
   const auto *entry = compiler->install(module);
-  return PreparedLoop{.entry = entry, .native_bytes = compiler->native_bytes() - before};
+  return PreparedRegion{.entry = entry, .native_bytes = compiler->native_bytes() - before};
 }
 }

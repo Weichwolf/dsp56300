@@ -51,18 +51,19 @@ absolute local cycle deadline. Core does not schedule an instrument or its audio
 Unsupported operations fail explicitly.
 
 `Core::prepare(entries)` follows established code entries without executing ISA or
-device I/O. It installs LLVM O3 code for supported arithmetic and parallel RAM/register
-transfers in natural DO bodies with linear cursors, including mixed increment,
-post-decrement and pre-decrement steps. Multiply/accumulate, rounding,
-add/subtract, comparisons, shifts and logic retain exact flags and old operands;
-each used cursor selects a containing declared RAM/ROM window at loop entry,
-checking its complete access range, permissions and initialization. Unknown words,
-cross-window ranges and other unsupported cases keep precise native execution. Preparation
+device I/O. It installs LLVM O3 code for supported arithmetic and RAM/register
+regions, including immediate accumulator shifts, shared-address X/Y long transfers
+and terminal non-call jumps. Complete DO bodies can batch linear unit cursors;
+one-pass regions also accept signed N steps and validated power-of-two multiple-wrap
+cursors. Loaded R/N values stay native; a cursor or stride overwritten before a later
+memory use rejects hoisted admission. Parallel operations retain old operands and
+exact flags. Entry guards prove declared memory ranges, permissions and knowledge;
+unknown words and unsupported cases keep precise native execution. Preparation
 reports installed entries, unresolved coverage, newly emitted text and a
 non-latching diagnostic. Code remains owned by Core; changed external mappings
 require a new `Io::program_revision()` before preparation or execution.
 After preparation, genuine program/mapping invalidations retain their checks;
-eligible cold loop entries optimize again when reached. Other native region
+eligible cold region entries optimize when reached. Other native region
 lowering remains available for unsupported optimizing cases.
 
 ARM64 native RAM regions also support valid power-of-two multiple-wrap cursors,

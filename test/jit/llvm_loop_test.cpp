@@ -5,7 +5,7 @@
 #include "isa.hpp"
 #include "jit.hpp"
 #include "jit/block.hpp"
-#include "jit/llvm/loop.hpp"
+#include "jit/llvm/region.hpp"
 #include "jit/llvm/runtime.hpp"
 #include "support.hpp"
 
@@ -54,7 +54,7 @@ void admitted_native() {
   const auto operations = detail::parse_block(program, initial, runtime);
   std::unique_ptr<detail::LlvmCompiler> compiler;
   const auto image =
-      detail::compile_loop(compiler, operations, runtime, std::bit_cast<const void *>(&fallback));
+      detail::compile_region(compiler, operations, runtime, std::bit_cast<const void *>(&fallback));
   if (!image) { throw std::runtime_error("A real RAM loop must be accepted"); }
   require(image->native_bytes > 0, "A real RAM loop must emit LLVM native text");
   using Function = std::uint32_t (*)(detail::Cpu *, detail::NativeContext *) noexcept;

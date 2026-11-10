@@ -5,7 +5,7 @@
 #include "isa.hpp"
 #include "jit.hpp"
 #include "jit/block.hpp"
-#include "jit/llvm/loop.hpp"
+#include "jit/llvm/region.hpp"
 #include "jit/llvm/runtime.hpp"
 #include "loop_frames.hpp"
 #include "register_model.hpp"
@@ -223,7 +223,7 @@ void direct(Fixture &fixture, const Input input, const Word mode) {
   const auto operations = detail::parse_block(fixture.program, seed, runtime);
   std::unique_ptr<detail::LlvmCompiler> compiler;
   const auto image =
-      detail::compile_loop(compiler, operations, runtime, std::bit_cast<const void *>(&fallback));
+      detail::compile_region(compiler, operations, runtime, std::bit_cast<const void *>(&fallback));
   if (!image) { throw std::runtime_error("Declared windows must admit a whole copy loop"); }
   for (Word flags = 0; flags <= status_byte; ++flags) {
     fixture.reset(input);
@@ -402,7 +402,7 @@ void cross_space_cursor(const Forms forms) {
   const auto operations = detail::parse_block(program, state, runtime);
   std::unique_ptr<detail::LlvmCompiler> compiler;
   const auto image =
-      detail::compile_loop(compiler, operations, runtime, std::bit_cast<const void *>(&fallback));
+      detail::compile_region(compiler, operations, runtime, std::bit_cast<const void *>(&fallback));
   if (!image) { throw std::runtime_error("One cursor can address both declared Harvard spaces"); }
   auto wanted = state;
   std::array<Word, words> expected_y{};

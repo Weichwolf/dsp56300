@@ -24,7 +24,8 @@ edges. Keep unknown code, register/stack targets, IRQs and implicit REP/DO flow
 unresolved until their contracts are proved. Never scan unrelated data or execute
 guest instructions, I/O or clocks during preparation.
 
-Lift exact fixed-width ISA semantics into LLVM 19 CFG/SSA, preserving flags,
+Lift complete arithmetic/RAM regions and terminal non-call jumps into LLVM 19
+CFG/SSA, preserving flags,
 aliases, ordered effects and precise event/cycle prefixes. Use constant/range
 propagation, dead-store elimination, forwarding and loop optimization before
 native lowering; optimizing the C++ emitter alone is insufficient. Both hosts

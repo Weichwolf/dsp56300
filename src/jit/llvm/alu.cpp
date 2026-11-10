@@ -50,6 +50,7 @@ public:
   Alu(Builder &ir, const Word mode, V &status) : ir_(ir), mode_(mode), status_(status) {}
 
   void lower(Word code, const Banks &before, Banks &after);
+  void shift(Word opcode, Banks &banks);
 
 private:
   V boolean(const bool value) { return LLVMConstInt(ir_.getIntNTy(1), value ? 1U : 0U, 0); }
@@ -243,6 +244,33 @@ void Alu::logic(const Word code, const Banks &before, Banks &after, const unsign
       ir_.CreateOr(ir_.CreateAnd(status_, ir_.getInt32(~Word{overflow | zero | negative})), bits);
 }
 
+void Alu::shift(const Word opcode, Banks &banks) {
+  constexpr Word count_mask = 63;
+  constexpr Word source_bit = 1U << 7;
+  constexpr Word left_bit = 1U << 8;
+  const auto count = (opcode >> 1) & count_mask;
+  auto *value = banks[(opcode & source_bit) != 0 ? 1U : 0U];
+  Result result{.value = value, .carried = boolean(false)};
+  if (count != 0 && (opcode & left_bit) != 0) {
+    result.value = ir_.CreateShl(value, ir_.getInt64(count));
+    result.carried = ir_.CreateICmpNE(
+        ir_.CreateAnd(ir_.CreateLShr(value, ir_.getInt64(host_sign_bit + 1 - count)),
+                      ir_.getInt64(1)),
+        ir_.getInt64(0));
+    auto *lost = signed_right(value, host_sign_bit - count);
+    result.overflowed = ir_.CreateAnd(ir_.CreateICmpNE(lost, ir_.getInt64(0)),
+                                      ir_.CreateICmpNE(lost, ir_.getInt64(~std::uint64_t{0})));
+  } else if (count != 0) {
+    result.value = ir_.CreateAnd(signed_right(value, count), ir_.getInt64(padding_mask));
+    result.carried = ir_.CreateICmpNE(
+        ir_.CreateAnd(ir_.CreateLShr(value, ir_.getInt64(padding_bits + count - 1)),
+                      ir_.getInt64(1)),
+        ir_.getInt64(0));
+  }
+  flags(result);
+  banks[(opcode & 1U) != 0 ? 1U : 0U] = result.value;
+}
+
 void Alu::lower(const Word code, const Banks &before, Banks &after) {
   if (code == 0) { return; }
   const auto destination = (code & 8U) != 0 ? 1U : 0U;
@@ -284,6 +312,11 @@ bool supported_alu(const Word opcode) {
 void lower_alu(
     Builder &ir, const Word opcode, const Word mode, const Banks &before, Banks &after, V &status) {
   Alu(ir, mode, status).lower(opcode & byte_mask, before, after);
+}
+
+void lower_arithmetic_shift(
+    Builder &ir, const Word opcode, const Word mode, Banks &banks, V &status) {
+  Alu(ir, mode, status).shift(opcode, banks);
 }
 
 V transfer_word(Builder &ir, V value, const Word mode, V &status) {

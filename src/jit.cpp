@@ -8,7 +8,7 @@
 #include "jit/arena.hpp"
 #include "jit/block.hpp"
 #include "jit/index.hpp"
-#include "jit/llvm/loop.hpp"
+#include "jit/llvm/region.hpp"
 #include "jit/llvm/runtime.hpp"
 #include "jit/preparation.hpp"
 #include "jit/resident_region.hpp"
@@ -87,8 +87,8 @@ struct Jit::Impl {
   [[nodiscard]] Mapping &mapping(const Registers &state);
   void clear_invalidated();
   [[nodiscard]] bool current_view(std::optional<std::uint64_t> revision) const;
-  [[nodiscard]] std::optional<PreparedLoop> prepare_entry(const Registers &state,
-                                                          std::optional<std::uint64_t> revision);
+  [[nodiscard]] std::optional<PreparedRegion>
+  prepare_entry(const Registers &state, std::optional<std::uint64_t> revision, bool complete_loop);
 #if defined(__aarch64__)
   [[nodiscard]] Block *reuse(std::span<const BlockInstruction> operations, EntryKind kind) const;
 #endif
@@ -126,8 +126,9 @@ Block *Jit::Impl::compile(const Registers &state, const bool requested) {
 #endif
   block->operations = parse_block(program, state, context.runtime, callbacks);
   if (block->operations.empty()) { return nullptr; }
-  const bool optimize = requested || (preparation_requested && whole_loop_entry(state) &&
-                                      loop_candidate(block->operations, context.runtime));
+  const bool optimize =
+      requested || (preparation_requested &&
+                    region_candidate(block->operations, context.runtime, whole_loop_entry(state)));
 #if defined(__aarch64__)
   if (!optimize) {
     block->region = resident_region_plan(program, state, context.runtime, block->operations);
@@ -171,7 +172,7 @@ Block *Jit::Impl::compile(const Registers &state, const bool requested) {
   }
   if (optimize) {
     if (const auto compiled =
-            compile_loop(compiler, block->operations, context.runtime, block->entry)) {
+            compile_region(compiler, block->operations, context.runtime, block->entry)) {
       block->entry = compiled->entry;
       block->native_bytes += compiled->native_bytes;
       block->optimized = true;
@@ -356,16 +357,17 @@ bool Jit::Impl::current_view(const std::optional<std::uint64_t> revision) const 
          (context.events.io != nullptr && context.events.io->program_revision() == *revision);
 }
 
-std::optional<PreparedLoop> Jit::Impl::prepare_entry(const Registers &state,
-                                                     const std::optional<std::uint64_t> revision) {
+std::optional<PreparedRegion> Jit::Impl::prepare_entry(const Registers &state,
+                                                       const std::optional<std::uint64_t> revision,
+                                                       const bool complete_loop) {
   auto &binding = mapping(state);
   const auto *entry = binding.table.find(state.pc);
   const auto known = std::ranges::find_if(storage, [&](const auto &block) {
     return entry != nullptr && block->entry == entry && block->optimized;
   });
-  if (known != storage.end()) { return PreparedLoop{.entry = entry}; }
+  if (known != storage.end()) { return PreparedRegion{.entry = entry}; }
   const auto operations = parse_block(program, state, context.runtime);
-  if (!loop_candidate(operations, context.runtime)) { return {}; }
+  if (!region_candidate(operations, context.runtime, complete_loop)) { return {}; }
   const auto *compiled = compile(state, true);
   if (compiled == nullptr || !compiled->optimized) { return {}; }
   if (!current_view(revision)) {
@@ -373,7 +375,7 @@ std::optional<PreparedLoop> Jit::Impl::prepare_entry(const Registers &state,
     return {};
   }
   binding.table.insert(state.pc, compiled->entry);
-  return PreparedLoop{.entry = compiled->entry, .native_bytes = compiled->native_bytes};
+  return PreparedRegion{.entry = compiled->entry, .native_bytes = compiled->native_bytes};
 }
 
 PreparationReport Jit::prepare(const std::span<const Word> established_entries,
@@ -386,9 +388,9 @@ PreparationReport Jit::prepare(const std::span<const Word> established_entries,
   PreparationReport report{.failure = graph.failure};
   std::set<Word> unresolved(graph.unresolved.begin(), graph.unresolved.end());
   std::set<std::uint64_t> visited;
-  const auto install = [&](const Registers &context) {
+  const auto install = [&](const Registers &context, const bool complete_loop) {
     if (!visited.insert(translation_key(context)).second) { return; }
-    const auto entry = self.prepare_entry(context, revision);
+    const auto entry = self.prepare_entry(context, revision, complete_loop);
     if (!entry) {
       unresolved.insert(context.pc);
       return;
@@ -403,7 +405,7 @@ PreparationReport Jit::prepare(const std::span<const Word> established_entries,
                       .pc = state.pc};
     return report;
   }
-  if (whole_loop_entry(state)) { install(state); }
+  install(state, whole_loop_entry(state));
   for (const auto &operation : graph.instructions) {
     const auto kind = operation.instruction.operation;
     if (kind != Operation::loop_immediate && kind != Operation::loop_register &&
@@ -419,7 +421,7 @@ PreparationReport Jit::prepare(const std::span<const Word> established_entries,
     context.pc = (operation.pc + decoded.words) & word_mask;
     context.la = relative ? (operation.pc + decoded.extension) & word_mask : decoded.extension;
     context.sr = (context.sr & ~(loop_flag | forever_flag)) | loop_flag;
-    install(context);
+    install(context, true);
   }
   report.unresolved_entries = unresolved.size();
   if (!self.current_view(revision)) {
