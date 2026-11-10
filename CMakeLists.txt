@@ -35,7 +35,7 @@ set(CMAKE_CXX_CLANG_TIDY "${DSP56300_CLANG_TIDY};--warnings-as-errors=*")
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
   set(dsp56300_native_sources
-    src/native_owner.cpp src/jit/a64/emitter.cpp src/jit/a64/guarded.cpp
+    src/native_owner.cpp src/jit/a64/emitter.cpp src/jit/a64/guarded.cpp src/jit/a64/guarded_control.cpp
     src/jit/a64/guarded_guards.cpp src/jit/a64/guarded_memory.cpp src/jit/a64/batch.cpp
     src/jit/a64/flags.cpp src/jit/a64/arithmetic.cpp src/jit/a64/unary.cpp
     src/jit/a64/shifts.cpp src/jit/a64/fault.cpp src/jit/a64/conditions.cpp
@@ -253,6 +253,10 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
     target_link_libraries(dsp56300_native_ring_test PRIVATE dsp56300::core)
     target_include_directories(dsp56300_native_ring_test PRIVATE src src/jit test/support)
     add_test(NAME native-masked-rings COMMAND dsp56300_native_ring_test)
+    add_executable(dsp56300_native_compound_test test/jit/native_compound_test.cpp test/support/native/direct_a64.cpp test/support/native_long_load_fixture.cpp)
+    target_link_libraries(dsp56300_native_compound_test PRIVATE dsp56300::core)
+    target_include_directories(dsp56300_native_compound_test PRIVATE src src/jit test test/support)
+    add_test(NAME native-compound-regions COMMAND dsp56300_native_compound_test)
     add_executable(dsp56300_native_region_constant_test test/jit/native_region_constant_test.cpp test/support/native/direct_a64.cpp)
     target_link_libraries(dsp56300_native_region_constant_test PRIVATE dsp56300::core)
     target_include_directories(dsp56300_native_region_constant_test PRIVATE src src/jit test/support)

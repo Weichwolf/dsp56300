@@ -43,6 +43,9 @@ bool Emitter::guardable(const BlockInstruction &operation) {
     return false;
   }
   const auto kind = instruction.opcode & 7U;
+  if (instruction.operation == Operation::arithmetic_shift_immediate) {
+    return ((instruction.opcode >> 1) & six_bit_mask) < accumulator_bits;
+  }
   if (instruction.operation == Operation::immediate_alu) {
     return kind == 0 || kind == 4 || kind == 5 || kind == 2 || kind == 3 || kind == 6;
   }
@@ -66,6 +69,9 @@ bool Emitter::guardable(const BlockInstruction &operation) {
 
 Word Emitter::written_flags(const BlockInstruction &operation) {
   if (operation.instruction.operation == Operation::nop) { return 0; }
+  if (operation.instruction.operation == Operation::arithmetic_shift_immediate) {
+    return observed_flags;
+  }
   const auto opcode = operation.instruction.opcode & byte_mask;
   const auto code = opcode & alu_mask;
   const auto selector = (opcode >> 4) & 7U;
@@ -209,11 +215,15 @@ Emitter::generate_guarded(const std::span<const BlockInstruction> operations,
                           const std::array<Word, agu_registers> &modifiers,
                           const std::span<const std::uint8_t> fallback) {
   const auto runtime = resident_runtime(supplied);
-  region_ = resident_plan(operations, runtime.memory, modifiers, RegionAddressing::masked_rings);
+  const bool control = guarded_control(operations);
+  const auto prefix = control ? operations.first(operations.size() - 1) : operations;
+  const auto addressing = control ? RegionAddressing::single_pass : RegionAddressing::compound;
+  region_ = resident_plan(prefix, runtime.memory, modifiers, addressing);
   if (!region_.valid || !std::in_range<Word>(operations.size()) ||
-      !std::ranges::all_of(operations, guardable)) {
+      !std::ranges::all_of(prefix, guardable)) {
     return std::nullopt;
   }
+  if (control) { region_.loop = at_loop_end(operations.back()); }
   entry_ = Entry::guarded;
   deferred_instructions_ = true;
   runtime_ = runtime;
@@ -230,10 +240,14 @@ Emitter::generate_guarded(const std::span<const BlockInstruction> operations,
   code_.compare(remaining, Reg::x9);
   code_.branch_far(Condition::no_carry, done_);
   guard_loop(done_);
-  guard_iterations(operations);
-  if (region_.loop) {
+  if (control) {
+    guard_addresses(false, done_);
+    guarded_control_body(operations);
+  } else if (region_.loop) {
+    guard_iterations(operations);
     guarded_chunk(operations);
   } else {
+    guard_iterations(operations);
     code_.bind(body);
     guarded_body(operations);
     guarded_complete(operations);

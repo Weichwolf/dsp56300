@@ -18,6 +18,10 @@ namespace dsp56300::detail {
 namespace {
 constexpr Word minimum_transfers = 8;
 
+bool compound_addressing(const RegionAddressing addressing) {
+  return addressing == RegionAddressing::compound || addressing == RegionAddressing::single_pass;
+}
+
 void unit_extent(RegionAddress &address, const Word mode) {
   if (mode == 7) { --address.displacement; }
   if (!address.accessed) {
@@ -39,9 +43,9 @@ bool transfer(ResidentPlan &region,
               const JitMemory &memory,
               const std::array<Word, agu_registers> &modifiers,
               const RegionAddressing addressing) {
-  // An R/N load can replace a later cursor/stride inside this region. Keep
-  // ordinary per-access guards until its loaded value has a region proof.
-  if (move.load && move.reg >= r_register_base) { return false; }
+  if (move.load && move.reg >= r_register_base) {
+    if (!compound_addressing(addressing) || move.reg >= n_register_base) { return false; }
+  }
   if (!move.load && memory.aliases_program) { return false; }
   if (move.immediate()) { return true; }
   if (memory.data == nullptr) { return false; }
@@ -54,6 +58,7 @@ bool transfer(ResidentPlan &region,
     return false;
   }
   auto &address = region.addresses.at(form.index);
+  if (address.replaced) { return false; }
   unit_extent(address, form.mode);
   address.accessed = true;
   address.modifier = modifiers.at(form.index) & modifier_mask;
@@ -94,10 +99,26 @@ bool moves(ResidentPlan &region,
     return true;
   }
   const auto plan = plan_moves(instruction);
-  if (plan.count == 0 || plan.long_pair) { return false; }
+  if (plan.count == 0) { return false; }
+  if (plan.long_pair) {
+    if (!compound_addressing(addressing)) { return false; }
+    const auto index = plan.transfers[0].address.index;
+    const auto original = region.addresses.at(index);
+    if (!transfer(region, plan.transfers[0], memory[0], modifiers, addressing)) { return false; }
+    const auto high = region.addresses.at(index);
+    region.addresses.at(index) = original;
+    if (!transfer(region, plan.transfers[1], memory[1], modifiers, addressing)) { return false; }
+    auto &address = region.addresses.at(index);
+    address.bound = std::min(address.bound, high.bound);
+    address.linear_limit = std::min(address.linear_limit, high.linear_limit);
+    return true;
+  }
   for (const auto &move : std::span(plan.transfers).first(plan.count)) {
     if (!transfer(region, move, memory.at(move.space == Space::x ? 0 : 1), modifiers, addressing)) {
       return false;
+    }
+    if (move.load && move.reg >= r_register_base) {
+      region.addresses.at(move.reg - r_register_base).replaced = true;
     }
   }
   return true;
@@ -105,8 +126,10 @@ bool moves(ResidentPlan &region,
 
 bool address_supported(const RegionAddress &address, const RegionAddressing addressing) {
   if (!address.accessed) { return true; }
-  if (addressing == RegionAddressing::masked_rings && address.updated &&
-      address.modifier != modifier_mask && (address.modifier & multiple_wrap_bit) != 0) {
+  if (address.replaced && addressing != RegionAddressing::single_pass) { return false; }
+  if ((addressing == RegionAddressing::masked_rings || compound_addressing(addressing)) &&
+      address.updated && address.modifier != modifier_mask &&
+      (address.modifier & multiple_wrap_bit) != 0) {
     const auto mask = address.modifier & multiple_wrap_mask;
     return (address.modifier & multiple_reserved_bit) == 0 && mask != 0 &&
            std::has_single_bit(mask + 1) && mask < address.bound;
@@ -146,8 +169,10 @@ ResidentPlan resident_plan(const std::span<const BlockInstruction> operations,
   for (std::size_t index = 0; index < operations.size(); ++index) {
     const auto &operation = operations[index];
     const auto kind = operation.instruction.operation;
+    const bool shift =
+        compound_addressing(addressing) && kind == Operation::arithmetic_shift_immediate;
     if ((kind != Operation::parallel && kind != Operation::nop &&
-         kind != Operation::immediate_alu) ||
+         kind != Operation::immediate_alu && !shift) ||
         operation.pc != pc || operation.mode != operations.front().mode ||
         operation.loop_address != operations.front().loop_address ||
         (at_loop_end(operation) && index + 1 != operations.size()) ||

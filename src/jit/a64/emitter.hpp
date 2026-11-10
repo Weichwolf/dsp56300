@@ -97,6 +97,8 @@ private:
   [[nodiscard]] bool guarded() const noexcept { return entry_ == Entry::guarded; }
 
   [[nodiscard]] static bool guardable(const BlockInstruction &operation);
+  [[nodiscard]] static bool guarded_control(std::span<const BlockInstruction> operations);
+  void guarded_control_body(std::span<const BlockInstruction> operations);
   [[nodiscard]] static Word written_flags(const BlockInstruction &operation);
   [[nodiscard]] static std::vector<Word> plan_flags(std::span<const BlockInstruction> operations);
   void guard_storage();
