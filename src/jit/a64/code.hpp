@@ -96,6 +96,8 @@ public:
   void constant(Reg target, std::uint64_t value, Width width = Width::x64);
   void move(Reg target, Reg source, Width width = Width::x64);
   void alu(Alu operation, Reg target, Reg left, Reg right, Width width = Width::w32);
+  [[nodiscard]] bool
+  logical(Alu operation, Reg target, Reg source, std::uint64_t value, Width width = Width::w32);
   void add(Reg target, Reg source, std::uint16_t value, Width width = Width::w32);
   void extract(Reg target,
                Reg source,

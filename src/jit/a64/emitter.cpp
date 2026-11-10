@@ -83,6 +83,7 @@ void Emitter::publish() {
 }
 
 void Emitter::mask(const Reg target, const Reg value, const std::uint64_t bits, const Width width) {
+  if (code_.logical(Alu::bit_and, target, value, bits, width)) { return; }
   code_.constant(Reg::x17, bits);
   code_.alu(Alu::bit_and, target, value, Reg::x17, width);
 }

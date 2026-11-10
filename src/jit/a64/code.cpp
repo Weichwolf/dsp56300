@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <span>
 #include <stdexcept>
 
@@ -25,6 +26,31 @@ constexpr auto wide(const Width width) {
 
 constexpr unsigned bit_count(const Width width) {
   return width == Width::x64 ? 64U : 32U;
+}
+
+std::optional<std::uint32_t> logical_bits(const std::uint64_t value, const Width width) {
+  const auto bits = bit_count(width);
+  const auto full = std::numeric_limits<std::uint64_t>::max() >> (64U - bits);
+  if (value == 0 || value >= full) { return std::nullopt; }
+  constexpr unsigned field_mask = 63;
+  constexpr unsigned n_shift = 22;
+  for (unsigned size = 2; size <= bits; size *= 2) {
+    const auto mask = std::numeric_limits<std::uint64_t>::max() >> (64U - size);
+    const auto element = value & mask;
+    std::uint64_t repeated = 0;
+    for (unsigned offset = 0; offset < bits; offset += size) { repeated |= element << offset; }
+    if (repeated != value || element == 0 || element == mask) { continue; }
+    const auto ones = static_cast<unsigned>(std::popcount(element));
+    const auto run = std::numeric_limits<std::uint64_t>::max() >> (64U - ones);
+    for (unsigned rotation = 0; rotation < size; ++rotation) {
+      const auto rotated = (run >> rotation) | (run << ((size - rotation) & (size - 1)));
+      if ((rotated & mask) != element) { continue; }
+      const auto imms = (~((2U * size) - 1U) & field_mask) | (ones - 1U);
+      return ((size == 64 ? 1U : 0U) << n_shift) | (rotation << operand_shift) |
+             (imms << immediate_shift);
+    }
+  }
+  return std::nullopt;
 }
 }
 
@@ -48,14 +74,37 @@ void Code::constant(const Reg target, const std::uint64_t value, const Width wid
     throw std::invalid_argument("A64 constant exceeds its register width");
   }
   constexpr std::uint32_t movz = 0x52800000;
+  constexpr std::uint32_t movn = 0x12800000;
   constexpr std::uint32_t movk = 0x72800000;
   constexpr unsigned lane_shift = 21;
   constexpr unsigned half_mask = 0xffff;
-  for (unsigned lane = 0; lane < bit_count(width) / half_bits; ++lane) {
+  unsigned zeros = 0;
+  unsigned ones = 0;
+  const auto lanes = bit_count(width) / half_bits;
+  for (unsigned lane = 0; lane < lanes; ++lane) {
+    const auto part = (value >> (lane * half_bits)) & half_mask;
+    zeros += part == 0 ? 1U : 0U;
+    ones += part == half_mask ? 1U : 0U;
+  }
+  if (zeros == lanes || ones == lanes) {
+    word(wide(width) | (zeros == lanes ? movz : movn) | reg(target));
+    return;
+  }
+  if (lanes - zeros > 1 && lanes - ones > 1 && target != Reg::zr &&
+      logical(Alu::bit_or, target, Reg::zr, value, width)) {
+    return;
+  }
+  const bool complement = ones > zeros;
+  const auto skipped = complement ? half_mask : 0U;
+  bool first = true;
+  for (unsigned lane = 0; lane < lanes; ++lane) {
     const auto part = static_cast<std::uint32_t>((value >> (lane * half_bits)) & half_mask);
-    if (lane != 0 && part == 0) { continue; }
-    word(wide(width) | (lane == 0 ? movz : movk) | (lane << lane_shift) | (part << register_shift) |
-         reg(target));
+    if (part == skipped) { continue; }
+    const auto initial = complement ? movn : movz;
+    const auto immediate = first && complement ? part ^ half_mask : part;
+    word(wide(width) | (first ? initial : movk) | (lane << lane_shift) |
+         (immediate << register_shift) | reg(target));
+    first = false;
   }
 }
 
@@ -67,6 +116,25 @@ void Code::alu(
     const Alu operation, const Reg target, const Reg left, const Reg right, const Width width) {
   word(wide(width) | static_cast<std::uint32_t>(operation) | (reg(right) << operand_shift) |
        (reg(left) << register_shift) | reg(target));
+}
+
+bool Code::logical(const Alu operation,
+                   const Reg target,
+                   const Reg source,
+                   const std::uint64_t value,
+                   const Width width) {
+  constexpr std::uint32_t opcode = 0x12000000;
+  constexpr std::uint32_t operation_mask = 0x60000000;
+  if (operation != Alu::bit_and && operation != Alu::bit_or && operation != Alu::bit_xor) {
+    throw std::invalid_argument("A64 logical immediate requires AND, ORR or EOR");
+  }
+  // Logical immediates interpret destination 31 as SP, unlike register forms.
+  if (target == Reg::zr) { return false; }
+  const auto encoding = logical_bits(value, width);
+  if (!encoding) { return false; }
+  word(wide(width) | opcode | (static_cast<std::uint32_t>(operation) & operation_mask) | *encoding |
+       (reg(source) << register_shift) | reg(target));
+  return true;
 }
 
 void Code::add(const Reg target, const Reg source, const std::uint16_t value, const Width width) {

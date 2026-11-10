@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <exception>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #if defined(__aarch64__)
 #include "jit/arena.hpp"
@@ -66,6 +67,54 @@ void encodings() {
       0x1b027c20, 0x1ac20c20, 0x1ac20820, 0x1b028c20, 0xd63f0200, 0xd65f03c0};
   for (std::size_t index = 0; index < expected.size(); ++index) {
     require(instruction(code, index) == expected[index], "A64 encoding differs from ISA reference");
+  }
+}
+
+void logical_encodings() {
+  constexpr std::uint64_t word_mask = 0x00ffffff;
+  constexpr std::uint64_t repeated_bytes = 0xff00ff00ff00ff00;
+  constexpr std::uint64_t wrapped_word = 0x80000001;
+  constexpr std::uint64_t high_run = 0xffffffffffffff00;
+  constexpr std::uint64_t middle_run = 0x00ffffffffffff00;
+  constexpr std::uint64_t upper_word = 0xffff0000;
+
+  Code code;
+  require(code.logical(Alu::bit_or, Reg::x0, Reg::zr, word_mask, Width::x64) &&
+              code.logical(Alu::bit_and, Reg::x0, Reg::x1, word_mask) &&
+              code.logical(Alu::bit_and, Reg::x0, Reg::x1, repeated_bytes, Width::x64) &&
+              code.logical(Alu::bit_or, Reg::x0, Reg::x1, wrapped_word) &&
+              code.logical(Alu::bit_xor, Reg::x0, Reg::x1, high_run, Width::x64) &&
+              code.logical(Alu::bit_and, Reg::x0, Reg::x1, middle_run, Width::x64),
+          "Architectural logical immediate masks must be encodable");
+  constexpr std::array<std::uint32_t, 6> expected{
+      0xb2405fe0, 0x12005c20, 0x92089c20, 0x32010420, 0xd278dc20, 0x9278bc20};
+  for (std::size_t index = 0; index < expected.size(); ++index) {
+    require(instruction(code, index) == expected[index],
+            "Logical immediate encoding differs from independent LLVM assembler bytes");
+  }
+  const auto size = code.size();
+  for (const auto value : {std::uint64_t{0},
+                           std::uint64_t{0xffffffff},
+                           std::uint64_t{0x12345678},
+                           ~std::uint64_t{0}}) {
+    require(!code.logical(Alu::bit_and, Reg::x0, Reg::x1, value),
+            "Unsupported word masks must remain explicit");
+  }
+  require(!code.logical(Alu::bit_and, Reg::zr, Reg::x1, 1) && code.size() == size,
+          "Rejected immediates must leave code untouched and never encode ZR as SP");
+  Code constants;
+  constants.constant(Reg::x0, ~std::uint64_t{0});
+  constants.constant(Reg::x0, high_run);
+  constants.constant(Reg::x0, 0x8000000000000000);
+  constants.constant(Reg::x0, upper_word, Width::w32);
+  constants.constant(Reg::x0, word_mask);
+  constexpr std::array<std::uint32_t, 5> materialized{
+      0x92800000, 0x92801fe0, 0xd2f00000, 0x52bfffe0, 0xb2405fe0};
+  require(constants.size() == materialized.size() * sizeof(std::uint32_t),
+          "Directed constants must use one instruction each");
+  for (std::size_t index = 0; index < materialized.size(); ++index) {
+    require(instruction(constants, index) == materialized[index],
+            "Constant materialization differs from independent LLVM assembler bytes");
   }
 }
 
@@ -287,6 +336,99 @@ Integer reference_shift(const Shift operation, const Integer value, const unsign
       return std::bit_cast<Integer>(std::bit_cast<std::make_signed_t<Integer>>(value) >> amount);
     case Shift::rotate: return std::rotr(value, static_cast<int>(amount));
     default: throw std::logic_error("Unknown A64 test shift");
+  }
+}
+
+std::uint64_t
+logical_result(const Alu operation, const std::uint64_t input, const std::uint64_t mask) {
+  if (operation == Alu::bit_and) { return input & mask; }
+  if (operation == Alu::bit_or) { return input | mask; }
+  if (operation == Alu::bit_xor) { return input ^ mask; }
+  throw std::logic_error("Invalid expected logical operation");
+}
+
+void execute_logical_mask(dsp56300::detail::ExecutableArena &arena,
+                          const Width width,
+                          const std::uint64_t mask,
+                          const Alu operation) {
+  Code code;
+  code.load(Reg::x2, Reg::x0, 3 * sizeof(std::uint64_t), Access::doubleword);
+  code.write_flags(Reg::x2);
+  code.constant(Reg::x2, mask, width);
+  code.store(Reg::x2, Reg::x0, 2 * sizeof(std::uint64_t), Access::doubleword);
+  require(code.logical(operation, Reg::x1, Reg::x1, mask, width),
+          "Every independently constructed rotated/repeated mask must encode");
+  code.store(Reg::x1, Reg::x0, 0, Access::doubleword);
+  code.read_flags(Reg::x2);
+  code.store(Reg::x2, Reg::x0, sizeof(std::uint64_t), Access::doubleword);
+  code.return_();
+  const auto *entry = arena.append(code.bytes());
+  constexpr std::array<std::uint64_t, 4> inputs{
+      0, ~std::uint64_t{0}, 0xa55a3cc369960ff0, 0x5aa5c33c9669f00f};
+  for (const auto input : inputs) {
+    for (unsigned status = 0; status < 16; ++status) {
+      constexpr unsigned flags_shift = 28;
+      const auto flags = std::uint64_t{status} << flags_shift;
+      std::array<std::uint64_t, 4> output{0, 0, 0, flags};
+      static_cast<void>(
+          dsp56300_a64_test_enter(entry, reinterpret_cast<std::uintptr_t>(output.data()), input));
+      auto expected = logical_result(operation, input, mask);
+      if (width == Width::w32) { expected &= std::numeric_limits<std::uint32_t>::max(); }
+      require(output[0] == expected && output[1] == flags && output[2] == mask,
+              "Immediate logic/constants must preserve every result bit, width and NZCV");
+    }
+  }
+}
+
+void execute_logical_width(dsp56300::detail::ExecutableArena &arena, const Width width) {
+  const unsigned bits = width == Width::x64 ? 64U : 32U;
+  for (unsigned period = 2; period <= bits; period *= 2) {
+    for (unsigned ones = 1; ones < period; ++ones) {
+      for (unsigned rotation = 0; rotation < period; ++rotation) {
+        std::uint64_t mask = 0;
+        for (unsigned bit = 0; bit < bits; ++bit) {
+          if ((bit + rotation) % period < ones) { mask |= std::uint64_t{1} << bit; }
+        }
+        for (const auto operation : {Alu::bit_and, Alu::bit_or, Alu::bit_xor}) {
+          execute_logical_mask(arena, width, mask, operation);
+        }
+      }
+    }
+  }
+}
+
+void execute_constants() {
+  dsp56300::detail::ExecutableArena arena;
+  constexpr std::array<std::uint64_t, 4> halves{0, 0xffff, 0x1234, 0x8000};
+  constexpr unsigned patterns = 256;
+  constexpr unsigned half_bits = 16;
+  constexpr unsigned half_mask = 3;
+  for (const auto width : {Width::w32, Width::x64}) {
+    const unsigned lanes = width == Width::x64 ? 4U : 2U;
+    for (unsigned pattern = 0; pattern < patterns; ++pattern) {
+      std::uint64_t value = 0;
+      for (unsigned lane = 0; lane < lanes; ++lane) {
+        value |= halves[(pattern >> (lane * 2)) & half_mask] << (lane * half_bits);
+      }
+      Code code;
+      code.write_flags(Reg::x1);
+      code.constant(Reg::x1, value, width);
+      code.store(Reg::x1, Reg::x0, 0, Access::doubleword);
+      code.read_flags(Reg::x2);
+      code.store(Reg::x2, Reg::x0, sizeof(std::uint64_t), Access::doubleword);
+      code.return_();
+      const auto *entry = arena.append(code.bytes());
+      for (unsigned status = 0; status < 16; ++status) {
+        constexpr unsigned flags_shift = 28;
+        const auto flags = std::uint64_t{status} << flags_shift;
+        std::array<std::uint64_t, 2> output{};
+        static_cast<void>(
+            dsp56300_a64_test_enter(entry, reinterpret_cast<std::uintptr_t>(output.data()), flags));
+        require(output[0] == value && output[1] == flags,
+                "MOVZ/MOVN/MOVK construction must preserve every lane and NZCV");
+      }
+    }
+    execute_logical_width(arena, width);
   }
 }
 
@@ -543,6 +685,7 @@ void execute() {
 int main() {
   try {
     encodings();
+    logical_encodings();
     fixups();
     barrel_encodings();
     bit_encodings();
@@ -554,6 +697,7 @@ int main() {
     selection_encodings();
 #if defined(__aarch64__)
     execute();
+    execute_constants();
     execute_barrels();
     execute_bits();
     execute_neon_memory();
