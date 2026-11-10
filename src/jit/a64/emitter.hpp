@@ -102,6 +102,8 @@ private:
   void guard_addresses(bool repeated, Label &failed);
   void guard_iterations(std::span<const BlockInstruction> operations);
   void guarded_body(std::span<const BlockInstruction> operations);
+  void guarded_complete(std::span<const BlockInstruction> operations);
+  void guarded_chunk(std::span<const BlockInstruction> operations);
   void guarded_finish(std::span<const std::uint8_t> fallback);
   void guarded_retire(std::span<const BlockInstruction> operations);
   void guarded_memory(BusOperand operand);

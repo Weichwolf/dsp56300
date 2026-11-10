@@ -132,12 +132,53 @@ void Emitter::guarded_body(const std::span<const BlockInstruction> operations) {
     flow_ = Flow::sequential;
     operation(item);
   }
+}
+
+void Emitter::guarded_complete(const std::span<const BlockInstruction> operations) {
   const auto &last = operations.back();
   code_.constant(pc, (last.pc + last.instruction.words) & word_mask);
   code_.store(Reg::zr, cpu, offsetof(Cpu, interrupt_inhibited), Access::byte);
   code_.store(Reg::zr, cpu, offsetof(Cpu, repeat_completed), Access::byte);
   if (region_.loop) { finish_loop(last); }
   guarded_retire(operations);
+}
+
+void Emitter::guarded_chunk(const std::span<const BlockInstruction> operations) {
+  // Proven scalar RAM bodies leave x16 free across the complete chunk.
+  code_.load(Reg::x16, Reg::sp, Frame::iterations);
+  Label body;
+  code_.bind(body);
+  guarded_body(operations);
+  code_.constant(Reg::x17, 1);
+  code_.alu(Alu::subtract_flags, Reg::x16, Reg::x16, Reg::x17);
+  code_.branch_far(Condition::not_equal, body);
+  code_.load(Reg::x9, Reg::sp, Frame::iterations);
+  Label multiple;
+  Label complete;
+  code_.constant(Reg::x17, 2);
+  code_.compare(Reg::x9, Reg::x17);
+  code_.branch_far(Condition::carry, multiple);
+  guarded_complete(operations);
+  code_.branch(complete);
+  code_.bind(multiple);
+  code_.constant(Reg::x17, operations.size());
+  code_.multiply(Reg::x10, Reg::x9, Reg::x17, Width::x64);
+  code_.alu(Alu::add, retired, retired, Reg::x10);
+  code_.alu(Alu::subtract, remaining, remaining, Reg::x10);
+  std::uint64_t cycles = 0;
+  for (const auto &operation : operations) { cycles += operation.instruction.cycles; }
+  code_.constant(Reg::x17, cycles);
+  code_.multiply(Reg::x10, Reg::x9, Reg::x17, Width::x64);
+  code_.load(Reg::x11, cpu, offsetof(Cpu, cycles), Access::doubleword);
+  code_.alu(Alu::add, Reg::x11, Reg::x11, Reg::x10, Width::x64);
+  code_.store(Reg::x11, cpu, offsetof(Cpu, cycles), Access::doubleword);
+  code_.load(Reg::x10, cpu, offsetof(Registers, lc));
+  code_.alu(Alu::subtract, Reg::x10, Reg::x10, Reg::x9);
+  code_.store(Reg::x10, cpu, offsetof(Registers, lc));
+  code_.constant(pc, operations.front().pc);
+  code_.store(Reg::zr, cpu, offsetof(Cpu, interrupt_inhibited), Access::byte);
+  code_.store(Reg::zr, cpu, offsetof(Cpu, repeat_completed), Access::byte);
+  code_.bind(complete);
 }
 
 void Emitter::guarded_finish(const std::span<const std::uint8_t> fallback) {
@@ -190,13 +231,18 @@ Emitter::generate_guarded(const std::span<const BlockInstruction> operations,
   code_.branch_far(Condition::no_carry, done_);
   guard_loop(done_);
   guard_iterations(operations);
-  code_.bind(body);
-  guarded_body(operations);
-  code_.load(Reg::x9, Reg::sp, Frame::iterations);
-  code_.constant(Reg::x17, 1);
-  code_.alu(Alu::subtract_flags, Reg::x9, Reg::x9, Reg::x17);
-  code_.store(Reg::x9, Reg::sp, Frame::iterations);
-  code_.branch_far(Condition::not_equal, body);
+  if (region_.loop) {
+    guarded_chunk(operations);
+  } else {
+    code_.bind(body);
+    guarded_body(operations);
+    guarded_complete(operations);
+    code_.load(Reg::x9, Reg::sp, Frame::iterations);
+    code_.constant(Reg::x17, 1);
+    code_.alu(Alu::subtract_flags, Reg::x9, Reg::x9, Reg::x17);
+    code_.store(Reg::x9, Reg::sp, Frame::iterations);
+    code_.branch_far(Condition::not_equal, body);
+  }
   if (region_.loop) {
     code_.load(Reg::x17, context, offsetof(NativeContext, boundary), Access::byte);
     code_.branch_zero_far(Reg::x17, done_, Width::w32, true);

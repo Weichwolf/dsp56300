@@ -6,6 +6,7 @@
 #include "register_model.hpp"
 #include "support.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -497,10 +498,114 @@ void rejected_windows() {
           "A tracked unknown input is a precise fault, never an initialized RAM prefix");
 }
 
+namespace short_loop_grants {
+using namespace dsp56300;
+constexpr Word entry = 8, loop_flag = 1U << 15, forever_flag = 1U << 16;
+using Bank = std::array<Word, 256>;
+constexpr std::uint64_t x1_mask = long_mask ^ std::uint64_t{word_mask};
+constexpr Word x_host_bits = 0xab000000, y_host_bits = 0xcd000000, pattern_stride = 0x10203;
+constexpr Word pointer_mask = 63, prior_la = 0x1234, prior_lc = 0x5678;
+
+void model(Registers &r, Bank &x) {
+  if (r.pc == entry) {
+    r.x = (r.x & x1_mask) | (x.at(r.r[0]) & word_mask);
+    r.r[0] = (r.r[0] + 1) & word_mask;
+    r.pc = entry + 1;
+    return;
+  }
+  x.at(r.r[1]) = static_cast<Word>(r.x) & word_mask;
+  r.r[1] = (r.r[1] + 1) & word_mask;
+  r.pc = entry + 2;
+  if (r.lc == 1 && (r.sr & forever_flag) == 0) {
+    test::loop_frames::complete(r);
+  } else {
+    r.lc = (r.lc + word_mask) & word_mask;
+    r.pc = entry;
+  }
+}
+
+void check(const Word count,
+           const Word slice,
+           const Word sp,
+           const Word prior,
+           const Word flags,
+           const bool cycles) {
+  Bank p{};
+  Bank x{};
+  Bank y{};
+  for (std::size_t i = 0; i < x.size(); ++i) {
+    x[i] = x_host_bits | (static_cast<Word>(i) * pattern_stride);
+    y[i] = y_host_bits | static_cast<Word>(i);
+  }
+  const auto original_y = y;
+  Core core(Memory::separate({.program = p, .x = x, .y = y}));
+  constexpr auto move_x = static_cast<Word>(isa::Opcode::move_x_effective);
+  constexpr Word post_increment = 3U << 11;
+  constexpr Word load = 1U << 15;
+  constexpr Word second_address = 1U << 8;
+  constexpr std::array program{move_x | post_increment | load,
+                               move_x | post_increment | second_address};
+  core.load(Space::program, entry, program);
+  const auto original_p = p;
+  auto expected = test::register_model::seed(flags);
+  expected.pc = entry;
+  expected.sr = flags | loop_flag;
+  expected.la = entry + 1;
+  expected.lc = count;
+  expected.sc = 2;
+  expected.sp = sp;
+  expected.r[0] = 4;
+  expected.r[1] = 64;
+  expected.m.fill(word_mask);
+  expected.stack[sp % stack_entries] = (std::uint64_t{entry} << test::word_bits) | prior;
+  expected.stack[((sp + pointer_mask) & pointer_mask) % stack_entries] =
+      (std::uint64_t{prior_la} << test::word_bits) | prior_lc;
+  core.set_registers(expected);
+  auto expected_x = x;
+  const Word total = count == 0 || (flags & forever_flag) != 0 ? 32U : count * 2;
+  Word done = 0;
+  while (done < total) {
+    const auto grant = std::min(slice, total - done);
+    for (Word i = 0; i < grant; ++i) { model(expected, expected_x); }
+    const auto result = cycles ? core.run_until(done + grant) : core.run(grant);
+    done += grant;
+    const auto state = core.state();
+    if (result.retired != grant || result.state != ExecutionState::running ||
+        result.fault.kind != FaultKind::none || result.yielded ||
+        result.progress != Progress{.instructions = done, .estimated_cycles = done} ||
+        state.registers != expected || p != original_p || x != expected_x || y != original_y ||
+        state.failure.kind != FaultKind::none || state.execution != ExecutionState::running ||
+        state.progress != Progress{.instructions = done, .estimated_cycles = done}) {
+      std::cerr << "count=" << count << " slice=" << slice << " sp=" << sp << " prior=" << prior
+                << " flags=" << flags << " cycles=" << cycles << " done=" << done
+                << " pc=" << state.registers.pc << " lc=" << state.registers.lc << '\n';
+      throw std::runtime_error("Independent complete short-loop grant/terminal state failed");
+    }
+  }
+}
+
+void boundaries() {
+  for (const Word count : {0U, 1U, 2U, 3U, 4U, 5U, 7U, 17U, 65U}) {
+    for (const Word slice : {1U, 2U, 3U, 4U, 7U, 11U, 130U}) {
+      for (const Word sp : {0U, 1U, 2U, 15U, 16U, 31U, 63U}) {
+        for (const Word prior : {0U, loop_flag, loop_flag | forever_flag}) {
+          for (const Word flags : {0U, 0x7fU, forever_flag}) {
+            for (const bool cycles : {false, true}) {
+              check(count, slice, sp, prior, flags, cycles);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+}
+
 }
 }
 
 int main() try {
+  dsp56300::test::short_loop_grants::boundaries();
   dsp56300::test::rebound_windows();
   dsp56300::test::revoked_windows();
   dsp56300::test::owned_loop_access();
