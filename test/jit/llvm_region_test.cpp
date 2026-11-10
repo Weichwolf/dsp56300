@@ -58,12 +58,16 @@ struct Input {
   Word modifier = linear, offset = 1, target = initial_target, flags = 0;
   unsigned selector = 2, condition = 5, shift = 7;
   bool left = false, alias = false;
-  bool source_b = false, destination_b = true, outer_loop = true;
+  bool source_b = false, destination_b = true, outer_loop = true, test_load = false;
   Tail tail = Tail::conditional_register;
   bool at_tail = false;
   Word loop_count = 7;
   bool test_flags = false;
 };
+
+unsigned transfer_destination(const Input input) {
+  return input.test_load ? 14U + static_cast<unsigned>(input.source_b) : 5U;
+}
 
 bool absolute(const Input input) {
   return input.tail == Tail::conditional_absolute || input.tail == Tail::jump_absolute;
@@ -116,8 +120,10 @@ std::array<Word, length + 1> program(const Input input) {
                                         : (named(Opcode::mpy_register_a) & status_byte) | (5U << 4);
   const auto mac = input.test_flags ? named(Opcode::tst_b) & status_byte
                                     : (named(Opcode::mac_register_a) & status_byte) | (6U << 4);
+  const auto alu =
+      input.test_load ? named(input.source_b ? Opcode::tst_b : Opcode::tst_a) & status_byte : mac;
   const auto moved = (named(Opcode::move_register_x0_x1) & ~((31U << 13) | (31U << 8))) |
-                     (r1 << 13) | (5U << 8) | mac;
+                     (r1 << 13) | (transfer_destination(input) << 8) | alu;
   return {pair | product | (input.test_flags ? 2U << x_selector_shift : 0U),
           named(input.left ? Opcode::asl_immediate : Opcode::asr_immediate) | (input.shift << 1) |
               (input.source_b ? 1U << 7 : 0U) | (input.destination_b ? 1U : 0U),
@@ -126,7 +132,7 @@ std::array<Word, length + 1> program(const Input input) {
           long_move(input, false),
           scalar_load(r2, 7),
           scalar_load(n1, 7, true),
-          moved,
+          input.test_load ? scalar_load(transfer_destination(input), 7) | alu : moved,
           branch(input),
           absolute(input) ? input.target : named(Opcode::rts)};
 }
@@ -338,7 +344,10 @@ void model_step(Registers &state, Data &data, const Input input) {
     }
     case 5: register_model::write(state, r2, x.at(state.r[7] - base)); break;
     case 6: register_model::write(state, n1, y.at(state.r[7] - base)); break;
-    case 7: register_model::write(state, 5, old.r[1]); break;
+    case 7:
+      register_model::write(
+          state, transfer_destination(input), input.test_load ? x.at(state.r[7] - base) : old.r[1]);
+      break;
     case 8: {
       if (absolute(input)) { ++state.pc; }
       if (unconditional(input) || selected(state, input.condition)) {
@@ -580,6 +589,10 @@ int main() try {
     direct({}, mode);
     direct({.test_flags = true}, mode);
     prefixes({.test_flags = true}, mode);
+    direct({.test_load = true}, mode);
+    direct({.source_b = true, .test_load = true}, mode);
+    prefixes({.test_load = true}, mode);
+    prefixes({.source_b = true, .test_load = true}, mode);
     direct({.modifier = narrow_ring, .offset = word_mask}, mode);
     direct({.modifier = wide_ring, .offset = 9, .alias = true}, mode);
     prefixes({}, mode);
@@ -592,6 +605,7 @@ int main() try {
     }
   }
   for (unsigned condition = 0; condition < 16; ++condition) {
+    direct({.condition = condition, .test_load = true}, 0);
     direct({.condition = condition, .outer_loop = false}, 0);
     direct({.condition = condition, .tail = Tail::conditional_short}, 0);
     direct({.condition = condition, .tail = Tail::conditional_absolute}, 0);
