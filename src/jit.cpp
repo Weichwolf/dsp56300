@@ -84,6 +84,7 @@ struct Jit::Impl {
             .runtime = runtime, .exit_requested = &exit_requested, .bus = bus, .events = events} {}
 
   [[nodiscard]] Block *compile(const Registers &state, bool requested = false);
+  void compile_resident(Block &block);
   [[nodiscard]] Mapping &mapping(const Registers &state);
   [[nodiscard]] Block *reuse_region(const Registers &state) const;
   void bind_region(Block &block);
@@ -148,21 +149,8 @@ Block *Jit::Impl::compile(const Registers &state, const bool requested) {
   }
 #endif
   if (block->region) {
-    auto &region = *block->region;
-    const auto full_width = 1U << (region.native.size() - 1);
-    for (unsigned index = 0; index < region.native.size(); ++index) {
-      const unsigned lanes = 1U << index;
-      // Slot zero batches child columns; the other slots batch parents.
-      if (region.nested && ((lanes == 1 && (region.inner_iterations < full_width ||
-                                            region.inner_iterations % full_width != 0)) ||
-                            (lanes == 2 && region.inner_iterations > full_width))) {
-        continue;
-      }
-      const auto native = emit_resident_region(region, lanes);
-      block->native_bytes += native.size();
-      region.native[index] = arena.append(native);
-    }
-    bytes = select_resident_region(region, bytes);
+    compile_resident(*block);
+    bytes = select_resident_region(*block->region, bytes);
   }
   const std::span<const BlockInstruction> admission = block->region && block->region->nested
                                                           ? std::span<const BlockInstruction>{}
@@ -184,6 +172,23 @@ Block *Jit::Impl::compile(const Registers &state, const bool requested) {
     }
   }
   return retain(std::move(block));
+}
+
+void Jit::Impl::compile_resident(Block &block) {
+  auto &region = *block.region;
+  const auto full_width = 1U << (region.native.size() - 1);
+  for (unsigned index = 0; index < region.native.size(); ++index) {
+    const unsigned lanes = 1U << index;
+    // Slot zero batches child columns; the other slots batch parents.
+    if (region.nested && ((lanes == 1 && (region.inner_iterations < full_width ||
+                                          region.inner_iterations % full_width != 0)) ||
+                          (lanes == 2 && region.inner_iterations > full_width))) {
+      continue;
+    }
+    const auto native = emit_resident_region(region, lanes);
+    block.native_bytes += native.size();
+    region.native[index] = arena.append(native);
+  }
 }
 
 #if defined(__aarch64__)
