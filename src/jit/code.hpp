@@ -78,6 +78,7 @@ struct IndexedAddress {
 
 // Low byte is the opcode; the next byte is the VEX opcode-map selector.
 enum class VectorOp : std::uint16_t {
+  test = 0x0217,
   copy = 0x016f,
   add = 0x01d4,
   subtract = 0x01fb,

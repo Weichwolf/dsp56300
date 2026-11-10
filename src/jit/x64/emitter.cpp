@@ -431,6 +431,10 @@ void BlockEmitter::retire(const BlockInstruction &operation, const bool publish)
     repeat_retire(operation);
     return;
   }
+  if (coalesced_loop_ && at_loop_end(operation)) {
+    retire_loop_window(operation, publish);
+    return;
+  }
   if (at_loop_end(operation)) {
     loop_continue();
   } else if (publish) {
@@ -633,6 +637,7 @@ BlockEmitter::generate_body(const std::span<const BlockInstruction> operations) 
   cached_inputs_ = admit_cached_inputs(operations);
   loop_residency_ = region_mode_ == RegionMode::guarded && loop_size_ != 0 && packed_retirement_ &&
                     residency_mode_ != LoopResidency::disabled;
+  plan_loop_window(operations);
   if (coalesced_accounting_ && !retirement_helpers_) {
     const auto mode = operations.front().mode;
     constexpr unsigned aligned_growth_shift = 53;
@@ -668,6 +673,7 @@ BlockEmitter::generate_body(const std::span<const BlockInstruction> operations) 
   }
   if (loop_size_ != 0) { code_.align_entry(); }
   code_.bind(loop_body_);
+  emit_loop_copy(operations);
   emit_operations(operations);
   materialize_pending_accounting();
   if (bounds_ == ExecutionBounds::whole && closed_jump(operations)) {

@@ -238,8 +238,11 @@ void BlockEmitter::initialize_loop_residency() {
   // Initial rejection retains the original zero-dirty exit. Subsequent guards
   // can fail after complete iterations and must publish both initialized slots.
   if (!entry_admitted_) { region_guard(code_, Reg::r12, exits_[0]); }
-  code_.load(Reg::bp, Reg::r12, offsetof(Cpu, reg) + offsetof(Registers, a));
-  code_.load(Reg::bx, Reg::r12, offsetof(Cpu, reg) + offsetof(Registers, b));
+  // Proved copy bodies overwrite both complete accumulators before any read or exit.
+  if (!copy_loop_) {
+    code_.load(Reg::bp, Reg::r12, offsetof(Cpu, reg) + offsetof(Registers, a));
+    code_.load(Reg::bx, Reg::r12, offsetof(Cpu, reg) + offsetof(Registers, b));
+  }
   if (!retirement_helpers_) {
     // The admitted body cannot modify SP or its saved loop frame. Retain the
     // actual target, including mismatches, rather than re-reading it each turn.
@@ -253,6 +256,7 @@ void BlockEmitter::initialize_loop_residency() {
   }
 
   accumulator_dirty_.fill(true);
+  initialize_loop_window_count();
 }
 
 } // namespace dsp56300::detail

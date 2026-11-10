@@ -18,6 +18,7 @@
 namespace dsp56300::test {
 namespace {
 constexpr Word pair = static_cast<Word>(isa::Opcode::move_xy);
+constexpr unsigned x_register_shift = 18, y_register_shift = 16;
 constexpr Word load = pair | (2U << 18) | (3U << 16) | (1U << 15) | (1U << 22);
 constexpr Word store = pair | (3U << 18) | (2U << 16) | (3U << 11) | (3U << 20);
 constexpr std::size_t extent = 64, split = extent / 2;
@@ -184,19 +185,23 @@ void owned_loop_store() {
           "A mixed I/O/RAM store completes both ports and initializes only its granted RAM word");
 }
 
-void model_step(Registers &state, ExpectedMemory &memory) {
+struct CopyRouting {
+  bool load_b_first = false, store_b_to_x = true, store_b_to_y = false;
+};
+
+void model_step(Registers &state, ExpectedMemory &memory, const CopyRouting routing = {}) {
   auto &x = memory.x;
   auto &y = memory.y;
   if ((state.pc - start) % 2 == 0) {
-    register_model::write(state, 14, x[state.r[0]] & word_mask);
-    register_model::write(state, 15, y[state.r[4]] & word_mask);
+    register_model::write(state, routing.load_b_first ? 15U : 14U, x[state.r[0]] & word_mask);
+    register_model::write(state, routing.load_b_first ? 14U : 15U, y[state.r[4]] & word_mask);
     ++state.pc;
     return;
   }
-  const auto a = register_model::bus_word(state, state.a);
-  const auto b = register_model::bus_word(state, state.b);
-  x[state.r[0]++] = b;
-  y[state.r[4]++] = a;
+  const auto to_x = register_model::bus_word(state, routing.store_b_to_x ? state.b : state.a);
+  const auto to_y = register_model::bus_word(state, routing.store_b_to_y ? state.b : state.a);
+  x[state.r[0]++] = to_x;
+  y[state.r[4]++] = to_y;
   ++state.pc;
   if (state.pc - 1 != state.la) { return; }
   if (state.lc > 1) {
@@ -207,10 +212,30 @@ void model_step(Registers &state, ExpectedMemory &memory) {
   }
 }
 
-void prefixes(const Word first, const Word count) {
+struct PrefixInput {
+  Word first = 0, count = 0, mode = 0;
+  CopyRouting routing{};
+  bool direct = false;
+};
+
+void prefixes(const PrefixInput input) {
+  const auto first = input.first;
+  const auto count = input.count;
+  const auto mode = input.mode;
   MemoryIo memory;
-  Core core(Memory::external(), &memory);
-  auto initial = register_model::seed(0);
+  constexpr Word register_fields = (3U << x_register_shift) | (3U << y_register_shift);
+  const auto &routing = input.routing;
+  memory.program[start] = (load & ~register_fields) |
+                          ((routing.load_b_first ? 3U : 2U) << x_register_shift) |
+                          ((routing.load_b_first ? 2U : 3U) << y_register_shift);
+  memory.program[start + 1] = (store & ~register_fields) |
+                              ((routing.store_b_to_x ? 3U : 2U) << x_register_shift) |
+                              ((routing.store_b_to_y ? 3U : 2U) << y_register_shift);
+  Core core(input.direct
+                ? Memory::separate({.program = memory.program, .x = memory.x, .y = memory.y})
+                : Memory::external(),
+            &memory);
+  auto initial = register_model::seed(mode);
   initial.sr |= Word{1} << 15;
   initial.la = start + 1;
   initial.lc = count;
@@ -225,7 +250,7 @@ void prefixes(const Word first, const Word count) {
       }
       ExpectedMemory contents{.x = memory.x, .y = memory.y};
       auto expected = initial;
-      for (Word step = 0; step < prefix; ++step) { model_step(expected, contents); }
+      for (Word step = 0; step < prefix; ++step) { model_step(expected, contents, routing); }
       core.set_registers(initial);
       const auto before = core.progress();
       const auto result =
@@ -235,7 +260,7 @@ void prefixes(const Word first, const Word count) {
                       Progress{.instructions = before.instructions + prefix,
                                .estimated_cycles = before.estimated_cycles + prefix} &&
                   core.registers() == expected && memory.x == contents.x && memory.y == contents.y,
-              "Cold and warm short loops preserve every prefix, full state and sparse RAM");
+              "Cold and warm short loops preserve every prefix, full state and RAM binding");
     }
   }
 }
@@ -248,6 +273,107 @@ Registers loop_state() {
   state.r[0] = state.r[4] = 4;
   state.stack[2] = std::uint64_t{start} << word_bits;
   return state;
+}
+
+void fragmented_window() {
+  MemoryIo memory;
+  Core core(Memory::external(), &memory);
+  const auto initial = loop_state();
+  memory.x.fill(sign24 | x_host_bits);
+  memory.y.fill((sign24 - 1) | y_host_bits);
+  ExpectedMemory contents{.x = memory.x, .y = memory.y};
+  auto expected = initial;
+  core.set_registers(initial);
+  for (const Word grant : {4U, 3U, 1U, 2U}) {
+    for (Word step = 0; step < grant; ++step) { model_step(expected, contents); }
+    const auto before = core.progress();
+    const auto result = core.run(grant);
+    require(result.retired == grant && result.fault == Fault{} && !result.yielded &&
+                result.progress == Progress{.instructions = before.instructions + grant,
+                                            .estimated_cycles = before.estimated_cycles + grant} &&
+                core.registers() == expected && memory.x == contents.x && memory.y == contents.y,
+            "Resumed grants retain complete loop state across whole windows and interior prefixes");
+  }
+}
+
+void mismatched_window_frame() {
+  constexpr Word target = start + 8;
+  constexpr Word grant = 6;
+  MemoryIo memory;
+  for (Word pc = target; pc < target + grant; ++pc) { memory.program[pc] = isa::nop.front(); }
+  Core core(Memory::external(), &memory);
+  auto initial = loop_state();
+  initial.stack[2] = std::uint64_t{target} << word_bits;
+  for (unsigned warmth = 0; warmth < 2; ++warmth) {
+    memory.x.fill(sign24 | x_host_bits);
+    memory.y.fill((sign24 - 1) | y_host_bits);
+    ExpectedMemory contents{.x = memory.x, .y = memory.y};
+    auto expected = initial;
+    model_step(expected, contents);
+    model_step(expected, contents);
+    expected.pc = target + grant - 2;
+    core.set_registers(initial);
+    const auto before = core.progress();
+    const auto result = core.run(grant);
+    require(result.retired == grant && result.fault == Fault{} && !result.yielded &&
+                result.progress == Progress{.instructions = before.instructions + grant,
+                                            .estimated_cycles = before.estimated_cycles + grant} &&
+                core.registers() == expected && memory.x == contents.x && memory.y == contents.y,
+            "A different saved loop start executes one body and follows its actual target");
+  }
+}
+
+void aliased_copy_prefixes() {
+  constexpr Word count = 8;
+  std::array<Word, memory_words> program{};
+  program[start] = load;
+  program[start + 1] = store;
+  const auto source = program;
+  Data shared{};
+  Core core(Memory::separate({.program = program, .x = shared, .y = shared}));
+  auto initial = loop_state();
+  initial.lc = count;
+  initial.r[4] = initial.r[0] + 1;
+  constexpr std::array<Word, 7> values{0, 1, sign24, word_mask, sign24 - 1, 0x123456, 0xabcdef};
+  for (unsigned warmth = 0; warmth < 2; ++warmth) {
+    for (Word prefix = 0; prefix <= count * 2; ++prefix) {
+      for (std::size_t index = 0; index < shared.size(); ++index) {
+        shared[index] = values[index % values.size()] | x_host_bits;
+      }
+      auto contents = shared;
+      auto expected = initial;
+      for (Word step = 0; step < prefix; ++step) {
+        if ((expected.pc - start) % 2 == 0) {
+          const auto x = contents[expected.r[0]] & word_mask;
+          const auto y = contents[expected.r[4]] & word_mask;
+          register_model::write(expected, 14, x);
+          register_model::write(expected, 15, y);
+          ++expected.pc;
+        } else {
+          const auto a = register_model::bus_word(expected, expected.a);
+          const auto b = register_model::bus_word(expected, expected.b);
+          contents[expected.r[0]++] = b;
+          contents[expected.r[4]++] = a;
+          ++expected.pc;
+          if (expected.lc > 1) {
+            --expected.lc;
+            expected.pc = start;
+          } else {
+            loop_frames::complete(expected);
+          }
+        }
+      }
+      core.set_registers(initial);
+      const auto before = core.progress();
+      const auto result = core.run(prefix);
+      require(result.retired == prefix && result.fault == Fault{} &&
+                  result.progress ==
+                      Progress{.instructions = before.instructions + prefix,
+                               .estimated_cycles = before.estimated_cycles + prefix} &&
+                  core.registers() == expected && shared == contents && program == source,
+              "Overlapping Harvard views retain ordered reads, stores and every loop prefix");
+    }
+  }
 }
 
 Registers window_state(MemoryIo &memory) {
@@ -380,9 +506,37 @@ int main() try {
   dsp56300::test::owned_loop_access();
   dsp56300::test::owned_loop_store();
   dsp56300::test::rejected_windows();
-  for (const dsp56300::Word first : {4U, 28U, 36U}) {
+  dsp56300::test::fragmented_window();
+  dsp56300::test::mismatched_window_frame();
+  dsp56300::test::aliased_copy_prefixes();
+  constexpr dsp56300::Word tail_rows = 5;
+  dsp56300::test::prefixes(
+      {.first = static_cast<dsp56300::Word>(dsp56300::test::extent) - tail_rows,
+       .count = tail_rows,
+       .direct = true});
+  for (const bool load_b_first : {false, true}) {
+    for (const bool store_b_to_x : {false, true}) {
+      for (const bool store_b_to_y : {false, true}) {
+        for (const dsp56300::Word count : {4U, 5U, 6U, 8U, 9U}) {
+          for (const bool direct : {false, true}) {
+            dsp56300::test::prefixes({.first = 4,
+                                      .count = count,
+                                      .mode = 0,
+                                      .routing = {.load_b_first = load_b_first,
+                                                  .store_b_to_x = store_b_to_x,
+                                                  .store_b_to_y = store_b_to_y},
+                                      .direct = direct});
+          }
+        }
+      }
+    }
+  }
+  for (const dsp56300::Word first : {1U, 4U, 5U, 28U, 36U}) {
     for (const dsp56300::Word count : {1U, 2U, 3U, 5U, 8U}) {
-      dsp56300::test::prefixes(first, count);
+      for (const auto mode :
+           {0U, dsp56300::test::mode_down, dsp56300::test::mode_up, dsp56300::test::mode_rm}) {
+        dsp56300::test::prefixes({.first = first, .count = count, .mode = mode});
+      }
     }
   }
 } catch (const std::exception &error) {

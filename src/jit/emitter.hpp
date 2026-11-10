@@ -178,8 +178,13 @@ private:
   void loop_push(x64::Reg frame);
   void loop_continue();
   void loop_backedge();
+  void loop_window_backedge();
+  void retire_loop_window(const BlockInstruction &operation, bool publish);
+  void emit_loop_copy(std::span<const BlockInstruction> operations);
   void initialize_loop_residency();
   void initialize_loop_window();
+  void initialize_loop_window_count();
+  void plan_loop_window(std::span<const BlockInstruction> operations);
   void guard_region_header();
   void batch_entry(std::span<const BlockInstruction> operations);
   void retire(const BlockInstruction &operation, bool publish);
@@ -214,6 +219,8 @@ private:
   bool cached_status_ = false;
   bool cached_inputs_ = false;
   bool coalesced_accounting_ = false;
+  bool coalesced_loop_ = false;
+  bool copy_loop_ = false;
   bool loop_residency_ = false;
   bool entry_admitted_ = false;
   unsigned deferred_growth_shift_ = 0;
@@ -224,6 +231,7 @@ private:
   std::array<x64::Label, 4> exits_;
   x64::Label loop_header_;
   x64::Label loop_body_;
+  x64::Label window_exhausted_;
   Word loop_size_ = 0, loop_pc_ = 0;
   ExecutionBounds bounds_ = ExecutionBounds::whole;
   Word live_flags_ = carry | overflow | zero | negative | unnormalized | extension;
