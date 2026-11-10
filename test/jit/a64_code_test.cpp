@@ -7,7 +7,6 @@
 #include <cstdint>
 #include <exception>
 #include <iostream>
-#include <limits>
 #include <stdexcept>
 #if defined(__aarch64__)
 #include "jit/arena.hpp"

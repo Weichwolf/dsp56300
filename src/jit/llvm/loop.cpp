@@ -8,6 +8,7 @@
 #include "instruction.hpp"
 #include "jit.hpp"
 #include "jit/block.hpp"
+#include "jit/llvm/alu.hpp"
 #include "jit/llvm/builder.hpp"
 #include "jit/llvm/runtime.hpp"
 #include "jit/move.hpp"
@@ -33,25 +34,28 @@ using V = LLVMValueRef;
 constexpr std::array<std::size_t, 4> bank_fields{
     offsetof(Registers, a), offsetof(Registers, b), offsetof(Registers, x), offsetof(Registers, y)};
 constexpr Word stack_mask = stack_entries - 1, pointer_mask = 63;
-constexpr unsigned bus_shift = word_bits + padding_bits, growth_low = word_bits - 3;
+constexpr unsigned bus_shift = word_bits + padding_bits;
+constexpr Word supported_modes = rounding_mode | scale_down | scale_up;
 
 bool data_register(const unsigned reg) {
   return (reg >= x0_register && reg <= y1_register) || reg == a_register || reg == b_register;
 }
 
 struct LoopPlan {
+  struct Step {
+    NativeMoves memory;
+    NativeRegisterMove registers;
+  };
+
   std::span<const BlockInstruction> operations;
-  std::vector<NativeMoves> moves;
+  std::vector<Step> steps;
   std::array<JitMemory, 2> memory;
   std::array<std::array<Word, agu_registers>, 2> accesses{};
   std::array<Word, agu_registers> deltas{};
   Word cost = 0, count = 0;
 };
 
-bool append_moves(LoopPlan &plan,
-                  const NativeMoves &moves,
-                  std::array<bool, m_register_base> &assigned) {
-  const auto before = assigned;
+bool append_moves(LoopPlan &plan, const NativeMoves &moves) {
   Word changed_addresses = 0;
   for (const auto &move : std::span(moves.transfers).first(moves.count)) {
     if (!data_register(move.reg) || (move.address.mode != 3 && move.address.mode != 4) ||
@@ -60,38 +64,41 @@ bool append_moves(LoopPlan &plan,
     }
     const auto bank = move.space == Space::x ? 0U : 1U;
     const auto &memory = plan.memory[bank];
-    if (memory.data == nullptr || (!move.load && memory.aliases_program) ||
-        (!move.load && move.reg >= a_register && !before.at(move.reg))) {
-      return false;
-    }
+    if (memory.data == nullptr || (!move.load && memory.aliases_program)) { return false; }
     auto &extent = plan.accesses[bank][move.address.index];
     extent = std::max(extent, plan.deltas[move.address.index] + 1);
     if (move.address.mode == 3) { ++plan.deltas[move.address.index]; }
     changed_addresses |= 1U << move.address.index;
-    if (move.load) { assigned[move.reg] = true; }
   }
   return true;
 }
 
 std::optional<LoopPlan> plan_loop(const std::span<const BlockInstruction> operations,
                                   const JitRuntime &runtime) {
-  if (operations.empty() || operations.front().mode != 0 || !at_loop_end(operations.back())) {
+  if (operations.empty() || !at_loop_end(operations.back())) { return {}; }
+  const auto mode = operations.front().mode;
+  if ((mode & ~supported_modes) != 0 ||
+      (mode & (scale_down | scale_up)) == (scale_down | scale_up)) {
     return {};
   }
-  LoopPlan plan{.operations = operations, .moves = {}, .memory = resident_runtime(runtime).memory};
-  std::array<bool, m_register_base> assigned{};
+  LoopPlan plan{.operations = operations, .steps = {}, .memory = resident_runtime(runtime).memory};
   auto pc = operations.front().pc;
   for (const auto &operation : operations) {
     const auto &instruction = operation.instruction;
-    if (operation.pc != pc++ || operation.mode != 0 ||
+    if (operation.pc != pc++ || operation.mode != mode ||
         operation.loop_address != operations.back().loop_address || instruction.words != 1 ||
-        instruction.operation != Operation::parallel || (instruction.opcode & byte_mask) != 0) {
+        (instruction.operation != Operation::parallel && instruction.operation != Operation::nop) ||
+        !llvm19::supported_alu(instruction.opcode)) {
       return {};
     }
     auto moves = plan_moves(instruction);
-    if (moves.count == 0 || moves.long_pair) { return {}; }
-    if (!append_moves(plan, moves, assigned)) { return {}; }
-    plan.moves.push_back(moves);
+    const auto registers = plan_register_move(instruction);
+    if (moves.long_pair || !append_moves(plan, moves)) { return {}; }
+    if (instruction.operation == Operation::parallel && moves.count == 0 && !registers.valid() &&
+        (instruction.opcode & upper_move_mask) != no_move_group) {
+      return {};
+    }
+    plan.steps.push_back({.memory = moves, .registers = registers});
     plan.cost += instruction.cycles;
     ++plan.count;
   }
@@ -178,7 +185,7 @@ private:
     turns_ = ir_.CreateSelect(forever_, turns_, minimum(turns_, finite_count_));
     eligible_ = ir_.CreateICmpUGT(turns_, ir_.getInt64(0));
     require(ir_.CreateICmpEQ(ir_.CreateAnd(status_, ir_.getInt32(numeric_mode_mask | loop_flag)),
-                             ir_.getInt32(loop_flag)));
+                             ir_.getInt32(loop_flag | plan_.operations.front().mode)));
     require(ir_.CreateICmpEQ(reg(32, offsetof(Registers, pc)),
                              ir_.getInt32(plan_.operations.front().pc)));
     require(ir_.CreateICmpEQ(reg(32, offsetof(Registers, la)),
@@ -223,13 +230,8 @@ private:
 
   V read_register(const std::array<V, 4> &values, const unsigned number) {
     if (number >= a_register) {
-      auto *word = ir_.CreateTrunc(
-          ir_.CreateLShr(values[number - a_register], ir_.getInt64(bus_shift)), ir_.getInt32Ty());
-      auto *bits = ir_.CreateXor(ir_.CreateLShr(word, ir_.getInt32(growth_low)),
-                                 ir_.CreateLShr(word, ir_.getInt32(growth_low + 1)));
-      status_ = ir_.CreateOr(status_,
-                             ir_.CreateShl(ir_.CreateAnd(bits, ir_.getInt32(1)), ir_.getInt32(7)));
-      return ir_.CreateAnd(word, ir_.getInt32(word_mask));
+      return llvm19::transfer_word(
+          ir_, values[number - a_register], plan_.operations.front().mode, status_);
     }
     auto *value = values[number < y0_register ? 2U : 3U];
     return ir_.CreateAnd(
@@ -367,7 +369,20 @@ private:
     banks_ = values;
     cursors_ = addresses;
     status_ = status;
-    for (const auto &moves : plan_.moves) { transfers(moves); }
+    for (std::size_t index = 0; index < plan_.steps.size(); ++index) {
+      const auto before = banks_;
+      const auto &step = plan_.steps[index];
+      if (step.registers.valid()) {
+        write_register(step.registers.destination, read_register(before, step.registers.source));
+      }
+      transfers(step.memory);
+      llvm19::lower_alu(ir_,
+                        plan_.operations[index].instruction.opcode,
+                        plan_.operations[index].mode,
+                        before,
+                        banks_,
+                        status_);
+    }
     for (unsigned bank = 0; bank < values.size(); ++bank) {
       LLVMAddIncoming(values[bank], &banks_[bank], &loop, 1);
     }
@@ -394,15 +409,14 @@ private:
 };
 }
 
-bool memory_loop_candidate(const std::span<const BlockInstruction> operations,
-                           const JitRuntime &runtime) {
+bool loop_candidate(const std::span<const BlockInstruction> operations, const JitRuntime &runtime) {
   return plan_loop(operations, runtime).has_value();
 }
 
-std::optional<PreparedLoop> compile_memory_loop(std::unique_ptr<LlvmCompiler> &compiler,
-                                                const std::span<const BlockInstruction> operations,
-                                                const JitRuntime &runtime,
-                                                const void *fallback) {
+std::optional<PreparedLoop> compile_loop(std::unique_ptr<LlvmCompiler> &compiler,
+                                         const std::span<const BlockInstruction> operations,
+                                         const JitRuntime &runtime,
+                                         const void *fallback) {
   const auto plan = plan_loop(operations, runtime);
   if (!plan) { return {}; }
   if (!compiler) { compiler = std::make_unique<LlvmCompiler>(); }

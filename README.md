@@ -51,8 +51,10 @@ absolute local cycle deadline. Core does not schedule an instrument or its audio
 Unsupported operations fail explicitly.
 
 `Core::prepare(entries)` follows established code entries without executing ISA or
-device I/O. It installs LLVM O3 code for ordinary RAM-transfer DO bodies with
-linear cursors; other operations retain their native execution path. Preparation
+device I/O. It installs LLVM O3 code for supported arithmetic and parallel RAM/register
+transfers in natural DO bodies with linear cursors. Multiply/accumulate, rounding,
+add/subtract, comparisons, shifts and logic retain exact flags and old operands;
+other operations retain their native execution path. Preparation
 reports installed entries, unresolved coverage, newly emitted text and a
 non-latching diagnostic. Code remains owned by Core; changed external mappings
 require a new `Io::program_revision()` before preparation or execution.

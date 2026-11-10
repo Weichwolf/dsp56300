@@ -121,8 +121,8 @@ Block *Jit::Impl::compile(const Registers &state, const bool requested) {
 #endif
   block->operations = parse_block(program, state, context.runtime, callbacks);
   if (block->operations.empty()) { return nullptr; }
-  const bool optimize = requested || (preparation_requested &&
-                                      memory_loop_candidate(block->operations, context.runtime));
+  const bool optimize =
+      requested || (preparation_requested && loop_candidate(block->operations, context.runtime));
 #if defined(__aarch64__)
   if (!optimize) {
     block->region = resident_region_plan(program, state, context.runtime, block->operations);
@@ -166,7 +166,7 @@ Block *Jit::Impl::compile(const Registers &state, const bool requested) {
   }
   if (optimize) {
     if (const auto compiled =
-            compile_memory_loop(compiler, block->operations, context.runtime, block->entry)) {
+            compile_loop(compiler, block->operations, context.runtime, block->entry)) {
       block->entry = compiled->entry;
       block->native_bytes += compiled->native_bytes;
       block->optimized = true;
@@ -360,7 +360,7 @@ std::optional<PreparedLoop> Jit::Impl::prepare_entry(const Registers &state,
   });
   if (known != storage.end()) { return PreparedLoop{.entry = entry}; }
   const auto operations = parse_block(program, state, context.runtime);
-  if (!memory_loop_candidate(operations, context.runtime)) { return {}; }
+  if (!loop_candidate(operations, context.runtime)) { return {}; }
   const auto *compiled = compile(state, true);
   if (compiled == nullptr || !compiled->optimized) { return {}; }
   if (!current_view(revision)) {
