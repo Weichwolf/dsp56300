@@ -58,6 +58,13 @@ struct Block {
   std::array<JitMemory, 2> memory{};
 #endif
 };
+
+#if defined(__aarch64__)
+bool callback_boundaries(const NativeContext &context, const Registers &state) noexcept {
+  return (context.events.io != nullptr || context.bus.external) &&
+         active_loop_address(state) == inactive_loop;
+}
+#endif
 }
 
 struct Jit::Impl {
@@ -108,8 +115,7 @@ struct Jit::Impl {
 Block *Jit::Impl::compile(const Registers &state, const bool requested) {
   auto block = std::make_unique<Block>();
 #if defined(__aarch64__)
-  const bool callbacks = (context.events.io != nullptr || context.bus.external) &&
-                         active_loop_address(state) == inactive_loop;
+  const bool callbacks = callback_boundaries(context, state);
 #else
   constexpr bool callbacks = false;
 #endif
