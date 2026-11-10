@@ -85,6 +85,8 @@ struct Jit::Impl {
 
   [[nodiscard]] Block *compile(const Registers &state, bool requested = false);
   [[nodiscard]] Mapping &mapping(const Registers &state);
+  [[nodiscard]] Block *reuse_region(const Registers &state) const;
+  void bind_region(Block &block);
   void clear_invalidated();
   [[nodiscard]] bool current_view(std::optional<std::uint64_t> revision) const;
   [[nodiscard]] std::optional<PreparedRegion>
@@ -100,6 +102,7 @@ struct Jit::Impl {
   Cpu &cpu;
   std::span<const Word> program;
   std::unordered_map<std::uint64_t, Block *> blocks;
+  std::unordered_map<std::uint64_t, Block *> shared_regions;
   std::unordered_map<std::uint64_t, std::unique_ptr<Mapping>> mappings;
   Mapping *current = nullptr;
   NativeTable catalog{4};
@@ -118,9 +121,10 @@ struct Jit::Impl {
 };
 
 Block *Jit::Impl::compile(const Registers &state, const bool requested) {
+  if (auto *shared = reuse_region(state)) { return shared; }
   auto block = std::make_unique<Block>();
 #if defined(__aarch64__)
-  const bool callbacks = callback_boundaries(context, state);
+  const bool callbacks = !requested && callback_boundaries(context, state);
 #else
   constexpr bool callbacks = false;
 #endif
@@ -288,6 +292,7 @@ bool Jit::bind_windows(const std::array<std::span<const MemoryWindow>, 2> window
 
 void Jit::reset() {
   impl_->blocks.clear();
+  impl_->shared_regions.clear();
   impl_->mappings.clear();
   impl_->catalog.clear();
   impl_->current = nullptr;
@@ -303,8 +308,11 @@ Block *Jit::Impl::retain(std::unique_ptr<Block> block) {
 #endif
   auto *const entry = block.get();
   storage.push_back(std::move(block));
+  if (entry->optimized && region_independent(entry->operations)) { bind_region(*entry); }
 #if defined(__aarch64__)
-  if (!entry->region) { reusable.emplace(entry->operations.front().pc, entry); }
+  if (!entry->region && !entry->optimized) {
+    reusable.emplace(entry->operations.front().pc, entry);
+  }
 #endif
   return entry;
 }
@@ -331,10 +339,65 @@ const void *Jit::Impl::prepare(Word &budget) {
 void Jit::Impl::clear_invalidated() {
   if (invalidated) {
     blocks.clear();
+    shared_regions.clear();
     mappings.clear();
     catalog.clear();
     current = nullptr;
     invalidated = false;
+  }
+}
+
+namespace {
+std::uint64_t region_key(const Registers &state) {
+  return state.pc | (std::uint64_t{state.sr & numeric_mode_mask} << word_bits);
+}
+
+bool outside_region(const Registers &state, const std::span<const BlockInstruction> operations) {
+  const auto &last = operations.back();
+  const auto end = (last.pc + last.instruction.words - 1) & word_mask;
+  const auto la = active_loop_address(state);
+  return la < operations.front().pc || la > end;
+}
+
+bool same_region(const std::span<const BlockInstruction> left,
+                 const std::span<const BlockInstruction> right) {
+  if (right.empty() || at_loop_end(right.back())) { return false; }
+  return std::ranges::equal(left, right, [](const auto &a, const auto &b) {
+    return a.pc == b.pc && a.mode == b.mode && a.instruction == b.instruction;
+  });
+}
+}
+
+Block *Jit::Impl::reuse_region(const Registers &state) const {
+  const auto known = shared_regions.find(region_key(state));
+  if (known == shared_regions.end() || !outside_region(state, known->second->operations)) {
+    return nullptr;
+  }
+  return known->second;
+}
+
+void Jit::Impl::bind_region(Block &block) {
+  const auto &first = block.operations.front();
+  Registers state;
+  state.pc = first.pc;
+  state.sr = first.mode;
+  shared_regions.insert_or_assign(region_key(state), &block);
+  // Tables and the shared index describe only the current program/grant view.
+  // Upgrade matching ordinary bindings while the execution owner is stopped.
+  for (const auto &[key, binding] : mappings) {
+    constexpr unsigned numeric_key_bits = 7;
+    const auto la = static_cast<Word>(key >> numeric_key_bits);
+    const auto &last = block.operations.back();
+    const auto end = (last.pc + last.instruction.words - 1) & word_mask;
+    if (la >= first.pc && la <= end) { continue; }
+    const auto *entry = binding->table.find(first.pc);
+    if (entry == nullptr) { continue; }
+    const auto known = std::ranges::find_if(
+        storage, [entry](const auto &candidate) { return candidate->entry == entry; });
+    if (known != storage.end() && !(*known)->optimized &&
+        same_region(block.operations, (*known)->operations)) {
+      binding->table.insert(first.pc, block.entry);
+    }
   }
 }
 
@@ -366,6 +429,10 @@ std::optional<PreparedRegion> Jit::Impl::prepare_entry(const Registers &state,
     return entry != nullptr && block->entry == entry && block->optimized;
   });
   if (known != storage.end()) { return PreparedRegion{.entry = entry}; }
+  if (auto *shared = reuse_region(state)) {
+    binding.table.insert(state.pc, shared->entry);
+    return PreparedRegion{.entry = shared->entry};
+  }
   const auto operations = parse_block(program, state, context.runtime);
   if (!region_candidate(operations, context.runtime, complete_loop)) { return {}; }
   const auto *compiled = compile(state, true);
@@ -388,6 +455,7 @@ PreparationReport Jit::prepare(const std::span<const Word> established_entries,
   PreparationReport report{.failure = graph.failure};
   std::set<Word> unresolved(graph.unresolved.begin(), graph.unresolved.end());
   std::set<std::uint64_t> visited;
+  std::set<std::uint64_t> installed;
   const auto install = [&](const Registers &context, const bool complete_loop) {
     if (!visited.insert(translation_key(context)).second) { return; }
     const auto entry = self.prepare_entry(context, revision, complete_loop);
@@ -395,7 +463,7 @@ PreparationReport Jit::prepare(const std::span<const Word> established_entries,
       unresolved.insert(context.pc);
       return;
     }
-    ++report.prepared_entries;
+    if (installed.insert(region_key(context)).second) { ++report.prepared_entries; }
     report.native_bytes += entry->native_bytes;
   };
   if (!self.current_view(revision)) {
@@ -406,12 +474,17 @@ PreparationReport Jit::prepare(const std::span<const Word> established_entries,
     return report;
   }
   install(state, whole_loop_entry(state));
+  for (const auto pc : graph.entries) {
+    auto context = state;
+    context.pc = pc;
+    context.sr &= ~(loop_flag | forever_flag);
+    install(context, false);
+  }
   for (const auto &operation : graph.instructions) {
     const auto kind = operation.instruction.operation;
     if (kind != Operation::loop_immediate && kind != Operation::loop_register &&
         kind != Operation::loop_short && kind != Operation::loop_effective &&
         kind != Operation::loop_forever) {
-      unresolved.insert(operation.pc);
       continue;
     }
     const auto &decoded = operation.instruction;
@@ -473,14 +546,7 @@ void Jit::set_cycle_deadline(const std::uint64_t deadline) noexcept {
 std::uint32_t Jit::run_repeat(const BlockInstruction operation, const std::uint32_t budget) {
   auto &self = *impl_;
   if (budget == 0 || self.cpu.repeat_remaining == 0) { return 0; }
-  if (self.invalidated) {
-    self.blocks.clear();
-    self.mappings.clear();
-    self.catalog.clear();
-    self.current = nullptr;
-
-    self.invalidated = false;
-  }
+  self.clear_invalidated();
   self.exit_requested = false;
   if (self.rejected_repeat && self.rejected_repeat->instruction == operation.instruction &&
       self.rejected_repeat->mode == operation.mode && self.rejected_repeat->pc == operation.pc &&
@@ -529,14 +595,7 @@ std::uint32_t Jit::run_captured(BlockInstruction operation) {
 #endif
     return run_repeat(operation, 1);
   }
-  if (self.invalidated) {
-    self.blocks.clear();
-    self.mappings.clear();
-    self.catalog.clear();
-    self.current = nullptr;
-
-    self.invalidated = false;
-  }
+  self.clear_invalidated();
   self.exit_requested = false;
   constexpr auto captured_tag = std::uint64_t{1} << 62;
   const auto key = translation_key(self.cpu.reg) | captured_tag;
@@ -564,13 +623,7 @@ std::uint32_t Jit::run_captured(BlockInstruction operation) {
 #if defined(__aarch64__)
 std::uint32_t Jit::run_vector(const BlockInstruction operation) {
   auto &self = *impl_;
-  if (self.invalidated) {
-    self.blocks.clear();
-    self.mappings.clear();
-    self.catalog.clear();
-    self.current = nullptr;
-    self.invalidated = false;
-  }
+  self.clear_invalidated();
   self.exit_requested = false;
   constexpr auto vector_tag = std::uint64_t{1} << 61;
   const auto key =

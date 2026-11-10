@@ -8,6 +8,7 @@
 #include "jit.hpp"
 
 #include <queue>
+#include <set>
 #include <span>
 #include <stdexcept>
 #include <vector>
@@ -166,6 +167,7 @@ PreparationGraph preparation_graph(const std::span<const Word> program,
   PreparationGraph result;
   if (established_entries.empty()) { return result; }
   std::queue<Word> pending;
+  std::set<Word> headers(established_entries.begin(), established_entries.end());
   std::vector<bool> visited(address_words);
   const auto enqueue = [&](const Word address) {
     if (address > word_mask) { throw std::invalid_argument("DSP code entry exceeds 24 bits"); }
@@ -198,8 +200,14 @@ PreparationGraph preparation_graph(const std::span<const Word> program,
     result.instructions.push_back(operation);
     const auto flow = successors(operation);
     if (flow.indirect) { result.unresolved.push_back(address); }
-    for (const auto target : std::span(flow.direct).first(flow.count)) { enqueue(target); }
+    const bool boundary = !repeatable(instruction.operation) ||
+                          instruction.operation == Operation::conditional_transfer;
+    for (const auto target : std::span(flow.direct).first(flow.count)) {
+      enqueue(target);
+      if (boundary) { headers.insert(target); }
+    }
   }
+  result.entries.assign(headers.begin(), headers.end());
   return result;
 }
 }

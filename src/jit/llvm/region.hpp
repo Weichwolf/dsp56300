@@ -9,6 +9,8 @@
 #include <span>
 
 namespace dsp56300::detail {
+// A complete non-call control region with no captured interior/final DO boundary.
+[[nodiscard]] bool region_independent(std::span<const BlockInstruction> operations);
 [[nodiscard]] bool region_candidate(std::span<const BlockInstruction> operations,
                                     const JitRuntime &runtime,
                                     bool complete_loop = true);

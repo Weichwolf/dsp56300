@@ -63,8 +63,11 @@ reports installed entries, unresolved coverage, newly emitted text and a
 non-latching diagnostic. Code remains owned by Core; changed external mappings
 require a new `Io::program_revision()` before preparation or execution.
 After preparation, genuine program/mapping invalidations retain their checks;
-eligible cold region entries optimize when reached. Other native region
-lowering remains available for unsupported optimizing cases.
+established CFG headers prepare before execution, and eligible cold entries optimize
+when reached. One-pass control regions share code across enclosing loops whose ends
+lie outside the region; interior/final DO boundaries retain precise specialized code.
+The shared lookup expires with the program/grant view. Preparation reports distinct guest
+entries and newly emitted bytes. Other native lowering remains available.
 
 ARM64 native RAM regions also support valid power-of-two multiple-wrap cursors,
 including mixed post-N, unit increment/decrement and pre-decrement accesses.

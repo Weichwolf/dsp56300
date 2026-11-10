@@ -130,7 +130,14 @@ private:
         ir_.CreateICmpNE(ir_.CreateAnd(status_, ir_.getInt32(loop_flag)), ir_.getInt32(0)),
         reg(32, offsetof(Registers, la)),
         ir_.getInt32(inactive_loop));
-    require(ir_.CreateICmpEQ(active_la, ir_.getInt32(plan_.operations.front().loop_address)));
+    if (region_independent(plan_.operations)) {
+      const auto &last = plan_.operations.back();
+      const auto final_word = (last.pc + last.instruction.words - 1) & word_mask;
+      require(ir_.CreateOr(ir_.CreateICmpULT(active_la, ir_.getInt32(plan_.operations.front().pc)),
+                           ir_.CreateICmpUGT(active_la, ir_.getInt32(final_word))));
+    } else {
+      require(ir_.CreateICmpEQ(active_la, ir_.getInt32(plan_.operations.front().loop_address)));
+    }
     if (at_loop_end(plan_.operations.back())) { require(ir_.CreateICmpUGE(sc_, ir_.getInt32(2))); }
     if (plan_.batch) {
       require(ir_.CreateICmpEQ(ir_.CreateLShr(saved_, ir_.getInt64(word_bits)),
@@ -640,6 +647,16 @@ private:
   std::array<V, agu_registers> cursors_{}, strides_{}, masks_{}, origins_{};
   std::array<std::array<V, agu_registers>, 2> memory_bases_{};
 };
+}
+
+bool region_independent(const std::span<const BlockInstruction> operations) {
+  if (operations.empty()) { return false; }
+  const auto &last = operations.back();
+  const auto final_word = (last.pc + last.instruction.words - 1) & word_mask;
+  if (at_loop_end(last) || operations.front().pc > final_word) { return false; }
+  const auto kind = last.instruction.operation;
+  return kind == Operation::jump_short || kind == Operation::jump_effective ||
+         kind == Operation::conditional_jump;
 }
 
 bool region_candidate(const std::span<const BlockInstruction> operations,

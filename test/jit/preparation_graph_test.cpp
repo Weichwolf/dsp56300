@@ -72,9 +72,13 @@ void reachable_graph() {
   require(graph.unresolved == std::vector<Word>{16, helper, helper_return} &&
               view.inspections == expected.size() && view.executions == 0 && view.words == before,
           "Dynamic returns and wake continuations stay open without guest or device execution");
+  const std::vector<Word> headers{0, 8, 10, 11, 16, helper, helper_return};
+  require(graph.entries == headers,
+          "Preparation headers are established roots and encoded control successors, not every "
+          "instruction");
   const auto empty = detail::preparation_graph({}, view.runtime(), {});
-  require(empty.instructions.empty() && empty.unresolved.empty() && empty.failure == Fault{} &&
-              view.inspections == expected.size(),
+  require(empty.entries.empty() && empty.instructions.empty() && empty.unresolved.empty() &&
+              empty.failure == Fault{} && view.inspections == expected.size(),
           "An empty entry set never scans the program");
 }
 

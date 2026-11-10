@@ -30,6 +30,10 @@ aliases, ordered effects and precise event/cycle prefixes. Use constant/range
 propagation, dead-store elimination, forwarding and loop optimization before
 native lowering; optimizing the C++ emitter alone is insufficient. Both hosts
 share this semantic pipeline; target lowering and native execution ABI differ.
+Prepare established CFG headers and share one-pass control regions across enclosing
+DO contexts only when their current loop end lies outside the complete region.
+An interior or final loop boundary keeps precise specialized execution. Clear shared
+lookup on program/grant invalidation; retained storage is not evidence of a valid view.
 Install code only at a stopped owner boundary after validating the captured code
 revision. Compilation failure leaves architecture/progress unchanged. Keep LLVM
 handles private, instrument emitted native code explicitly in sanitizer builds,

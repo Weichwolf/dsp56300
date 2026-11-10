@@ -19,6 +19,7 @@ struct Successors {
 struct PreparationGraph {
   std::vector<BlockInstruction> instructions;
   std::vector<Word> unresolved;
+  std::vector<Word> entries;
   Fault failure;
 };
 
