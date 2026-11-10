@@ -46,13 +46,16 @@ struct LoopPlan {
     NativeRegisterMove registers;
   };
 
+  struct Extent {
+    std::int64_t minimum = 0, maximum = 0;
+    bool accessed = false, writing = false;
+  };
+
   std::span<const BlockInstruction> operations;
   std::vector<Step> steps;
   std::array<std::vector<MemoryWindow>, 2> windows;
-  std::array<std::array<Word, agu_registers>, 2> accesses{};
-  std::array<std::array<Word, agu_registers>, 2> first_offsets{};
-  std::array<std::array<bool, agu_registers>, 2> writes{};
-  std::array<Word, agu_registers> deltas{};
+  std::array<std::array<Extent, agu_registers>, 2> extents{};
+  std::array<std::int64_t, agu_registers> deltas{};
   Word cost = 0, count = 0;
 };
 
@@ -89,7 +92,8 @@ bool stable_knowledge(const LoopPlan &plan) {
     }
   }
   for (std::size_t bank = 0; bank < plan.windows.size(); ++bank) {
-    if (!std::ranges::any_of(plan.writes[bank], [](const bool writing) { return writing; })) {
+    if (!std::ranges::any_of(plan.extents[bank],
+                             [](const auto &extent) { return extent.writing; })) {
       continue;
     }
     for (const auto &window : plan.windows[bank]) {
@@ -109,7 +113,8 @@ bool stable_knowledge(const LoopPlan &plan) {
 bool append_moves(LoopPlan &plan, const NativeMoves &moves) {
   Word changed_addresses = 0;
   for (const auto &move : std::span(moves.transfers).first(moves.count)) {
-    if (!data_register(move.reg) || (move.address.mode != 3 && move.address.mode != 4) ||
+    const auto mode = move.address.mode;
+    if (!data_register(move.reg) || (mode != 2 && mode != 3 && mode != 4 && mode != 7) ||
         (changed_addresses & (1U << move.address.index)) != 0) {
       return false;
     }
@@ -119,13 +124,19 @@ bool append_moves(LoopPlan &plan, const NativeMoves &moves) {
         })) {
       return false;
     }
-    auto &extent = plan.accesses[bank][move.address.index];
-    if (extent == 0) {
-      plan.first_offsets[bank][move.address.index] = plan.deltas[move.address.index];
+    auto &delta = plan.deltas[move.address.index];
+    if (mode == 7) { --delta; }
+    auto &extent = plan.extents[bank][move.address.index];
+    if (!extent.accessed) {
+      extent.minimum = extent.maximum = delta;
+    } else {
+      extent.minimum = std::min(extent.minimum, delta);
+      extent.maximum = std::max(extent.maximum, delta);
     }
-    extent = std::max(extent, plan.deltas[move.address.index] + 1);
-    plan.writes[bank][move.address.index] = plan.writes[bank][move.address.index] || !move.load;
-    if (move.address.mode == 3) { ++plan.deltas[move.address.index]; }
+    extent.accessed = true;
+    extent.writing = extent.writing || !move.load;
+    if (mode == 3) { ++delta; }
+    if (mode == 2) { --delta; }
     changed_addresses |= 1U << move.address.index;
   }
   return true;
@@ -268,7 +279,7 @@ private:
     }
     for (unsigned index = 0; index < agu_registers; ++index) {
       cursors_[index] = reg(32, offsetof(Registers, r) + (index * sizeof(Word)));
-      if (plan_.accesses[0][index] == 0 && plan_.accesses[1][index] == 0) { continue; }
+      if (!plan_.extents[0][index].accessed && !plan_.extents[1][index].accessed) { continue; }
       auto *modifier = reg(32, offsetof(Registers, m) + (index * sizeof(Word)));
       require(ir_.CreateICmpEQ(ir_.CreateAnd(modifier, ir_.getInt32(modifier_mask)),
                                ir_.getInt32(modifier_mask)));
@@ -345,17 +356,22 @@ private:
   void memory_guards() {
     for (unsigned index = 0; index < agu_registers; ++index) {
       for (unsigned bank = 0; bank < 2; ++bank) {
-        const auto extent = plan_.accesses[bank][index];
-        if (extent == 0) { continue; }
+        const auto &extent = plan_.extents[bank][index];
+        if (!extent.accessed) { continue; }
         auto *origin = ir_.CreateZExt(cursors_[index], ir_.getInt64Ty());
-        auto *first = ir_.CreateAdd(origin, ir_.getInt64(plan_.first_offsets[bank][index]));
+        auto *first =
+            ir_.CreateAdd(origin, ir_.getInt64(static_cast<std::uint64_t>(extent.minimum)));
         auto *last =
-            ir_.CreateAdd(origin,
-                          ir_.CreateAdd(ir_.getInt64(extent - 1),
-                                        ir_.CreateMul(ir_.CreateSub(turns_, ir_.getInt64(1)),
-                                                      ir_.getInt64(plan_.deltas[index]))));
-        memory_bases_[bank][index] = select_window(
-            plan_.windows[bank], {.first = first, .last = last}, plan_.writes[bank][index]);
+            ir_.CreateAdd(origin, ir_.getInt64(static_cast<std::uint64_t>(extent.maximum)));
+        auto *travel = ir_.CreateMul(ir_.CreateSub(turns_, ir_.getInt64(1)),
+                                     ir_.getInt64(static_cast<std::uint64_t>(plan_.deltas[index])));
+        if (plan_.deltas[index] < 0) {
+          first = ir_.CreateAdd(first, travel);
+        } else {
+          last = ir_.CreateAdd(last, travel);
+        }
+        memory_bases_[bank][index] =
+            select_window(plan_.windows[bank], {.first = first, .last = last}, extent.writing);
       }
     }
   }
@@ -400,13 +416,14 @@ private:
     std::array<V, 2> pointers{};
     for (unsigned index = 0; index < moves.count; ++index) {
       const auto &move = moves.transfers[index];
+      auto *&cursor = cursors_[move.address.index];
+      if (move.address.mode == 7) { cursor = ir_.CreateSub(cursor, ir_.getInt32(1)); }
       pointers[index] = memory(move);
       words[index] = move.load ? ir_.CreateAnd(ir_.CreateLoad(ir_.getInt32Ty(), pointers[index]),
                                                ir_.getInt32(word_mask))
                                : read_register(before, move.reg);
-      if (move.address.mode == 3) {
-        cursors_[move.address.index] = ir_.CreateAdd(cursors_[move.address.index], ir_.getInt32(1));
-      }
+      if (move.address.mode == 3) { cursor = ir_.CreateAdd(cursor, ir_.getInt32(1)); }
+      if (move.address.mode == 2) { cursor = ir_.CreateSub(cursor, ir_.getInt32(1)); }
     }
     for (unsigned index = 0; index < moves.count; ++index) {
       const auto &move = moves.transfers[index];
@@ -422,7 +439,8 @@ private:
     for (unsigned bank = 0; bank < banks_.size(); ++bank) { put(banks_[bank], bank_fields[bank]); }
     for (unsigned index = 0; index < agu_registers; ++index) {
       if (plan_.deltas[index] != 0) {
-        put(cursors_[index], offsetof(Registers, r) + (index * sizeof(Word)));
+        put(ir_.CreateAnd(cursors_[index], ir_.getInt32(word_mask)),
+            offsetof(Registers, r) + (index * sizeof(Word)));
       }
     }
     put(status_, offsetof(Registers, sr));

@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <exception>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -42,19 +43,30 @@ struct Input {
   std::uint8_t knowledge = 1;
 };
 
+struct Forms {
+  Word load = 3, store = 3;
+};
+
+struct Grant {
+  Word instructions;
+  std::uint64_t cycles = std::numeric_limits<std::uint64_t>::max();
+};
+
 struct Fixture final : Io {
-  explicit Fixture(const bool aliases = false)
+  explicit Fixture(const bool aliases = false, const Forms forms = {})
       : windows{MemoryWindow{.address = 0, .words = data[0], .known = {}, .writable = true},
                 MemoryWindow{.address = rom, .words = data[1], .known = {}},
                 MemoryWindow{.address = high,
                              .words = data[2],
                              .known = known,
                              .writable = true,
-                             .aliases_program = aliases}} {
+                             .aliases_program = aliases}},
+        load_mode(forms.load),
+        store_mode(forms.store) {
     program[entry - 2] = static_cast<Word>(do_immediate) | (3U << 8);
     program[entry - 1] = entry + 1;
-    program[entry] = loads;
-    program[entry + 1] = stores;
+    program[entry] = (loads & ~(7U << 11)) | (forms.load << 11);
+    program[entry + 1] = (stores & ~(7U << 11)) | (forms.store << 11);
     program[entry + 2] = static_cast<Word>(rts);
     reset();
   }
@@ -79,8 +91,10 @@ struct Fixture final : Io {
                              : std::span<const MemoryWindow>{};
   }
 
-  bool read(Space /*space*/, Word /*address*/, Word /*pc*/, Word & /*value*/) noexcept override {
-    return false;
+  bool read(const Space space, const Word address, Word /*pc*/, Word &value) noexcept override {
+    if (space != Space::program || address >= program.size()) { return false; }
+    value = program[address];
+    return true;
   }
 
   bool write(Space /*space*/, Word /*address*/, Word /*pc*/, Word /*value*/) noexcept override {
@@ -102,6 +116,7 @@ struct Fixture final : Io {
   Data data{};
   std::array<std::uint8_t, words> known{};
   std::array<MemoryWindow, 3> windows;
+  Word load_mode, store_mode;
 };
 
 Registers initial(const Input input, const Word mode) {
@@ -123,6 +138,7 @@ struct Model {
   std::array<std::uint8_t, words> known;
   Fault failure;
   Word retired = 0;
+  std::uint64_t cycles = 0;
 };
 
 std::optional<std::pair<std::size_t, std::size_t>> location(const Word address) {
@@ -135,16 +151,27 @@ std::optional<std::pair<std::size_t, std::size_t>> location(const Word address) 
   return {};
 }
 
-void step(Model &model, const bool aliases) {
+Word effective(Registers &reg, const Fixture &fixture, const bool load) {
+  const auto mode = load ? fixture.load_mode : fixture.store_mode;
+  auto &cursor = reg.r[load ? 0U : 1U];
+  if (mode == 7) { cursor = (cursor - 1) & word_mask; }
+  const auto address = cursor;
+  if (mode == 3) { cursor = (cursor + 1) & word_mask; }
+  if (mode == 2) { cursor = (cursor - 1) & word_mask; }
+  return address;
+}
+
+void step(Model &model, const Fixture &fixture) {
   const auto pc = model.reg.pc;
   const bool load = pc == entry;
-  const auto address = model.reg.r[load ? 0U : 1U]++;
+  const auto address = effective(model.reg, fixture, load);
   const auto position = location(address);
   bool accepted = position.has_value();
   const auto value = static_cast<Word>(model.reg.x) & word_mask;
   if (position) {
     const auto [bank, index] = *position;
-    accepted = load ? bank != 2 || model.known[index] != 0 : bank != 1 && (bank != 2 || !aliases);
+    accepted = load ? bank != 2 || model.known[index] != 0
+                    : bank != 1 && (bank != 2 || !fixture.windows[2].aliases_program);
     if (accepted && load) {
       model.reg.x =
           (model.reg.x & ~std::uint64_t{word_mask}) | (model.data[bank][index] & word_mask);
@@ -163,6 +190,7 @@ void step(Model &model, const bool aliases) {
     return;
   }
   ++model.retired;
+  model.cycles += (load ? fixture.load_mode : fixture.store_mode) == 7 ? 2U : 1U;
   if (load) { return; }
   if ((model.reg.sr & forever) != 0 || model.reg.lc != 1) {
     model.reg.lc = (model.reg.lc - 1) & word_mask;
@@ -172,10 +200,11 @@ void step(Model &model, const bool aliases) {
   }
 }
 
-Model expected(const Fixture &fixture, const Registers &state, const Word budget) {
+Model expected(const Fixture &fixture, const Registers &state, const Grant grant) {
   Model result{.reg = state, .data = fixture.data, .known = fixture.known, .failure = {}};
-  for (Word i = 0; i < budget && result.failure == Fault{}; ++i) {
-    step(result, fixture.windows[2].aliases_program);
+  for (Word i = 0; i < grant.instructions && result.failure == Fault{}; ++i) {
+    if (result.cycles >= grant.cycles) { break; }
+    step(result, fixture);
   }
   return result;
 }
@@ -189,35 +218,48 @@ std::uint32_t fallback(detail::Cpu * /*cpu*/, detail::NativeContext * /*owner*/)
 
 void direct(Fixture &fixture, const Input input, const Word mode) {
   fixture.reset(input);
-  const auto state = initial(input, mode);
+  const auto seed = initial(input, mode);
   const auto runtime = fixture.runtime();
-  const auto operations = detail::parse_block(fixture.program, state, runtime);
+  const auto operations = detail::parse_block(fixture.program, seed, runtime);
   std::unique_ptr<detail::LlvmCompiler> compiler;
   const auto image =
       detail::compile_loop(compiler, operations, runtime, std::bit_cast<const void *>(&fallback));
   if (!image) { throw std::runtime_error("Declared windows must admit a whole copy loop"); }
-  const auto wanted = expected(fixture, state, 6);
-  auto shifted = state;
-  shifted.a <<= detail::padding_bits;
-  shifted.b <<= detail::padding_bits;
-  detail::Cpu cpu{.reg = shifted};
-  detail::NativeContext owner{.runtime = {}, .budget = 6, .cycle_deadline = 6};
-  const auto before = fallback_calls;
-  const auto retired = detail::enter_block(image->entry, cpu, owner);
-  cpu.reg.a >>= detail::padding_bits;
-  cpu.reg.b >>= detail::padding_bits;
-  require(retired == 6 && fallback_calls == before && cpu.reg == wanted.reg &&
-              fixture.data == wanted.data && fixture.known == wanted.known &&
-              cpu.instructions == 6 && cpu.cycles == 6,
-          "LLVM selects actual per-cursor windows and executes their body without fallback");
+  for (Word flags = 0; flags <= status_byte; ++flags) {
+    fixture.reset(input);
+    auto state = seed;
+    state.sr |= flags;
+    const auto total = input.count != 0 && (input.flags & forever) == 0 ? input.count * 2 : 6U;
+    const auto wanted = expected(fixture, state, {.instructions = total});
+    auto shifted = state;
+    shifted.a <<= detail::padding_bits;
+    shifted.b <<= detail::padding_bits;
+    detail::Cpu cpu{.reg = shifted};
+    detail::NativeContext owner{.runtime = {}, .budget = total, .cycle_deadline = wanted.cycles};
+    const auto before = fallback_calls;
+    const auto retired = detail::enter_block(image->entry, cpu, owner);
+    cpu.reg.a >>= detail::padding_bits;
+    cpu.reg.b >>= detail::padding_bits;
+    require(retired == total && fallback_calls == before && cpu.reg == wanted.reg &&
+                fixture.data == wanted.data && fixture.known == wanted.known &&
+                cpu.instructions == total && cpu.cycles == wanted.cycles,
+            "LLVM selects actual per-cursor windows and executes their body without fallback");
+  }
 }
 
-void prefixes(Core &core, Fixture &fixture, const Input input, const Word mode) {
+void prefixes(
+    Core &core, Fixture &fixture, const Input input, const Word mode, const bool deadline = false) {
   const auto total = input.count != 0 && (input.flags & forever) == 0 ? input.count * 2 : 6U;
-  for (Word prefix = 0; prefix <= total; ++prefix) {
+  const auto limit =
+      deadline
+          ? (total / 2) * ((fixture.load_mode == 7 ? 2U : 1U) + (fixture.store_mode == 7 ? 2U : 1U))
+          : total;
+  for (Word prefix = 0; prefix <= limit; ++prefix) {
     fixture.reset(input);
     const auto state = initial(input, mode);
-    const auto wanted = expected(fixture, state, prefix);
+    const auto wanted = deadline
+                            ? expected(fixture, state, {.instructions = total, .cycles = prefix})
+                            : expected(fixture, state, {.instructions = prefix});
     const bool restart = core.state().failure != Fault{};
     if (restart) { core.reset(); }
     core.set_registers(state);
@@ -228,9 +270,16 @@ void prefixes(Core &core, Fixture &fixture, const Input input, const Word mode) 
     }
     const auto before = core.progress();
     const auto result =
-        prefix % 2 == 0 ? core.run(prefix) : core.run_until(before.estimated_cycles + prefix);
+        deadline ? core.run_until(before.estimated_cycles + prefix) : core.run(prefix);
     if (core.registers() != wanted.reg || result.fault != wanted.failure) {
-      std::cerr << "source/destination/count/flags/mode/prefix=" << input.source << '/'
+      std::cerr << "forms/deadline=" << fixture.load_mode << '/' << fixture.store_mode << '/'
+                << deadline << " retired/cycles/yield/fault=" << result.retired << '/'
+                << result.progress.estimated_cycles - before.estimated_cycles << '/'
+                << result.yielded << '/' << static_cast<unsigned>(result.fault.kind)
+                << " fault-space/address/pc=" << static_cast<unsigned>(result.fault.space) << '/'
+                << result.fault.address << '/' << result.fault.pc
+                << " expected retired/cycles=" << wanted.retired << '/' << wanted.cycles << '\n'
+                << "source/destination/count/flags/mode/prefix=" << input.source << '/'
                 << input.destination << '/' << input.count << '/' << input.flags << '/' << mode
                 << '/' << prefix << " actual PC/R0/R1=" << core.registers().pc << '/'
                 << core.registers().r[0] << '/' << core.registers().r[1]
@@ -242,7 +291,7 @@ void prefixes(Core &core, Fixture &fixture, const Input input, const Word mode) 
                 fixture.known == wanted.known &&
                 result.progress ==
                     Progress{.instructions = before.instructions + wanted.retired,
-                             .estimated_cycles = before.estimated_cycles + wanted.retired},
+                             .estimated_cycles = before.estimated_cycles + wanted.cycles},
             "Window admission and exact prefixes preserve permissions, aliases, frames and data");
   }
 }
@@ -292,6 +341,39 @@ void cases(const Word mode) {
   prefixes(alias_core, aliased, {}, mode);
 }
 
+void signed_cases(const Word mode) {
+  for (const Word from : {2U, 3U, 4U, 7U}) {
+    for (const Word to : {2U, 3U, 4U, 7U}) {
+      Fixture fixture(false, {.load = from, .store = to});
+      constexpr Input middle{.source = rom + 7, .destination = high + 8};
+      direct(fixture, middle, mode);
+      direct(fixture, {.source = 7, .destination = 8}, mode);
+      direct(fixture, {.source = from == 7 ? 1U : 0U, .count = 1}, mode);
+      Core core(Memory::external(), &fixture);
+      core.set_registers(initial(middle, mode));
+      constexpr std::array entries{entry};
+      require(core.prepare(entries).prepared_entries == 1,
+              "Prepare a signed window loop through the public core API");
+      constexpr std::array inputs{
+          middle,
+          Input{.source = high + 7, .destination = 8},
+          Input{.source = 7, .destination = 8},
+          Input{.source = rom, .destination = high},
+          Input{.source = rom + words - 1, .destination = high + words - 1},
+          Input{.source = rom + 7, .destination = high + 8, .count = 1},
+          Input{.source = rom + 7, .destination = high + 8, .count = 0},
+          Input{.source = rom + 7, .destination = high + 8, .flags = forever | status_byte},
+          Input{.source = rom + 7, .destination = high + 8, .known_index = 7, .knowledge = 0},
+          Input{.source = rom + 7, .destination = high + 8, .known_index = 7, .knowledge = 0x80},
+          Input{.source = rom + 7, .destination = rom + 8}};
+      for (const auto input : inputs) {
+        prefixes(core, fixture, input, mode);
+        prefixes(core, fixture, input, mode, true);
+      }
+    }
+  }
+}
+
 void knowledge_alias() {
   Fixture fixture;
   fixture.windows[2].known = {reinterpret_cast<std::uint8_t *>(fixture.data[2].data()), words};
@@ -303,50 +385,70 @@ void knowledge_alias() {
           "A store aliasing knowledge bytes cannot use invariant initialization admission");
 }
 
-void cross_space_cursor() {
+void cross_space_cursor(const Forms forms) {
   std::array<Word, 32> program{};
   std::array<Word, words> x{};
   std::array<Word, words> y{};
   std::array<std::uint8_t, words> known{};
   known.fill(1);
   for (std::size_t i = 0; i < words; ++i) { x[i] = static_cast<Word>(i + 1); }
-  program[entry] = loads;
-  program[entry + 1] = (stores & ~(7U << 8)) | y_bus;
+  program[entry] = (loads & ~(7U << 11)) | (forms.load << 11);
+  program[entry + 1] = (stores & ~((7U << 8) | (7U << 11))) | y_bus | (forms.store << 11);
   const MemoryWindow from{.address = rom, .words = x, .known = {}};
   const MemoryWindow to{.address = rom + 1, .words = y, .known = known, .writable = true};
   const detail::JitRuntime runtime{.memory = {},
                                    .windows = {std::span(&from, 1), std::span(&to, 1)}};
-  const auto state = initial({.source = rom}, 0);
+  const auto state = initial({.source = rom + 7}, 0);
   const auto operations = detail::parse_block(program, state, runtime);
   std::unique_ptr<detail::LlvmCompiler> compiler;
   const auto image =
       detail::compile_loop(compiler, operations, runtime, std::bit_cast<const void *>(&fallback));
   if (!image) { throw std::runtime_error("One cursor can address both declared Harvard spaces"); }
   auto wanted = state;
-  wanted.r[0] = rom + 6;
-  wanted.x = (wanted.x & ~std::uint64_t{word_mask}) | x[4];
+  std::array<Word, words> expected_y{};
+  for (unsigned iteration = 0; iteration < 3; ++iteration) {
+    if (forms.load == 7) { --wanted.r[0]; }
+    const auto value = x.at(wanted.r[0] - rom);
+    wanted.x = (wanted.x & ~std::uint64_t{word_mask}) | value;
+    if (forms.load == 3) { ++wanted.r[0]; }
+    if (forms.load == 2) { --wanted.r[0]; }
+    if (forms.store == 7) { --wanted.r[0]; }
+    expected_y.at(wanted.r[0] - rom - 1) = value;
+    if (forms.store == 3) { ++wanted.r[0]; }
+    if (forms.store == 2) { --wanted.r[0]; }
+  }
   loop_frames::complete(wanted);
   wanted.pc = entry + 2;
   auto shifted = state;
   shifted.a <<= detail::padding_bits;
   shifted.b <<= detail::padding_bits;
   detail::Cpu cpu{.reg = shifted};
-  detail::NativeContext owner{.runtime = {}, .budget = 6, .cycle_deadline = 6};
+  const auto cycles = 3 * ((forms.load == 7 ? 2U : 1U) + (forms.store == 7 ? 2U : 1U));
+  detail::NativeContext owner{.runtime = {}, .budget = 6, .cycle_deadline = cycles};
   const auto before = fallback_calls;
   const auto retired = detail::enter_block(image->entry, cpu, owner);
   cpu.reg.a >>= detail::padding_bits;
   cpu.reg.b >>= detail::padding_bits;
-  std::array<Word, words> expected_y{};
-  for (std::size_t i = 0; i < 6; i += 2) { expected_y[i] = x[i]; }
-  require(retired == 6 && fallback_calls == before && cpu.reg == wanted && y == expected_y,
-          "The second space's first access accounts for the preceding cursor update");
+  require(retired == 6 && fallback_calls == before && cpu.reg == wanted && y == expected_y &&
+              cpu.instructions == 6 && cpu.cycles == cycles,
+          "Shared cursors preserve signed prefix extents, net movement and predecrement costs");
+  shifted.m[0] = 3;
+  detail::Cpu nonlinear{.reg = shifted};
+  const auto rejected_before = fallback_calls;
+  require(detail::enter_block(image->entry, nonlinear, owner) == 0 &&
+              fallback_calls == rejected_before + 1 && nonlinear.reg == shifted &&
+              nonlinear.cycles == 0 && nonlinear.instructions == 0,
+          "Nonlinear modifiers retain exact ordinary execution without speculative memory work");
 }
 }
 
 int main() try {
   for (const auto mode : modes) { cases(mode); }
+  for (const auto mode : modes) { signed_cases(mode); }
   knowledge_alias();
-  cross_space_cursor();
+  for (const Word from : {2U, 3U, 4U, 7U}) {
+    for (const Word to : {2U, 3U, 4U, 7U}) { cross_space_cursor({.load = from, .store = to}); }
+  }
 } catch (const std::exception &error) {
 
   std::cerr << error.what() << '\n';

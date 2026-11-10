@@ -52,7 +52,8 @@ Unsupported operations fail explicitly.
 
 `Core::prepare(entries)` follows established code entries without executing ISA or
 device I/O. It installs LLVM O3 code for supported arithmetic and parallel RAM/register
-transfers in natural DO bodies with linear cursors. Multiply/accumulate, rounding,
+transfers in natural DO bodies with linear cursors, including mixed increment,
+post-decrement and pre-decrement steps. Multiply/accumulate, rounding,
 add/subtract, comparisons, shifts and logic retain exact flags and old operands;
 each used cursor selects a containing declared RAM/ROM window at loop entry,
 checking its complete access range, permissions and initialization. Unknown words,
