@@ -4,6 +4,7 @@
 #include "architecture.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "fields.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
 #include "jit/a64/code.hpp"
@@ -20,24 +21,51 @@
 
 namespace dsp56300::detail::a64 {
 namespace {
-constexpr std::array saved{Reg::x19, Reg::x21, Reg::x23, Reg::x25, Reg::x27};
+constexpr Word accumulator_banks = bank_bit(ValueBank::a) | bank_bit(ValueBank::b);
+constexpr Word data_banks = bank_bit(ValueBank::x) | bank_bit(ValueBank::y);
+constexpr std::array saved{std::pair{Reg::x19, Word{0}},
+                           std::pair{Reg::x21, accumulator_banks},
+                           std::pair{Reg::x23, data_banks},
+                           std::pair{Reg::x25, Word{0}},
+                           std::pair{Reg::x27, Word{0}}};
 constexpr std::array held{std::pair{accumulator_a, offsetof(Registers, a)},
                           std::pair{accumulator_b, offsetof(Registers, b)},
                           std::pair{bank_x, offsetof(Registers, x)},
                           std::pair{bank_y, offsetof(Registers, y)}};
 static_assert(offsetof(Cpu, reg) == 0);
+
+Word active_banks(const std::span<const BlockInstruction> operations) {
+  Word result = 0;
+  for (const auto &operation : operations) {
+    const auto &instruction = operation.instruction;
+    if (instruction.operation == Operation::nop || instruction.operation == Operation::bit_memory) {
+      continue;
+    }
+    if (instruction.operation != Operation::parallel || (instruction.opcode & byte_mask) != 0) {
+      return accumulator_banks | data_banks;
+    }
+    const auto flow = analyze_dataflow(instruction);
+    result |= flow.move_reads | flow.move_writes;
+  }
+  return result;
+}
 }
 
 void Emitter::begin() {
   code_.push(Reg::fp, Reg::lr);
   code_.add(Reg::fp, Reg::sp, 0, Width::x64);
-  for (const auto reg : saved) {
+  for (const auto &[reg, banks] : saved) {
+    if (banks != 0 && (banks & active_banks_) == 0) { continue; }
     code_.push(reg, static_cast<Reg>(static_cast<unsigned>(reg) + 1));
   }
   code_.subtract(Reg::sp, Reg::sp, Frame::pairs * 2 * sizeof(std::uint64_t), Width::x64);
   code_.move(cpu, Reg::x0);
   code_.move(context, Reg::x1);
-  for (const auto &[reg, offset] : held) { code_.load(reg, cpu, offset, Access::doubleword); }
+  for (std::size_t index = 0; index < held.size(); ++index) {
+    if ((active_banks_ & (Word{1} << index)) != 0) {
+      code_.load(held[index].first, cpu, held[index].second, Access::doubleword);
+    }
+  }
   code_.load(status, cpu, offsetof(Registers, sr));
   code_.load(pc, cpu, offsetof(Registers, pc));
   code_.constant(retired, 0);
@@ -65,7 +93,8 @@ void Emitter::read_old(const Reg result, const unsigned bank) {
 
 void Emitter::restore() {
   code_.add(Reg::sp, Reg::sp, Frame::pairs * 2 * sizeof(std::uint64_t), Width::x64);
-  for (const auto reg : std::views::reverse(saved)) {
+  for (const auto &[reg, banks] : std::views::reverse(saved)) {
+    if (banks != 0 && (banks & active_banks_) == 0) { continue; }
     code_.pop(reg, static_cast<Reg>(static_cast<unsigned>(reg) + 1));
   }
   code_.pop(Reg::fp, Reg::lr);
@@ -77,7 +106,11 @@ void Emitter::publish() {
     code_.alu(Alu::add, Reg::x17, Reg::x17, retired, Width::x64);
     code_.store(Reg::x17, cpu, offsetof(Cpu, instructions), Access::doubleword);
   }
-  for (const auto &[reg, offset] : held) { code_.store(reg, cpu, offset, Access::doubleword); }
+  for (std::size_t index = 0; index < held.size(); ++index) {
+    if ((active_banks_ & (Word{1} << index)) != 0) {
+      code_.store(held[index].first, cpu, held[index].second, Access::doubleword);
+    }
+  }
   code_.store(status, cpu, offsetof(Registers, sr));
   code_.store(pc, cpu, offsetof(Registers, pc));
 }
@@ -147,6 +180,7 @@ bool Emitter::prepare_instruction(const BlockInstruction &operation) {
 std::vector<std::uint8_t> Emitter::generate(const std::span<const BlockInstruction> operations) {
   if (operations.empty()) { throw std::invalid_argument("Cannot emit an empty A64 DSP block"); }
   const bool chained = entry_ == Entry::chained;
+  active_banks_ = active_banks(operations);
   deferred_instructions_ = entry_ == Entry::repeat || operations.size() >= 4;
   Label header;
   Label dispatch;

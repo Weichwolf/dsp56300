@@ -79,13 +79,20 @@ NativeDataflow analyze_dataflow(const Instruction &instruction) {
   const auto reg = plan_register_move(instruction);
   if (reg.valid()) {
     result.move_writes = register_bank(reg.destination);
+    result.move_reads = register_bank(reg.source);
   } else if (plan.count == 0) {
     result.move_writes = all_banks;
+    result.move_reads = all_banks;
   } else {
     for (const auto &move : std::span(plan.transfers.data(), plan.count)) {
-      if (move.load) { result.move_writes |= register_bank(move.reg); }
+      if (move.load) {
+        result.move_writes |= register_bank(move.reg);
+      } else {
+        result.move_reads |= register_bank(move.reg);
+      }
     }
   }
+  if (plan.long_pair) { result.move_reads = all_banks; }
   result.old_inputs = result.move_writes & alu_inputs(instruction.opcode);
   return result;
 }

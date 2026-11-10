@@ -162,6 +162,49 @@ void finite_admission() {
     }
   }
 }
+
+void unused_banks() {
+  constexpr std::array<std::uint32_t, 10> spills{0xf9400a75,
+                                                 0xf9400e76,
+                                                 0xf9400277,
+                                                 0xf9400678,
+                                                 0xf9000a75,
+                                                 0xf9000e76,
+                                                 0xf9000277,
+                                                 0xf9000678,
+                                                 0xa9bf5bf5,
+                                                 0xa9bf63f7};
+  const std::array ops{operations(false).front()};
+  detail::a64::Emitter emitter;
+  const auto bytes = emitter.generate_chained(ops);
+  for (std::size_t offset = 0; offset < bytes.size(); offset += sizeof(std::uint32_t)) {
+    std::uint32_t word = 0;
+    for (unsigned byte = 0; byte < sizeof(word); ++byte) {
+      word |= std::uint32_t{bytes[offset + byte]} << (byte * 8U);
+    }
+    require(std::ranges::find(spills, word) == spills.end(),
+            "A NOP entry must not load, store or save unreferenced A/B/X/Y banks");
+  }
+  const native::Direct code(bytes);
+  constexpr Word ccr_mask = 255;
+  constexpr std::uint64_t accumulator = 0x123456789abc00;
+  constexpr std::uint64_t bank = 0xabcdef123456;
+  for (Word ccr = 0; ccr <= ccr_mask; ++ccr) {
+    detail::Cpu cpu;
+    cpu.reg.pc = start;
+    cpu.reg.sr = ccr;
+    cpu.reg.a = accumulator;
+    cpu.reg.b = accumulator ^ (accumulator >> 8U);
+    cpu.reg.x = bank;
+    cpu.reg.y = bank ^ (bank >> 8U);
+    auto expected = cpu.reg;
+    ++expected.pc;
+    detail::NativeContext context{.runtime = {}, .budget = 1};
+    require(code.enter(cpu, context) == 1 && cpu.reg == expected && cpu.instructions == 1 &&
+                cpu.cycles == 1 && context.failure.kind == FaultKind::none,
+            "Removing unused host bank spills preserves the complete guest state");
+  }
+}
 }
 }
 
@@ -173,6 +216,7 @@ int main() try {
   }
   dsp56300::test::repeated();
   dsp56300::test::finite_admission();
+  dsp56300::test::unused_banks();
   std::cout << dsp56300::test::checks << " ARM64 progress publication checks passed\n";
 } catch (const std::exception &error) {
 

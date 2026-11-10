@@ -251,6 +251,7 @@ private:
   ResidentPlan region_;
   NativeValueProof value_proof_;
   Word old_inputs_ = 15;
+  Word active_banks_ = 15;
   Word live_flags_ = overflow | zero | negative | unnormalized | extension | carry;
 };
 }

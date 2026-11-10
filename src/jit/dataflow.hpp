@@ -14,7 +14,7 @@ constexpr Word bank_bit(const ValueBank bank) noexcept {
 }
 
 struct NativeDataflow {
-  Word old_inputs = 0, move_writes = 0;
+  Word old_inputs = 0, move_writes = 0, move_reads = 0;
 };
 
 // Unknown move classes conservatively clobber every bank. These effects describe
