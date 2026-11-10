@@ -10,7 +10,9 @@
 #include "jit/resident_region.hpp"
 #include "translation.hpp"
 
+#include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -22,8 +24,6 @@
 #if defined(__aarch64__)
 #include "jit/resident.hpp"
 
-#include <algorithm>
-#include <cstddef>
 #include <exception>
 #endif
 #if defined(__x86_64__) && defined(__linux__)
@@ -44,10 +44,10 @@ enum class EntryKind : std::uint8_t { ordinary, repeat, vector };
 struct Block {
   std::vector<BlockInstruction> operations;
   const void *entry = nullptr;
+  const void *direct = nullptr;
   std::unique_ptr<ResidentRegion> region;
 #if defined(__aarch64__)
   EntryKind kind = EntryKind::ordinary;
-  const void *direct = nullptr;
   std::array<JitMemory, 2> memory{};
 #endif
 };
@@ -67,10 +67,10 @@ struct Jit::Impl {
   [[nodiscard]] Block *compile();
 #if defined(__aarch64__)
   [[nodiscard]] Block *reuse(std::span<const BlockInstruction> operations, EntryKind kind) const;
-  [[nodiscard]] Word first_budget(const Block &block, Word budget) const;
 #endif
+  [[nodiscard]] Word first_budget(const Block &block, Word budget) const;
   [[nodiscard]] Block *retain(std::unique_ptr<Block> block);
-  [[nodiscard]] const void *prepare();
+  [[nodiscard]] const void *prepare(Word &budget);
   [[nodiscard]] std::uint32_t enter(const Block &block, Word budget);
   [[nodiscard]] std::uint32_t finish(std::uint32_t retired);
   Cpu &cpu;
@@ -88,7 +88,6 @@ struct Jit::Impl {
   std::array<std::vector<NativeWindow>, 2> windows;
 #if defined(__aarch64__)
   std::unordered_multimap<Word, Block *> reusable;
-  const Block *prepared = nullptr;
 #endif
 };
 
@@ -130,15 +129,11 @@ Block *Jit::Impl::compile() {
   const std::span<const BlockInstruction> admission = block->region && block->region->nested
                                                           ? std::span<const BlockInstruction>{}
                                                           : block->operations;
-#if defined(__aarch64__)
   std::size_t body_offset = 0;
   block->entry = arena.append(admit_cycles(bytes, admission, &body_offset));
   if (!block->region) {
     block->direct = static_cast<const std::uint8_t *>(block->entry) + body_offset;
   }
-#else
-  block->entry = arena.append(admit_cycles(bytes, admission));
-#endif
   return retain(std::move(block));
 }
 
@@ -167,6 +162,8 @@ Block *Jit::Impl::reuse(const std::span<const BlockInstruction> operations,
   return nullptr;
 }
 
+#endif
+
 Word Jit::Impl::first_budget(const Block &block, const Word budget) const {
   auto credit = context.cycle_deadline - cpu.cycles;
   Word count = 0;
@@ -178,7 +175,6 @@ Word Jit::Impl::first_budget(const Block &block, const Word budget) const {
   }
   return count;
 }
-#endif
 
 Jit::Jit(Cpu &cpu,
          const std::span<const Word> program,
@@ -267,7 +263,7 @@ Block *Jit::Impl::retain(std::unique_ptr<Block> block) {
   return entry;
 }
 
-const void *Jit::Impl::prepare() {
+const void *Jit::Impl::prepare(Word &budget) {
   if (invalidated) {
     blocks.clear();
     mappings.clear();
@@ -291,9 +287,13 @@ const void *Jit::Impl::prepare() {
   const auto *retained = compile();
   if (retained == nullptr) { return nullptr; }
   current->table.insert(cpu.reg.pc, retained->entry);
-#if defined(__aarch64__)
-  prepared = retained;
-#endif
+  // Exact cold grants avoid suffix compilation; warm lookup retains native admission.
+  if (retained->direct != nullptr &&
+      context.cycle_deadline != std::numeric_limits<std::uint64_t>::max() &&
+      context.cycle_deadline > cpu.cycles) {
+    budget = first_budget(*retained, budget);
+    return retained->direct;
+  }
   return retained->entry;
 }
 
@@ -320,20 +320,8 @@ std::uint32_t Jit::Impl::finish(const std::uint32_t retired) {
 std::uint32_t Jit::run(std::uint32_t budget) {
   auto &self = *impl_;
   if (budget == 0) { return 0; }
-  const auto *entry = self.prepare();
+  const auto *entry = self.prepare(budget);
   if (entry == nullptr) { return 0; }
-#if defined(__aarch64__)
-  // Exact cold grants avoid suffix recompilation; retained dispatch keeps native admission.
-  if (const auto *prepared = self.prepared) {
-    self.prepared = nullptr;
-    if (prepared->direct != nullptr &&
-        self.context.cycle_deadline != std::numeric_limits<std::uint64_t>::max() &&
-        self.context.cycle_deadline > self.cpu.cycles) {
-      budget = self.first_budget(*prepared, budget);
-      entry = prepared->direct;
-    }
-  }
-#endif
   self.context.boundary = NativeBoundary::none;
   self.context.failure = {};
   return self.finish(enter_blocks(

@@ -80,6 +80,53 @@ void long_block_deadlines() {
           "Warm deadline execution resumes across long native blocks after an untimed run");
 }
 
+void first_deadlines() {
+  constexpr Word body = 193;
+  constexpr Word length = body + 1;
+  constexpr std::uint64_t accumulator_a = 0x7e345678abcdef;
+  constexpr std::uint64_t accumulator_b = 0x813456abcdef12;
+  constexpr std::uint64_t input_x = 0x345678fedcba;
+  constexpr std::uint64_t input_y = 0x876543123456;
+  constexpr Word period = body + 3;
+  for (const Word deadline : {1U, 7U, body - 1, body, body + 1, body + 2, period}) {
+    std::array<Word, length> ram{};
+    ram.fill(nop);
+    ram.back() = jump;
+    const auto original = ram;
+    Core core(Memory::unified(ram));
+    auto initial = core.registers();
+    initial.a = accumulator_a;
+    initial.b = accumulator_b;
+    initial.x = input_x;
+    initial.y = input_y;
+    core.set_registers(initial);
+    const auto images = codegen::publications();
+    const auto result = core.run_until(deadline);
+    const bool branched = deadline > body;
+    const auto instructions = std::min(deadline, body) + static_cast<Word>(branched);
+    const auto cycles = branched ? period : deadline;
+    auto expected = initial;
+    expected.pc = branched ? 0 : deadline;
+    require(result.retired == instructions && !result.yielded && result.fault == Fault{} &&
+                result.state == ExecutionState::running && core.registers() == expected &&
+                result.progress ==
+                    Progress{.instructions = instructions, .estimated_cycles = cycles} &&
+                ram == original,
+            "A first deadline preserves full registers, memory and an atomic mixed-cost prefix");
+    require(codegen::publications().count == images.count + 1,
+            "A cold exact deadline publishes one complete block without suffix translations");
+    const auto retained = codegen::publications();
+    core.set_registers(initial);
+    const auto warm = core.run(length * 2);
+    require(warm.retired == length * 2 && warm.fault == Fault{} && !warm.yielded &&
+                warm.state == ExecutionState::running && core.registers() == initial &&
+                warm.progress == Progress{.instructions = instructions + (length * 2),
+                                          .estimated_cycles = cycles + (period * 2)} &&
+                ram == original && codegen::publications() == retained,
+            "Warm untimed entry retains full native backedges and never recompiles its block");
+  }
+}
+
 void chunked_deadlines() {
   constexpr std::array<Word, 3> lengths{1, 31, 257};
   constexpr std::array<std::uint64_t, 9> grants{1, 2, 3, 7, 16, 31, 64, 127, 4096};
@@ -271,6 +318,7 @@ int main() {
   try {
     dsp56300::test::loop_deadlines();
     dsp56300::test::long_block_deadlines();
+    dsp56300::test::first_deadlines();
     dsp56300::test::chunked_deadlines();
     dsp56300::test::hardware_loop_deadlines();
     dsp56300::test::jump_and_repeat_deadlines();
