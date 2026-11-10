@@ -46,10 +46,10 @@ constexpr std::array<std::uint8_t, 3> increment_retired{0x41, 0xff, 0xc7};
 constexpr std::array<std::uint8_t, 4> entry_landing{0xf3, 0x0f, 0x1e, 0xfa};
 constexpr std::array<std::uint8_t, 3> test_round_prefix{0x48, 0x0f, 0xba};
 constexpr unsigned test_round_register = 0xe0;
-constexpr std::array<std::uint8_t, 14> save_nonvolatile{
-    0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57, 0x55, 0x53, 0x48, 0x83, 0xec, 0x08};
-constexpr std::array<std::uint8_t, 15> restore_and_return{
-    0x48, 0x83, 0xc4, 0x08, 0x5b, 0x5d, 0x41, 0x5f, 0x41, 0x5e, 0x41, 0x5d, 0x41, 0x5c, 0xc3};
+// The owner bridge protects host nonvolatile registers once per native run.
+// Keep the eight-byte window scratch and SysV helper-call alignment per entry.
+constexpr std::array<std::uint8_t, 4> allocate_scratch{0x48, 0x83, 0xec, 0x08};
+constexpr std::array<std::uint8_t, 5> release_and_return{0x48, 0x83, 0xc4, 0x08, 0xc3};
 
 enum AluByte : std::uint8_t {
   alu_clear = 0x13,
@@ -239,7 +239,7 @@ void BlockEmitter::finish() {
   materialize_retirement();
   materialize_status();
   code_.mov({.destination = Reg::ax, .source = Reg::r15}, Width::dword);
-  code_.raw(restore_and_return);
+  code_.raw(release_and_return);
 }
 
 void BlockEmitter::input(const Reg destination,
@@ -640,9 +640,7 @@ BlockEmitter::generate_body(const std::span<const BlockInstruction> operations) 
                              ((mode & scale_up) != 0 ? 1U : 0U);
   }
   code_.raw(entry_landing); // ENDBR64.
-  code_.raw(save_nonvolatile);
-  code_.mov({.destination = Reg::r12, .source = Reg::di});
-  code_.mov({.destination = Reg::r13, .source = Reg::si});
+  code_.raw(allocate_scratch);
   code_.binary(op_xor, {.destination = Reg::r15, .source = Reg::r15}, Width::dword);
   batch_entry(operations);
   if (cached_status_) {
