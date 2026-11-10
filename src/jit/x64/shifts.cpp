@@ -13,6 +13,38 @@ using x64::Width;
 constexpr Word right_shift_code = 0x22, left_shift_code = 0x32, operation_mask = 0xf7;
 constexpr unsigned arithmetic_right = 7, shift_left = 4;
 constexpr unsigned condition_carry = 0x92, condition_overflow = 0x90, op_xor = 0x31;
+constexpr unsigned condition_above = 0x97, add_immediate = 0, compare_immediate = 7;
+constexpr unsigned count_mask = 63, source_bit = 7, direction_bit = 8;
+}
+
+void BlockEmitter::immediate_shift(const BlockInstruction &operation) {
+  const auto opcode = operation.instruction.opcode;
+  const auto count = (opcode >> 1) & count_mask;
+  const bool left = (opcode & (1U << direction_bit)) != 0;
+  current_value(Reg::ax, (opcode & (1U << source_bit)) != 0 ? 1U : 0U);
+  code_.binary(op_xor, {.destination = Reg::r10, .source = Reg::r10}, Width::dword);
+  if (count == 0) {
+    if ((live_flags_ & carry) != 0) {
+      code_.binary(op_xor, {.destination = Reg::dx, .source = Reg::dx}, Width::dword);
+    }
+  } else if (left) {
+    // OF after a multi-bit host shift is undefined. The lost signed prefix
+    // overflows exactly when it contains a value other than zero or minus one.
+    code_.mov({.destination = Reg::r10, .source = Reg::ax});
+    code_.shift(arithmetic_right, Reg::r10, host_sign_bit - count);
+    code_.immediate(add_immediate, Reg::r10, 1);
+    code_.immediate(compare_immediate, Reg::r10, 1);
+    code_.set(condition_above, Reg::r10);
+    code_.shift(shift_left, Reg::ax, count);
+    if ((live_flags_ & carry) != 0) { code_.set(condition_carry, Reg::dx); }
+  } else {
+    code_.shift(arithmetic_right, Reg::ax, count + padding_bits);
+    if ((live_flags_ & carry) != 0) { code_.set(condition_carry, Reg::dx); }
+    code_.shift(shift_left, Reg::ax, padding_bits);
+  }
+  // Immediate forms copy either old accumulator and never apply SM limiting.
+  store_accumulator((opcode & 1U) != 0, Reg::ax);
+  arithmetic_flags(operation.mode, true);
 }
 
 void BlockEmitter::left_shift(const BlockInstruction &operation) {
@@ -33,6 +65,10 @@ void BlockEmitter::left_shift(const BlockInstruction &operation) {
 }
 
 void BlockEmitter::arithmetic_shift(const BlockInstruction &operation) {
+  if (operation.instruction.operation == Operation::arithmetic_shift_immediate) {
+    immediate_shift(operation);
+    return;
+  }
   if ((operation.instruction.opcode & operation_mask) == left_shift_code) {
     left_shift(operation);
     return;
@@ -56,6 +92,9 @@ void BlockEmitter::arithmetic_shift(const BlockInstruction &operation) {
 
 // Keep lowering admission separable for local matched performance controls.
 bool BlockEmitter::is_arithmetic_shift(const BlockInstruction &operation) {
+  if (operation.instruction.operation == Operation::arithmetic_shift_immediate) {
+    return ((operation.instruction.opcode >> 1) & count_mask) < accumulator_bits;
+  }
   const auto code = operation.instruction.opcode & operation_mask;
   return operation.instruction.operation == Operation::parallel &&
          (code == right_shift_code || code == left_shift_code);

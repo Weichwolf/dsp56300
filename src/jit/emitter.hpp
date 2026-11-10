@@ -141,6 +141,7 @@ private:
   void logical_flags(x64::Reg word);
   void addition(const BlockInstruction &operation);
   void arithmetic_shift(const BlockInstruction &operation);
+  void immediate_shift(const BlockInstruction &operation);
   void left_shift(const BlockInstruction &operation);
   void round(Word mode, x64::Reg result = x64::Reg::ax);
   void saturate(Word mode, bool rounded = false);

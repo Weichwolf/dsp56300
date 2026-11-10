@@ -161,7 +161,7 @@ bool BlockEmitter::lowerable(const BlockInstruction &operation) {
   if (decoded.operation == Operation::immediate_alu) {
     return is_addition(operation) || is_logic(operation);
   }
-  if (decoded.operation != Operation::parallel) { return false; }
+  if (decoded.operation != Operation::parallel) { return is_arithmetic_shift(operation); }
   const auto opcode = decoded.opcode;
   if ((opcode & if_mask) == if_group) { return false; }
   // Exclude all PCU register operands: they can modify control/stack state.
