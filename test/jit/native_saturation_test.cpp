@@ -11,6 +11,7 @@
 #include "jit/emitter.hpp"
 #include "native/direct.hpp"
 #include "register_model.hpp"
+#include "saturated_shift_model.hpp"
 #include "saturation_model.hpp"
 #include "support.hpp"
 
@@ -122,6 +123,13 @@ void model(Registers &state, const Step step) {
     if (const auto logical = logical_input(step.word & status_byte)) {
       const auto old = state;
       bfu_model::apply(state, old, *logical);
+    } else if ((step.word & alu_destination_mask) ==
+                   (static_cast<Word>(isa::Opcode::asl_a) & alu_destination_mask) ||
+               (step.word & alu_destination_mask) ==
+                   (static_cast<Word>(isa::Opcode::asr_a) & alu_destination_mask)) {
+      const bool target = (step.word & 8U) != 0;
+      const bool left = (step.word & 0x10U) != 0;
+      shift_model::apply(state, state, {.left = left, .source_b = target, .destination_b = target});
     } else {
       saturation_model::alu(state, state, step.word);
     }
@@ -219,7 +227,10 @@ bool admitted(const Word code) {
   constexpr std::array<Word, 27> unary_and_sums{
       0x01, 0x11, 0x13, 0x26, 0x36, 0x41, 0x51, 0x61, 0x71, 0x10, 0x14, 0x20, 0x24, 0x30,
       0x34, 0x40, 0x44, 0x50, 0x54, 0x60, 0x64, 0x70, 0x74, 0x21, 0x25, 0x31, 0x35};
-  return code >= 0x80 || logical_input(code).has_value() ||
+  const auto left = static_cast<Word>(isa::Opcode::asl_a) & alu_destination_mask;
+  const auto right = static_cast<Word>(isa::Opcode::asr_a) & alu_destination_mask;
+  return code >= 0x80 || (code & alu_destination_mask) == left ||
+         (code & alu_destination_mask) == right || logical_input(code).has_value() ||
          std::ranges::find(unary_and_sums, code & alu_destination_mask) != unary_and_sums.end();
 }
 

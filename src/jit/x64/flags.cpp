@@ -54,7 +54,7 @@ Word BlockEmitter::written_flags(const BlockInstruction &operation) {
     return 0;
   }
   if (is_logic(operation)) { return overflow | zero | negative; }
-  if (is_addition(operation) || is_right_shift(operation)) { return observed_flags; }
+  if (is_addition(operation) || is_arithmetic_shift(operation)) { return observed_flags; }
   const auto alu = operation.instruction.opcode & byte_mask;
   const auto kind = alu & alu_mask;
   if (alu == 0 || kind == tfr_other || kind == tfr_x0 || kind == tfr_y0 || kind == tfr_x1 ||

@@ -36,7 +36,7 @@ enum Alu : std::uint8_t {
 }
 
 bool BlockEmitter::saturation_supported(const BlockInstruction &operation) {
-  if (is_logic(operation)) { return true; }
+  if (is_logic(operation) || is_arithmetic_shift(operation)) { return true; }
   const auto &decoded = operation.instruction;
   const auto opcode = decoded.opcode;
   const auto kind = opcode & 7U;

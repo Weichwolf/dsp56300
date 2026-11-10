@@ -81,7 +81,7 @@ private:
   void region_guard(x64::Code &code, x64::Reg cpu, x64::Label &failed) const;
   void region_address(const NativeMove &move);
   [[nodiscard]] static bool is_addition(const BlockInstruction &operation);
-  [[nodiscard]] static bool is_right_shift(const BlockInstruction &operation);
+  [[nodiscard]] static bool is_arithmetic_shift(const BlockInstruction &operation);
   void helper(JitHelper function, const BlockInstruction &operation);
   void native(const BlockInstruction &operation);
   [[nodiscard]] static bool is_control_flow(const BlockInstruction &operation);
@@ -140,7 +140,8 @@ private:
   void logic(const BlockInstruction &operation);
   void logical_flags(x64::Reg word);
   void addition(const BlockInstruction &operation);
-  void right_shift(const BlockInstruction &operation);
+  void arithmetic_shift(const BlockInstruction &operation);
+  void left_shift(const BlockInstruction &operation);
   void round(Word mode, x64::Reg result = x64::Reg::ax);
   void saturate(Word mode, bool rounded = false);
   void saturate_canonical(bool rounded);

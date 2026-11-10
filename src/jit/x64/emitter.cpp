@@ -177,7 +177,7 @@ bool BlockEmitter::lowerable(const BlockInstruction &operation) {
   }
   if (is_logic(operation)) { return true; }
   if (is_addition(operation)) { return true; }
-  if (is_right_shift(operation)) { return true; }
+  if (is_arithmetic_shift(operation)) { return true; }
   if ((alu & 0x80U) != 0) { return true; }
   const auto operation_code = alu & alu_mask;
   return operation_code == alu_clear || operation_code == 0x01 || operation_code == alu_x0 ||
@@ -377,8 +377,8 @@ void BlockEmitter::native(const BlockInstruction &operation) {
     addition(operation);
     return;
   }
-  if (is_right_shift(operation)) {
-    right_shift(operation);
+  if (is_arithmetic_shift(operation)) {
+    arithmetic_shift(operation);
     return;
   }
   const auto opcode = operation.instruction.opcode & byte_mask;
