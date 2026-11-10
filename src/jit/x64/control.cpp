@@ -21,6 +21,7 @@ constexpr Word short_mask = 0xfff;
 constexpr Word stack_pointer_mask = 63;
 constexpr unsigned unconditional = 16;
 constexpr unsigned condition_mask = 127;
+constexpr unsigned group_add = 0;
 constexpr unsigned group_and = 4;
 constexpr unsigned group_sub = 5;
 constexpr unsigned group_cmp = 7;
@@ -48,6 +49,7 @@ struct ControlPlan {
   Word target = 0;
   unsigned selector = unconditional;
   unsigned offset_register = agu_registers;
+  unsigned target_register = agu_registers;
   bool call = false, returns = false, valid = false;
 };
 
@@ -80,30 +82,49 @@ ControlPlan relative_plan(const BlockInstruction &operation) {
 }
 
 ControlPlan plan(const BlockInstruction &operation) {
-  if (at_loop_end(operation)) { return {}; }
   const auto kind = operation.instruction.operation;
-  if (kind == Operation::return_subroutine) { return {.returns = true, .valid = true}; }
-  if (kind == Operation::relative_branch) { return relative_plan(operation); }
+  if (kind == Operation::return_subroutine) {
+    return at_loop_end(operation) ? ControlPlan{} : ControlPlan{.returns = true, .valid = true};
+  }
+  if (kind == Operation::relative_branch) {
+    const auto result = relative_plan(operation);
+    return at_loop_end(operation) && result.call ? ControlPlan{} : result;
+  }
   const bool conditional = kind == Operation::conditional_jump;
   const bool supported = conditional || kind == Operation::call_short ||
-                         kind == Operation::call_effective || kind == Operation::jump_effective;
+                         kind == Operation::call_effective || kind == Operation::jump_effective ||
+                         kind == Operation::jump_short;
   if (!supported) { return {}; }
   const auto opcode = operation.instruction.opcode;
-  const bool short_form =
-      conditional ? (opcode & (Word{1} << 18U)) != 0 : kind == Operation::call_short;
+  const bool short_form = conditional
+                              ? (opcode & (Word{1} << 18U)) != 0
+                              : kind == Operation::call_short || kind == Operation::jump_short;
   constexpr unsigned absolute_ea = 0x30;
   constexpr unsigned ea_mask = 0x3f;
-  if (!short_form && ((opcode >> 8U) & ea_mask) != absolute_ea) { return {}; }
+  const bool indirect = !short_form && ((opcode >> 11U) & 7U) == 4;
+  if (!short_form && !indirect && ((opcode >> 8U) & ea_mask) != absolute_ea) { return {}; }
+  const bool call = conditional
+                        ? (opcode & (Word{1} << 16U)) != 0
+                        : kind == Operation::call_short || kind == Operation::call_effective;
+  if (at_loop_end(operation) && call) { return {}; }
   const auto condition_shift = short_form ? 12U : 0U;
   return {.target = short_form ? opcode & short_mask : operation.instruction.extension,
           .selector = conditional ? (opcode >> condition_shift) & 15U : unconditional,
-          .call = conditional ? (opcode & (Word{1} << 16U)) != 0
-                              : kind == Operation::call_short || kind == Operation::call_effective,
+          .target_register = indirect ? (opcode >> 8U) & 7U : static_cast<unsigned>(agu_registers),
+          .call = call,
           .valid = true};
 }
 
 void emit_target(x64::Code &code, const ControlPlan &branch) {
-  code.constant(Reg::ax, branch.target);
+  if (branch.target_register < agu_registers) {
+    code.load(Reg::ax,
+              Reg::r12,
+              offsetof(Cpu, reg) + offsetof(Registers, r) + (branch.target_register * sizeof(Word)),
+              Width::dword);
+    code.immediate(group_and, Reg::ax, word_mask, Width::dword);
+  } else {
+    code.constant(Reg::ax, branch.target);
+  }
   if (branch.offset_register < agu_registers) {
     code.load(Reg::dx,
               Reg::r12,
@@ -165,6 +186,7 @@ bool BlockEmitter::boundary_operation(const BlockInstruction &operation, const b
   }
   const auto branch = plan(operation);
   if (!branch.valid) { return false; }
+  if (at_loop_end(operation)) { loop_guard(operation); }
   const auto next = (operation.pc + operation.instruction.words) & word_mask;
   x64::Label untaken;
   x64::Label complete;
@@ -193,7 +215,19 @@ bool BlockEmitter::boundary_operation(const BlockInstruction &operation, const b
     code_.store_constant(Reg::r12, pc_offset, Width::dword, next);
   }
   code_.bind(complete);
-  retire(operation, false);
+  if (at_loop_end(operation)) {
+    x64::Label completed;
+    // DO continuation occurs only when control leaves PC at LA+1.
+    code_.memory_immediate(group_cmp, Reg::r12, pc_offset, Width::dword, next);
+    code_.jump_if(Branch::not_equal, completed);
+    loop_continue();
+    code_.bind(completed);
+    code_.store_constant(Reg::r12, offsetof(Cpu, repeat_completed), Width::word, 0);
+    retire_progress(operation);
+    code_.immediate(group_add, Reg::r15, 1, Width::dword);
+  } else {
+    retire(operation, false);
+  }
   code_.jump(exits_.at(dirty_accumulators()));
   if (branch.call || branch.returns) {
     code_.bind(slow);
