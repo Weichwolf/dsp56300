@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <limits>
 #include <type_traits>
 #include <vector>
 #endif
