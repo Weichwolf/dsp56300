@@ -251,6 +251,10 @@ Emitter::generate_guarded(const std::span<const BlockInstruction> operations,
     code_.branch_far(Condition::equal, header);
   }
   guarded_finish(fallback);
+  if (branch_range_ == BranchRange::full && code_.size() < Code::near_branch_bytes) {
+    Emitter compact(BranchRange::near);
+    return compact.generate_guarded(operations, supplied, modifiers, fallback);
+  }
   return code_.bytes();
 }
 }

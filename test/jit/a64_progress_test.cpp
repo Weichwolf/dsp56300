@@ -4,7 +4,9 @@
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
+#include "jit/a64/code.hpp"
 #include "jit/a64/emitter.hpp"
+#include "jit/arena.hpp"
 #include "jit/block.hpp"
 #include "native/direct.hpp"
 #include "support.hpp"
@@ -16,6 +18,7 @@
 #include <exception>
 #include <iostream>
 #include <limits>
+#include <vector>
 
 namespace dsp56300::test {
 namespace {
@@ -63,6 +66,49 @@ auto operations(const bool io) {
     pc += instruction.words;
   }
   return result;
+}
+
+void compact_control_flow() {
+  const auto ops = operations(false);
+  detail::a64::Emitter emitter;
+  const auto bytes = emitter.generate_chained(ops);
+  constexpr unsigned byte_bits = 8;
+  constexpr std::uint32_t register_and_kind = 0xff00001f;
+  constexpr std::uint32_t nonzero_w17 = 0x35000011;
+  bool compact = false;
+  for (std::size_t offset = 0; offset < bytes.size(); offset += sizeof(std::uint32_t)) {
+    std::uint32_t word = 0;
+    for (unsigned byte = 0; byte < sizeof(word); ++byte) {
+      word |= std::uint32_t{bytes[offset + byte]} << (byte * byte_bits);
+    }
+    compact |= (word & register_and_kind) == nonzero_w17;
+  }
+  require(compact, "A bounded native body uses one direct CBNZ for its owner boundary");
+}
+
+void large_control_flow() {
+  constexpr Word count = 32768;
+  std::vector<detail::BlockInstruction> ops;
+  ops.reserve(count);
+  for (Word index = 0; index < count; ++index) {
+    ops.push_back({.instruction = detail::decode(0), .pc = start + index});
+  }
+  detail::a64::Emitter emitter;
+  const auto bytes = emitter.generate_chained(ops);
+  require(bytes.size() > detail::a64::Code::near_branch_bytes,
+          "The independently authored large body exceeds the conditional immediate span");
+  detail::ExecutableArena arena;
+  const auto *entry = arena.append(bytes);
+  for (const Word budget : {0U, 1U, count - 1, count}) {
+    detail::Cpu cpu;
+    cpu.reg.pc = start;
+    detail::NativeContext context{.runtime = {}, .budget = budget};
+    auto expected = cpu.reg;
+    expected.pc += budget;
+    require(detail::enter_block(entry, cpu, context) == budget && cpu.reg == expected &&
+                cpu.instructions == budget && cpu.cycles == budget,
+            "Large native bodies retain full-range jumps and exact entry/exit prefixes");
+  }
 }
 
 void ordinary(const bool io, const bool accept, const bool chained) {
@@ -214,6 +260,8 @@ int main() try {
     dsp56300::test::ordinary(true, false, chained);
     dsp56300::test::ordinary(true, true, chained);
   }
+  dsp56300::test::compact_control_flow();
+  dsp56300::test::large_control_flow();
   dsp56300::test::repeated();
   dsp56300::test::finite_admission();
   dsp56300::test::unused_banks();

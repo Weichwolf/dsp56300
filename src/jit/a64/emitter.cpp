@@ -218,6 +218,11 @@ std::vector<std::uint8_t> Emitter::generate(const std::span<const BlockInstructi
   code_.move(Reg::x0, retired, Width::w32);
   restore();
   code_.return_();
+  if (branch_range_ == BranchRange::full && code_.size() < Code::near_branch_bytes) {
+    Emitter compact(BranchRange::near);
+    compact.entry_ = entry_;
+    return compact.generate(operations);
+  }
   return code_.bytes();
 }
 

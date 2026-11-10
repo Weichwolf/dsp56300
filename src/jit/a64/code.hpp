@@ -74,6 +74,7 @@ enum class Alu : std::uint32_t {
   test = 0x6a000000
 };
 enum class Shift : std::uint8_t { left, right, arithmetic, rotate };
+enum class BranchRange : std::uint8_t { full, near };
 
 struct Reference {
   std::size_t offset;
@@ -88,6 +89,10 @@ struct Label {
 
 class Code {
 public:
+  static constexpr std::size_t near_branch_bytes = std::size_t{1} << 20;
+
+  explicit Code(BranchRange range = BranchRange::full) : range_(range) {}
+
   [[nodiscard]] const std::vector<std::uint8_t> &bytes() const noexcept { return bytes_; }
 
   [[nodiscard]] std::size_t size() const noexcept { return bytes_.size(); }
@@ -139,6 +144,7 @@ private:
   void reference(Label &label, unsigned bits);
   void patch(Reference reference, std::size_t target);
   void memory(Reg value, Reg base, std::size_t offset, Access access, bool read);
+  BranchRange range_;
   std::vector<std::uint8_t> bytes_;
 };
 }

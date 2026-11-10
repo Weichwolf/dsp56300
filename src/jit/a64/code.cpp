@@ -349,6 +349,10 @@ void Code::branch_far(const Condition condition, Label &label) {
     branch(label);
     return;
   }
+  if (range_ == BranchRange::near) {
+    branch(condition, label);
+    return;
+  }
   Label skip;
   branch(static_cast<Condition>(static_cast<unsigned>(condition) ^ 1U), skip);
   branch(label);
@@ -356,6 +360,10 @@ void Code::branch_far(const Condition condition, Label &label) {
 }
 
 void Code::branch_zero_far(const Reg value, Label &label, const Width width, const bool nonzero) {
+  if (range_ == BranchRange::near) {
+    branch_zero(value, label, width, nonzero);
+    return;
+  }
   Label skip;
   branch_zero(value, skip, width, !nonzero);
   branch(label);

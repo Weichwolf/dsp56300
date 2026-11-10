@@ -8,6 +8,7 @@
 #include <exception>
 #include <iostream>
 #include <stdexcept>
+#include <vector>
 #if defined(__aarch64__)
 #include "jit/arena.hpp"
 
@@ -15,7 +16,6 @@
 #include <bit>
 #include <limits>
 #include <type_traits>
-#include <vector>
 #endif
 
 namespace {
@@ -316,6 +316,56 @@ void fixups() {
     code.bind(end);
   } catch (const std::logic_error &) { rejected = true; }
   require(rejected, "A64 labels must not be rebound");
+}
+
+void near_fixups() {
+  Code code(BranchRange::near);
+  Label begin;
+  Label end;
+  code.bind(begin);
+  code.branch_far(Condition::equal, end);
+  code.branch_zero_far(Reg::x0, begin, Width::x64, true);
+  code.branch_far(Condition::always, end);
+  code.constant(Reg::x0, 7);
+  code.bind(end);
+  code.return_();
+  constexpr std::array<std::uint32_t, 5> expected{
+      0x54000080, 0xb5ffffe0, 0x14000002, 0xd28000e0, 0xd65f03c0};
+  require(code.size() == expected.size() * sizeof(std::uint32_t),
+          "Near branches emit one instruction without padding or inverse trampolines");
+  for (std::size_t index = 0; index < expected.size(); ++index) {
+    require(instruction(code, index) == expected[index],
+            "Near forward/backward fixups match independent assembler encodings");
+  }
+}
+
+void branch_ranges() {
+  const std::vector<std::uint8_t> padding(Code::near_branch_bytes);
+  for (const auto range : {BranchRange::full, BranchRange::near}) {
+    Code code(range);
+    Label end;
+    code.branch_zero_far(Reg::x0, end, Width::x64, true);
+    code.append(padding);
+    bool rejected = false;
+    try {
+      code.bind(end);
+    } catch (const std::length_error &) { rejected = true; }
+    require(rejected == (range == BranchRange::near),
+            "Only full-range trampolines accept targets outside the signed19 branch range");
+  }
+  Code backward(BranchRange::near);
+  Label begin;
+  backward.bind(begin);
+  backward.append(padding);
+  backward.branch_far(Condition::equal, begin);
+  constexpr std::uint32_t minimum_delta_equal = 0x54800000;
+  require(instruction(backward, padding.size() / sizeof(std::uint32_t)) == minimum_delta_equal,
+          "The exact negative19 boundary remains encodable");
+  bool rejected = false;
+  try {
+    backward.branch_far(Condition::equal, begin);
+  } catch (const std::length_error &) { rejected = true; }
+  require(rejected, "A backward branch one instruction past the negative19 limit must fail");
 }
 
 #if defined(__aarch64__)
@@ -732,6 +782,8 @@ int main() {
     encodings();
     logical_encodings();
     fixups();
+    near_fixups();
+    branch_ranges();
     barrel_encodings();
     bit_encodings();
     neon_encodings();

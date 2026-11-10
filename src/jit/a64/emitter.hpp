@@ -77,6 +77,8 @@ struct MemoryLabels {
 
 class Emitter {
 public:
+  explicit Emitter(BranchRange range = BranchRange::full) : code_(range), branch_range_(range) {}
+
   [[nodiscard]] std::vector<std::uint8_t> generate(std::span<const BlockInstruction> operations);
   [[nodiscard]] std::vector<std::uint8_t>
   generate_chained(std::span<const BlockInstruction> operations);
@@ -241,6 +243,7 @@ private:
   void mask(Reg target, Reg value, std::uint64_t bits, Width width = Width::x64);
   [[nodiscard]] static Reg destination(Word opcode);
   Code code_;
+  BranchRange branch_range_;
   Label done_;
   Label repeat_header_;
   Flow flow_ = Flow::sequential;
