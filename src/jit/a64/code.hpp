@@ -104,6 +104,7 @@ public:
   [[nodiscard]] bool
   logical(Alu operation, Reg target, Reg source, std::uint64_t value, Width width = Width::w32);
   void add(Reg target, Reg source, std::uint16_t value, Width width = Width::w32);
+  void add(Reg target, Reg left, Reg right, unsigned shift, Width width = Width::w32);
   void subtract(Reg target, Reg source, std::uint16_t value, Width width = Width::w32);
   void extract(Reg target,
                Reg source,

@@ -18,16 +18,18 @@
 #include <exception>
 #include <iostream>
 #include <limits>
+#include <span>
 #include <vector>
 
 namespace dsp56300::test {
 namespace {
 constexpr Word port = 0xffff80, datum = 0x123456;
 constexpr Word load_x0 = 0x44f000, saved_lc = 17;
-constexpr std::uint64_t prefix_cycles = 258;
 constexpr std::array costs{1U, 2U, 255U, 2U, 1U, 3U};
-constexpr std::array seeds{
-    std::uint64_t{0}, (std::uint64_t{1} << 32) - 2, std::numeric_limits<std::uint64_t>::max() - 2};
+constexpr std::array seeds{std::uint64_t{0},
+                           (std::uint64_t{1} << 32) - 2,
+                           (std::uint64_t{1} << 63) - 2,
+                           std::numeric_limits<std::uint64_t>::max() - 2};
 
 std::uint64_t sum(const std::uint64_t value, const std::uint64_t increment) {
   const auto room = std::numeric_limits<std::uint64_t>::max() - value;
@@ -111,8 +113,12 @@ void large_control_flow() {
   }
 }
 
-void ordinary(const bool io, const bool accept, const bool chained) {
-  const auto ops = operations(io);
+void ordinary(const bool io, const bool accept, const bool chained, const Word uniform = 0) {
+  auto ops = operations(io);
+  if (uniform != 0) {
+    for (auto &op : ops) { op.instruction.cycles = static_cast<std::uint8_t>(uniform); }
+  }
+  const auto prefix_cycles = uniform == 0 ? costs[0] + costs[1] + costs[2] : 3 * uniform;
   detail::a64::Emitter emitter;
   const native::Direct code(chained ? emitter.generate_chained(ops) : emitter.generate(ops));
   for (const auto seed : seeds) {
@@ -131,7 +137,9 @@ void ordinary(const bool io, const bool accept, const bool chained) {
       const auto retired = code.enter(cpu, context);
       const Word wanted = std::min(budget, io ? 3U + static_cast<Word>(accept) : 6U);
       std::uint64_t cycles = seed;
-      for (Word index = 0; index < wanted; ++index) { cycles = sum(cycles, costs[index]); }
+      for (Word index = 0; index < wanted; ++index) {
+        cycles = sum(cycles, uniform == 0 ? costs[index] : uniform);
+      }
       require(retired == wanted && cpu.instructions == sum(seed, wanted) && cpu.cycles == cycles,
               "Every budget and fault prefix publishes exact modulo-64 counts and mixed costs");
       require(observer.observed == (io && budget >= 4),
@@ -142,8 +150,9 @@ void ordinary(const bool io, const bool accept, const bool chained) {
   }
 }
 
-void repeated() {
-  const auto op = operations(false).front();
+void repeated(const Word cost = 1) {
+  auto op = operations(false).front();
+  op.instruction.cycles = static_cast<std::uint8_t>(cost);
   detail::a64::Emitter emitter;
   const native::Direct code(emitter.generate_repeat(op));
   for (const auto seed : seeds) {
@@ -157,7 +166,8 @@ void repeated() {
       const auto retired = code.enter(cpu, context);
       const auto wanted = std::min(budget, 5U);
       require(retired == wanted && cpu.instructions == sum(seed, wanted) &&
-                  cpu.cycles == sum(seed, wanted) && cpu.repeat_remaining == 5 - wanted &&
+                  cpu.cycles == sum(seed, std::uint64_t{wanted} * cost) &&
+                  cpu.repeat_remaining == 5 - wanted &&
                   cpu.reg.pc == start + (wanted == 5 ? 1U : 0U) &&
                   cpu.reg.lc == (wanted == 5 ? saved_lc : 5 - wanted),
               "REP budget exits and completion publish each iteration once, including wrap");
@@ -206,6 +216,66 @@ void finite_admission() {
         }
       }
     }
+  }
+}
+
+void uniform_admission() {
+  for (const Word cost : {1U, 2U, 4U, 128U}) {
+    auto ops = operations(false);
+    for (auto &op : ops) { op.instruction.cycles = static_cast<std::uint8_t>(cost); }
+    for (const std::size_t extent : {2U, 6U}) {
+      const auto body = std::span(ops).first(extent);
+      detail::a64::Emitter emitter;
+      const native::Direct code(detail::admit_cycles(emitter.generate_chained(body), body));
+      for (const auto beginning : seeds) {
+        for (Word available = 0; available <= body.size(); ++available) {
+          const auto credit = std::uint64_t{available} * cost;
+          if (credit >= std::numeric_limits<std::uint64_t>::max() - beginning) { continue; }
+          for (Word budget = 0; budget <= body.size() + 1; ++budget) {
+            detail::Cpu cpu;
+            cpu.reg.pc = start;
+            cpu.instructions = cpu.cycles = beginning;
+            auto expected = cpu.reg;
+            const auto count = std::min(budget, available);
+            expected.pc += count;
+            detail::NativeContext context{
+                .runtime = {}, .budget = budget, .cycle_deadline = beginning + credit};
+            require(code.enter(cpu, context) == count && cpu.reg == expected &&
+                        cpu.instructions == sum(beginning, count) &&
+                        cpu.cycles == sum(beginning, std::uint64_t{count} * cost) &&
+                        context.failure.kind == FaultKind::none,
+                    "Uniform bodies publish every exact finite deadline and budget prefix");
+          }
+        }
+      }
+    }
+  }
+}
+
+void uniform_publication() {
+  auto ops = operations(false);
+  for (auto &op : ops) { op.instruction.cycles = 1; }
+  for (const std::size_t count : {2U, 6U}) {
+    detail::a64::Emitter emitter;
+    const auto bytes = emitter.generate_chained(std::span(ops).first(count));
+    constexpr std::uint32_t store_base_mask = 0xffc003e0;
+    constexpr std::uint32_t store_to_cpu = 0xf9000260;
+    constexpr std::uint32_t immediate_mask = 0xfff;
+    constexpr unsigned immediate_shift = 10;
+    constexpr unsigned byte_bits = 8;
+    unsigned writes = 0;
+    for (std::size_t offset = 0; offset < bytes.size(); offset += sizeof(std::uint32_t)) {
+      std::uint32_t word = 0;
+      for (unsigned byte = 0; byte < sizeof(word); ++byte) {
+        word |= std::uint32_t{bytes[offset + byte]} << (byte * byte_bits);
+      }
+      if ((word & store_base_mask) == store_to_cpu &&
+          ((word >> immediate_shift) & immediate_mask) * sizeof(std::uint64_t) ==
+              offsetof(detail::Cpu, cycles)) {
+        ++writes;
+      }
+    }
+    require(writes == 1, "An unobserved uniform body publishes cycles once at its precise exit");
   }
 }
 
@@ -259,10 +329,17 @@ int main() try {
     dsp56300::test::ordinary(false, true, chained);
     dsp56300::test::ordinary(true, false, chained);
     dsp56300::test::ordinary(true, true, chained);
+    for (const dsp56300::Word cost : {1U, 2U, 3U, 255U}) {
+      dsp56300::test::ordinary(false, true, chained, cost);
+      dsp56300::test::ordinary(true, true, chained, cost);
+      dsp56300::test::ordinary(true, false, chained, cost);
+    }
   }
   dsp56300::test::compact_control_flow();
   dsp56300::test::large_control_flow();
-  dsp56300::test::repeated();
+  dsp56300::test::uniform_publication();
+  dsp56300::test::uniform_admission();
+  for (const dsp56300::Word cost : {1U, 2U, 3U, 255U}) { dsp56300::test::repeated(cost); }
   dsp56300::test::finite_admission();
   dsp56300::test::unused_banks();
   std::cout << dsp56300::test::checks << " ARM64 progress publication checks passed\n";

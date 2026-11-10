@@ -10,6 +10,7 @@
 #include "jit/a64/code.hpp"
 #include "jit/dataflow.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -74,6 +75,10 @@ void Emitter::begin() {
     code_.load(Reg::x17, cpu, offsetof(Cpu, instructions), Access::doubleword);
     code_.store(Reg::x17, Reg::sp, Frame::instructions, Access::doubleword);
   }
+  if (cycle_cost_ != 0) {
+    code_.load(Reg::x17, cpu, offsetof(Cpu, cycles), Access::doubleword);
+    code_.store(Reg::x17, Reg::sp, Frame::cycles, Access::doubleword);
+  }
 }
 
 void Emitter::snapshot() {
@@ -106,6 +111,15 @@ void Emitter::publish() {
     code_.alu(Alu::add, Reg::x17, Reg::x17, retired, Width::x64);
     code_.store(Reg::x17, cpu, offsetof(Cpu, instructions), Access::doubleword);
   }
+  if (cycle_cost_ != 0) {
+    code_.load(Reg::x17, Reg::sp, Frame::cycles, Access::doubleword);
+    unsigned shift = 0;
+    for (auto cost = cycle_cost_; cost != 0; cost >>= 1) {
+      if ((cost & 1U) != 0) { code_.add(Reg::x17, Reg::x17, retired, shift, Width::x64); }
+      ++shift;
+    }
+    code_.store(Reg::x17, cpu, offsetof(Cpu, cycles), Access::doubleword);
+  }
   for (std::size_t index = 0; index < held.size(); ++index) {
     if ((active_banks_ & (Word{1} << index)) != 0) {
       code_.store(held[index].first, cpu, held[index].second, Access::doubleword);
@@ -133,6 +147,7 @@ void Emitter::retire(const BlockInstruction &operation) {
        {std::pair{offsetof(Cpu, instructions), 1U},
         std::pair{offsetof(Cpu, cycles), unsigned{operation.instruction.cycles}}}) {
     if (deferred_instructions_ && offset == offsetof(Cpu, instructions)) { continue; }
+    if (cycle_cost_ != 0 && offset == offsetof(Cpu, cycles)) { continue; }
     code_.load(Reg::x9, cpu, offset, Access::doubleword);
     code_.add(Reg::x9, Reg::x9, static_cast<std::uint16_t>(count), Width::x64);
     code_.store(Reg::x9, cpu, offset, Access::doubleword);
@@ -182,6 +197,14 @@ std::vector<std::uint8_t> Emitter::generate(const std::span<const BlockInstructi
   const bool chained = entry_ == Entry::chained;
   active_banks_ = active_banks(operations);
   deferred_instructions_ = entry_ == Entry::repeat || operations.size() >= 4;
+  cycle_cost_ = operations.front().instruction.cycles;
+  const bool repeating = entry_ == Entry::repeat || (chained && at_loop_end(operations.back()));
+  if ((!repeating && operations.size() < 2) ||
+      !std::ranges::all_of(operations, [this](const auto &operation) {
+        return operation.instruction.cycles == cycle_cost_;
+      })) {
+    cycle_cost_ = 0;
+  }
   Label header;
   Label dispatch;
   begin();

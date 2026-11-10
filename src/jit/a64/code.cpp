@@ -112,6 +112,13 @@ void Code::move(const Reg target, const Reg source, const Width width) {
   alu(Alu::bit_or, target, Reg::zr, source, width);
 }
 
+void Code::add(
+    const Reg target, const Reg left, const Reg right, const unsigned shift, const Width width) {
+  if (shift >= bit_count(width)) { throw std::invalid_argument("A64 add shift exceeds its width"); }
+  word(wide(width) | static_cast<std::uint32_t>(Alu::add) | (reg(right) << operand_shift) |
+       (shift << immediate_shift) | (reg(left) << register_shift) | reg(target));
+}
+
 void Code::alu(
     const Alu operation, const Reg target, const Reg left, const Reg right, const Width width) {
   word(wide(width) | static_cast<std::uint32_t>(operation) | (reg(right) << operand_shift) |

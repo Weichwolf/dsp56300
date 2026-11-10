@@ -318,6 +318,29 @@ void fixups() {
   require(rejected, "A64 labels must not be rebound");
 }
 
+void shifted_add_encodings() {
+  Code code;
+  code.add(Reg::x0, Reg::x1, Reg::x2, 5, Width::w32);
+  constexpr unsigned maximum_shift = 63;
+  code.add(Reg::x0, Reg::x1, Reg::x2, maximum_shift, Width::x64);
+  code.add(Reg::x0, Reg::x1, Reg::x2, 0, Width::x64);
+  constexpr std::array<std::uint32_t, 3> expected{0x0b021420, 0x8b02fc20, 0x8b020020};
+  require(code.size() == expected.size() * sizeof(std::uint32_t),
+          "Shifted addition uses exactly one instruction per term");
+  for (std::size_t index = 0; index < expected.size(); ++index) {
+    require(instruction(code, index) == expected[index],
+            "Shifted ADD matches independent LLVM assembler encodings");
+  }
+  for (const auto width : {Width::w32, Width::x64}) {
+    const auto size = code.size();
+    bool rejected = false;
+    try {
+      code.add(Reg::x0, Reg::x1, Reg::x2, width == Width::w32 ? 32U : 64U, width);
+    } catch (const std::invalid_argument &) { rejected = true; }
+    require(rejected && code.size() == size, "Out-of-width ADD shifts cannot emit partial code");
+  }
+}
+
 void near_fixups() {
   Code code(BranchRange::near);
   Label begin;
@@ -745,6 +768,41 @@ void execute_scratch() {
   }
 }
 
+void execute_shifted_add() {
+  dsp56300::detail::ExecutableArena arena;
+  constexpr std::array<std::uint64_t, 4> inputs{0, 1, 0x8000000000000000, 0xffffffffffffffff};
+  constexpr unsigned flags_shift = 28;
+  for (const auto width : {Width::w32, Width::x64}) {
+    const unsigned bits = width == Width::w32 ? 32U : 64U;
+    for (unsigned shift = 0; shift < bits; ++shift) {
+      Code code;
+      code.write_flags(Reg::x1);
+      code.load(Reg::x2, Reg::x0, 0, Access::doubleword);
+      code.load(Reg::x3, Reg::x0, sizeof(std::uint64_t), Access::doubleword);
+      code.add(Reg::x2, Reg::x2, Reg::x3, shift, width);
+      code.store(Reg::x2, Reg::x0, 2 * sizeof(std::uint64_t), Access::doubleword);
+      code.read_flags(Reg::x2);
+      code.store(Reg::x2, Reg::x0, 3 * sizeof(std::uint64_t), Access::doubleword);
+      code.return_();
+      const auto *entry = arena.append(code.bytes());
+      for (const auto left : inputs) {
+        for (const auto right : inputs) {
+          auto expected = left + (right << shift);
+          if (width == Width::w32) { expected &= std::numeric_limits<std::uint32_t>::max(); }
+          for (unsigned status = 0; status < 16; ++status) {
+            std::array<std::uint64_t, 4> data{left, right, 0, 0};
+            const auto flags = std::uint64_t{status} << flags_shift;
+            static_cast<void>(dsp56300_a64_test_enter(
+                entry, reinterpret_cast<std::uintptr_t>(data.data()), flags));
+            require(data == std::array<std::uint64_t, 4>{left, right, expected, flags},
+                    "Shifted ADD preserves unsigned width, wrap, inputs and all NZCV states");
+          }
+        }
+      }
+    }
+  }
+}
+
 void execute() {
   dsp56300::detail::ExecutableArena arena;
   Code code;
@@ -782,6 +840,7 @@ int main() {
     encodings();
     logical_encodings();
     fixups();
+    shifted_add_encodings();
     near_fixups();
     branch_ranges();
     barrel_encodings();
@@ -795,6 +854,7 @@ int main() {
     selection_encodings();
 #if defined(__aarch64__)
     execute();
+    execute_shifted_add();
     execute_constants();
     execute_barrels();
     execute_bits();

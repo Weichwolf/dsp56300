@@ -59,7 +59,8 @@ struct Frame {
   static constexpr std::size_t address = 40, other_address = 44, value = 48, other_value = 56,
                                secondary = 64, iterations = 72, access = 80;
   static constexpr std::size_t instructions = access + sizeof(NativeAccess);
-  static constexpr std::size_t pairs = (instructions + sizeof(std::uint64_t) + 15) / 16;
+  static constexpr std::size_t cycles = instructions + sizeof(std::uint64_t);
+  static constexpr std::size_t pairs = (cycles + sizeof(std::uint64_t) + 15) / 16;
 };
 
 struct BusOperand {
@@ -250,6 +251,7 @@ private:
   Label *failure_ = nullptr;
   Entry entry_ = Entry::block;
   bool deferred_instructions_ = false;
+  Word cycle_cost_ = 0;
   JitRuntime runtime_;
   ResidentPlan region_;
   NativeValueProof value_proof_;
