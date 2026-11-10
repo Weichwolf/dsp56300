@@ -50,6 +50,13 @@ state inspection is optional. Use Io for device effects and run_until() for an
 absolute local cycle deadline. Core does not schedule an instrument or its audio.
 Unsupported operations fail explicitly.
 
+`Core::prepare(entries)` follows established code entries without executing ISA or
+device I/O. It installs LLVM O3 code for ordinary RAM-transfer DO bodies with
+linear cursors; other operations retain their native execution path. Preparation
+reports installed entries, unresolved coverage, newly emitted text and a
+non-latching diagnostic. Code remains owned by Core; changed external mappings
+require a new `Io::program_revision()` before preparation or execution.
+
 Benchmarks check independent results and report cold/warm timing and matched
 JIT/host ratios (`100 * host_time / jit_time`). Hardware factors use stated models,
 not measured device speed. Select cases with DSP56300_BENCH_FILTER;

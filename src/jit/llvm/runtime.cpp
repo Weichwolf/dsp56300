@@ -14,6 +14,7 @@
 #include <llvm-c/Core.h>
 #include <llvm-c/Error.h>
 #include <llvm-c/LLJIT.h>
+#include <llvm-c/Object.h>
 #include <llvm-c/Orc.h>
 #include <llvm-c/TargetMachine.h>
 #include <llvm-c/Transforms/PassBuilder.h>
@@ -70,6 +71,33 @@ TargetMachine native_machine() {
 }
 
 struct LlvmCompiler::Impl {
+  static LLVMErrorRef object(void *owner, LLVMMemoryBufferRef *buffer) noexcept {
+    char *message = nullptr;
+    const std::unique_ptr<std::remove_pointer_t<LLVMBinaryRef>, LlvmDelete<LLVMDisposeBinary>>
+        binary(LLVMCreateBinary(*buffer, nullptr, &message));
+    const Message error(message);
+    if (!binary) {
+      LLVMDisposeMemoryBuffer(*buffer);
+      *buffer = nullptr;
+      return LLVMCreateStringError(error.get());
+    }
+    const std::unique_ptr<std::remove_pointer_t<LLVMSectionIteratorRef>,
+                          LlvmDelete<LLVMDisposeSectionIterator>>
+        sections(LLVMObjectFileCopySectionIterator(binary.get()));
+    auto &self = *static_cast<Impl *>(owner);
+    if (!sections) { return nullptr; }
+    while (LLVMObjectFileIsSectionIteratorAtEnd(binary.get(), sections.get()) == 0) {
+      const auto *section_name = LLVMGetSectionName(sections.get());
+      const std::string_view name(section_name == nullptr ? "" : section_name);
+      if (name == ".text" || name.starts_with(".text.") || name == "__text" || name == ".ltext" ||
+          name.starts_with(".ltext.")) {
+        self.text_bytes += LLVMGetSectionSize(sections.get());
+      }
+      LLVMMoveToNextSection(sections.get());
+    }
+    return nullptr;
+  }
+
   ~Impl() {
     if (jit == nullptr) { return; }
     if (auto *error = LLVMOrcDisposeLLJIT(jit)) {
@@ -82,6 +110,7 @@ struct LlvmCompiler::Impl {
 
   LLVMOrcLLJITRef jit = nullptr;
   TargetMachine machine;
+  std::uint64_t text_bytes = 0;
 };
 
 LlvmModule::LlvmModule(std::string name) : name_(std::move(name)) {
@@ -120,6 +149,8 @@ LlvmCompiler::LlvmCompiler() : impl_(std::make_unique<Impl>()) {
   LLVMOrcLLJITBuilderSetJITTargetMachineBuilder(
       builder, LLVMOrcJITTargetMachineBuilderCreateFromTargetMachine(machine.release()));
   check(LLVMOrcCreateLLJIT(&impl_->jit, builder));
+  LLVMOrcObjectTransformLayerSetTransform(
+      LLVMOrcLLJITGetObjTransformLayer(impl_->jit), Impl::object, impl_.get());
   LLVMOrcDefinitionGeneratorRef symbols = nullptr;
   check(LLVMOrcCreateDynamicLibrarySearchGeneratorForProcess(
       &symbols, LLVMOrcLLJITGetGlobalPrefix(impl_->jit), nullptr, nullptr));
@@ -127,6 +158,10 @@ LlvmCompiler::LlvmCompiler() : impl_(std::make_unique<Impl>()) {
 }
 
 LlvmCompiler::~LlvmCompiler() = default;
+
+std::uint64_t LlvmCompiler::native_bytes() const noexcept {
+  return impl_->text_bytes;
+}
 
 const void *LlvmCompiler::install(LlvmModule &module) {
   if (module.code() == nullptr) { throw std::logic_error("LLVM module was already transferred"); }

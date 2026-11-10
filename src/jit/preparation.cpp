@@ -184,12 +184,15 @@ PreparationGraph preparation_graph(const std::span<const Word> program,
     }
     const auto &instruction = capture.instruction;
     if (instruction.operation == Operation::unsupported) {
-      result.failure = {.kind = FaultKind::unsupported_instruction,
-                        .space = Space::program,
-                        .address = address,
-                        .value = instruction.opcode,
-                        .pc = address};
-      return result;
+      if (result.failure.kind == FaultKind::none) {
+        result.failure = {.kind = FaultKind::unsupported_instruction,
+                          .space = Space::program,
+                          .address = address,
+                          .value = instruction.opcode,
+                          .pc = address};
+      }
+      result.unresolved.push_back(address);
+      continue;
     }
     const BlockInstruction operation{.instruction = instruction, .pc = address};
     result.instructions.push_back(operation);

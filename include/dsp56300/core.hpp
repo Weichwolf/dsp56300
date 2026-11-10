@@ -78,6 +78,11 @@ struct State {
   Progress progress;
 };
 
+struct PreparationReport {
+  std::uint64_t prepared_entries = 0, unresolved_entries = 0, native_bytes = 0;
+  Fault failure;
+};
+
 // No derivative peripherals are implemented by this CPU library. False means a
 // visible fail-stop error. Callbacks run synchronously on the execution thread.
 // Callbacks may read state and read/write memory, including P invalidation. They
@@ -142,6 +147,9 @@ public:
   [[nodiscard]] Progress progress() const noexcept;
   // Explicit host programming; ordinary data may be accessed through borrowed memory.
   void load(Space space, Word address, std::span<const Word> words);
+  // Compile established immutable code without executing instructions or device I/O.
+  // Call on a stopped owner; preparation failures do not latch into state/progress.
+  [[nodiscard]] PreparationReport prepare(std::span<const Word> established_entries);
   [[nodiscard]] RunResult step();
   [[nodiscard]] Registers registers() const;
   // Changes visible registers, not hidden execution continuation. Use after reset

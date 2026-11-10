@@ -10,7 +10,7 @@
 #include <span>
 
 namespace dsp56300 {
-bool Core::Impl::bind_memory_windows() {
+Fault Core::Impl::bind_memory_windows() {
   constexpr std::array spaces{Space::x, Space::y};
   std::array<std::span<const MemoryWindow>, 2> windows;
   for (std::size_t bank = 0; bank < windows.size(); ++bank) {
@@ -20,19 +20,21 @@ bool Core::Impl::bind_memory_windows() {
       if (window.address < end || window.address >= detail::io_begin || window.words.empty() ||
           window.words.size() > detail::io_begin - window.address ||
           (!window.known.empty() && window.known.size() != window.words.size())) {
-        current_pc = cpu.reg.pc;
-        fail(FaultKind::host_event, spaces[bank], window.address);
-        return false;
+        return {.kind = FaultKind::host_event,
+                .space = spaces[bank],
+                .address = window.address,
+                .pc = cpu.reg.pc};
       }
       end = window.address + static_cast<Word>(window.words.size());
     }
   }
   if (!jit->bind_windows(windows)) {
-    current_pc = cpu.reg.pc;
-    fail(FaultKind::host_event, Space::program, current_pc);
-    return false;
+    return {.kind = FaultKind::host_event,
+            .space = Space::program,
+            .address = cpu.reg.pc,
+            .pc = cpu.reg.pc};
   }
   windows_bound = true;
-  return true;
+  return {};
 }
 }

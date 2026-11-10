@@ -117,6 +117,9 @@ public:
   Jit(const Jit &) = delete;
   Jit &operator=(const Jit &) = delete;
   [[nodiscard]] static bool available() noexcept;
+  [[nodiscard]] PreparationReport prepare(std::span<const Word> established_entries,
+                                          const Registers &state,
+                                          std::optional<std::uint64_t> revision = std::nullopt);
   [[nodiscard]] std::uint32_t run(std::uint32_t budget);
   [[nodiscard]] std::uint32_t run_repeat(BlockInstruction operation, std::uint32_t budget);
   [[nodiscard]] std::uint32_t run_captured(BlockInstruction operation);

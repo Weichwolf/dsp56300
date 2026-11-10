@@ -4,9 +4,13 @@
 #include "architecture.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "instruction.hpp"
 #include "jit/arena.hpp"
 #include "jit/block.hpp"
 #include "jit/index.hpp"
+#include "jit/llvm/loop.hpp"
+#include "jit/llvm/runtime.hpp"
+#include "jit/preparation.hpp"
 #include "jit/resident_region.hpp"
 #include "translation.hpp"
 
@@ -17,6 +21,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <set>
 #include <span>
 #include <unordered_map>
 #include <utility>
@@ -46,6 +51,8 @@ struct Block {
   const void *entry = nullptr;
   const void *direct = nullptr;
   std::unique_ptr<ResidentRegion> region;
+  std::uint64_t native_bytes = 0;
+  bool optimized = false;
 #if defined(__aarch64__)
   EntryKind kind = EntryKind::ordinary;
   std::array<JitMemory, 2> memory{};
@@ -64,7 +71,12 @@ struct Jit::Impl {
         context{
             .runtime = runtime, .exit_requested = &exit_requested, .bus = bus, .events = events} {}
 
-  [[nodiscard]] Block *compile();
+  [[nodiscard]] Block *compile(const Registers &state, bool optimize = false);
+  [[nodiscard]] Mapping &mapping(const Registers &state);
+  void clear_invalidated();
+  [[nodiscard]] bool current_view(std::optional<std::uint64_t> revision) const;
+  [[nodiscard]] std::optional<PreparedLoop> prepare_entry(const Registers &state,
+                                                          std::optional<std::uint64_t> revision);
 #if defined(__aarch64__)
   [[nodiscard]] Block *reuse(std::span<const BlockInstruction> operations, EntryKind kind) const;
 #endif
@@ -83,6 +95,7 @@ struct Jit::Impl {
   bool invalidated = false;
   bool exit_requested = false;
   NativeContext context;
+  std::unique_ptr<LlvmCompiler> compiler;
   ExecutableArena arena;
   std::vector<std::unique_ptr<Block>> storage;
   std::array<std::vector<NativeWindow>, 2> windows;
@@ -91,25 +104,29 @@ struct Jit::Impl {
 #endif
 };
 
-Block *Jit::Impl::compile() {
+Block *Jit::Impl::compile(const Registers &state, const bool optimize) {
   auto block = std::make_unique<Block>();
 #if defined(__aarch64__)
   const bool callbacks = (context.events.io != nullptr || context.bus.external) &&
-                         active_loop_address(cpu.reg) == inactive_loop;
+                         active_loop_address(state) == inactive_loop;
 #else
   constexpr bool callbacks = false;
 #endif
-  block->operations = parse_block(program, cpu.reg, context.runtime, callbacks);
+  block->operations = parse_block(program, state, context.runtime, callbacks);
   if (block->operations.empty()) { return nullptr; }
 #if defined(__aarch64__)
-  block->region = resident_region_plan(program, cpu.reg, context.runtime, block->operations);
-  if (!block->region) {
+  if (!optimize) {
+    block->region = resident_region_plan(program, state, context.runtime, block->operations);
+  }
+  if (!optimize && !block->region) {
     if (auto *existing = reuse(block->operations, EntryKind::ordinary)) { return existing; }
   }
 #endif
-  auto bytes = emit_block(block->operations, context.runtime, cpu.reg.m);
+  auto bytes = emit_block(block->operations, context.runtime, state.m);
 #if defined(__x86_64__)
-  block->region = resident_region_plan(program, cpu.reg, context.runtime, block->operations);
+  if (!optimize) {
+    block->region = resident_region_plan(program, state, context.runtime, block->operations);
+  }
 #endif
   if (block->region) {
     auto &region = *block->region;
@@ -122,7 +139,9 @@ Block *Jit::Impl::compile() {
                             (lanes == 2 && region.inner_iterations > full_width))) {
         continue;
       }
-      region.native[index] = arena.append(emit_resident_region(region, lanes));
+      const auto native = emit_resident_region(region, lanes);
+      block->native_bytes += native.size();
+      region.native[index] = arena.append(native);
     }
     bytes = select_resident_region(region, bytes);
   }
@@ -130,9 +149,20 @@ Block *Jit::Impl::compile() {
                                                           ? std::span<const BlockInstruction>{}
                                                           : block->operations;
   std::size_t body_offset = 0;
-  block->entry = arena.append(admit_cycles(bytes, admission, &body_offset));
+  const auto native = admit_cycles(bytes, admission, &body_offset);
+  block->native_bytes += native.size();
+  block->entry = arena.append(native);
   if (!block->region) {
     block->direct = static_cast<const std::uint8_t *>(block->entry) + body_offset;
+  }
+  if (optimize) {
+    if (const auto compiled =
+            compile_memory_loop(compiler, block->operations, context.runtime, block->entry)) {
+      block->entry = compiled->entry;
+      block->native_bytes += compiled->native_bytes;
+      block->optimized = true;
+      block->direct = nullptr;
+    }
   }
   return retain(std::move(block));
 }
@@ -264,27 +294,12 @@ Block *Jit::Impl::retain(std::unique_ptr<Block> block) {
 }
 
 const void *Jit::Impl::prepare(Word &budget) {
-  if (invalidated) {
-    blocks.clear();
-    mappings.clear();
-    catalog.clear();
-    current = nullptr;
-    invalidated = false;
-  }
+  clear_invalidated();
   exit_requested = false;
   if (cpu.reg.pc > word_mask) { return nullptr; }
-  const auto key = translation_key(cpu.reg) >> word_bits;
-  if (current == nullptr || current->key != key) {
-    auto &mapping = mappings[key];
-    if (!mapping) { mapping = std::make_unique<Mapping>(key); }
-    current = mapping.get();
-    if (key <= std::numeric_limits<std::uint32_t>::max()) {
-      catalog.insert(static_cast<std::uint32_t>(key),
-                     static_cast<const void *>(current->table.index().data()));
-    }
-  }
+  current = &mapping(cpu.reg);
   if (const auto *entry = current->table.find(cpu.reg.pc)) { return entry; }
-  const auto *retained = compile();
+  const auto *retained = compile(cpu.reg);
   if (retained == nullptr) { return nullptr; }
   current->table.insert(cpu.reg.pc, retained->entry);
   // Exact cold grants avoid suffix compilation; warm lookup retains native admission.
@@ -295,6 +310,111 @@ const void *Jit::Impl::prepare(Word &budget) {
     return retained->direct;
   }
   return retained->entry;
+}
+
+void Jit::Impl::clear_invalidated() {
+  if (invalidated) {
+    blocks.clear();
+    mappings.clear();
+    catalog.clear();
+    current = nullptr;
+    invalidated = false;
+  }
+}
+
+Mapping &Jit::Impl::mapping(const Registers &state) {
+  const auto key = translation_key(state) >> word_bits;
+  if (current == nullptr || current->key != key) {
+    auto &mapping = mappings[key];
+    if (!mapping) { mapping = std::make_unique<Mapping>(key); }
+    current = mapping.get();
+    if (key <= std::numeric_limits<std::uint32_t>::max()) {
+      catalog.insert(static_cast<std::uint32_t>(key),
+                     static_cast<const void *>(current->table.index().data()));
+    }
+  }
+  return *current;
+}
+
+bool Jit::Impl::current_view(const std::optional<std::uint64_t> revision) const {
+  return !revision ||
+         (context.events.io != nullptr && context.events.io->program_revision() == *revision);
+}
+
+std::optional<PreparedLoop> Jit::Impl::prepare_entry(const Registers &state,
+                                                     const std::optional<std::uint64_t> revision) {
+  auto &binding = mapping(state);
+  const auto *entry = binding.table.find(state.pc);
+  const auto known = std::ranges::find_if(storage, [&](const auto &block) {
+    return entry != nullptr && block->entry == entry && block->optimized;
+  });
+  if (known != storage.end()) { return PreparedLoop{.entry = entry}; }
+  const auto operations = parse_block(program, state, context.runtime);
+  if (!memory_loop_candidate(operations, context.runtime)) { return {}; }
+  const auto *compiled = compile(state, true);
+  if (compiled == nullptr || !compiled->optimized) { return {}; }
+  if (!current_view(revision)) {
+    invalidated = true;
+    return {};
+  }
+  binding.table.insert(state.pc, compiled->entry);
+  return PreparedLoop{.entry = compiled->entry, .native_bytes = compiled->native_bytes};
+}
+
+PreparationReport Jit::prepare(const std::span<const Word> established_entries,
+                               const Registers &state,
+                               const std::optional<std::uint64_t> revision) {
+  auto &self = *impl_;
+  self.clear_invalidated();
+  const auto graph = preparation_graph(self.program, self.context.runtime, established_entries);
+  PreparationReport report{.failure = graph.failure};
+  std::set<Word> unresolved(graph.unresolved.begin(), graph.unresolved.end());
+  std::set<std::uint64_t> visited;
+  const auto install = [&](const Registers &context) {
+    if (!visited.insert(translation_key(context)).second) { return; }
+    const auto entry = self.prepare_entry(context, revision);
+    if (!entry) {
+      unresolved.insert(context.pc);
+      return;
+    }
+    ++report.prepared_entries;
+    report.native_bytes += entry->native_bytes;
+  };
+  if (!self.current_view(revision)) {
+    report.failure = {.kind = FaultKind::host_event,
+                      .space = Space::program,
+                      .address = state.pc,
+                      .pc = state.pc};
+    return report;
+  }
+  if ((state.sr & loop_flag) != 0) { install(state); }
+  for (const auto &operation : graph.instructions) {
+    const auto kind = operation.instruction.operation;
+    if (kind != Operation::loop_immediate && kind != Operation::loop_register &&
+        kind != Operation::loop_short && kind != Operation::loop_effective &&
+        kind != Operation::loop_forever) {
+      unresolved.insert(operation.pc);
+      continue;
+    }
+    const auto &decoded = operation.instruction;
+    const bool relative =
+        kind == Operation::loop_forever ? (decoded.opcode & 1U) == 0 : (decoded.opcode & 16U) != 0;
+    auto context = state;
+    context.pc = (operation.pc + decoded.words) & word_mask;
+    context.la = relative ? (operation.pc + decoded.extension) & word_mask : decoded.extension;
+    context.sr = (context.sr & ~(loop_flag | forever_flag)) | loop_flag;
+    install(context);
+  }
+  report.unresolved_entries = unresolved.size();
+  if (!self.current_view(revision)) {
+    self.invalidated = true;
+    report.prepared_entries = 0;
+    report.failure = {.kind = FaultKind::host_event,
+                      .space = Space::program,
+                      .address = state.pc,
+                      .pc = state.pc};
+  }
+  return report;
 }
 
 std::uint32_t Jit::Impl::enter(const Block &block, const Word budget) {

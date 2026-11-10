@@ -94,7 +94,7 @@ struct Core::Impl {
   jit_execute(void *owner, const detail::BlockInstruction *operation) noexcept;
   static void jit_access(void *owner, detail::NativeAccess &access) noexcept;
   void synchronize_program_view();
-  [[nodiscard]] bool bind_memory_windows();
+  [[nodiscard]] Fault bind_memory_windows();
   [[nodiscard]] static std::optional<Word> jit_program(void *owner, Word address) noexcept;
   [[nodiscard]] static std::uint32_t jit_moves(void *owner,
                                                const detail::BlockInstruction *operation) noexcept;

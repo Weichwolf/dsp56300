@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
+#include <cstdint>
 #include <llvm-c/Orc.h>
 #include <llvm-c/Types.h>
 #include <memory>
@@ -36,6 +37,8 @@ public:
   // Verify exact semantic IR, optimize with the native target, materialize now.
   // The single exported entry has the module's name. Code lives with this owner.
   [[nodiscard]] const void *install(LlvmModule &module);
+  // Cold materialization accounting; native execution does not update it.
+  [[nodiscard]] std::uint64_t native_bytes() const noexcept;
 
 private:
   struct Impl;

@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <span>
 #include <stdexcept>
 
@@ -302,6 +303,27 @@ void Core::reset() {
 
 Progress Core::progress() const noexcept {
   return {.instructions = impl_->cpu.instructions, .estimated_cycles = impl_->cpu.cycles};
+}
+
+PreparationReport Core::prepare(const std::span<const Word> established_entries) {
+  const auto pc = impl_->cpu.reg.pc;
+  if (impl_->executing) {
+    return {.failure = {
+                .kind = FaultKind::host_event, .space = Space::program, .address = pc, .pc = pc}};
+  }
+  const detail::ExecutionGuard guard(impl_->executing);
+  const auto revision =
+      impl_->external ? std::optional(impl_->io->program_revision()) : std::nullopt;
+  if (revision && (!impl_->windows_bound || *revision != impl_->program_revision ||
+                   impl_->program_omr != impl_->cpu.reg.omr)) {
+    if (const auto error = impl_->bind_memory_windows(); error.kind != FaultKind::none) {
+      return {.failure = error};
+    }
+    impl_->jit->invalidate();
+    impl_->program_revision = *revision;
+    impl_->program_omr = impl_->cpu.reg.omr;
+  }
+  return impl_->jit->prepare(established_entries, impl_->cpu.reg, revision);
 }
 
 Fault Core::fault() const noexcept {

@@ -46,7 +46,11 @@ void Core::Impl::synchronize_program_view() {
   if (!external || !jit || io == nullptr) { return; }
   const auto next = io->program_revision();
   if (!windows_bound || next != program_revision || program_omr != cpu.reg.omr) {
-    if (!bind_memory_windows()) { return; }
+    if (const auto error = bind_memory_windows(); error.kind != FaultKind::none) {
+      current_pc = cpu.reg.pc;
+      fail(error.kind, error.space, error.address, error.value);
+      return;
+    }
     if (program_omr != cpu.reg.omr) {
       yield_requested = true;
       jit->request_yield();
