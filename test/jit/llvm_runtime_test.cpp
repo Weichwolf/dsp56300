@@ -6,17 +6,25 @@
 #include <array>
 #include <barrier>
 #include <bit>
+#include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <iostream>
 #include <limits>
 #include <llvm-c/Core.h>
 #include <llvm-c/Types.h>
+#if defined(__APPLE__)
+#include <llvm/BinaryFormat/MachO.h>
+#else
+#include <llvm/BinaryFormat/ELF.h>
+#endif
 #include <memory>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <thread>
 #include <type_traits>
+#include <vector>
 
 namespace {
 using dsp56300::detail::LlvmCompiler;
@@ -93,6 +101,75 @@ void failure_ownership(LlvmCompiler &compiler, const Function retained) {
   check(install(compiler, "after_failure"));
 }
 
+void bitcode_linking(LlvmModule &module) {
+  const auto before = module.bitcode();
+  constexpr std::array corrupt{std::byte{1}};
+  for (const auto input :
+       {std::span<const std::byte>(corrupt), std::span<const std::byte>(before)}) {
+    bool rejected = false;
+    try {
+      module.link_bitcode(input);
+    } catch (const std::runtime_error &) { rejected = true; }
+    require(rejected && module.bitcode() == before,
+            "Malformed or duplicate bitcode retains the complete original compiler module");
+  }
+}
+
+void rejected_objects(LlvmCompiler &compiler, const std::span<const std::byte> object) {
+  auto foreign = std::vector<std::byte>(object.begin(), object.end());
+  constexpr unsigned byte_mask = 0xff;
+#if defined(__APPLE__)
+  constexpr unsigned machine_offset = 4;
+  constexpr auto other_machine = llvm::MachO::CPU_TYPE_X86_64;
+#else
+  constexpr unsigned machine_offset = 18;
+  constexpr auto other_machine = llvm::ELF::EM_AARCH64;
+#endif
+  foreign.at(machine_offset) = static_cast<std::byte>(other_machine & byte_mask);
+  foreign.at(machine_offset + 1) = static_cast<std::byte>((other_machine >> 8U) & byte_mask);
+  constexpr std::array corrupt{std::byte{1}};
+  for (const auto input :
+       {std::span<const std::byte>(corrupt), std::span<const std::byte>(foreign)}) {
+    bool rejected = false;
+    try {
+      static_cast<void>(compiler.install_object(input, "rejected"));
+    } catch (const std::runtime_error &) { rejected = true; }
+    require(rejected && compiler.native_bytes() == 0,
+            "Malformed or foreign native objects fail before materialization");
+  }
+}
+
+void exported_code() {
+  LlvmCompiler compiler;
+  LlvmModule original("exported_entry");
+  lift(original);
+  const auto serialized = original.bitcode();
+  LlvmModule imported(original.name());
+  imported.link_bitcode(serialized);
+  bitcode_linking(imported);
+  const auto object = compiler.object(imported);
+  require(!object.empty() && original.code() != nullptr && imported.code() != nullptr &&
+              compiler.native_bytes() == 0,
+          "Bitcode and object export retain both owners without materializing live code");
+  rejected_objects(compiler, object);
+  const auto first = std::bit_cast<Function>(compiler.install_object(object, original.name()));
+  require(compiler.native_bytes() != 0, "Cold installation accounts actual native text");
+  check(first);
+  LlvmCompiler independent;
+  check(std::bit_cast<Function>(independent.install_object(object, original.name())));
+  check(first);
+  LlvmModule incompatible("incompatible");
+  lift(incompatible);
+  LLVMSetDataLayout(incompatible.code(), "E-p:64:64");
+  bool rejected = false;
+  try {
+    static_cast<void>(compiler.object(incompatible));
+  } catch (const std::runtime_error &) { rejected = true; }
+  require(rejected && incompatible.code() != nullptr,
+          "An incompatible native layout fails before transferring compiler ownership");
+  check(first);
+}
+
 void independent_owners() {
   require(dsp56300::test::llvm_flag_a() == dsp56300::test::llvm_flag_b(),
           "Separate static core archives must share exactly one target initializer flag");
@@ -122,7 +199,10 @@ void independent_owners() {
 }
 }
 
-int main() try { independent_owners(); } catch (const std::exception &error) {
+int main() try {
+  independent_owners();
+  exported_code();
+} catch (const std::exception &error) {
 
   std::cerr << error.what() << '\n';
   return 1;

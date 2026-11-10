@@ -7,24 +7,35 @@
 #include <array>
 #endif
 #include <bit>
+#include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <iostream>
 #include <llvm-c/Analysis.h>
+#include <llvm-c/BitReader.h>
+#include <llvm-c/BitWriter.h>
 #include <llvm-c/Core.h>
 #include <llvm-c/Error.h>
 #include <llvm-c/LLJIT.h>
+#include <llvm-c/Linker.h>
 #include <llvm-c/Object.h>
 #include <llvm-c/Orc.h>
 #include <llvm-c/TargetMachine.h>
 #include <llvm-c/Transforms/PassBuilder.h>
 #include <llvm-c/Types.h>
+#include <llvm/ADT/StringRef.h>
+#include <llvm/Object/ObjectFile.h>
+#include <llvm/Support/Error.h>
+#include <llvm/Support/MemoryBufferRef.h>
+#include <llvm/TargetParser/Triple.h>
 #include <memory>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace dsp56300::detail {
 namespace {
@@ -33,6 +44,9 @@ template <auto dispose> struct LlvmDelete {
 };
 
 using Message = std::unique_ptr<char, LlvmDelete<LLVMDisposeMessage>>;
+using Buffer = std::unique_ptr<std::remove_pointer_t<LLVMMemoryBufferRef>,
+                               LlvmDelete<LLVMDisposeMemoryBuffer>>;
+using Module = std::unique_ptr<std::remove_pointer_t<LLVMModuleRef>, LlvmDelete<LLVMDisposeModule>>;
 using TargetMachine = std::unique_ptr<std::remove_pointer_t<LLVMTargetMachineRef>,
                                       LlvmDelete<LLVMDisposeTargetMachine>>;
 
@@ -47,6 +61,90 @@ void verify(LLVMModuleRef module) {
   const auto invalid = LLVMVerifyModule(module, LLVMReturnStatusAction, &message);
   const Message text(message);
   if (invalid != 0) { throw std::runtime_error(text.get()); }
+}
+
+Buffer buffer(const std::span<const std::byte> bytes) {
+  return Buffer(LLVMCreateMemoryBufferWithMemoryRangeCopy(
+      reinterpret_cast<const char *>(bytes.data()), bytes.size(), "native_compiler_input"));
+}
+
+std::vector<std::byte> bytes(LLVMMemoryBufferRef buffer) {
+  const auto *first = reinterpret_cast<const std::byte *>(LLVMGetBufferStart(buffer));
+  return {first, first + LLVMGetBufferSize(buffer)};
+}
+
+struct TargetIdentity {
+  std::string_view triple, layout;
+};
+
+void compatible(LLVMModuleRef module, const TargetIdentity identity) {
+  const std::string_view supplied(LLVMGetTarget(module));
+  if (!supplied.empty()) {
+    const llvm::Triple source(supplied);
+    const llvm::Triple target(identity.triple);
+    if (source.getArch() != target.getArch() ||
+        source.getObjectFormat() != target.getObjectFormat()) {
+      throw std::runtime_error("LLVM module target does not match the native compiler");
+    }
+  }
+  const std::string_view data_layout(LLVMGetDataLayoutStr(module));
+  if (!data_layout.empty() && data_layout != identity.layout) {
+    throw std::runtime_error("LLVM module data layout does not match the native compiler");
+  }
+}
+
+class Diagnostics {
+public:
+  explicit Diagnostics(LLVMContextRef context)
+      : context_(context),
+        previous_(LLVMContextGetDiagnosticHandler(context)),
+        previous_owner_(LLVMContextGetDiagnosticContext(context)) {
+    LLVMContextSetDiagnosticHandler(context_, receive, this);
+  }
+
+  ~Diagnostics() { LLVMContextSetDiagnosticHandler(context_, previous_, previous_owner_); }
+
+  Diagnostics(const Diagnostics &) = delete;
+  Diagnostics &operator=(const Diagnostics &) = delete;
+
+  void check(const bool failed, const char *fallback) const {
+    if (exception_) { std::rethrow_exception(exception_); }
+    if (failed || diagnosed_) { throw std::runtime_error(text_.empty() ? fallback : text_); }
+  }
+
+private:
+  static void receive(LLVMDiagnosticInfoRef info, void *owner) noexcept {
+    const auto severity = LLVMGetDiagInfoSeverity(info);
+    if (severity != LLVMDSWarning && severity != LLVMDSError) { return; }
+    const auto &self = *static_cast<const Diagnostics *>(owner);
+    self.diagnosed_ = true;
+    try {
+      const Message message(LLVMGetDiagInfoDescription(info));
+      if (message) { self.text_ += message.get(); }
+    } catch (...) { self.exception_ = std::current_exception(); }
+  }
+
+  LLVMContextRef context_;
+  LLVMDiagnosticHandler previous_;
+  void *previous_owner_;
+  mutable std::string text_;
+  mutable std::exception_ptr exception_;
+  mutable bool diagnosed_ = false;
+};
+
+void compatible_object(LLVMMemoryBufferRef input, const char *native_triple) {
+  const llvm::StringRef data(LLVMGetBufferStart(input), LLVMGetBufferSize(input));
+  auto object = llvm::object::ObjectFile::createObjectFile(
+      llvm::MemoryBufferRef(data, "native_compiler_object"));
+  if (!object) { throw std::runtime_error(llvm::toString(object.takeError())); }
+  const auto source = (*object)->makeTriple();
+  const llvm::Triple target(native_triple);
+  if (source.getArch() != target.getArch() ||
+      source.getObjectFormat() != target.getObjectFormat() ||
+      (*object)->getBytesInAddress() != sizeof(void *) ||
+      (*object)->isLittleEndian() != (std::endian::native == std::endian::little)) {
+    throw std::runtime_error("LLVM object target does not match the native compiler");
+  }
 }
 
 TargetMachine native_machine() {
@@ -108,6 +206,14 @@ struct LlvmCompiler::Impl {
     }
   }
 
+  void prepare(LlvmModule &module) const;
+
+  [[nodiscard]] const void *lookup(const std::string &name) const {
+    LLVMOrcExecutorAddress entry = 0;
+    check(LLVMOrcLLJITLookup(jit, &entry, name.c_str()));
+    return std::bit_cast<const void *>(static_cast<std::uintptr_t>(entry));
+  }
+
   LLVMOrcLLJITRef jit = nullptr;
   TargetMachine machine;
   std::uint64_t text_bytes = 0;
@@ -137,6 +243,37 @@ LLVMContextRef LlvmModule::context() const noexcept {
   return LLVMOrcThreadSafeContextGetContext(context_);
 }
 
+std::vector<std::byte> LlvmModule::bitcode() const {
+  if (module_ == nullptr) { throw std::logic_error("LLVM module was already transferred"); }
+  verify(module_);
+  const Buffer output(LLVMWriteBitcodeToMemoryBuffer(module_));
+  if (!output) { throw std::runtime_error("LLVM 19 cannot export semantic bitcode"); }
+  return bytes(output.get());
+}
+
+void LlvmModule::link_bitcode(const std::span<const std::byte> source) {
+  if (module_ == nullptr) { throw std::logic_error("LLVM module was already transferred"); }
+  const auto input = buffer(source);
+  LLVMModuleRef parsed = nullptr;
+  const Diagnostics diagnostics(context());
+  const auto failed = LLVMParseBitcodeInContext2(context(), input.get(), &parsed);
+  Module incoming(parsed);
+  diagnostics.check(failed != 0 || !incoming, "LLVM 19 cannot parse semantic bitcode");
+  verify(incoming.get());
+  const std::string_view target(LLVMGetTarget(module_));
+  const std::string_view layout(LLVMGetDataLayoutStr(module_));
+  if (!target.empty() || !layout.empty()) {
+    compatible(incoming.get(),
+               {.triple = target.empty() ? LLVMGetTarget(incoming.get()) : target,
+                .layout = layout.empty() ? LLVMGetDataLayoutStr(incoming.get()) : layout});
+  }
+  Module candidate(LLVMCloneModule(module_));
+  diagnostics.check(LLVMLinkModules2(candidate.get(), incoming.release()) != 0,
+                    "LLVM 19 cannot link semantic bitcode");
+  verify(candidate.get());
+  LLVMDisposeModule(std::exchange(module_, candidate.release()));
+}
+
 LLVMOrcThreadSafeModuleRef LlvmModule::release() noexcept {
   return LLVMOrcCreateNewThreadSafeModule(std::exchange(module_, nullptr), context_);
 }
@@ -163,10 +300,13 @@ std::uint64_t LlvmCompiler::native_bytes() const noexcept {
   return impl_->text_bytes;
 }
 
-const void *LlvmCompiler::install(LlvmModule &module) {
+void LlvmCompiler::Impl::prepare(LlvmModule &module) const {
   if (module.code() == nullptr) { throw std::logic_error("LLVM module was already transferred"); }
-  LLVMSetTarget(module.code(), LLVMOrcLLJITGetTripleString(impl_->jit));
-  LLVMSetDataLayout(module.code(), LLVMOrcLLJITGetDataLayoutStr(impl_->jit));
+  compatible(
+      module.code(),
+      {.triple = LLVMOrcLLJITGetTripleString(jit), .layout = LLVMOrcLLJITGetDataLayoutStr(jit)});
+  LLVMSetTarget(module.code(), LLVMOrcLLJITGetTripleString(jit));
+  LLVMSetDataLayout(module.code(), LLVMOrcLLJITGetDataLayoutStr(jit));
   constexpr bool address_sanitizer = __has_feature(address_sanitizer);
   if constexpr (address_sanitizer) {
     constexpr std::string_view name = "sanitize_address";
@@ -186,13 +326,38 @@ const void *LlvmCompiler::install(LlvmModule &module) {
       options(LLVMCreatePassBuilderOptions());
   check(LLVMRunPasses(module.code(),
                       address_sanitizer ? "default<O3>,asan" : "default<O3>",
-                      impl_->machine.get(),
+                      machine.get(),
                       options.get()));
   verify(module.code());
+}
+
+const void *LlvmCompiler::install(LlvmModule &module) {
+  impl_->prepare(module);
   check(LLVMOrcLLJITAddLLVMIRModule(
       impl_->jit, LLVMOrcLLJITGetMainJITDylib(impl_->jit), module.release()));
-  LLVMOrcExecutorAddress entry = 0;
-  check(LLVMOrcLLJITLookup(impl_->jit, &entry, module.name().c_str()));
-  return std::bit_cast<const void *>(static_cast<std::uintptr_t>(entry));
+  return impl_->lookup(module.name());
+}
+
+std::vector<std::byte> LlvmCompiler::object(LlvmModule &module) {
+  impl_->prepare(module);
+  char *message = nullptr;
+  LLVMMemoryBufferRef exported = nullptr;
+  const auto failed = LLVMTargetMachineEmitToMemoryBuffer(
+      impl_->machine.get(), module.code(), LLVMObjectFile, &message, &exported);
+  const Message error(message);
+  const Buffer output(exported);
+  if (failed != 0 || !output) {
+    throw std::runtime_error(error ? error.get() : "LLVM 19 cannot export native code");
+  }
+  return bytes(output.get());
+}
+
+const void *LlvmCompiler::install_object(const std::span<const std::byte> code,
+                                         const std::string &entry) {
+  auto input = buffer(code);
+  compatible_object(input.get(), LLVMOrcLLJITGetTripleString(impl_->jit));
+  check(LLVMOrcLLJITAddObjectFile(
+      impl_->jit, LLVMOrcLLJITGetMainJITDylib(impl_->jit), input.release()));
+  return impl_->lookup(entry);
 }
 }
