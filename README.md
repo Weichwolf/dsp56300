@@ -70,8 +70,9 @@ ARM64 native RAM regions also support valid power-of-two multiple-wrap cursors,
 including mixed post-N, unit increment/decrement and pre-decrement accesses.
 Entry guards prove the complete aligned ring lies inside initialized RAM;
 changed modifiers, invalid ranges and partial grants retain precise execution.
-Closed scalar regions can include single-update long X/Y transfers, immediate
-arithmetic shifts and terminal non-call jumps. A cursor may be replaced after its
+Closed scalar regions can include mixed RAM/accumulator transfers with old-value
+ordering, single-update long X/Y transfers, immediate arithmetic shifts and terminal
+non-call jumps. A cursor may be replaced after its
 last memory use when each pass is checked separately; every reentry validates the
 new value. Batched regions retain the stricter cursor proof.
 

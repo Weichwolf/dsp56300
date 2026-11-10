@@ -79,6 +79,24 @@ bool transfer(ResidentPlan &region,
   return true;
 }
 
+bool mixed_transfer(ResidentPlan &region,
+                    const Instruction &instruction,
+                    const std::array<JitMemory, 2> &memory,
+                    const std::array<Word, agu_registers> &modifiers,
+                    const RegionAddressing addressing) {
+  const auto opcode = instruction.opcode;
+  const AddressForm form{.mode = (opcode >> 11) & 7U, .index = (opcode >> 8) & 7U};
+  if (!compound_addressing(addressing) || form.mode == 6) { return false; }
+  const bool y = (opcode & (1U << 14)) != 0;
+  constexpr std::array xregs{x0_register, x1_register, a_register, b_register};
+  constexpr std::array yregs{y0_register, y1_register, a_register, b_register};
+  const NativeMove move{.address = form,
+                        .reg = y ? yregs.at((opcode >> 16) & 3U) : xregs.at((opcode >> 18) & 3U),
+                        .space = y ? Space::y : Space::x,
+                        .load = (opcode & (1U << 15)) != 0};
+  return transfer(region, move, memory[y ? 1U : 0U], modifiers, addressing);
+}
+
 bool moves(ResidentPlan &region,
            const Instruction &instruction,
            const std::array<JitMemory, 2> &memory,
@@ -97,6 +115,9 @@ bool moves(ResidentPlan &region,
     if (address.accessed) { return false; }
     address.constant = immediate.value;
     return true;
+  }
+  if ((instruction.opcode & pair_group_mask) == pair_group) {
+    return mixed_transfer(region, instruction, memory, modifiers, addressing);
   }
   const auto plan = plan_moves(instruction);
   if (plan.count == 0) { return false; }
