@@ -114,6 +114,25 @@ BlockEmitter::BlockEmitter(const JitRuntime runtime,
       word_mode_(words),
       window_mode_(window) {}
 
+bool BlockEmitter::closed_jump(const std::span<const BlockInstruction> operations) {
+  if (operations.empty()) { return false; }
+  const auto &last = operations.back();
+  constexpr Word short_target = 0xfff;
+  if (last.instruction.operation != Operation::jump_short ||
+      (last.instruction.opcode & short_target) != operations.front().pc) {
+    return false;
+  }
+  return std::ranges::all_of(operations.first(operations.size() - 1),
+                             [](const auto &operation) {
+                               return operation.loop_address == inactive_loop &&
+                                      lowerable(operation) &&
+                                      (operation.instruction.operation == Operation::nop ||
+                                       (operation.instruction.operation == Operation::parallel &&
+                                        !has_moves(operation)));
+                             }) &&
+         last.loop_address == inactive_loop;
+}
+
 bool BlockEmitter::has_moves(const BlockInstruction &operation) {
   return operation.instruction.operation == Operation::parallel &&
          (operation.instruction.opcode & upper_move_mask) != no_move_group;
@@ -653,6 +672,16 @@ BlockEmitter::generate_body(const std::span<const BlockInstruction> operations) 
   code_.bind(loop_body_);
   emit_operations(operations);
   materialize_pending_accounting();
+  if (bounds_ == ExecutionBounds::whole && closed_jump(operations)) {
+    code_.load(Reg::ax, Reg::r13, offsetof(NativeContext, budget), Width::dword);
+    code_.binary(op_sub, {.destination = Reg::ax, .source = Reg::r15}, Width::dword);
+    code_.immediate(group_cmp, Reg::ax, static_cast<Word>(operations.size() - 1), Width::dword);
+    exit_if(Branch::below_equal);
+    // The next body starts with canonical accumulator inputs. Numeric modes,
+    // data registers and all device state are unchanged by this pure backedge.
+    flush_accumulators(dirty_accumulators());
+    code_.jump(loop_header_);
+  }
   finish();
   // Keep non-linear checks beyond every return, outside the linear hot path.
   emit_ring_guards();

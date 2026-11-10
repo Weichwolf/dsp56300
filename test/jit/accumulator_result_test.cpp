@@ -103,19 +103,20 @@ void check(Machine &machine,
            const Word count) {
   auto expected = state;
   for (Word index = 0; index < count; ++index) {
-    if (index == body.size()) {
+    const auto position = index % (body.size() + 1);
+    if (position == body.size()) {
       expected.pc = start;
       continue;
     }
     const auto old = expected;
-    arithmetic(expected, old, body[index]);
+    arithmetic(expected, old, body[position]);
     ++expected.pc;
   }
   machine.core.set_registers(state);
   const auto before = machine.core.state().progress;
   const auto memory = std::array{machine.p, machine.x, machine.y};
   const auto result = machine.core.run(count);
-  const auto cycles = count + (count > body.size() ? jump_extra_cycles : 0);
+  const auto cycles = count + ((count / (body.size() + 1)) * jump_extra_cycles);
   const auto actual = machine.core.registers();
   if (actual != expected || result.retired != count || result.fault != Fault{}) {
     std::cerr << "count=" << count << " input SR/X/Y/A/B=" << state.sr << '/' << state.x << '/'
@@ -149,6 +150,7 @@ void numeric_mode(Machine &machine,
                                     .seed = left + right,
                                     .complement_y = complement_y});
         check(machine, body, state, count);
+        check(machine, body, state, count * 3);
         for (Word prefix = 0; prefix <= count; ++prefix) { check(machine, body, state, prefix); }
       }
     }

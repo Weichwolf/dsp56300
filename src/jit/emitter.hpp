@@ -38,6 +38,8 @@ public:
 
   [[nodiscard]] std::vector<std::uint8_t> generate_repeat(const BlockInstruction &operation);
 
+  [[nodiscard]] static bool closed_jump(std::span<const BlockInstruction> operations);
+
   [[nodiscard]] bool direct_memory(const BlockInstruction &operation) const;
 
   [[nodiscard]] bool packed_retirement() const noexcept { return packed_retirement_; }
