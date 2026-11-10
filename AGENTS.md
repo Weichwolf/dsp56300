@@ -19,6 +19,9 @@
   at build time. Keep firmware out of cores.
   Fuse compatible consumer binding IR before LLVM O3; benchmark against equivalent
   Clang 19 O3 C++ with parity as the target and explicit lowering/coverage scope.
+  Design for the complete instrument's 10x throughput target; 4x is intermediate.
+  Development always runs complete AOT; validated persistent artifacts serve
+  operation after the full translation path.
 - Lower ordinary ISA natively; distinguish actual I/O calls from ISA fallback
   gaps. Keep unsupported cases visible. Fix generic integration defects here.
 - Keep code small, registers live and RAM direct. SIMD needs measured benefit.

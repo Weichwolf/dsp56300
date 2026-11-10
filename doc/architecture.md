@@ -42,6 +42,10 @@ code/variant hashes, compiler/target/features and binding ABI identity. Resolve
 memory/context/device symbols by linking or validated relocation, never serialized
 process pointers. Keep LLVM ownership private; expose only the minimal consumer
 artifact/binding contract. Shared IR is optimized together before host lowering.
+Development always exercises the full AOT pipeline. Provide persistent validated
+artifacts for deployment, preserving exact code/variant, core/LLVM pipeline, host
+features and binding identity. Rebuild rejected artifacts before execution.
+Design generated code and host integration for the consumer's 10x throughput target.
 Treat translated code and concrete host functions as one optimized native path.
 Inline stable bindings and remove avoidable call/dispatch boundaries, state
 copies, spills and repeated validation. Qualify generated code and connected
@@ -75,7 +79,8 @@ revision. Compilation failure leaves architecture/progress unchanged. Keep LLVM
 handles private, instrument emitted native code explicitly in sanitizer builds,
 and initialize LLVM once per process before parallel preparation. Core destruction
 must not shut down LLVM while another core owns code. Preparation has no fixed
-time cap; persistent caching is optional when measured latency justifies it.
+time cap. Development always runs complete AOT/optimization; persistent validated
+artifacts serve operation and preserve exact code/binding/target identity.
 
 On Linux x86-64, resolve both 24-bit PCs and complete 32-bit numeric/loop keys
 with one indexed load from non-executable, demand-zero target tables. Reserve

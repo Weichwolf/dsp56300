@@ -26,6 +26,10 @@ Prefer consumer startup loading and complete AOT before playback, with the same
 native code quality as build-time compilation. Report preparation/startup and
 compiler memory separately from warm execution. Loading at application startup
 does not permit lazy translation during playing.
+Development always runs complete AOT and optimization. Support persistent
+validated artifacts for operation after the complete translation path; key exact
+code/variants, core/LLVM pipeline, binding ABI and host target/features. Rebind
+relocations safely and rebuild rejected artifacts before execution.
 
 Allow the consumer to generate a local translation at build time and compile/link
 it with its own host application. Mandatory preparation may be a build phase;
@@ -78,8 +82,8 @@ sanitizers may wait for the instrument goal; earlier runs need a concrete
 technical reason. Cover our code and emitted JIT code, not packaged foreign
 libraries; never rebuild LLVM/compiler-rt as part of the toolchain.
 Manufacturer assets and application program extracts stay outside source/tests.
-The Blofeld consumer requires >=4x sustainable offline instrument throughput and
-bounded live latency; isolated core benchmarks do not establish that result.
+The Blofeld consumer targets >=10x sustained offline instrument throughput,
+with >=4x as an intermediate milestone, and bounded live latency; isolated core benchmarks do not establish that result.
 
 Cover exact fixed-point arithmetic, all numerical modes, parallel transfers,
 AGU, REP/DO and stack effects. Representative streams include audio/speech,

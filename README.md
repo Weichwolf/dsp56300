@@ -60,6 +60,9 @@ Binary Translation of consumer-owned executable images and known variants.
 Prefer startup loading and complete preparation before execution. Support
 build-time export of linkable LLVM bitcode or relocatable native objects through
 the same semantic translation and optimization pipeline.
+Development always runs complete AOT/optimization. Preserve validated code
+artifacts for operational startup reuse, with exact code/binding/host identity
+and safe relocation. Rebuild rejected artifacts before execution.
 
 `Core::prepare(entries)` analyzes an immutable code/mapping view without guest
 execution, real I/O or architectural state/time changes. Lift the complete known
