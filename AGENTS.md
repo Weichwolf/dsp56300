@@ -4,9 +4,21 @@
   device clocks, peripherals and scheduling in consumers; no foreign core.
 - Expose only core.hpp and memory.hpp, aligned with the other core. Core owns
   readable state; consumers own memory. One owner executes each core.
-- Production is JIT-only. Keep all implemented ISA semantics. Compile natural
-  control-flow regions once, retain immutable code and link native successors.
+- Production execution is native-only. Keep all implemented ISA semantics.
+  Compile natural control-flow regions once, retain immutable code and link
+  native successors.
   No instruction-count translation caps, checkpoints or public effect tickets.
+- Target Ahead-of-Time Binary Translation for consumer-owned executable images.
+  Complete preparation of all known code/variants is mandatory before execution;
+  incomplete translation fails explicitly. Prefer startup loading/full AOT;
+  build-time translation is allowed with the same code-quality contract.
+  Export linkable LLVM bitcode or relocatable objects through the same semantic
+  pipeline used for startup installation; no duplicated lowering or public LLVM
+  handles. Validate code/binding/target identity and relocations.
+  Consumers may compile/link generated firmware code with a host application
+  at build time. Keep firmware out of cores.
+  Fuse compatible consumer binding IR before LLVM O3; benchmark against equivalent
+  Clang 19 O3 C++ with parity as the target and explicit lowering/coverage scope.
 - Lower ordinary ISA natively; distinguish actual I/O calls from ISA fallback
   gaps. Keep unsupported cases visible. Fix generic integration defects here.
 - Keep code small, registers live and RAM direct. SIMD needs measured benefit.
@@ -28,8 +40,10 @@
 - Blofeld firmware probes stop within 10 host seconds and fail unless playable.
   Until real time, no long firmware runs or unchanged failed-probe repetitions.
 - Telemetry is runtime-selectable and off by default; no hot-path statistics.
-- README describes implemented use; OBJECTIVE defines acceptance; doc/ contains
-  one target architecture and primary references. No diaries or result archives.
+- Documentation describes the required target, not implementation status. README
+  defines intended use, OBJECTIVE acceptance, doc/ the architecture and primary
+  references. Keep actual qualification results in the acceptance catalogue.
+  No diaries or result archives.
 - Keep firmware, samples, manuals, disassemblies and private analysis untracked.
   Reference inputs: ignored build/local/; artifacts: build/. Preserve inputs and
   source/size/hash manifests. Original source is GPL-3.0-only with SPDX notices.

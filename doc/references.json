@@ -10,5 +10,45 @@
     "source": "https://www.nxp.com/docs/en/reference-manual/DSP56303UM.pdf",
     "scope": "Architecture integration reference; derivative peripherals belong to consumers",
     "redistributed": false
+  },
+  {
+    "title": "N64Recomp/N64Recomp README.md",
+    "source": "https://github.com/N64Recomp/N64Recomp/blob/598ce2080004a5672d604dceadbda436045307b7/README.md",
+    "download_url": "https://raw.githubusercontent.com/N64Recomp/N64Recomp/598ce2080004a5672d604dceadbda436045307b7/README.md",
+    "revision": "598ce2080004a5672d604dceadbda436045307b7",
+    "bytes": 9145,
+    "sha256": "001ef14790d6bd3d4b5a01588ce58107fd82b8bccafd78eac3dae19092d95d85",
+    "scope": "Static recompilation and known overlays; requires code metadata and a native runtime.",
+    "redistributed": false
+  },
+  {
+    "title": "hedge-dev/XenonRecomp README.md",
+    "source": "https://github.com/hedge-dev/XenonRecomp/blob/ddd128bcca99fe8bfbb99bea583c972351fa6ace/README.md",
+    "download_url": "https://raw.githubusercontent.com/hedge-dev/XenonRecomp/ddd128bcca99fe8bfbb99bea583c972351fa6ace/README.md",
+    "revision": "ddd128bcca99fe8bfbb99bea583c972351fa6ace",
+    "bytes": 17607,
+    "sha256": "b72d34f82f796e4c84f0f622fad8fb720b64607b842de31b70596d35157a68ff",
+    "scope": "PowerPC to C++; consumer runtime and program analysis remain necessary.",
+    "redistributed": false
+  },
+  {
+    "title": "lifting-bits/remill docs/DESIGN.md",
+    "source": "https://github.com/lifting-bits/remill/blob/918e0bccd890188e2eddd8ce0bb8a8cd4058158b/docs/DESIGN.md",
+    "download_url": "https://raw.githubusercontent.com/lifting-bits/remill/918e0bccd890188e2eddd8ce0bb8a8cd4058158b/docs/DESIGN.md",
+    "revision": "918e0bccd890188e2eddd8ce0bb8a8cd4058158b",
+    "bytes": 3081,
+    "sha256": "315749b962581d9032807ef781042e47eb5ea7e090b9fe5dde1ad50e106fed1e",
+    "scope": "C++ ISA semantics lifted to LLVM; consumer-owned memory and runtime bindings.",
+    "redistributed": false
+  },
+  {
+    "title": "lifting-bits/remill docs/LIFE_OF_AN_INSTRUCTION.md",
+    "source": "https://github.com/lifting-bits/remill/blob/918e0bccd890188e2eddd8ce0bb8a8cd4058158b/docs/LIFE_OF_AN_INSTRUCTION.md",
+    "download_url": "https://raw.githubusercontent.com/lifting-bits/remill/918e0bccd890188e2eddd8ce0bb8a8cd4058158b/docs/LIFE_OF_AN_INSTRUCTION.md",
+    "revision": "918e0bccd890188e2eddd8ce0bb8a8cd4058158b",
+    "bytes": 12080,
+    "sha256": "a88c0f7948dbbaeef149a8ccc8a3317851f5c1dbdad073ee0f142b29cc935d25",
+    "scope": "Inlining semantic functions and implementing memory intrinsics as concrete LLVM accesses.",
+    "redistributed": false
   }
 ]

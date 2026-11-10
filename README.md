@@ -40,6 +40,11 @@ int main() {
   constexpr std::array<dsp56300::Word, 2> program{0x000000, 0x000087}; // NOP; STOP
   std::ranges::copy(program, ram.begin());
   dsp56300::Core core(dsp56300::Memory::unified(ram));
+  const std::array entries{dsp56300::Word{0}};
+  const auto prepared = core.prepare(entries);
+  if (prepared.failure.kind != dsp56300::FaultKind::none || prepared.unresolved_entries != 0) {
+    return 1;
+  }
   const auto result = core.run();
   return result.fault.kind == dsp56300::FaultKind::none ? 0 : 1;
 }
@@ -50,37 +55,36 @@ state inspection is optional. Use Io for device effects and run_until() for an
 absolute local cycle deadline. Core does not schedule an instrument or its audio.
 Unsupported operations fail explicitly.
 
-`Core::prepare(entries)` follows established code entries without executing ISA or
-device I/O. It installs LLVM O3 code for supported arithmetic and RAM/register
-regions, including immediate accumulator shifts, shared-address X/Y long transfers
-and terminal non-call jumps. Complete DO bodies can batch linear unit cursors;
-one-pass regions also accept signed N steps and validated power-of-two multiple-wrap
-cursors. Loaded R/N values stay native; a cursor or stride overwritten before a later
-memory use rejects hoisted admission. Parallel operations retain old operands and
-exact flags. Entry guards prove declared memory ranges, permissions and knowledge;
-unknown words and unsupported cases keep precise native execution. Preparation
-reports installed entries, unresolved coverage, newly emitted text and a
-non-latching diagnostic. Code remains owned by Core; changed external mappings
-require a new `Io::program_revision()` before preparation or execution.
-After preparation, genuine program/mapping invalidations retain their checks;
-established CFG headers prepare before execution. Optimizing materialization occurs
-only in explicit preparation; newly reached entries use the fast native emitter. One-pass control regions share code across enclosing loops whose ends
-lie outside the region; interior/final DO boundaries retain precise specialized code.
-The shared lookup expires with the program/grant view. Preparation reports distinct guest
-entries and newly emitted bytes. Other native lowering remains available.
+The [target architecture](doc/architecture.md) requires complete Ahead-of-Time
+Binary Translation of consumer-owned executable images and known variants.
+Prefer startup loading and complete preparation before execution. Support
+build-time export of linkable LLVM bitcode or relocatable native objects through
+the same semantic translation and optimization pipeline.
 
-ARM64 native RAM regions also support valid power-of-two multiple-wrap cursors,
-including mixed post-N, unit increment/decrement and pre-decrement accesses.
-Entry guards prove the complete aligned ring lies inside initialized RAM;
-changed modifiers, invalid ranges and partial grants retain precise execution.
-Closed scalar regions can include mixed RAM/accumulator transfers with old-value
-ordering, single-update long X/Y transfers, immediate arithmetic shifts and terminal
-non-call jumps. A cursor may be replaced after its
-last memory use when each pass is checked separately; every reentry validates the
-new value. Batched regions retain the stricter cursor proof.
+`Core::prepare(entries)` analyzes an immutable code/mapping view without guest
+execution, real I/O or architectural state/time changes. Lift the complete known
+executable program into semantic LLVM 19 IR, optimize connected functions and
+loops with target-aware O3, and install code against validated bindings.
+Fuse compatible consumer-owned host IR before optimization. Keep LLVM handles
+private and original memory/device effects ordered.
+
+Require complete translation before execution; report a gap with code identity,
+address and reason. Distinguish total executable coverage from optimization
+coverage. Include interrupt/indirect entries and known loader/template variants;
+preserve original writes while selecting prepared native code. Keep mutable data
+in borrowed host RAM and retain observable program words. Compilation and
+validated artifact loading run on a stopped owner; code/cache identity includes
+input hashes, binding ABI, compiler and host target/features.
 
 Benchmarks check independent results and report cold/warm timing and matched
-JIT/host ratios (`100 * host_time / jit_time`). Hardware factors use stated models,
+host ratios. FIR, IIR, nonlinear and spectral streams include verified C++ host
+references compiled with Clang 19 `-O3`, reporting `host_cpp_o3_s` and
+`jit_to_cpp_o3_percent` separately from retained ASM/SIMD comparisons and gates.
+The C++ FIR reference preserves exact wrapping MACs and sticky overflow.
+Require explicit LLVM O3 preparation and report its complete executable coverage
+separately from warm timing and host/API costs.
+
+JIT/host ratios use `100 * host_time / jit_time`. Hardware factors use stated models,
 not measured device speed. Select cases with DSP56300_BENCH_FILTER;
 fixtures are in test/bench/. See doc/architecture.md and test/ for details.
 
