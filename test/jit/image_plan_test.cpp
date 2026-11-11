@@ -219,6 +219,15 @@ void native_units() {
       0, {opcode<isa::Opcode::jsr_absolute_short> | helper, opcode<isa::Opcode::nop>}, plan);
   require(vector.units() == std::vector<Word>{0},
           "A captured vector does not invent the ordinary callee inside its inserted words");
+  constexpr std::array indirect{opcode<isa::Opcode::jmp_effective> | (4U << 11),
+                                opcode<isa::Opcode::nop>,
+                                opcode<isa::Opcode::rts>};
+  const auto separated =
+      plan_image(std::array{CodeSpan{.address = start, .words = indirect}}, entry);
+  require(
+      separated.units() == std::vector<Word>{start, start + 1} &&
+          separated.instructions.size() == 3,
+      "A terminal transfer separates the following declared region without guessing its caller");
 }
 
 void native_edges() {
