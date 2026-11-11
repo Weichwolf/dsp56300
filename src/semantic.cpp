@@ -25,6 +25,14 @@ extern "C" const std::array<Word, semantic_abi_fields> dsp56300_semantic_abi{
 }
 
 namespace dsp56300 {
+// Native owners and every continuing native edge have already admitted this state.
+void Core::Impl::assume_image_admission() const noexcept {
+  const bool admitted = fault.kind == FaultKind::none &&
+                        cpu.processing == ExecutionState::running && !yield_requested &&
+                        !debug_ready() && !instruction_cache_active();
+  __builtin_assume(admitted);
+}
+
 // Portable ISA, REP and DO effects are available to semantic IR translation
 // without entering an architecture-specific native execution owner.
 void Core::Impl::step_semantic(const detail::Instruction &decoded) {
@@ -85,7 +93,11 @@ std::uint64_t Core::Impl::semantic_entry(void *const owner,
                                          const detail::Instruction &decoded) noexcept {
   // A prepared instruction site owns this exact fetch address. Carry that
   // constant into its effects instead of hiding it behind an unrelated load.
-  static_cast<Impl *>(owner)->cpu.reg.pc = pc;
+  auto &self = *static_cast<Impl *>(owner);
+  self.assume_image_admission();
+  const bool ordinary = !self.exception_ready();
+  __builtin_assume(ordinary);
+  self.cpu.reg.pc = pc;
   constexpr unsigned flow_shift = 32;
   const auto result = semantic_execute(owner, decoded);
   return result.pc | (static_cast<std::uint64_t>(result.flow) << flow_shift);
@@ -94,6 +106,9 @@ std::uint64_t Core::Impl::semantic_entry(void *const owner,
 std::uint64_t Core::Impl::semantic_vector_entry(void *const owner,
                                                 const detail::Instruction &decoded) noexcept {
   auto &self = *static_cast<Impl *>(owner);
+  self.assume_image_admission();
+  const bool inserted = self.exception_ready();
+  __builtin_assume(inserted);
   if (self.vector.phase == VectorPhase::pending) {
     self.cpu.reg.pc = self.vector.resume;
     self.cpu.repeat_completed = false;

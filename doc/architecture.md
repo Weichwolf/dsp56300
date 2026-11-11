@@ -74,6 +74,8 @@ An interior or final loop boundary keeps precise specialized execution. Clear sh
 lookup on program/grant invalidation; retained storage is not evidence of a valid view.
 Run optimizing materialization only during explicit stopped-owner preparation.
 Installed images reject unprepared entries instead of decoding or emitting at first use.
+Expose checked owner-admission facts to semantic optimization; preserve the
+different ordinary and inserted-vector fetch conditions and all real side exits.
 Form native control-flow blocks at established entries, branch/call targets and
 fallthrough/return sites. Separate declared code after terminals and across address
 gaps; transport fragments and instruction counts do not impose boundaries.
