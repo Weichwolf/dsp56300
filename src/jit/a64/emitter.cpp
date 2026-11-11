@@ -35,7 +35,9 @@ constexpr std::array held{std::pair{accumulator_a, offsetof(Registers, a)},
                           std::pair{bank_y, offsetof(Registers, y)}};
 static_assert(offsetof(Cpu, reg) == 0);
 
-Word active_banks(const std::span<const BlockInstruction> operations) {
+}
+
+Word Emitter::active_banks(const std::span<const BlockInstruction> operations) {
   Word result = 0;
   for (const auto &operation : operations) {
     const auto &instruction = operation.instruction;
@@ -49,7 +51,6 @@ Word active_banks(const std::span<const BlockInstruction> operations) {
     result |= flow.move_reads | flow.move_writes;
   }
   return result;
-}
 }
 
 void Emitter::begin() {

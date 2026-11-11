@@ -225,6 +225,7 @@ Emitter::generate_guarded(const std::span<const BlockInstruction> operations,
   }
   if (control) { region_.loop = at_loop_end(operations.back()); }
   entry_ = Entry::guarded;
+  active_banks_ = active_banks(prefix);
   deferred_instructions_ = true;
   runtime_ = runtime;
   begin();
