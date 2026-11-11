@@ -79,7 +79,9 @@ void verify(LLVMModuleRef module) {
 
 void canonicalize_semantic_entry(LLVMModuleRef module) {
   // Clang's Mach-O asm label carries an LLVM mangling escape.
-  for (const auto *name : {"dsp56300_semantic_execute", "dsp56300_semantic_vector_execute"}) {
+  for (const auto *name : {"dsp56300_semantic_execute",
+                           "dsp56300_semantic_vector_execute",
+                           "dsp56300_semantic_memory"}) {
     const auto alias = std::string(1, '\001') + name;
     auto *escaped = LLVMGetNamedFunction(module, alias.c_str());
     if (escaped == nullptr) { continue; }
@@ -336,6 +338,19 @@ std::vector<std::byte> LlvmModule::bitcode() const {
   return bytes(output.get());
 }
 
+LLVMModuleRef LlvmModule::parse_bitcode(const std::span<const std::byte> source) const {
+  if (module_ == nullptr) { throw std::logic_error("LLVM module was already transferred"); }
+  const Diagnostics diagnostics(context());
+  const auto input = buffer(source);
+  LLVMModuleRef raw = nullptr;
+  const auto failed = LLVMParseBitcodeInContext2(context(), input.get(), &raw);
+  Module parsed(raw);
+  try {
+    diagnostics.check(failed != 0 || !parsed, "LLVM 19 cannot parse callback bitcode");
+  } catch (const std::runtime_error &error) { throw std::invalid_argument(error.what()); }
+  return parsed.release();
+}
+
 void LlvmModule::link_bitcode(const std::span<const std::byte> source) {
   if (module_ == nullptr) { throw std::logic_error("LLVM module was already transferred"); }
   LlvmModule candidate(name_);
@@ -422,7 +437,7 @@ void LlvmCompiler::Impl::prepare(LlvmModule &module) const {
   compatible(
       module.code(),
       {.triple = LLVMOrcLLJITGetTripleString(jit), .layout = LLVMOrcLLJITGetDataLayoutStr(jit)});
-  inline_io(module);
+  finalize_io(module);
   LLVMSetTarget(module.code(), LLVMOrcLLJITGetTripleString(jit));
   LLVMSetDataLayout(module.code(), LLVMOrcLLJITGetDataLayoutStr(jit));
   constexpr bool address_sanitizer = __has_feature(address_sanitizer);

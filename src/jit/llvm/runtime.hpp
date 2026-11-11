@@ -26,6 +26,8 @@ public:
   // Successful cold links replace module/context; reacquire borrowed LLVM values.
   // Failure preserves both, including serialized metadata identity.
   [[nodiscard]] std::vector<std::byte> bitcode() const;
+  // Dispose the returned module before a link can replace this borrowed context.
+  [[nodiscard]] LLVMModuleRef parse_bitcode(std::span<const std::byte> source) const;
   void link_bitcode(std::span<const std::byte> source);
   [[nodiscard]] LLVMOrcThreadSafeModuleRef release() noexcept;
 

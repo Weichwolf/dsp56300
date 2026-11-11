@@ -7,8 +7,8 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <llvm-c/Core.h>
 #include <llvm/ADT/StringRef.h>
-#include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/IR/Attributes.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/CallingConv.h>
@@ -16,12 +16,9 @@
 #include <llvm/IR/GlobalValue.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instructions.h>
-#include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Value.h>
 #include <llvm/Support/Alignment.h>
-#include <llvm/Support/Error.h>
-#include <llvm/Support/MemoryBufferRef.h>
 #include <llvm/Transforms/Utils/ModuleUtils.h>
 #include <memory>
 #include <set>
@@ -39,6 +36,9 @@ constexpr std::array names{"dsp56300_io_read",
                            "dsp56300_io_reset",
                            "dsp56300_io_pending",
                            "dsp56300_io_revision"};
+constexpr std::array interfaces{"_ZNK8dsp563004Core9registersEv",
+                                "_ZNK8dsp563004Core8progressEv",
+                                "_ZN8dsp563004Core13request_yieldEv"};
 constexpr std::array abi_kinds{llvm::Attribute::ZExt,
                                llvm::Attribute::SExt,
                                llvm::Attribute::InReg,
@@ -135,7 +135,7 @@ llvm::Function *declaration(llvm::Function &source, const llvm::StringRef symbol
   }
   target = llvm::Function::Create(
       source.getFunctionType(), llvm::GlobalValue::ExternalLinkage, symbol, module);
-  target->setCallingConv(source.getCallingConv());
+  LLVMSetFunctionCallConv(llvm::wrap(target), source.getCallingConv());
   std::vector<llvm::AttributeSet> parameters;
   parameters.reserve(source.arg_size());
   for (unsigned index = 0; index < source.arg_size(); ++index) {
@@ -151,15 +151,12 @@ llvm::Function *declaration(llvm::Function &source, const llvm::StringRef symbol
 void validate_host(LlvmModule &module,
                    const std::span<const std::byte> bytes,
                    const std::span<const CallbackBinding> bindings) {
-  const llvm::StringRef data(reinterpret_cast<const char *>(bytes.data()), bytes.size());
-  auto parsed = llvm::parseBitcodeFile(llvm::MemoryBufferRef(data, "dsp-public-callbacks"),
-                                       *llvm::unwrap(module.context()));
-  if (!parsed) { throw std::invalid_argument(llvm::toString(parsed.takeError())); }
+  const std::unique_ptr<llvm::Module> parsed(llvm::unwrap(module.parse_bitcode(bytes)));
   const auto &source = *llvm::unwrap(module.code());
   for (const auto &binding : bindings) {
     const llvm::StringRef name(binding.symbol);
     const auto *expected = source.getFunction(name);
-    const auto *provided = (*parsed)->getFunction(name);
+    const auto *provided = parsed->getFunction(name);
     if (expected == nullptr || !expected->isDeclaration() || provided == nullptr ||
         provided->isDeclaration() || !same_abi(*expected, *provided)) {
       throw std::invalid_argument("DSP callback definition has incompatible ABI: " + name.str());
@@ -220,15 +217,33 @@ void mark_io(LlvmModule &module) {
       function->addFnAttr("dsp56300-io-adapter");
     }
   }
+  for (const auto *name : interfaces) {
+    if (auto *function = native.getFunction(name);
+        function != nullptr && !function->isDeclaration()) {
+      function->addFnAttr("dsp56300-core-interface");
+    }
+  }
 }
 
 void inline_io(LlvmModule &module) {
   mark_io(module);
   auto &native = *llvm::unwrap(module.code());
   for (auto &function : native) {
-    if (!function.hasFnAttribute("dsp56300-io-adapter")) { continue; }
+    const bool core_interface = function.hasFnAttribute("dsp56300-core-interface");
+    if (!function.hasFnAttribute("dsp56300-io-adapter") && !core_interface) { continue; }
     function.removeFnAttr(llvm::Attribute::NoInline);
     function.addFnAttr(llvm::Attribute::AlwaysInline);
+    // Binding modules introduce these uses after detached components are linked.
+    if (core_interface) { function.setLinkage(llvm::GlobalValue::WeakODRLinkage); }
+  }
+}
+
+void finalize_io(LlvmModule &module) {
+  inline_io(module);
+  for (auto &function : *llvm::unwrap(module.code())) {
+    if (function.hasFnAttribute("dsp56300-core-interface")) {
+      function.setLinkage(llvm::GlobalValue::InternalLinkage);
+    }
   }
 }
 }

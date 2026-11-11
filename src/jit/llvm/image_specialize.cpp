@@ -102,8 +102,11 @@ void specialize_image(LlvmModule &module, const std::span<const std::string> ent
   std::string diagnostic;
   llvm::raw_string_ostream output(diagnostic);
   if (llvm::verifyModule(native, &output)) { throw std::invalid_argument(diagnostic); }
-  llvm::internalizeModule(native,
-                          [&](const llvm::GlobalValue &value) { return roots.contains(&value); });
+  llvm::internalizeModule(native, [&](const llvm::GlobalValue &value) {
+    const auto *function = llvm::dyn_cast<llvm::Function>(&value);
+    return roots.contains(&value) ||
+           (function != nullptr && function->hasFnAttribute("dsp56300-core-interface"));
+  });
   passes(module, "globaldce");
   for (;;) {
     const auto frontier = semantic_calls(native);

@@ -300,12 +300,22 @@ void code_quality(const std::span<const std::byte> host) {
   const auto semantic = lower(roles);
   LlvmModule module(std::string(semantic.exports().front().name));
   module.link_bitcode(semantic.bitcode());
+  unsigned interfaces = 0;
+  for (const auto &function : *llvm::unwrap(module.code())) {
+    if (!function.hasFnAttribute("dsp56300-core-interface")) { continue; }
+    ++interfaces;
+    require(!function.isDeclaration() && function.hasWeakODRLinkage() &&
+                function.hasFnAttribute(llvm::Attribute::AlwaysInline),
+            "Detached core interfaces survive linking before host references exist");
+  }
+  require(interfaces == 3, "The core supplies registers, progress and synchronous yield IR");
   link_callbacks(module, host, roles);
   LlvmCompiler compiler;
   require(!compiler.object(module).empty(), "The public callback artifact reaches native emission");
   for (const auto &function : *llvm::unwrap(module.code())) {
-    require(!function.hasFnAttribute("dsp56300-io-adapter"),
-            "Final O3 removes every temporary public Io adapter definition");
+    require(!function.hasFnAttribute("dsp56300-io-adapter") &&
+                !function.hasFnAttribute("dsp56300-core-interface"),
+            "Final O3 removes every temporary public Io and core interface definition");
     for (const auto &block : function) {
       for (const auto &instruction : block) {
         const auto *call = llvm::dyn_cast<llvm::CallBase>(&instruction);

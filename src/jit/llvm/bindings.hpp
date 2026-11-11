@@ -13,4 +13,5 @@ void link_callbacks(LlvmModule &module,
                     std::span<const CallbackBinding> bindings);
 void mark_io(LlvmModule &module);
 void inline_io(LlvmModule &module);
+void finalize_io(LlvmModule &module);
 }
