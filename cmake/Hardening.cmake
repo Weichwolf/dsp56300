@@ -15,6 +15,13 @@ check_cxx_source_compiles("#include <cstddef>
 int main() { return 0; }" DSP56300_USE_LIBSTDCXX)
 
 add_library(dsp56300_hardening INTERFACE)
+set(LLVM19_RESOURCE_DIR "$ENV{LLVM19_RESOURCE_DIR}" CACHE PATH "Optional packaged Clang runtime resource directory")
+if(LLVM19_RESOURCE_DIR)
+  if(NOT EXISTS "${LLVM19_RESOURCE_DIR}/include/stddef.h")
+    message(FATAL_ERROR "LLVM19_RESOURCE_DIR must contain packaged Clang headers and runtimes")
+  endif()
+  target_link_options(dsp56300_hardening INTERFACE "-resource-dir=${LLVM19_RESOURCE_DIR}")
+endif()
 target_compile_options(dsp56300_hardening INTERFACE
   -fstack-protector-strong
   -Wformat=2 -Werror=format-security $<$<CONFIG:Debug>:-O1>)

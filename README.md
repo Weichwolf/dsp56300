@@ -29,7 +29,15 @@ frontend UBSan checks remain in the compiler input.
 
 `strict` enables ASan/UBSan; `thread` selects separate TSan. Ccache is used when
 available. Use the packaged LLVM 19 toolchain; on macOS install it with
-`brew install llvm@19 ninja ccache`. LLVM and compiler-rt are not built from source.
+`brew install llvm@19 llvm ninja ccache`. The compiler and builtin headers remain
+LLVM 19. For current macOS versions select the packaged current Clang sanitizer runtime:
+
+```sh
+export LLVM19_RESOURCE_DIR="$("$(brew --prefix llvm)/bin/clang" -print-resource-dir)"
+cmake --preset strict
+```
+
+LLVM and compiler-rt are not built from source.
 Sanitizers cover project code and explicitly instrumented generated JIT code,
 not packaged third-party libraries.
 
