@@ -35,5 +35,6 @@ void Core::Impl::execute_processing(const detail::Instruction &decoded) {
   if (io == nullptr || !io->reset_peripherals(current_pc)) {
     fail(FaultKind::host_event, Space::program, current_pc, decoded.opcode);
   }
+  image_io_completed();
 }
 } // namespace dsp56300

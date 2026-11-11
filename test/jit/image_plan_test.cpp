@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 #include "isa.hpp"
@@ -18,7 +19,6 @@
 
 namespace {
 using namespace dsp56300;
-using detail::CodeSpan;
 using detail::plan_image;
 using test::require;
 template <isa::Opcode operation> constexpr Word opcode = static_cast<Word>(operation);

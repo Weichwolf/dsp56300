@@ -50,6 +50,7 @@ public:
   // Use the same verified native O3 pipeline, preserving the module owner.
   [[nodiscard]] std::vector<std::byte> object(LlvmModule &module);
   // Load a relocatable native object; code/binding identity belongs to the caller.
+  // ASan development uses IR installation; native object loading is rejected.
   [[nodiscard]] const void *install_object(std::span<const std::byte> code,
                                            const std::string &entry);
   // Cold materialization accounting; native execution does not update it.

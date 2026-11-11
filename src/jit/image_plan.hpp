@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
+#include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 
@@ -8,13 +9,6 @@
 #include <vector>
 
 namespace dsp56300::detail {
-// A complete instruction stream, not a readable-memory grant or a reachability seed.
-// Addresses wrap at 24 bits; a stream contains at most one program address space.
-struct CodeSpan {
-  Word address = 0;
-  std::span<const Word> words;
-};
-
 struct ImagePlan {
   // Sorted, unique instruction starts; descriptors own their complete source values.
   std::map<Word, Instruction> instructions;

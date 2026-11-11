@@ -30,7 +30,8 @@ enum class FaultKind : std::uint8_t {
   unsupported_mode,
   stack,
   invalid_instruction,
-  host_event
+  host_event,
+  unprepared_execution
 };
 
 // Architectural values use unshifted DSP coordinates, including raw 56-bit A/B.
@@ -81,6 +82,55 @@ struct State {
 struct PreparationReport {
   std::uint64_t prepared_entries = 0, unresolved_entries = 0, native_bytes = 0;
   Fault failure;
+};
+
+struct CodeSpan {
+  Word address;
+  std::span<const Word> words;
+};
+
+struct CodeVariant {
+  std::uint64_t id;
+  std::span<const CodeSpan> code;
+  std::span<const Word> entries;
+};
+
+struct CodeImage {
+  std::span<const CodeVariant> variants;
+};
+
+struct RegionLayout {
+  Space space;
+  Word first;
+  std::size_t size;
+  bool writable = true, tracked = false, aliases_program = false;
+};
+
+struct VariantLayout {
+  std::uint64_t id;
+  std::span<const RegionLayout> memory;
+};
+
+struct InterruptRequest {
+  Word vector;
+  unsigned level;
+};
+
+struct CompileOptions {
+  std::span<const VariantLayout> memory;
+  std::span<const InterruptRequest> interrupts;
+};
+
+class NativeImage {
+public:
+  NativeImage() = default;
+  [[nodiscard]] PreparationReport report() const noexcept;
+
+private:
+  struct Impl;
+  explicit NativeImage(std::shared_ptr<const Impl> image) noexcept;
+  std::shared_ptr<const Impl> impl_;
+  friend class Core;
 };
 
 // No derivative peripherals are implemented by this CPU library. False means a
@@ -141,6 +191,9 @@ public:
   ~Core();
   Core(const Core &) = delete;
   Core &operator=(const Core &) = delete;
+  [[nodiscard]] static NativeImage compile(CodeImage image, CompileOptions options);
+  // Cold owner boundary: validate code/layout and bind RAM/events before publishing.
+  void install(const NativeImage &image, std::uint64_t variant);
   void reset();
   [[nodiscard]] State state() const;
   // Completed nominal work; does not materialize a register snapshot.

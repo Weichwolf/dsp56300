@@ -45,6 +45,7 @@ void Core::Impl::check_interrupt_window(const Word previous_status) noexcept {
     yield_requested = true;
     jit->request_yield();
   }
+  image_io_completed();
 }
 
 detail::CacheState *Core::Impl::jit_cache(void *const owner) noexcept {

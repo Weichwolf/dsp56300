@@ -157,6 +157,10 @@ void Core::Impl::execute_operation(const Instruction &decoded) {
 void Core::interrupt(const Word vector, const unsigned level) {
 
   const ExecutionGuard guard(impl_->executing);
+  if (impl_->image) {
+    impl_->unprepared(vector, level);
+    return;
+  }
   auto &state = impl_->cpu.reg;
   const auto mask = (state.sr >> interrupt_level_shift) & interrupt_level_mask;
   if (vector > word_mask || (vector & 1U) != 0 || level > maximum_level || level < mask ||

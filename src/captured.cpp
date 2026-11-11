@@ -58,6 +58,17 @@ RunResult Core::run_instruction(const InstructionWords words) {
       impl_->cpu.processing != ExecutionState::running) {
     throw std::logic_error("Captured execution requires healthy stopped running state");
   }
+  if (impl_->image) {
+    const auto found = impl_->active_image->instructions.find(words.address);
+    if (words.address != impl_->cpu.reg.pc || found == impl_->active_image->instructions.end() ||
+        found->second.opcode != words.opcode ||
+        (found->second.words == 2 ? std::optional(found->second.extension) : std::nullopt) !=
+            words.extension) {
+      impl_->unprepared(words.address, words.opcode);
+      return {.state = processing_state(), .progress = progress(), .fault = fault()};
+    }
+    return run(1);
+  }
   const auto decoded = Impl::decode_words(words);
   const auto fetch = instruction_fetch();
   if (fetch.exception_vector || impl_->debug_ready() || impl_->instruction_cache_active() ||
@@ -111,7 +122,18 @@ bool Core::interrupt_ready_opcode(const InstructionWords words) const {
 }
 
 bool Core::interrupt_ready_captured(const InstructionWords words, const bool complete) const {
-  const auto decoded = Impl::decode_words(words, complete);
+  auto decoded = detail::Instruction{};
+  if (impl_->image) {
+    const auto found = impl_->active_image->instructions.find(words.address);
+    if (found == impl_->active_image->instructions.end() || found->second.opcode != words.opcode ||
+        (complete && (found->second.words == 2 ? std::optional(found->second.extension)
+                                               : std::nullopt) != words.extension)) {
+      throw std::invalid_argument("Interrupt query has no prepared DSP instruction");
+    }
+    decoded = found->second;
+  } else {
+    decoded = Impl::decode_words(words, complete);
+  }
   if (words.address != impl_->cpu.reg.pc) {
     throw std::invalid_argument("Interrupt metadata differs from the current normal PC");
   }
@@ -127,6 +149,10 @@ bool Core::interrupt_ready_captured(const InstructionWords words, const bool com
 
 void Core::request_interrupt(const Word vector, const unsigned level) {
   if (impl_->executing) { throw std::logic_error("Interrupt requests require stopped execution"); }
+  if (impl_->image) {
+    impl_->unprepared(vector, level);
+    return;
+  }
   constexpr unsigned maximum_level = 3;
   constexpr unsigned level_shift = 8;
   const auto mask = (impl_->cpu.reg.sr >> level_shift) & maximum_level;
@@ -146,6 +172,10 @@ void Core::request_interrupt(const Word vector,
                              const unsigned level,
                              const InstructionWords foreground) {
   if (impl_->executing) { throw std::logic_error("Interrupt requests require stopped execution"); }
+  if (impl_->image) {
+    impl_->unprepared(vector, level);
+    return;
+  }
   constexpr unsigned maximum_level = 3;
   constexpr unsigned level_shift = 8;
   const auto mask = (impl_->cpu.reg.sr >> level_shift) & maximum_level;

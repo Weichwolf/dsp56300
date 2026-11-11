@@ -112,10 +112,12 @@ bool Core::Impl::overlaps_program(const std::span<const Word> memory) const {
                          : other - program < buffers.program.size_bytes();
 }
 
-void Core::Impl::invalidate_program_word(const Word *const location) const {
+void Core::Impl::invalidate_program_word(const Word *const location) {
   const auto program = reinterpret_cast<std::uintptr_t>(buffers.program.data());
   const auto address = reinterpret_cast<std::uintptr_t>(location);
   if (address < program || address - program >= buffers.program.size_bytes()) { return; }
+  image_word_written({.address = static_cast<Word>((address - program) / sizeof(Word)),
+                      .value = *location & word_mask});
   if (jit) { jit->invalidate(); }
 }
 
@@ -145,6 +147,7 @@ Word Core::Impl::read_memory(const Space space, const Word address) {
     if (io == nullptr || !io->read(space, address, current_pc, value)) {
       fail(FaultKind::io_read, space, address);
     }
+    image_io_completed();
     return value & word_mask;
   }
   const auto memory = area(space);
@@ -168,6 +171,7 @@ void Core::Impl::write_memory(const Space space, const Word address, const Word 
     if (io == nullptr || !io->write(space, address, current_pc, value & word_mask)) {
       fail(FaultKind::io_write, space, address, value);
     }
+    image_io_completed();
     return;
   }
   const auto memory = area(space);
@@ -233,6 +237,10 @@ void Core::load(const Space space, const Word address, const std::span<const Wor
   }
   for (std::size_t index = 0; index < words.size(); ++index) {
     memory[address + index] = words[index];
+    if (space == Space::program) {
+      impl_->image_word_written(
+          {.address = address + static_cast<Word>(index), .value = words[index]});
+    }
   }
   if (space == Space::program) {
     clear_code_cache();
@@ -274,6 +282,21 @@ PreparationReport Core::prepare(const std::span<const Word> established_entries)
                 .kind = FaultKind::host_event, .space = Space::program, .address = pc, .pc = pc}};
   }
   const detail::ExecutionGuard guard(impl_->executing);
+  if (impl_->image) {
+    PreparationReport report{.prepared_entries = impl_->active_image->instructions.size(),
+                             .native_bytes = impl_->image->report.native_bytes,
+                             .failure = {}};
+    for (const auto entry : established_entries) {
+      if (!impl_->image_ready || !impl_->active_image->instructions.contains(entry)) {
+        ++report.unresolved_entries;
+        report.failure = {.kind = FaultKind::unprepared_execution,
+                          .space = Space::program,
+                          .address = entry,
+                          .pc = pc};
+      }
+    }
+    return report;
+  }
   const auto revision =
       impl_->external ? std::optional(impl_->io->program_revision()) : std::nullopt;
   if (revision && (!impl_->windows_bound || *revision != impl_->program_revision ||
@@ -296,6 +319,7 @@ RunResult Core::run(const std::uint32_t instruction_budget) {
 
   const detail::ExecutionGuard guard(impl_->executing);
   impl_->yield_requested = false;
+  if (impl_->image) { return impl_->run_image(instruction_budget); }
   RunResult result;
 
   impl_->synchronize_program_view();
@@ -369,6 +393,13 @@ bool Core::interrupt_ready() const {
   }
   if (impl_->cacheable(pc) && impl_->icache) {
     if (const auto cached = impl_->icache->peek(pc)) { opcode = *cached; }
+  }
+  if (impl_->image) {
+    const auto found = impl_->active_image->instructions.find(pc);
+    if (found == impl_->active_image->instructions.end() || found->second.opcode != opcode) {
+      throw std::logic_error("IRQ eligibility has no matching prepared DSP instruction");
+    }
+    return !detail::is_repeat(found->second.operation);
   }
   return !detail::is_repeat(detail::decode(opcode).operation);
 }

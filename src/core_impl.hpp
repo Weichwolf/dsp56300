@@ -5,6 +5,7 @@
 #include "bit_instruction.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "image.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
 #include "program_cache.hpp"
@@ -82,7 +83,7 @@ struct Core::Impl {
   [[nodiscard]] Word read_memory(Space space, Word address);
   void write_memory(Space space, Word address, Word value);
   [[nodiscard]] bool overlaps_program(std::span<const Word> memory) const;
-  void invalidate_program_word(const Word *location) const;
+  void invalidate_program_word(const Word *location);
   [[nodiscard]] detail::Instruction instruction(Word pc);
   void step();
   void step_decoded(const detail::Instruction &decoded);
@@ -102,7 +103,12 @@ struct Core::Impl {
   jit_execute(void *owner, const detail::BlockInstruction *operation) noexcept;
   static void jit_access(void *owner, detail::NativeAccess &access) noexcept;
   void synchronize_program_view();
+  [[nodiscard]] RunResult run_image(std::uint32_t quota);
+  void image_word_written(detail::ProgramCache::Write transfer) noexcept;
+  void image_io_completed() noexcept;
+  void unprepared(Word address, Word value = 0) noexcept;
   [[nodiscard]] Fault bind_memory_windows();
+  [[nodiscard]] const MemoryWindow *memory_window(Space space, Word address) const noexcept;
   [[nodiscard]] static std::optional<Word> jit_program(void *owner, Word address) noexcept;
   [[nodiscard]] static std::uint32_t jit_moves(void *owner,
                                                const detail::BlockInstruction *operation) noexcept;
@@ -202,5 +208,10 @@ struct Core::Impl {
   static constexpr unsigned code_page_shift = 8;
   using CodePages = std::bitset<(address_words >> code_page_shift)>;
   std::unique_ptr<CodePages> code_pages;
+  std::shared_ptr<const NativeImage::Impl> image;
+  const NativeImage::Impl::Variant *active_image = nullptr;
+  bool image_ready = false;
+  std::uint64_t image_revision = 0;
+  std::array<std::span<const MemoryWindow>, 2> image_windows{};
 };
 } // namespace dsp56300

@@ -6,7 +6,7 @@ macOS ARM64, GPL-3.0-only. See OBJECTIVE.md for complete-ISA acceptance.
 ## Build
 
 LLVM 19.1 development headers/shared library, the LLVM 19 toolchain, CMake, Ninja,
-clang-format-19 and clang-tidy-19 are required.
+clang-format-19, clang-tidy-19 and Python 3 are required.
 
 ```sh
 cmake --preset release
@@ -15,8 +15,7 @@ ctest --preset release
 cmake --build --preset release --target bench
 ```
 
-The generic ISA/retirement compiler input is exported from the same Release
-objects as the native library:
+The built-in ISA/retirement compiler input can also be exported:
 
 ```sh
 cmake --build --preset release --target dsp56300-semantic-ir
@@ -24,7 +23,9 @@ cmake --build --preset release --target dsp56300-semantic-ir
 
 This emits verified LLVM 19 bitcode at `build/release/semantic/dsp56300.bc`.
 Consumer image compilation specializes that input and combines compatible host
-bindings before O3. Export requires Release ThinLTO.
+bindings before O3. Templates and native helpers share one ISA implementation.
+Requested ASan coverage is applied once to the final generated functions;
+frontend UBSan checks remain in the compiler input.
 
 `strict` enables ASan/UBSan; `thread` selects separate TSan. Ccache is used when
 available. Use the packaged LLVM 19 toolchain; on macOS install it with
@@ -51,11 +52,12 @@ int main() {
   constexpr std::array<dsp56300::Word, 2> program{0x000000, 0x000087}; // NOP; STOP
   std::ranges::copy(program, ram.begin());
   dsp56300::Core core(dsp56300::Memory::unified(ram));
+  const std::array code{dsp56300::CodeSpan{.address = 0, .words = program}};
   const std::array entries{dsp56300::Word{0}};
-  const auto prepared = core.prepare(entries);
-  if (prepared.failure.kind != dsp56300::FaultKind::none || prepared.unresolved_entries != 0) {
-    return 1;
-  }
+  const std::array versions{
+      dsp56300::CodeVariant{.id = 0, .code = code, .entries = entries}};
+  const auto image = dsp56300::Core::compile({.variants = versions}, {});
+  core.install(image, 0);
   const auto result = core.run();
   return result.fault.kind == dsp56300::FaultKind::none ? 0 : 1;
 }
@@ -64,7 +66,10 @@ int main() {
 Memory belongs to the consumer and must outlive Core. One thread owns execution;
 state inspection is optional. Use Io for device effects and run_until() for an
 absolute local cycle deadline. Core does not schedule an instrument or its audio.
-Unsupported operations fail explicitly.
+Unsupported operations fail explicitly. Installed images retain shared code
+ownership and never fall back to ordinary decoding or emission. Code/mapping
+changes require a matching installation; unknown entries and unprepared
+vector/cache forms fail explicitly.
 
 The [target architecture](doc/architecture.md) requires complete Ahead-of-Time
 Binary Translation of consumer-owned executable images and known variants.

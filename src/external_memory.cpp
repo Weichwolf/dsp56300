@@ -9,18 +9,16 @@
 #include <optional>
 
 namespace dsp56300 {
-namespace {
-// RAM grants also cover cold instruction helpers. Real device/denied accesses
-// retain callbacks, including executable-alias writes and unknown words.
-const MemoryWindow *window_for(Io *const io, const Space space, const Word address) noexcept {
+const MemoryWindow *Core::Impl::memory_window(const Space space,
+                                              const Word address) const noexcept {
   if (io == nullptr || space == Space::program || address >= detail::io_begin) { return nullptr; }
-  for (const auto &window : io->memory_windows(space)) {
+  const auto windows = image ? image_windows[space == Space::x ? 0 : 1] : io->memory_windows(space);
+  for (const auto &window : windows) {
     if (address >= window.address && address - window.address < window.words.size()) {
       return &window;
     }
   }
   return nullptr;
-}
 }
 
 void Core::request_yield() noexcept {
@@ -66,7 +64,7 @@ Word Core::Impl::read_external(const Space space, const Word address) {
   if (space == Space::program && cacheable(address) && icache) {
     if (const auto cached = icache->peek(address)) { return *cached; }
   }
-  if (const auto *window = window_for(io, space, address)) {
+  if (const auto *window = memory_window(space, address)) {
     const auto offset = address - window->address;
     if (window->known.empty() || (offset < window->known.size() && window->known[offset] != 0)) {
       return window->words[offset] & word_mask;
@@ -77,12 +75,13 @@ Word Core::Impl::read_external(const Space space, const Word address) {
     const bool peripheral = space != Space::program && address >= detail::io_begin;
     fail(peripheral ? FaultKind::io_read : FaultKind::memory_read, space, address);
   }
+  image_io_completed();
   return value & word_mask;
 }
 
 void Core::Impl::write_external(const Space space, const Word address, const Word value) {
   if (fault.kind != FaultKind::none) { return; }
-  if (const auto *window = window_for(io, space, address);
+  if (const auto *window = memory_window(space, address);
       window != nullptr && window->writable && !window->aliases_program) {
     const auto offset = address - window->address;
     if (window->known.empty() || offset < window->known.size()) {
@@ -97,6 +96,10 @@ void Core::Impl::write_external(const Space space, const Word address, const Wor
     fail(peripheral ? FaultKind::io_write : FaultKind::memory_write, space, address, value);
     return;
   }
+  if (space == Space::program) {
+    image_word_written({.address = address, .value = value & word_mask});
+  }
+  image_io_completed();
   // A low loader and a high ROM do not make the uninspected gap executable.
   // Dependencies include extensions and code inspected for fused regions.
   if (space == Space::program && jit && code_pages->test(address >> code_page_shift)) {

@@ -75,12 +75,13 @@ set(dsp56300_semantic_sources
   src/integer.cpp src/iteration.cpp src/jit.cpp src/loop.cpp
   src/memory_windows.cpp src/move.cpp src/processing.cpp src/products.cpp
   src/program_cache.cpp src/registers.cpp src/repeat.cpp src/runtime.cpp
-  src/saturation.cpp src/semantic.cpp src/shifts.cpp src/state.cpp
+  src/saturation.cpp src/semantic.cpp src/image_runtime.cpp src/shifts.cpp src/state.cpp
   src/transfer.cpp src/transfer_description.cpp src/transfer_info.cpp
   src/transfer_parallel.cpp src/transfer_special.cpp src/viterbi.cpp)
 add_library(dsp56300_semantics OBJECT ${dsp56300_semantic_sources})
 add_library(dsp56300_core STATIC
-  src/jit/preparation.cpp src/jit/image_plan.cpp src/jit/llvm/runtime.cpp
+  src/image_compile.cpp src/image_entry.cpp src/jit/preparation.cpp src/jit/image_plan.cpp src/jit/llvm/runtime.cpp
+  src/jit/llvm/lifecycle.cpp
   src/jit/llvm/image.cpp src/jit/llvm/image_specialize.cpp
   src/jit/llvm/region.cpp src/jit/llvm/region_plan.cpp src/jit/llvm/alu.cpp
   src/jit/arena.cpp src/jit/block_parse.cpp src/jit/block_emit.cpp
@@ -94,7 +95,18 @@ target_include_directories(dsp56300_core PUBLIC include)
 target_compile_features(dsp56300_core PUBLIC cxx_std_23)
 target_link_libraries(dsp56300_core PUBLIC dsp56300_quality PRIVATE dsp56300_semantics)
 include(cmake/Llvm.cmake)
-foreach(own_target IN ITEMS dsp56300_core dsp56300_semantics)
+set(dsp56300_own_targets dsp56300_core dsp56300_semantics)
+set(DSP56300_SEMANTIC_TARGET dsp56300_semantics)
+if(DSP56300_SANITIZER STREQUAL "address-undefined")
+  # Keep frontend UBSan checks; defer LLVM optimization/ASan until the final
+  # generated functions exist. Native helpers retain their normal instrumentation.
+  add_library(dsp56300_semantic_ir_objects OBJECT ${dsp56300_semantic_sources})
+  list(APPEND dsp56300_own_targets dsp56300_semantic_ir_objects)
+  set(DSP56300_SEMANTIC_TARGET dsp56300_semantic_ir_objects)
+  target_compile_options(dsp56300_semantic_ir_objects PRIVATE
+    -O3 -flto=thin -Xclang -disable-llvm-passes)
+endif()
+foreach(own_target IN LISTS dsp56300_own_targets)
   target_include_directories(${own_target} PRIVATE include src src/jit src/jit/x64)
   target_include_directories(${own_target} SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
   target_link_libraries(${own_target} PRIVATE dsp56300_quality)
@@ -104,7 +116,10 @@ foreach(own_target IN ITEMS dsp56300_core dsp56300_semantics)
     target_compile_options(${own_target} PRIVATE $<$<CONFIG:Release>:-march=native>)
   endif()
 endforeach()
+# Normal helpers use production O3/ThinLTO with all requested diagnostics.
+target_compile_options(dsp56300_semantics PRIVATE -O3 -flto=thin)
 include(cmake/SemanticIr.cmake)
+include(cmake/EmbedSemantic.cmake)
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
   target_compile_options(dsp56300_core INTERFACE $<$<CONFIG:Release>:-mcpu=native>)
 else()
@@ -153,7 +168,27 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   target_include_directories(dsp56300_image_plan_test PRIVATE src test/support)
   target_link_libraries(dsp56300_image_plan_test PRIVATE dsp56300::core)
   add_test(NAME explicit-executable-inventory COMMAND dsp56300_image_plan_test)
-  # Semantic export uses the same optimized ThinLTO objects as production.
+  add_executable(dsp56300_image_execution_test test/core/image_test.cpp)
+  target_include_directories(dsp56300_image_execution_test PRIVATE test/support)
+  target_link_libraries(dsp56300_image_execution_test PRIVATE dsp56300::core)
+  add_test(NAME installed-image-execution COMMAND dsp56300_image_execution_test)
+  set_tests_properties(installed-image-execution PROPERTIES TIMEOUT 30)
+  add_executable(dsp56300_image_contract_test test/core/image_contract_test.cpp)
+  target_include_directories(dsp56300_image_contract_test PRIVATE test/support)
+  target_link_libraries(dsp56300_image_contract_test PRIVATE dsp56300::core)
+  add_test(NAME installed-image-contracts COMMAND dsp56300_image_contract_test)
+  set_tests_properties(installed-image-contracts PROPERTIES TIMEOUT 30)
+  if(NOT DSP56300_SANITIZER STREQUAL "none")
+    # Instrumented complete semantic modules require substantial cold optimization.
+    set_tests_properties(installed-image-execution installed-image-contracts PROPERTIES TIMEOUT 120)
+  endif()
+  add_executable(dsp56300_image_lifetime_test test/jit/image_lifetime_test.cpp)
+  target_include_directories(dsp56300_image_lifetime_test PRIVATE src test/support)
+  target_include_directories(dsp56300_image_lifetime_test SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
+  target_link_libraries(dsp56300_image_lifetime_test PRIVATE dsp56300::core)
+  add_test(NAME native-image-lifetime COMMAND dsp56300_image_lifetime_test)
+  set_tests_properties(native-image-lifetime PROPERTIES TIMEOUT 30)
+  # Qualify relocatable production artifacts in the optimized configuration.
   if(CMAKE_BUILD_TYPE STREQUAL "Release")
     add_executable(dsp56300_llvm_image_test test/jit/llvm_image_test.cpp)
     target_include_directories(dsp56300_llvm_image_test PRIVATE src test/support)

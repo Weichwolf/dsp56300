@@ -91,6 +91,7 @@ bool Core::Impl::access_bit(const Instruction &decoded, const BitAction action) 
     if (io == nullptr || !io->bit(operand.space, address, current_pc, bit, action, previous)) {
       fail(FaultKind::io_bit, operand.space, address, bit);
     }
+    image_io_completed();
     return previous;
   }
   const auto original = read_memory(operand.space, address);

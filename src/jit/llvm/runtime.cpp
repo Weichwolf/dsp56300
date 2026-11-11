@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "jit/llvm/runtime.hpp"
 
+#include "jit/llvm/lifecycle.hpp"
 #include "jit/llvm/native.hpp"
 
 #if defined(__CET__)
@@ -24,6 +25,7 @@
 #include <llvm-c/Transforms/PassBuilder.h>
 #include <llvm-c/Types.h>
 #include <llvm/ADT/StringRef.h>
+#include <llvm/ExecutionEngine/Orc/LLJIT.h>
 #include <llvm/Object/ObjectFile.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/MemoryBufferRef.h>
@@ -55,6 +57,16 @@ void check(LLVMErrorRef error) {
   if (error == nullptr) { return; }
   const std::unique_ptr<char, LlvmDelete<LLVMDisposeErrorMessage>> text(LLVMGetErrorMessage(error));
   throw std::runtime_error(text.get());
+}
+
+void check(llvm::Error error) {
+  if (error) { throw std::runtime_error(llvm::toString(std::move(error))); }
+}
+
+llvm::orc::LLJIT &native_jit(LLVMOrcLLJITRef jit) noexcept {
+  // LLVM 19 OrcV2CBindings.cpp represents this C handle as a direct LLJIT pointer.
+  // Use its C++ lifecycle API, which has no corresponding C entry points.
+  return *reinterpret_cast<llvm::orc::LLJIT *>(jit);
 }
 
 void verify(LLVMModuleRef module) {
@@ -191,7 +203,10 @@ private:
   mutable bool diagnosed_ = false;
 };
 
-void compatible_object(LLVMMemoryBufferRef input, const char *native_triple) {
+ImageLifecycle compatible_object(LLVMMemoryBufferRef input,
+                                 const char *native_triple,
+                                 const std::string_view entry,
+                                 const char prefix) {
   const llvm::StringRef data(LLVMGetBufferStart(input), LLVMGetBufferSize(input));
   auto object = llvm::object::ObjectFile::createObjectFile(
       llvm::MemoryBufferRef(data, "native_compiler_object"));
@@ -204,6 +219,7 @@ void compatible_object(LLVMMemoryBufferRef input, const char *native_triple) {
       (*object)->isLittleEndian() != (std::endian::native == std::endian::little)) {
     throw std::runtime_error("LLVM object target does not match the native compiler");
   }
+  return object_lifecycle(**object, entry, prefix);
 }
 
 TargetMachine native_machine() {
@@ -257,6 +273,11 @@ struct LlvmCompiler::Impl {
 
   ~Impl() {
     if (jit == nullptr) { return; }
+    auto &native = native_jit(jit);
+    if (auto error = native.deinitialize(native.getMainJITDylib())) {
+      std::cerr << "LLVM JIT finalization failed: " << llvm::toString(std::move(error)) << '\n';
+      std::terminate();
+    }
     if (auto *error = LLVMOrcDisposeLLJIT(jit)) {
       const std::unique_ptr<char, LlvmDelete<LLVMDisposeErrorMessage>> text(
           LLVMGetErrorMessage(error));
@@ -270,6 +291,8 @@ struct LlvmCompiler::Impl {
   [[nodiscard]] const void *lookup(const std::string &name) const {
     LLVMOrcExecutorAddress entry = 0;
     check(LLVMOrcLLJITLookup(jit, &entry, name.c_str()));
+    auto &native = native_jit(jit);
+    check(native.initialize(native.getMainJITDylib()));
     return std::bit_cast<const void *>(static_cast<std::uintptr_t>(entry));
   }
 
@@ -336,6 +359,7 @@ void LlvmModule::link_bitcode(const std::span<const std::byte> source) {
   }
   diagnostics.check(LLVMLinkModules2(candidate.module_, incoming.release()) != 0,
                     "LLVM 19 cannot link semantic bitcode");
+  LLVMSetModuleIdentifier(candidate.module_, name_.data(), name_.size());
   verify(candidate.module_);
   std::swap(module_, candidate.module_);
   std::swap(context_, candidate.context_);
@@ -426,6 +450,8 @@ std::vector<std::byte> LlvmCompiler::object(LlvmModule &module) {
   if (module.code() == nullptr) { throw std::logic_error("LLVM module was already transferred"); }
   relocatable(module.code());
   impl_->prepare(module);
+  export_lifecycle(module);
+  verify(module.code());
   relocatable(module.code());
   char *message = nullptr;
   LLVMMemoryBufferRef exported = nullptr;
@@ -441,10 +467,24 @@ std::vector<std::byte> LlvmCompiler::object(LlvmModule &module) {
 
 const void *LlvmCompiler::install_object(const std::span<const std::byte> code,
                                          const std::string &entry) {
+  if constexpr (__has_feature(address_sanitizer)) {
+    throw std::invalid_argument(
+        "ASan native object installation is unsupported; use IR installation");
+  }
   auto input = buffer(code);
-  compatible_object(input.get(), LLVMOrcLLJITGetTripleString(impl_->jit));
+  const auto lifecycle = compatible_object(input.get(),
+                                           LLVMOrcLLJITGetTripleString(impl_->jit),
+                                           entry,
+                                           LLVMOrcLLJITGetGlobalPrefix(impl_->jit));
   check(LLVMOrcLLJITAddObjectFile(
       impl_->jit, LLVMOrcLLJITGetMainJITDylib(impl_->jit), input.release()));
+  if (lifecycle.initialize || lifecycle.finalize) {
+    LlvmModule shim(entry + ".lifetime");
+    bind_lifecycle(shim, lifecycle, entry);
+    impl_->prepare(shim);
+    check(LLVMOrcLLJITAddLLVMIRModule(
+        impl_->jit, LLVMOrcLLJITGetMainJITDylib(impl_->jit), shim.release()));
+  }
   return impl_->lookup(entry);
 }
 }

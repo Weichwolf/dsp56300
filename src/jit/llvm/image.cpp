@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "jit/llvm/image.hpp"
 
+#include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 #include "jit/image_plan.hpp"
@@ -9,7 +10,7 @@
 
 #include <array>
 #include <cstdint>
-#include <format>
+#include <llvm/ADT/StringExtras.h>
 #include <llvm/IR/Attributes.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constants.h>
@@ -88,7 +89,7 @@ public:
     std::set<Word> heads{plan_.instructions.begin()->first};
     for (const auto &span : code) { heads.insert(span.address); }
     for (const auto head : heads) {
-      units_.emplace(head, function(std::format("{}.unit.{:x}", name_, head), true));
+      units_.emplace(head, function(name_ + ".unit." + llvm::utohexstr(head, true), true));
     }
     for (const auto &[pc, instruction] : plan_.instructions) {
       static_cast<void>(instruction);
@@ -161,7 +162,7 @@ private:
     for (const auto &[page, targets] : contents) {
       auto *array =
           llvm::ConstantArray::get(llvm::ArrayType::get(pointer, targets.size()), targets);
-      top[page] = constant(std::format("{}.targets.{:x}", name_, page), array);
+      top[page] = constant(name_ + ".targets." + llvm::utohexstr(page, true), array);
     }
     return constant(name_ + ".pages",
                     llvm::ConstantArray::get(llvm::ArrayType::get(pointer, pages), top));
@@ -247,7 +248,7 @@ private:
         ir_.getInt8(operation.words),
         ir_.getInt8(operation.cycles)};
     auto *value = llvm::ConstantStruct::getAnon(module_.getContext(), fields);
-    auto *global = constant(std::format("{}.op.{:x}", name_, pc), value);
+    auto *global = constant(name_ + ".op." + llvm::utohexstr(pc, true), value);
     global->setAlignment(llvm::Align(alignof(Instruction)));
     return global;
   }
@@ -321,7 +322,7 @@ private:
       exits_.emplace(reason, block(unit, "exit"));
     }
     for (const auto &[pc, target] : targets_) {
-      if (target == unit) { sites_.emplace(pc, block(unit, std::format("pc.{:x}", pc))); }
+      if (target == unit) { sites_.emplace(pc, block(unit, "pc." + llvm::utohexstr(pc, true))); }
     }
     ir_.SetInsertPoint(local_dispatch_);
     auto *switch_pc =

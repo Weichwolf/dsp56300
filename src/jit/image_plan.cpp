@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "jit/image_plan.hpp"
 
+#include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
@@ -9,17 +10,20 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
-#include <format>
+#include <llvm/ADT/StringExtras.h>
 #include <map>
 #include <optional>
 #include <span>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 
 namespace dsp56300::detail {
 namespace {
 [[noreturn]] void reject(const Word address, const std::string_view message) {
-  throw std::invalid_argument(std::format("DSP image P:${:06x}: {}", address, message));
+  throw std::invalid_argument("DSP image P:$" +
+                              llvm::utohexstr(address, true, address <= word_mask ? 6 : 0) + ": " +
+                              std::string(message));
 }
 
 void validate_sources(const std::span<const CodeSpan> code) {
@@ -64,9 +68,8 @@ void validate_targets(const ImagePlan &plan) {
     const auto target = encoded_target(address, instruction);
     if (target && plan.find(*target) == nullptr) {
       reject(address,
-             std::format("encoded target P:${:06x} is not a declared instruction "
-                         "start",
-                         *target));
+             "encoded target P:$" + llvm::utohexstr(*target, true, 6) +
+                 " is not a declared instruction start");
     }
   }
 }

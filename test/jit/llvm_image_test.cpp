@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "image_entry.hpp"
 #include "isa.hpp"
-#include "jit/image_plan.hpp"
 #include "jit/llvm/image.hpp"
 #include "jit/llvm/runtime.hpp"
 #include "support.hpp"
@@ -58,13 +59,14 @@ void control(const ImageEntry entry) {
   constexpr auto unlimited = std::numeric_limits<std::uint64_t>::max();
   constexpr auto invalid = std::numeric_limits<Word>::max();
   for (const Word pc : {0U, 1U, helper, helper + 1, helper + 2, high, 20U, 0x1000U, invalid}) {
-    require(entry(nullptr, pc, 0, unlimited) == (std::uint64_t{2} << reason_shift),
+    require(dsp56300_image_enter(entry, nullptr, pc, 0, unlimited) ==
+                (std::uint64_t{2} << reason_shift),
             "Zero quota returns before touching even a valid instruction's owner");
-    require(entry(nullptr, pc, 1, 0) == (std::uint64_t{3} << reason_shift),
+    require(dsp56300_image_enter(entry, nullptr, pc, 1, 0) == (std::uint64_t{3} << reason_shift),
             "An expired cycle window precedes code lookup without touching the owner");
   }
   for (const Word pc : {2U, 20U, 0x1000U, high + 1, invalid}) {
-    require(entry(nullptr, pc, 1, 1) == (std::uint64_t{4} << reason_shift),
+    require(dsp56300_image_enter(entry, nullptr, pc, 1, 1) == (std::uint64_t{4} << reason_shift),
             "Unknown starts, null pages and out-of-range PCs fail before ISA execution");
   }
 }
@@ -72,6 +74,8 @@ void control(const ImageEntry entry) {
 void materialization(const std::span<const std::byte> semantics) {
   LlvmModule module("native_image_control");
   module.link_bitcode(semantics);
+  require(llvm::unwrap(module.code())->getModuleIdentifier() == module.name(),
+          "Semantic import preserves the unique native module initialization identity");
   lift_image(module, code, entries);
   specialize_image(module);
   LlvmCompiler first_owner;
