@@ -90,7 +90,7 @@ bool Core::Impl::access_bit(const Instruction &decoded, const BitAction action) 
 
     bool previous = false;
     if (io == nullptr ||
-        !dsp56300_io_bit(io, operand.space, address, current_pc, bit, action, previous)) {
+        !dsp56300_io_bit(*io, operand.space, address, current_pc, bit, action, previous)) {
       fail(FaultKind::io_bit, operand.space, address, bit);
     }
     image_io_completed();

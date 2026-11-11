@@ -418,7 +418,7 @@ Mapping &Jit::Impl::mapping(const Registers &state) {
 
 bool Jit::Impl::current_view(const std::optional<std::uint64_t> revision) const {
   return !revision ||
-         (context.events.io != nullptr && dsp56300_io_revision(context.events.io) == *revision);
+         (context.events.io != nullptr && dsp56300_io_revision(*context.events.io) == *revision);
 }
 
 std::optional<PreparedRegion> Jit::Impl::prepare_entry(const Registers &state,

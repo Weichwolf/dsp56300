@@ -309,6 +309,14 @@ void rejected(const BindingInputs inputs) {
   require(owner != nullptr, "The public owner binding exists before the aliasing negative control");
   owner->addParamAttr(0, llvm::Attribute::NoAlias);
   check(aliased.bitcode(), roles);
+  LlvmModule extent("invalid_io_extent");
+  extent.link_bitcode(inputs.host);
+  auto *output = llvm::unwrap(extent.code())->getFunction("image_io_read");
+  require(output != nullptr, "The public read output exists before its extent negative control");
+  output->addParamAttr(4,
+                       llvm::Attribute::getWithDereferenceableBytes(
+                           llvm::unwrap(extent.code())->getContext(), sizeof(Word) * 2));
+  check(extent.bitcode(), roles);
 }
 }
 

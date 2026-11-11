@@ -33,7 +33,7 @@ void Core::Impl::execute_processing(const detail::Instruction &decoded) {
     return;
   }
 
-  if (io == nullptr || !dsp56300_io_reset(io, current_pc)) {
+  if (io == nullptr || !dsp56300_io_reset(*io, current_pc)) {
     fail(FaultKind::host_event, Space::program, current_pc, decoded.opcode);
   }
   image_io_completed();

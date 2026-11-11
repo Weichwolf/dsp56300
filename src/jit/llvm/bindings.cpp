@@ -15,6 +15,7 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Value.h>
+#include <llvm/Support/Alignment.h>
 #include <set>
 #include <span>
 #include <stdexcept>
@@ -41,8 +42,32 @@ constexpr std::array abi_kinds{llvm::Attribute::ZExt,
                                llvm::Attribute::Returned,
                                llvm::Attribute::SwiftSelf,
                                llvm::Attribute::SwiftError,
-                               llvm::Attribute::Preallocated,
-                               llvm::Attribute::Alignment};
+                               llvm::Attribute::Preallocated};
+
+bool accepts_parameters(const llvm::Function &source, const llvm::Function &target) {
+  constexpr std::array guarantees{
+      llvm::Attribute::NoUndef, llvm::Attribute::NonNull, llvm::Attribute::NoAlias};
+  for (unsigned index = 0; index < source.arg_size(); ++index) {
+    for (const auto kind : guarantees) {
+      if (target.hasParamAttribute(index, kind) && !source.hasParamAttribute(index, kind)) {
+        return false;
+      }
+    }
+    if (target.getParamAlign(index).valueOrOne() > source.getParamAlign(index).valueOrOne()) {
+      return false;
+    }
+    const auto bytes = source.getParamDereferenceableBytes(index);
+    const auto nullable = source.getParamDereferenceableOrNullBytes(index);
+    const auto nonnull = source.hasParamAttribute(index, llvm::Attribute::NonNull)
+                             ? std::max(bytes, nullable)
+                             : bytes;
+    if (target.getParamDereferenceableBytes(index) > nonnull ||
+        target.getParamDereferenceableOrNullBytes(index) > std::max(bytes, nullable)) {
+      return false;
+    }
+  }
+  return true;
+}
 
 bool same_abi(const llvm::Function &source, const llvm::Function &target) {
   if (source.getFunctionType() != target.getFunctionType() ||
@@ -56,6 +81,7 @@ bool same_abi(const llvm::Function &source, const llvm::Function &target) {
       target.hasParamAttribute(0, llvm::Attribute::NoAlias)) {
     return false;
   }
+  if (!accepts_parameters(source, target)) { return false; }
   for (unsigned index = 0; index <= source.arg_size(); ++index) {
     for (const auto kind : abi_kinds) {
       if (source.getAttributes().getAttributeAtIndex(index, kind) !=

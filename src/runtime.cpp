@@ -13,7 +13,7 @@
 
 namespace dsp56300::detail {
 bool reset_io(Io *const io, const Word pc) noexcept {
-  return io != nullptr && dsp56300_io_reset(io, pc);
+  return io != nullptr && dsp56300_io_reset(*io, pc);
 }
 
 void access_bit_io(Io *const io, NativeAccess &access) noexcept {
@@ -24,7 +24,7 @@ void access_bit_io(Io *const io, NativeAccess &access) noexcept {
       actions[static_cast<unsigned>(access.action) - static_cast<unsigned>(BusAction::bit_test)];
   bool previous = false;
   if ((io == nullptr ||
-       !dsp56300_io_bit(io, access.space, access.address, access.pc, bit, action, previous)) &&
+       !dsp56300_io_bit(*io, access.space, access.address, access.pc, bit, action, previous)) &&
       access.failure.kind == FaultKind::none) {
     access.failure = {.kind = FaultKind::io_bit,
                       .space = access.space,
@@ -44,7 +44,7 @@ void Core::Impl::check_interrupt_window(const Word previous_status) noexcept {
     return;
   }
   const bool installed = image != nullptr;
-  if (dsp56300_io_pending(io, cpu.reg.sr)) {
+  if (dsp56300_io_pending(*io, cpu.reg.sr)) {
     yield_requested = true;
     if (!installed) { jit->request_yield(); }
   }
