@@ -66,7 +66,8 @@ SemanticImage lower(const std::span<const CallbackBinding> callbacks,
                     const std::span<const std::byte> bindings = {}) {
   const std::array code{CodeSpan{.address = io_entry, .words = program}};
   constexpr std::array entries{io_entry};
-  const std::array versions{CodeVariant{.id = 0, .code = code, .entries = entries}};
+  const std::array versions{
+      CodeVariant{.id = 0, .code = code, .entries = entries, .failed_fetches = {}}};
   return Core::lower({.variants = versions},
                      {.memory = {},
                       .interrupts = {},
@@ -79,7 +80,8 @@ NativeImage compile(const std::span<const CallbackBinding> callbacks,
                     const std::span<const std::byte> bindings) {
   const std::array code{CodeSpan{.address = io_entry, .words = program}};
   constexpr std::array entries{io_entry};
-  const std::array versions{CodeVariant{.id = 0, .code = code, .entries = entries}};
+  const std::array versions{
+      CodeVariant{.id = 0, .code = code, .entries = entries, .failed_fetches = {}}};
   return Core::compile({.variants = versions},
                        {.memory = {},
                         .interrupts = {},

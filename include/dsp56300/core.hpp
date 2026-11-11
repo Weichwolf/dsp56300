@@ -94,6 +94,9 @@ struct CodeVariant {
   std::uint64_t id;
   std::span<const CodeSpan> code;
   std::span<const Word> entries;
+  // Explicit expected fetch failures, never substitutes for missing code.
+  // Entry performs the real read; a readable word fails as unprepared execution.
+  std::span<const Word> failed_fetches;
 };
 
 struct CodeImage {

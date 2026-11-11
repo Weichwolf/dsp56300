@@ -63,14 +63,36 @@ std::optional<Word> encoded_target(const Word address, const Instruction &instru
   return flow.direct[flow.count - 1];
 }
 
-void validate_targets(const ImagePlan &plan, const std::span<const Word> external_entries) {
+void validate_failed_fetches(const CodeVariant &source,
+                             const std::span<const Word> external_entries) {
+  std::set<Word> targets;
+  for (const auto address : source.failed_fetches) {
+    if (address > word_mask || !targets.insert(address).second) {
+      reject(address, "invalid or duplicate failed-fetch target");
+    }
+    if (std::ranges::find(external_entries, address) != external_entries.end()) {
+      reject(address, "failed-fetch target is a code transition");
+    }
+    for (const auto &span : source.code) {
+      const auto offset = (address + address_words - span.address) & word_mask;
+      if (offset < span.words.size()) {
+        reject(address, "failed-fetch target overlaps instruction source");
+      }
+    }
+  }
+}
+
+void validate_targets(const ImagePlan &plan,
+                      const std::span<const Word> external_entries,
+                      const std::span<const Word> failed_fetches) {
   for (const auto entry : plan.entries) {
     if (plan.find(entry) == nullptr) { reject(entry, "entry is not a declared instruction start"); }
   }
   for (const auto &[address, instruction] : plan.instructions) {
     const auto target = encoded_target(address, instruction);
     if (target && plan.find(*target) == nullptr &&
-        std::ranges::find(external_entries, *target) == external_entries.end()) {
+        std::ranges::find(external_entries, *target) == external_entries.end() &&
+        std::ranges::find(failed_fetches, *target) == failed_fetches.end()) {
       reject(address,
              "encoded target P:$" + llvm::utohexstr(*target, true, 6) +
                  " is not a declared instruction start");
@@ -134,6 +156,7 @@ ImagePlan plan_image(const CodeVariant &source, const std::span<const Word> exte
     throw std::invalid_argument("DSP image requires executable streams and established entries");
   }
   validate_sources(code);
+  validate_failed_fetches(source, external_entries);
   ImagePlan result;
   for (const auto &span : code) {
     std::size_t index = 0;
@@ -155,12 +178,13 @@ ImagePlan plan_image(const CodeVariant &source, const std::span<const Word> exte
   std::ranges::sort(result.entries);
   const auto duplicates = std::ranges::unique(result.entries);
   result.entries.erase(duplicates.begin(), duplicates.end());
-  validate_targets(result, external_entries);
+  validate_targets(result, external_entries, source.failed_fetches);
   return result;
 }
 
 ImagePlan plan_image(const std::span<const CodeSpan> code, const std::span<const Word> entries) {
-  return plan_image(CodeVariant{.id = 0, .code = code, .entries = entries}, {});
+  return plan_image(CodeVariant{.id = 0, .code = code, .entries = entries, .failed_fetches = {}},
+                    {});
 }
 
 ImagePlan plan_vector(const Word address,

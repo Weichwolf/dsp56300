@@ -77,6 +77,38 @@ std::vector<RegionLayout> layout(const Buffers buffers,
   }
   return result;
 }
+
+void validate_program(const auto &core, const detail::ImageContracts::Variant &selected) {
+  for (const auto &[address, expected] : selected.words) {
+    const auto actual = core.known_program_word(address);
+    if (!actual || *actual != expected) {
+      throw std::invalid_argument("DSP image code mismatch at P:$" +
+                                  llvm::utohexstr(address, true, 6));
+    }
+  }
+  for (const auto address : selected.failed_fetches) {
+    if (core.known_program_word(address)) {
+      throw std::invalid_argument("DSP expected failed fetch has readable source at P:$" +
+                                  llvm::utohexstr(address, true, 6));
+    }
+  }
+}
+
+void handle_image_miss(auto &core,
+                       const bool vector_fetch,
+                       const Word address,
+                       const bool retired) {
+  if (!vector_fetch && core.active_image->failed_fetches.contains(core.cpu.reg.pc)) {
+    core.current_pc = core.cpu.reg.pc;
+    const auto value = core.fetch_program(core.cpu.reg.pc);
+    if (core.fault.kind == FaultKind::none) { core.unprepared(core.cpu.reg.pc, value); }
+    return;
+  }
+  if (vector_fetch || !core.image_transition(retired)) {
+    core.unprepared(vector_fetch ? address : core.cpu.reg.pc);
+  }
+}
+
 }
 
 void Core::install(const NativeImage &image, const std::uint64_t variant) {
@@ -108,13 +140,7 @@ void Core::install(const NativeImage &image, const std::uint64_t variant) {
                           equal)) {
     throw std::invalid_argument("DSP image memory layout differs from this owner");
   }
-  for (const auto &[address, expected] : selected.words) {
-    const auto actual = self.known_program_word(address);
-    if (!actual || *actual != expected) {
-      throw std::invalid_argument("DSP image code mismatch at P:$" +
-                                  llvm::utohexstr(address, true, 6));
-    }
-  }
+  validate_program(self, selected);
   if (self.cpu.repeat_loaded) {
     const auto found = selected.instructions.find(self.cpu.reg.pc);
     if (found == selected.instructions.end() || found->second != self.repeated) {
@@ -159,9 +185,7 @@ RunResult Core::Impl::run_image(const std::uint32_t quota) {
     const auto retired = static_cast<std::uint32_t>(outcome);
     result.retired += retired;
     if ((outcome >> reason_shift) == static_cast<unsigned>(detail::ImageExit::unprepared)) {
-      if (vector_fetch || !image_transition(result.retired != 0)) {
-        unprepared(vector_fetch ? address : cpu.reg.pc);
-      }
+      handle_image_miss(*this, vector_fetch, address, result.retired != 0);
     }
     if (retired == 0) { break; }
   }

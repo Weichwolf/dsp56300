@@ -94,7 +94,8 @@ SemanticImage public_lower() {
                              static_cast<Word>(isa::Opcode::stop)};
   const std::array code{CodeSpan{.address = 0, .words = words}};
   constexpr std::array<Word, 1> entries{0};
-  const std::array variants{CodeVariant{.id = 1, .code = code, .entries = entries}};
+  const std::array variants{
+      CodeVariant{.id = 1, .code = code, .entries = entries, .failed_fetches = {}}};
   auto image = Core::lower({.variants = variants}, {});
   require(engines == 0 && machines == 0 && !image.bitcode().empty(),
           "Public lowering creates neither an execution engine nor a native target machine");
@@ -105,7 +106,8 @@ void unused_declarations() {
   constexpr std::array words{static_cast<Word>(isa::Opcode::stop)};
   const std::array code{CodeSpan{.address = 0, .words = words}};
   constexpr std::array<Word, 1> entries{0};
-  const std::array variants{CodeVariant{.id = 2, .code = code, .entries = entries}};
+  const std::array variants{
+      CodeVariant{.id = 2, .code = code, .entries = entries, .failed_fetches = {}}};
   constexpr std::array callbacks{
       CallbackBinding{.role = CallbackRole::read, .symbol = "unused_read"},
       CallbackBinding{.role = CallbackRole::bit, .symbol = "unused_bit"}};
@@ -222,7 +224,8 @@ void fixed_memory() {
                              static_cast<Word>(isa::Opcode::stop)};
   const std::array code{CodeSpan{.address = 16, .words = words}};
   constexpr std::array<Word, 1> entries{16};
-  const std::array variants{CodeVariant{.id = 0, .code = code, .entries = entries}};
+  const std::array variants{
+      CodeVariant{.id = 0, .code = code, .entries = entries, .failed_fetches = {}}};
   constexpr std::array memory{RegionLayout{.space = Space::program, .first = 0, .size = 64},
                               RegionLayout{.space = Space::x, .first = 0, .size = 8},
                               RegionLayout{.space = Space::y, .first = 0, .size = 8}};

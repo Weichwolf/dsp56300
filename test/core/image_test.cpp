@@ -264,7 +264,8 @@ NativeImage prepare_image() {
                    .words = std::span(program).subspan(units[index][0], units[index][1])};
     entries[index] = units[index][0];
   }
-  const std::array variants{CodeVariant{.id = 0, .code = code, .entries = entries}};
+  const std::array variants{
+      CodeVariant{.id = 0, .code = code, .entries = entries, .failed_fetches = {}}};
   return Core::compile({.variants = variants}, {});
 }
 

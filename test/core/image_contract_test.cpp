@@ -36,8 +36,9 @@ NativeImage compile(const bool fixed_memory = true) {
   const std::array second{CodeSpan{.address = start, .words = code1},
                           CodeSpan{.address = writer, .words = writing}};
   constexpr std::array entries{start};
-  const std::array variants{CodeVariant{.id = 0, .code = first, .entries = entries},
-                            CodeVariant{.id = 1, .code = second, .entries = entries}};
+  const std::array variants{
+      CodeVariant{.id = 0, .code = first, .entries = entries, .failed_fetches = {}},
+      CodeVariant{.id = 1, .code = second, .entries = entries, .failed_fetches = {}}};
   const std::array layouts{VariantLayout{.id = 0, .memory = memory},
                            VariantLayout{.id = 1, .memory = memory}};
   return Core::compile({.variants = variants},

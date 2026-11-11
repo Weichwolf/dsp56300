@@ -44,8 +44,9 @@ NativeImage compile() {
   const auto stopped = streams(root);
   const auto running = streams(loop);
   constexpr std::array entries{entry};
-  const std::array versions{CodeVariant{.id = 0, .code = stopped, .entries = entries},
-                            CodeVariant{.id = 1, .code = running, .entries = entries}};
+  const std::array versions{
+      CodeVariant{.id = 0, .code = stopped, .entries = entries, .failed_fetches = {}},
+      CodeVariant{.id = 1, .code = running, .entries = entries, .failed_fetches = {}}};
   return Core::compile({.variants = versions}, {});
 }
 
@@ -212,7 +213,7 @@ void shared_io() {
   constexpr std::array code{op<isa::Opcode::reset>, op<isa::Opcode::reset>, op<isa::Opcode::stop>};
   const std::array spans{CodeSpan{.address = entry, .words = code}};
   constexpr std::array entries{entry};
-  const CodeVariant version{.id = 0, .code = spans, .entries = entries};
+  const CodeVariant version{.id = 0, .code = spans, .entries = entries, .failed_fetches = {}};
   const auto image = Core::compile({.variants = {&version, 1}}, {});
   std::array<Word, 512> program{};
   std::array<Word, 1> x{};

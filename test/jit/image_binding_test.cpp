@@ -32,7 +32,8 @@ SemanticImage lower(const bool left) {
   const auto unchanged = words;
   const std::array code{CodeSpan{.address = entry, .words = words}};
   constexpr std::array entries{entry};
-  const std::array variants{CodeVariant{.id = 7, .code = code, .entries = entries}};
+  const std::array variants{
+      CodeVariant{.id = 7, .code = code, .entries = entries, .failed_fetches = {}}};
   auto image = Core::lower({.variants = variants}, {});
   require(words == unchanged && !image.bitcode().empty() && image.exports().size() == 1 &&
               !image.identity().empty() && image.exports().front().abi.starts_with("llvm19;"),

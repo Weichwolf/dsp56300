@@ -172,7 +172,8 @@ void control_mapping(const ControlCase item) {
   constexpr std::array entries{start};
   const std::array words{item.operation, code[1], code[2]};
   const std::array spans{CodeSpan{.address = start, .words = words}};
-  const std::array variants{CodeVariant{.id = 0, .code = spans, .entries = entries}};
+  const std::array variants{
+      CodeVariant{.id = 0, .code = spans, .entries = entries, .failed_fetches = {}}};
   constexpr std::array memory{RegionLayout{.space = Space::x, .first = 0, .size = 1}};
   const std::array layouts{VariantLayout{.id = 0, .memory = memory}};
   const auto image = Core::compile(
@@ -218,7 +219,7 @@ int main() {
     const std::array spans{CodeSpan{.address = start, .words = code},
                            CodeSpan{.address = vector, .words = inserted}};
     constexpr std::array entries{start};
-    const CodeVariant version{.id = 0, .code = spans, .entries = entries};
+    const CodeVariant version{.id = 0, .code = spans, .entries = entries, .failed_fetches = {}};
     constexpr std::array interrupts{InterruptRequest{.vector = vector, .level = 0}};
     for (const bool tracked : {false, true}) {
       const std::array memory{

@@ -56,6 +56,8 @@ void hash_variant(llvm::SHA256 &hash, const CodeVariant &source) {
   }
   hash_word(hash, source.entries.size());
   for (const auto address : source.entries) { hash_word(hash, address); }
+  hash_word(hash, source.failed_fetches.size());
+  for (const auto address : source.failed_fetches) { hash_word(hash, address); }
 }
 
 std::string symbol(const CodeImage image, const CompileOptions options) {
@@ -193,6 +195,7 @@ detail::ImageContracts::plan_vectors(const std::vector<detail::ImagePlan> &plans
     std::vector<Word> external;
     external.reserve(source.transitions.size());
     for (const auto &transfer : source.transitions) { external.push_back(transfer.first); }
+    external.insert(external.end(), source.failed_fetches.begin(), source.failed_fetches.end());
     for (const auto &[address, level] : interrupts) {
       static_cast<void>(level);
       const auto first = source.words.find(address);
@@ -246,6 +249,7 @@ SemanticImage Core::lower(const CodeImage image, const CompileOptions options) {
       }
     }
     variant.instructions = plan.instructions;
+    variant.failed_fetches.insert(source.failed_fetches.begin(), source.failed_fetches.end());
     variant.fixed_memory = !options.memory.empty();
     if (variant.fixed_memory) { variant.memory = regions(source.id, options); }
     variant.prefixes = detail::foreground_prefixes(plan, variant.memory);

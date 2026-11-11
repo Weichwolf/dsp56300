@@ -81,8 +81,9 @@ const NativeImage &image() {
     const auto first = streams(vector0);
     const auto second = streams(vector1);
     constexpr std::array entries{foreground, service, trap_pc, illegal_pc, repeat_pc, wait_pc};
-    const std::array versions{CodeVariant{.id = 0, .code = first, .entries = entries},
-                              CodeVariant{.id = 1, .code = second, .entries = entries}};
+    const std::array versions{
+        CodeVariant{.id = 0, .code = first, .entries = entries, .failed_fetches = {}},
+        CodeVariant{.id = 1, .code = second, .entries = entries, .failed_fetches = {}}};
     std::vector<InterruptRequest> interrupts;
     for (const Word vector : {4U,
                               8U,

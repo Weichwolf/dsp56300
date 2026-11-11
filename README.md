@@ -63,7 +63,7 @@ int main() {
   const std::array code{dsp56300::CodeSpan{.address = 0, .words = program}};
   const std::array entries{dsp56300::Word{0}};
   const std::array versions{
-      dsp56300::CodeVariant{.id = 0, .code = code, .entries = entries}};
+      dsp56300::CodeVariant{.id = 0, .code = code, .entries = entries, .failed_fetches = {}}};
   const auto image = dsp56300::Core::compile({.variants = versions}, {});
   core.install(image, 0);
   const auto result = core.run();

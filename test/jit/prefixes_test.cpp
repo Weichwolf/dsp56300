@@ -59,7 +59,8 @@ const NativeImage &image() {
   static const auto compiled = [] {
     const auto spans = streams();
     constexpr std::array entries{entry, pure, output, repeated};
-    const std::array versions{CodeVariant{.id = 0, .code = spans, .entries = entries}};
+    const std::array versions{
+        CodeVariant{.id = 0, .code = spans, .entries = entries, .failed_fetches = {}}};
     constexpr std::array requests{InterruptRequest{.vector = vector, .level = 0},
                                   InterruptRequest{.vector = vector + 2, .level = 0},
                                   InterruptRequest{.vector = vector + 4, .level = 0},

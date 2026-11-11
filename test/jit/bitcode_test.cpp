@@ -65,7 +65,8 @@ void declarations() {
   constexpr std::array words{static_cast<Word>(isa::Opcode::stop)};
   const std::array code{CodeSpan{.address = 0, .words = words}};
   constexpr std::array<Word, 1> entries{0};
-  const std::array variants{CodeVariant{.id = 7, .code = code, .entries = entries}};
+  const std::array variants{
+      CodeVariant{.id = 7, .code = code, .entries = entries, .failed_fetches = {}}};
   constexpr std::array callbacks{
       CallbackBinding{.role = CallbackRole::read, .symbol = "probe_read"}};
   constexpr std::array invalid_host{std::byte{0}};

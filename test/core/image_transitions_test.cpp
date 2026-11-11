@@ -34,9 +34,10 @@ NativeImage compile(const std::span<const CodeTransition> transitions,
   const std::array alternate{CodeSpan{.address = destination, .words = loaded}};
   constexpr std::array boot_entry{start};
   constexpr std::array runtime_entry{destination};
-  const std::array variants{CodeVariant{.id = 0, .code = first, .entries = boot_entry},
-                            CodeVariant{.id = 1, .code = second, .entries = runtime_entry},
-                            CodeVariant{.id = 2, .code = alternate, .entries = runtime_entry}};
+  const std::array variants{
+      CodeVariant{.id = 0, .code = first, .entries = boot_entry, .failed_fetches = {}},
+      CodeVariant{.id = 1, .code = second, .entries = runtime_entry, .failed_fetches = {}},
+      CodeVariant{.id = 2, .code = alternate, .entries = runtime_entry, .failed_fetches = {}}};
   constexpr std::array interrupts{InterruptRequest{.vector = vector, .level = 0}};
   return Core::compile({.variants = variants},
                        {.memory = {},
