@@ -19,6 +19,7 @@
 #include <llvm/Support/SHA256.h>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <span>
 #include <stdexcept>
@@ -115,6 +116,12 @@ std::vector<RegionLayout> regions(const std::uint64_t id, const CompileOptions o
     end[space] = region.first + region.size;
   }
   return result;
+}
+
+std::optional<std::span<const RegionLayout>>
+memory_view(const detail::ImageContracts::Variant &variant) {
+  return variant.fixed_memory ? std::optional<std::span<const RegionLayout>>(variant.memory)
+                              : std::nullopt;
 }
 
 void validate(const CodeImage image, const CompileOptions options) {
@@ -260,7 +267,8 @@ SemanticImage Core::lower(const CodeImage image, const CompileOptions options) {
     const auto &variant = result->variants[index];
     names.push_back(index == 0 ? image_name
                                : image_name + ".variant." + llvm::utohexstr(variant.id, true));
-    translations.push_back({.name = names.back(), .plan = plans[index]});
+    translations.push_back(
+        {.name = names.back(), .plan = plans[index], .memory = memory_view(variant)});
     result->report.prepared_entries += variant.instructions.size();
   }
   for (const auto &[key, plan] : vector_plans) {
@@ -268,7 +276,8 @@ SemanticImage Core::lower(const CodeImage image, const CompileOptions options) {
     const auto name = image_name + ".vector." + llvm::utohexstr(address, true) + "." +
                       llvm::utohexstr(first, true) + "." + llvm::utohexstr(second, true);
     const auto symbol = vector_symbols.emplace(key, name).first;
-    translations.push_back({.name = symbol->second, .plan = plan, .vector = true});
+    translations.push_back(
+        {.name = symbol->second, .plan = plan, .vector = true, .memory = std::nullopt});
     result->report.prepared_entries += plan.instructions.size();
   }
   auto artifact = detail::lower_images(image_name, translations, options.callbacks);

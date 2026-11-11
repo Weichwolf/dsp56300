@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <exception>
 #include <iostream>
 #include <optional>
@@ -39,8 +40,9 @@ struct Bus final : Io {
     ++grants;
     if (space != Space::x) { return {}; }
     const bool selected = (owner->registers().omr & 1U) != 0;
-    window[0] = {
-        .words = selected ? std::span(second) : std::span(first), .known = {}, .writable = true};
+    window[0] = {.words = selected ? std::span(second) : std::span(first),
+                 .known = tracked ? std::span(known) : std::span<std::uint8_t>{},
+                 .writable = true};
     return window;
   }
 
@@ -65,6 +67,8 @@ struct Bus final : Io {
   std::array<Word, 64> program{};
   std::array<Word, 1> first{first_value}, second{second_value};
   std::array<MemoryWindow, 1> window{};
+  std::array<std::uint8_t, 1> known{1};
+  bool tracked = false;
   Core *owner = nullptr;
   unsigned grants = 0, reads = 0;
 };
@@ -74,8 +78,9 @@ bool same(const State &left, const State &right) {
          left.failure == right.failure && left.execution == right.execution;
 }
 
-void guest_mapping(const NativeImage &image, const Word initial_mode) {
+void guest_mapping(const NativeImage &image, const Word initial_mode, const bool tracked) {
   Bus bus;
+  bus.tracked = tracked;
   Core core(Memory::external(), &bus);
   bus.owner = &core;
   auto initial = core.registers();
@@ -113,8 +118,9 @@ void guest_mapping(const NativeImage &image, const Word initial_mode) {
           "The resumed original load uses the new direct grant without an I/O fallback or replay");
 }
 
-void host_mapping(const NativeImage &image, const bool interrupt) {
+void host_mapping(const NativeImage &image, const bool interrupt, const bool tracked) {
   Bus bus;
+  bus.tracked = tracked;
   Core core(Memory::external(), &bus);
   bus.owner = &core;
   auto initial = core.registers();
@@ -136,6 +142,27 @@ void host_mapping(const NativeImage &image, const bool interrupt) {
         "Host register initialization cannot silently retain an incompatible installed mapping");
   }
 }
+
+void unknown_word(const NativeImage &image) {
+  Bus bus;
+  bus.tracked = true;
+  bus.known[0] = 0;
+  Core core(Memory::external(), &bus);
+  bus.owner = &core;
+  auto initial = core.registers();
+  initial.pc = start + 1;
+  initial.omr = 1;
+  initial.x = first_value;
+  core.set_registers(initial);
+  core.install(image, 0);
+  const auto result = core.run();
+  const Fault failure{
+      .kind = FaultKind::memory_read, .space = Space::x, .address = 0, .pc = start + 1};
+  initial.pc = start + 2;
+  require(result.fault == failure && result.retired == 0 && bus.reads == 1 &&
+              core.registers() == initial && core.progress() == Progress{},
+          "Fixed bounds never turn an unknown RAM word into a known read or retire its fault");
+}
 }
 
 int main() {
@@ -145,16 +172,25 @@ int main() {
     constexpr std::array entries{start};
     const CodeVariant version{.id = 0, .code = spans, .entries = entries};
     constexpr std::array interrupts{InterruptRequest{.vector = vector, .level = 0}};
-    const auto image = Core::compile({.variants = {&version, 1}},
-                                     {.memory = {},
-                                      .interrupts = interrupts,
-                                      .transitions = {},
-                                      .callbacks = {},
-                                      .bindings = {}});
-    guest_mapping(image, 0);
-    guest_mapping(image, 1);
-    host_mapping(image, false);
-    host_mapping(image, true);
+    for (const bool tracked : {false, true}) {
+      const std::array memory{
+          RegionLayout{.space = Space::x, .first = 0, .size = 1, .tracked = tracked}};
+      const std::array layouts{VariantLayout{.id = 0, .memory = memory}};
+      for (const bool fixed : {false, true}) {
+        const auto image = Core::compile({.variants = {&version, 1}},
+                                         {.memory = fixed ? std::span<const VariantLayout>(layouts)
+                                                          : std::span<const VariantLayout>{},
+                                          .interrupts = interrupts,
+                                          .transitions = {},
+                                          .callbacks = {},
+                                          .bindings = {}});
+        guest_mapping(image, 0, tracked);
+        guest_mapping(image, 1, tracked);
+        host_mapping(image, false, tracked);
+        host_mapping(image, true, tracked);
+        if (tracked) { unknown_word(image); }
+      }
+    }
     std::cout << test::checks << " public image-mapping checks passed\n";
     return 0;
   } catch (const std::exception &error) {

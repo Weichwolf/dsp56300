@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -18,6 +19,7 @@ struct ImageTranslation {
   std::string_view name;
   const ImagePlan &plan;
   bool vector = false;
+  std::optional<std::span<const RegionLayout>> memory;
 };
 
 // Owned pre-O3 IR and exports; no execution owner or native compiler is retained.
@@ -37,7 +39,10 @@ using ImageEntry = std::uint64_t (*)(void *, Word, std::uint32_t, std::uint64_t)
 // Link the exact semantic/binding bitcode first. Lift only explicitly declared code.
 // Mutable instance state remains in the owner argument, never in exported objects.
 void lift_image(LlvmModule &module, std::span<const CodeSpan> code, std::span<const Word> entries);
-void lift_image(LlvmModule &module, const ImagePlan &plan, std::string_view entry = {});
+void lift_image(LlvmModule &module,
+                const ImagePlan &plan,
+                std::string_view entry = {},
+                std::optional<std::span<const RegionLayout>> memory = std::nullopt);
 void lift_vector(LlvmModule &module, const ImagePlan &plan, std::string_view entry = {});
 // Remove ordinary ISA calls before the shared native O3/export/install pipeline.
 void specialize_image(LlvmModule &module);

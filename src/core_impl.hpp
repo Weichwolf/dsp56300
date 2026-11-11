@@ -90,6 +90,8 @@ struct Core::Impl {
   void step_decoded(const detail::Instruction &decoded);
   void step_semantic(const detail::Instruction &decoded);
   void assume_image_admission() const noexcept;
+  static void semantic_memory(void *owner, const detail::SemanticMemory &memory) noexcept
+      asm("dsp56300_semantic_memory");
   [[nodiscard]] static detail::SemanticResult
   semantic_execute(void *owner, const detail::Instruction &decoded) noexcept;
   // Stable private LLVM boundary; the packed result does not depend on struct-return ABI.

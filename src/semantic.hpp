@@ -15,6 +15,12 @@ struct SemanticResult {
   SemanticFlow flow;
 };
 
-inline constexpr std::size_t semantic_abi_fields = 9;
+inline constexpr Word memory_writable = 1, memory_tracked = 2, memory_program_alias = 4;
+
+struct SemanticMemory {
+  Word space, index, regions, first, words, flags, external;
+};
+
+inline constexpr std::size_t semantic_abi_fields = 11;
 extern "C" const std::array<Word, semantic_abi_fields> dsp56300_semantic_abi;
 } // namespace dsp56300::detail

@@ -13,7 +13,7 @@
 
 namespace dsp56300::detail {
 extern "C" const std::array<Word, semantic_abi_fields> dsp56300_semantic_abi{
-    3,
+    4,
     word_mask,
     sizeof(Instruction),
     offsetof(Instruction, opcode),
@@ -21,10 +21,41 @@ extern "C" const std::array<Word, semantic_abi_fields> dsp56300_semantic_abi{
     offsetof(Instruction, operation),
     offsetof(Instruction, words),
     offsetof(Instruction, cycles),
-    static_cast<Word>(Operation::conditional_debug) + 1};
+    static_cast<Word>(Operation::conditional_debug) + 1,
+    sizeof(SemanticMemory),
+    offsetof(SemanticMemory, external)};
 }
 
 namespace dsp56300 {
+// Installation validates these layout values. Reassert them at each admitted
+// ordinary site after loop/I/O edges; real remapping yields before the next site.
+// RAM pointers, contents and per-word initialization remain dynamic.
+void Core::Impl::semantic_memory(void *const owner, const detail::SemanticMemory &memory) noexcept {
+  const auto &self = *static_cast<Impl *>(owner);
+  const bool mode = self.external == (memory.external != 0);
+  __builtin_assume(mode);
+  const auto space = static_cast<Space>(memory.space);
+  const bool alias = (memory.flags & detail::memory_program_alias) != 0;
+  if (!self.external) {
+    const auto words = self.area(space);
+    const bool matches = words.size() == memory.words &&
+                         (space == Space::program || self.aliases_program[memory.space] == alias);
+    __builtin_assume(matches);
+    return;
+  }
+  const auto windows = self.image_windows[space == Space::x ? 0 : 1];
+  const bool count = windows.size() == memory.regions;
+  __builtin_assume(count);
+  if (memory.regions == 0) { return; }
+  const auto &window = windows[memory.index];
+  const bool writable = (memory.flags & detail::memory_writable) != 0;
+  const bool tracked = (memory.flags & detail::memory_tracked) != 0;
+  const bool matches = window.address == memory.first && window.words.size() == memory.words &&
+                       window.writable == writable && window.aliases_program == alias &&
+                       window.known.size() == (tracked ? memory.words : 0);
+  __builtin_assume(matches);
+}
+
 // Native owners and every continuing native edge have already admitted this state.
 void Core::Impl::assume_image_admission() const noexcept {
   const bool admitted = image != nullptr && active_image != nullptr && image_ready &&

@@ -20,8 +20,11 @@
 #include <llvm-c/LLJIT.h>
 #include <llvm-c/TargetMachine.h>
 #include <llvm/IR/Function.h>
+#include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Module.h>
+#include <llvm/Support/Casting.h>
 #include <memory>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -51,9 +54,10 @@ ImageArtifact lower() {
       16, {static_cast<Word>(isa::Opcode::nop), static_cast<Word>(isa::Opcode::nop)}, plan, {});
   const std::array<std::string, 3> names{
       "semantic_image", "semantic_image.variant", "semantic_image.vector"};
-  const std::array translations{ImageTranslation{.name = names[0], .plan = plan},
-                                ImageTranslation{.name = names[1], .plan = plan},
-                                ImageTranslation{.name = names[2], .plan = vector, .vector = true}};
+  const std::array translations{
+      ImageTranslation{.name = names[0], .plan = plan, .memory = std::nullopt},
+      ImageTranslation{.name = names[1], .plan = plan, .memory = std::nullopt},
+      ImageTranslation{.name = names[2], .plan = vector, .vector = true, .memory = std::nullopt}};
   auto artifact = lower_images(names.front(), translations);
   require(engines == 0 && machines == 0,
           "Semantic lowering creates neither an execution engine nor a native target machine");
@@ -177,11 +181,13 @@ void invalid_translations() {
   constexpr std::array<Word, 1> entries{0};
   const auto plan = plan_image(code, entries);
   const ImagePlan empty;
-  const std::array valid{ImageTranslation{.name = "first", .plan = plan}};
+  const std::array valid{ImageTranslation{.name = "first", .plan = plan, .memory = std::nullopt}};
   const std::array duplicate{valid.front(), valid.front()};
   const std::string embedded("first\0other", sizeof("first\0other") - 1);
-  const std::array nul{valid.front(), ImageTranslation{.name = embedded, .plan = plan}};
-  const std::array incomplete{valid.front(), ImageTranslation{.name = "other", .plan = empty}};
+  const std::array nul{valid.front(),
+                       ImageTranslation{.name = embedded, .plan = plan, .memory = std::nullopt}};
+  const std::array incomplete{
+      valid.front(), ImageTranslation{.name = "other", .plan = empty, .memory = std::nullopt}};
   const auto rejects = [](const std::string_view name,
                           const std::span<const ImageTranslation> translations) {
     bool rejected = false;
@@ -196,6 +202,55 @@ void invalid_translations() {
   rejects("first", duplicate);
   rejects("first", nul);
   rejects("first", incomplete);
+}
+
+std::size_t callback_calls(const llvm::Module &module, const llvm::Function *target) {
+  std::size_t count = 0;
+  for (const auto &function : module) {
+    for (const auto &block : function) {
+      for (const auto &instruction : block) {
+        const auto *call = llvm::dyn_cast<llvm::CallBase>(&instruction);
+        if (call != nullptr && call->getCalledFunction() == target) { ++count; }
+      }
+    }
+  }
+  return count;
+}
+
+void fixed_memory() {
+  constexpr std::array words{static_cast<Word>(isa::Opcode::move_x_absolute_short) | (1U << 15),
+                             static_cast<Word>(isa::Opcode::stop)};
+  const std::array code{CodeSpan{.address = 16, .words = words}};
+  constexpr std::array<Word, 1> entries{16};
+  const std::array variants{CodeVariant{.id = 0, .code = code, .entries = entries}};
+  constexpr std::array memory{RegionLayout{.space = Space::program, .first = 0, .size = 64},
+                              RegionLayout{.space = Space::x, .first = 0, .size = 8},
+                              RegionLayout{.space = Space::y, .first = 0, .size = 8}};
+  const std::array layouts{VariantLayout{.id = 0, .memory = memory}};
+  constexpr std::array callbacks{
+      CallbackBinding{.role = CallbackRole::read, .symbol = "image_memory_read"}};
+  for (const bool fixed : {false, true}) {
+    const auto image = Core::lower({.variants = variants},
+                                   {.memory = fixed ? std::span<const VariantLayout>(layouts)
+                                                    : std::span<const VariantLayout>{},
+                                    .interrupts = {},
+                                    .transitions = {},
+                                    .callbacks = callbacks,
+                                    .bindings = {}});
+    LlvmModule module(std::string(image.exports().front().name));
+    module.link_bitcode(image.bitcode());
+    LlvmCompiler compiler;
+    require(!compiler.object(module).empty(), "Both memory contracts reach actual native emission");
+    const auto &native = *llvm::unwrap(module.code());
+    const auto *read = native.getFunction(callbacks[0].symbol);
+    require(read != nullptr && read->isDeclaration(),
+            "The selected public read contract remains externally declared");
+    require((callback_calls(native, read) == 0) == fixed,
+            fixed ? "Fixed RAM must remove external read paths before native emission"
+                  : "Unfixed RAM must retain its actual external read paths");
+    require(native.getFunction("dsp56300_semantic_memory") == nullptr,
+            "Memory contracts leave no runtime helper definition or call");
+  }
 }
 }
 
@@ -226,6 +281,7 @@ int main() {
     const auto guest = public_lower();
     const auto artifact = detached();
     materialize(artifact, guest);
+    fixed_memory();
     std::cout << test::checks << " owned semantic image lowering checks passed.\n";
     return 0;
   } catch (const std::exception &error) {

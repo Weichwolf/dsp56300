@@ -10,6 +10,7 @@
 #include "semantic.hpp"
 #include "semantic_ir.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -33,6 +34,7 @@
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/raw_ostream.h>
 #include <map>
+#include <optional>
 #include <set>
 #include <span>
 #include <stdexcept>
@@ -47,6 +49,11 @@ constexpr unsigned flow_shift = 32, page_shift = 12;
 constexpr Word page_words = Word{1} << page_shift, page_mask = page_words - 1;
 using Value = llvm::Value;
 using Block = llvm::BasicBlock;
+
+Word memory_flags(const RegionLayout &region) {
+  return (region.writable ? memory_writable : 0U) | (region.tracked ? memory_tracked : 0U) |
+         (region.aliases_program ? memory_program_alias : 0U);
+}
 
 llvm::Function *semantic_function(llvm::Module &module, const bool vector) {
   const auto *abi = module.getGlobalVariable("dsp56300_semantic_abi");
@@ -91,13 +98,15 @@ public:
   ImageLifter(LlvmModule &module,
               const ImagePlan &plan,
               const std::string_view entry,
-              const bool vector = false)
+              const bool vector = false,
+              const std::optional<std::span<const RegionLayout>> memory = std::nullopt)
       : module_(*llvm::unwrap(module.code())),
         ir_(module_.getContext()),
         name_(entry.empty() ? module.name() : std::string(entry)),
         plan_(plan),
         edges_(plan.edges()),
-        semantic_(semantic_function(module_, vector)) {
+        semantic_(semantic_function(module_, vector)),
+        memory_(memory) {
     if (module_.getNamedValue(name_) != nullptr) {
       throw std::invalid_argument("DSP image entry already exists");
     }
@@ -339,6 +348,7 @@ private:
     ir_.CreateCondBr(
         ir_.CreateICmpNE(window, ir_.getInt64(0)), execute, exits_.at(ImageExit::deadline));
     ir_.SetInsertPoint(execute);
+    memory_contracts();
     auto *outcome =
         ir_.CreateCall(semantic_variant(operation), {active_->getArg(0), ir_.getInt32(pc)});
     auto *next = ir_.CreateTrunc(outcome, ir_.getInt32Ty());
@@ -374,6 +384,66 @@ private:
     auto *assume = llvm::Intrinsic::getDeclaration(&module_, llvm::Intrinsic::assume);
     ir_.CreateCall(assume, ir_.CreateICmpEQ(next, ir_.getInt32(expected)));
     ir_.CreateBr(successor(expected));
+  }
+
+  void memory_contract(const SemanticMemory &memory) {
+    auto *function = module_.getFunction("dsp56300_semantic_memory");
+    if (function == nullptr || function->isDeclaration() ||
+        !function->getReturnType()->isVoidTy() || function->arg_size() != 2 ||
+        !function->getFunctionType()->getParamType(0)->isPointerTy() ||
+        !function->getFunctionType()->getParamType(1)->isPointerTy()) {
+      throw std::invalid_argument("DSP image lacks its private memory contract ABI");
+    }
+    const std::array<llvm::Constant *, 7> fields{ir_.getInt32(memory.space),
+                                                 ir_.getInt32(memory.index),
+                                                 ir_.getInt32(memory.regions),
+                                                 ir_.getInt32(memory.first),
+                                                 ir_.getInt32(memory.words),
+                                                 ir_.getInt32(memory.flags),
+                                                 ir_.getInt32(memory.external)};
+    auto *value = llvm::ConstantStruct::getAnon(module_.getContext(), fields);
+    const auto name = active_->getName().str() + ".memory." + std::to_string(memory.space) + "." +
+                      std::to_string(memory.index);
+    auto *description = module_.getGlobalVariable(name, true);
+    if (description == nullptr) {
+      description = constant(name, value);
+    } else if (!description->isConstant() || description->getInitializer() != value) {
+      throw std::invalid_argument("DSP memory contract conflicts with an existing constant");
+    }
+    description->setAlignment(llvm::Align(alignof(SemanticMemory)));
+    ir_.CreateCall(function, {active_->getArg(0), description});
+  }
+
+  void memory_contracts() {
+    if (!memory_) { return; }
+    const auto regions = *memory_;
+    const bool external = std::ranges::none_of(
+        regions, [](const auto &region) { return region.space == Space::program; });
+    for (const auto space : {Space::program, Space::x, Space::y}) {
+      if (external && space == Space::program) { continue; }
+      const auto count =
+          static_cast<Word>(std::ranges::count(regions, space, &RegionLayout::space));
+      Word index = 0;
+      if (count == 0) {
+        memory_contract({.space = static_cast<Word>(space),
+                         .index = 0,
+                         .regions = 0,
+                         .first = 0,
+                         .words = 0,
+                         .flags = 0,
+                         .external = external ? 1U : 0U});
+      }
+      for (const auto &region : regions) {
+        if (region.space != space) { continue; }
+        memory_contract({.space = static_cast<Word>(space),
+                         .index = index++,
+                         .regions = count,
+                         .first = region.first,
+                         .words = static_cast<Word>(region.size),
+                         .flags = memory_flags(region),
+                         .external = external ? 1U : 0U});
+      }
+    }
   }
 
   void emit_unit(llvm::Function *unit) {
@@ -431,6 +501,7 @@ private:
   const ImagePlan &plan_;
   const std::map<Word, std::vector<Word>> edges_;
   llvm::Function *semantic_, *dispatch_ = nullptr, *active_ = nullptr;
+  const std::optional<std::span<const RegionLayout>> memory_;
   llvm::GlobalVariable *table_ = nullptr;
   std::map<Word, llvm::Function *> units_, targets_;
   std::map<std::pair<Word, Word>, llvm::Function *> semantic_variants_;
@@ -449,10 +520,13 @@ void lift_image(LlvmModule &module,
   lift_image(module, plan);
 }
 
-void lift_image(LlvmModule &module, const ImagePlan &plan, const std::string_view entry) {
+void lift_image(LlvmModule &module,
+                const ImagePlan &plan,
+                const std::string_view entry,
+                const std::optional<std::span<const RegionLayout>> memory) {
   if (module.code() == nullptr) { throw std::logic_error("Image module was already transferred"); }
   if (plan.instructions.empty()) { throw std::invalid_argument("Image has no instructions"); }
-  const ImageLifter lifter(module, plan, entry);
+  const ImageLifter lifter(module, plan, entry, false, memory);
 }
 
 void lift_vector(LlvmModule &module, const ImagePlan &plan, const std::string_view entry) {
@@ -488,7 +562,7 @@ ImageArtifact lower_images(const std::string_view name,
     if (translation.vector) {
       lift_vector(module, translation.plan, translation.name);
     } else {
-      lift_image(module, translation.plan, translation.name);
+      lift_image(module, translation.plan, translation.name, translation.memory);
     }
   }
   specialize_image(module, result.entries);

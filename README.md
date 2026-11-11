@@ -83,6 +83,10 @@ text size describes that owner once, rather than a sum across bound components.
 their native-target LLVM bitcode through `CompileOptions::bindings` and validates
 it before linking and final O3. Unselected roles retain normal Io behavior.
 
+Fixed `CompileOptions::memory` layouts specialize native RAM paths after cold
+installation checks. Backing addresses, contents and initialization bits stay
+dynamic; actual remapping still requires a matching installation.
+
 Memory belongs to the consumer and must outlive Core. One thread owns execution;
 state inspection is optional. Use Io for device effects and run_until() for an
 absolute local cycle deadline. Core does not schedule an instrument or its audio.
