@@ -220,6 +220,28 @@ void native_units() {
   require(vector.units() == std::vector<Word>{0},
           "A captured vector does not invent the ordinary callee inside its inserted words");
 }
+
+void native_edges() {
+  constexpr Word immediate =
+      opcode<isa::Opcode::move_x_effective> | (6U << 11) | (4U << 8) | (1U << 15);
+  constexpr std::array code{opcode<isa::Opcode::do_immediate> | (2U << 8),
+                            start + 4,
+                            opcode<isa::Opcode::nop>,
+                            immediate,
+                            Word{0},
+                            opcode<isa::Opcode::rts>};
+  const std::array spans{CodeSpan{.address = start, .words = code}};
+  constexpr std::array entries{start};
+  const auto edges = plan_image(spans, entries).edges();
+  require(edges.at(start) == std::vector<Word>{start + 2, start + 5},
+          "A zero-count DO exit and ordinary body entry remain distinct real edges");
+  require(edges.at(start + 2) == std::vector<Word>{start + 2, start + 3},
+          "A one-word repeatable instruction has its own REP edge and ordinary successor");
+  require(edges.at(start + 3) == std::vector<Word>{start + 2, start + 5},
+          "DO backedges attach to the ending instruction, including its extension word");
+  require(edges.at(start + 5).empty(),
+          "A stack return uses native indirect dispatch rather than a fabricated local CFG loop");
+}
 }
 
 int main() {
@@ -231,6 +253,7 @@ int main() {
     wrapping_and_extent();
     vector_forms();
     native_units();
+    native_edges();
     std::cout << test::checks << " explicit executable-inventory checks passed.\n";
     return 0;
   } catch (const std::exception &error) {

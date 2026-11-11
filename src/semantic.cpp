@@ -13,7 +13,7 @@
 
 namespace dsp56300::detail {
 extern "C" const std::array<Word, semantic_abi_fields> dsp56300_semantic_abi{
-    1,
+    2,
     word_mask,
     sizeof(Instruction),
     offsetof(Instruction, opcode),
@@ -82,7 +82,11 @@ detail::SemanticResult Core::Impl::semantic_execute(void *const owner,
 }
 
 std::uint64_t Core::Impl::semantic_entry(void *const owner,
+                                         const Word pc,
                                          const detail::Instruction &decoded) noexcept {
+  // A prepared instruction site owns this exact fetch address. Carry that
+  // constant into its effects instead of hiding it behind an unrelated load.
+  static_cast<Impl *>(owner)->cpu.reg.pc = pc;
   constexpr unsigned flow_shift = 32;
   const auto result = semantic_execute(owner, decoded);
   return result.pc | (static_cast<std::uint64_t>(result.flow) << flow_shift);

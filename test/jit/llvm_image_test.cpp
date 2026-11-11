@@ -15,10 +15,13 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constant.h>
+#include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/GlobalValue.h>
 #include <llvm/IR/GlobalVariable.h>
+#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Module.h>
 #include <span>
 #include <stdexcept>
@@ -155,14 +158,25 @@ void unprepared_source(const std::span<const std::byte> semantics) {
 }
 
 void rejected_abi(const std::span<const std::byte> semantics) {
-  for (const bool missing : {false, true}) {
+  for (unsigned variant = 0; variant < 3; ++variant) {
     LlvmModule module("invalid_image_abi");
     module.link_bitcode(semantics);
     auto &native = *llvm::unwrap(module.code());
-    if (missing) {
+    if (variant == 1) {
       auto *function = native.getFunction("dsp56300_semantic_execute");
       require(function != nullptr, "The input contains the real semantic entry");
       function->deleteBody();
+    } else if (variant == 2) {
+      auto *previous = native.getFunction("dsp56300_semantic_execute");
+      require(previous != nullptr, "The current private semantic ABI exists before replacement");
+      previous->setName("retired_semantic_abi");
+      auto *entry_block = llvm::BasicBlock::Create(native.getContext(), "entry");
+      llvm::IRBuilder<> ir(entry_block);
+      auto *type = llvm::FunctionType::get(ir.getInt64Ty(), {ir.getPtrTy(), ir.getPtrTy()}, false);
+      auto *function = llvm::Function::Create(
+          type, llvm::GlobalValue::ExternalLinkage, "dsp56300_semantic_execute", native);
+      entry_block->insertInto(function);
+      ir.CreateRet(ir.getInt64(0));
     } else {
       auto *metadata = native.getGlobalVariable("dsp56300_semantic_abi");
       require(metadata != nullptr, "The input contains the real semantic ABI metadata");
@@ -174,7 +188,8 @@ void rejected_abi(const std::span<const std::byte> semantics) {
       lift_image(module, code, entries);
     } catch (const std::invalid_argument &) { rejected = true; }
     require(rejected && module.bitcode() == before,
-            "Missing semantics and incompatible layouts fail before image emission");
+            "Missing semantics, incompatible layouts and retired signatures fail before image "
+            "emission");
   }
 }
 }

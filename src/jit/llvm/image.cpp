@@ -67,10 +67,13 @@ llvm::Function *semantic_function(llvm::Module &module, const bool vector) {
     throw std::invalid_argument("DSP image requires its complete semantic implementation");
   }
   auto *type = function->getFunctionType();
-  if (!type->getReturnType()->isIntegerTy(64) || type->isVarArg() || type->getNumParams() != 2 ||
-      !type->getParamType(0)->isPointerTy() || !type->getParamType(1)->isPointerTy() ||
+  const unsigned last = vector ? 1 : 2;
+  if (!type->getReturnType()->isIntegerTy(64) || type->isVarArg() ||
+      type->getNumParams() != last + 1 || !type->getParamType(0)->isPointerTy() ||
+      !type->getParamType(last)->isPointerTy() ||
+      (!vector && !type->getParamType(1)->isIntegerTy(32)) ||
       type->getParamType(0)->getPointerAddressSpace() != 0 ||
-      type->getParamType(1)->getPointerAddressSpace() != 0) {
+      type->getParamType(last)->getPointerAddressSpace() != 0) {
     throw std::invalid_argument("DSP image semantic function has an incompatible ABI");
   }
   return function;
@@ -83,6 +86,7 @@ public:
         ir_(module_.getContext()),
         name_(module.name()),
         plan_(plan),
+        edges_(plan.edges()),
         semantic_(semantic_function(module_, vector)) {
     if (module_.getNamedValue(name_) != nullptr) {
       throw std::invalid_argument("DSP image entry already exists");
@@ -260,12 +264,16 @@ private:
     if (found != semantic_variants_.end()) { return found->second; }
     const auto name = name_ + ".semantic." + llvm::utohexstr(key.first, true) + "." +
                       llvm::utohexstr(key.second, true);
-    auto *type = llvm::FunctionType::get(ir_.getInt64Ty(), {ir_.getPtrTy()}, false);
+    auto *type =
+        llvm::FunctionType::get(ir_.getInt64Ty(), {ir_.getPtrTy(), ir_.getInt32Ty()}, false);
     auto *result = llvm::Function::Create(type, llvm::GlobalValue::InternalLinkage, name, module_);
     attributes(result);
     const llvm::IRBuilderBase::InsertPointGuard insertion(ir_);
     ir_.SetInsertPoint(block(result, "entry"));
-    ir_.CreateRet(ir_.CreateCall(semantic_, {result->getArg(0), descriptor(name, operation)}));
+    std::vector<Value *> arguments{result->getArg(0)};
+    if (semantic_->arg_size() == 3) { arguments.push_back(result->getArg(1)); }
+    arguments.push_back(descriptor(name, operation));
+    ir_.CreateRet(ir_.CreateCall(semantic_, arguments));
     semantic_variants_.emplace(key, result);
     return result;
   }
@@ -277,6 +285,7 @@ private:
     auto *commit = block(active_, "commit");
     auto *continued = block(active_, "continued");
     auto *sequential = block(active_, "sequential");
+    auto *branched = block(active_, "branch");
     auto *count = ir_.CreateLoad(ir_.getInt32Ty(), count_);
     ir_.CreateCondBr(
         ir_.CreateICmpULT(count, active_->getArg(2)), time, exits_.at(ImageExit::budget));
@@ -285,7 +294,8 @@ private:
     ir_.CreateCondBr(
         ir_.CreateICmpNE(window, ir_.getInt64(0)), execute, exits_.at(ImageExit::deadline));
     ir_.SetInsertPoint(execute);
-    auto *outcome = ir_.CreateCall(semantic_variant(operation), {active_->getArg(0)});
+    auto *outcome =
+        ir_.CreateCall(semantic_variant(operation), {active_->getArg(0), ir_.getInt32(pc)});
     auto *next = ir_.CreateTrunc(outcome, ir_.getInt32Ty());
     auto *flow = ir_.CreateTrunc(ir_.CreateLShr(outcome, flow_shift), ir_.getInt8Ty());
     ir_.CreateStore(next, pc_);
@@ -308,7 +318,13 @@ private:
     ir_.CreateCondBr(
         ir_.CreateICmpEQ(flow, ir_.getInt8(static_cast<unsigned>(SemanticFlow::sequential))),
         sequential,
-        local_dispatch_);
+        branched);
+    ir_.SetInsertPoint(branched);
+    auto *transfer = ir_.CreateSwitch(next, exits_.at(ImageExit::unprepared));
+    for (const auto target : edges_.at(pc)) {
+      const auto site = sites_.find(target);
+      if (site != sites_.end()) { transfer->addCase(ir_.getInt32(target), site->second); }
+    }
     ir_.SetInsertPoint(sequential);
     const auto expected = (pc + operation.words) & word_mask;
     auto *assume = llvm::Intrinsic::getDeclaration(&module_, llvm::Intrinsic::assume);
@@ -369,6 +385,7 @@ private:
   llvm::IRBuilder<> ir_;
   std::string name_;
   const ImagePlan &plan_;
+  const std::map<Word, std::vector<Word>> edges_;
   llvm::Function *semantic_, *dispatch_ = nullptr, *active_ = nullptr;
   llvm::GlobalVariable *table_ = nullptr;
   std::map<Word, llvm::Function *> units_, targets_;

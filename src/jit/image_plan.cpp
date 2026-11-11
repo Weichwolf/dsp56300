@@ -97,6 +97,30 @@ std::vector<Word> ImagePlan::units() const {
   return {heads.begin(), heads.end()};
 }
 
+std::map<Word, std::vector<Word>> ImagePlan::edges() const {
+  constexpr std::array loops{Operation::loop_immediate,
+                             Operation::loop_register,
+                             Operation::loop_short,
+                             Operation::loop_effective,
+                             Operation::loop_forever};
+  std::map<Word, std::set<Word>> endings;
+  for (const auto &[pc, instruction] : instructions) {
+    if (std::ranges::find(loops, instruction.operation) == loops.end()) { continue; }
+    const auto flow = successors({.instruction = instruction, .pc = pc});
+    endings[(flow.direct[1] - 1) & word_mask].insert(flow.direct[0]);
+  }
+  std::map<Word, std::vector<Word>> result;
+  for (const auto &[pc, instruction] : instructions) {
+    const auto flow = successors({.instruction = instruction, .pc = pc});
+    std::set<Word> targets(flow.direct.begin(), flow.direct.begin() + flow.count);
+    if (instruction.words == 1 && repeatable(instruction.operation)) { targets.insert(pc); }
+    const auto end = endings.find((pc + instruction.words - 1) & word_mask);
+    if (end != endings.end()) { targets.insert(end->second.begin(), end->second.end()); }
+    result.emplace(pc, std::vector<Word>(targets.begin(), targets.end()));
+  }
+  return result;
+}
+
 ImagePlan plan_image(const std::span<const CodeSpan> code, const std::span<const Word> entries) {
   if (code.empty() || entries.empty()) {
     throw std::invalid_argument("DSP image requires executable streams and established entries");
