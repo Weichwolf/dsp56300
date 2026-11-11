@@ -16,6 +16,7 @@
 #include <llvm/ADT/StringExtras.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/SHA256.h>
+#include <map>
 #include <memory>
 #include <set>
 #include <span>
@@ -41,11 +42,7 @@ void hash_word(llvm::SHA256 &hash, const std::uint64_t value) {
   hash.update(bytes);
 }
 
-std::string symbol(const CodeVariant &source) {
-  llvm::SHA256 hash;
-  const auto identity = detail::compiler_identity();
-  hash.update(llvm::StringRef(identity.data(), identity.size()));
-  hash_bytes(hash, detail::semantic_ir());
+void hash_variant(llvm::SHA256 &hash, const CodeVariant &source) {
   hash_word(hash, source.id);
   hash_word(hash, source.code.size());
   for (const auto &span : source.code) {
@@ -55,6 +52,39 @@ std::string symbol(const CodeVariant &source) {
   }
   hash_word(hash, source.entries.size());
   for (const auto address : source.entries) { hash_word(hash, address); }
+}
+
+std::string symbol(const CodeImage image, const CompileOptions options) {
+  llvm::SHA256 hash;
+  const auto identity = detail::compiler_identity();
+  hash.update(llvm::StringRef(identity.data(), identity.size()));
+  hash_bytes(hash, detail::semantic_ir());
+  hash_word(hash, image.variants.size());
+  for (const auto &source : image.variants) { hash_variant(hash, source); }
+  hash_word(hash, options.memory.size());
+  for (const auto &layout : options.memory) {
+    hash_word(hash, layout.id);
+    hash_word(hash, layout.memory.size());
+    for (const auto &region : layout.memory) {
+      hash_word(hash, static_cast<unsigned>(region.space));
+      hash_word(hash, region.first);
+      hash_word(hash, region.size);
+      hash_word(hash, static_cast<std::uint64_t>(region.writable));
+      hash_word(hash, static_cast<std::uint64_t>(region.tracked));
+      hash_word(hash, static_cast<std::uint64_t>(region.aliases_program));
+    }
+  }
+  hash_word(hash, options.interrupts.size());
+  for (const auto request : options.interrupts) {
+    hash_word(hash, request.vector);
+    hash_word(hash, request.level);
+  }
+  hash_word(hash, options.transitions.size());
+  for (const auto transfer : options.transitions) {
+    hash_word(hash, transfer.from);
+    hash_word(hash, transfer.to);
+    hash_word(hash, transfer.entry);
+  }
   return "dsp56300_image_" + llvm::toHex(hash.final(), true);
 }
 
@@ -140,9 +170,10 @@ detail::ImageEntry NativeImage::Impl::vector_entry(const Word address,
   return found == vectors.end() ? nullptr : found->second;
 }
 
-void NativeImage::Impl::prepare_vectors(const Variant &variant,
-                                        const detail::ImagePlan &foreground,
-                                        const std::string &name) {
+void NativeImage::Impl::lift_vectors(detail::LlvmModule &module,
+                                     const Variant &variant,
+                                     const detail::ImagePlan &foreground,
+                                     std::map<std::tuple<Word, Word, Word>, std::string> &symbols) {
   std::vector<Word> external;
   external.reserve(variant.transitions.size());
   for (const auto &transfer : variant.transitions) { external.push_back(transfer.first); }
@@ -158,12 +189,11 @@ void NativeImage::Impl::prepare_vectors(const Variant &variant,
     const std::array words{first->second, second->second};
     const auto key = std::tuple(address, words[0], words[1]);
     const auto plan = detail::plan_vector(address, words, foreground, external);
-    if (vectors.contains(key)) { continue; }
-    detail::LlvmModule module(name + ".vector." + llvm::utohexstr(address, true));
-    module.link_bitcode(detail::semantic_ir());
-    detail::lift_vector(module, plan);
-    detail::specialize_image(module);
-    vectors.emplace(key, std::bit_cast<detail::ImageEntry>(compiler->install(module)));
+    if (symbols.contains(key)) { continue; }
+    const auto name = module.name() + ".vector." + llvm::utohexstr(address, true) + "." +
+                      llvm::utohexstr(words[0], true) + "." + llvm::utohexstr(words[1], true);
+    detail::lift_vector(module, plan, name);
+    symbols.emplace(key, name);
     report.prepared_entries += plan.instructions.size();
   }
 }
@@ -237,17 +267,32 @@ NativeImage Core::compile(const CodeImage image, const CompileOptions options) {
     result->variants.push_back(std::move(variant));
   }
   result->validate_vectors(plans);
-  result->compiler = std::make_unique<detail::LlvmCompiler>();
+  detail::LlvmModule module(symbol(image, options));
+  module.link_bitcode(detail::semantic_ir());
+  std::vector<std::string> names;
+  names.reserve(image.variants.size());
+  std::map<std::tuple<Word, Word, Word>, std::string> vector_symbols;
   for (std::size_t index = 0; index < image.variants.size(); ++index) {
     auto &variant = result->variants[index];
-    const auto name = symbol(image.variants[index]);
-    result->prepare_vectors(variant, plans[index], name);
-    detail::LlvmModule module(name);
-    module.link_bitcode(detail::semantic_ir());
-    detail::lift_image(module, plans[index]);
-    detail::specialize_image(module);
-    variant.entry = std::bit_cast<detail::ImageEntry>(result->compiler->install(module));
+    names.push_back(index == 0 ? module.name()
+                               : module.name() + ".variant." + llvm::utohexstr(variant.id, true));
+    result->lift_vectors(module, variant, plans[index], vector_symbols);
+    detail::lift_image(module, plans[index], names.back());
     result->report.prepared_entries += variant.instructions.size();
+  }
+  auto roots = names;
+  for (const auto &item : vector_symbols) { roots.push_back(item.second); }
+  detail::specialize_image(module, roots);
+  result->compiler = std::make_unique<detail::LlvmCompiler>();
+  result->variants.front().entry =
+      std::bit_cast<detail::ImageEntry>(result->compiler->install(module));
+  for (std::size_t index = 1; index < names.size(); ++index) {
+    result->variants[index].entry =
+        std::bit_cast<detail::ImageEntry>(result->compiler->resolve(names[index]));
+  }
+  for (const auto &[key, name] : vector_symbols) {
+    result->vectors.emplace(key,
+                            std::bit_cast<detail::ImageEntry>(result->compiler->resolve(name)));
   }
   result->report.native_bytes = result->compiler->native_bytes();
   return NativeImage(std::move(result));

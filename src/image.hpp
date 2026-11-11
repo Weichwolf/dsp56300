@@ -17,6 +17,7 @@
 
 namespace dsp56300::detail {
 class LlvmCompiler;
+class LlvmModule;
 }
 
 namespace dsp56300 {
@@ -35,9 +36,10 @@ struct NativeImage::Impl {
 
   [[nodiscard]] const Variant &variant(std::uint64_t id) const;
   [[nodiscard]] detail::ImageEntry vector_entry(Word address, std::array<Word, 2> words) const;
-  void prepare_vectors(const Variant &variant,
-                       const detail::ImagePlan &foreground,
-                       const std::string &name);
+  void lift_vectors(detail::LlvmModule &module,
+                    const Variant &variant,
+                    const detail::ImagePlan &foreground,
+                    std::map<std::tuple<Word, Word, Word>, std::string> &symbols);
   void validate_vectors(const std::vector<detail::ImagePlan> &plans) const;
   std::unique_ptr<detail::LlvmCompiler> compiler;
   std::vector<Variant> variants;

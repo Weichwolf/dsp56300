@@ -3,6 +3,7 @@
 #include "support.hpp"
 
 #include <bit>
+#include <cstdint>
 #include <exception>
 #include <iostream>
 #include <llvm/IR/BasicBlock.h>
@@ -72,6 +73,7 @@ void rejected_sanitized_object(LlvmCompiler &compiler) {
 }
 
 void lifecycle() {
+  constexpr std::uint64_t secondary_result = 42;
   {
     LlvmCompiler compiler;
     compiler.define("image_begin", std::bit_cast<const void *>(&initialize));
@@ -86,6 +88,13 @@ void lifecycle() {
       require(native.getModuleIdentifier() == module.name(),
               "A shared bitcode buffer cannot erase distinct module identities");
       native.getFunction(producer.name())->setName(module.name());
+      const auto secondary_name = module.name() + ".additional";
+      auto *secondary = llvm::Function::Create(native.getFunction(module.name())->getFunctionType(),
+                                               llvm::GlobalValue::ExternalLinkage,
+                                               secondary_name,
+                                               native);
+      llvm::IRBuilder<> ir(llvm::BasicBlock::Create(native.getContext(), "entry", secondary));
+      ir.CreateRet(ir.getInt64(secondary_result));
       constexpr bool sanitized = __has_feature(address_sanitizer);
       if (object && sanitized) { rejected_sanitized_object(compiler); }
       const auto *entry = object && !sanitized
@@ -93,6 +102,14 @@ void lifecycle() {
                               : compiler.install(module);
       require(entry != nullptr && initialized == (object ? 2U : 1U) && finalized == 0,
               "Every linked module initializes exactly once before its native entry is published");
+      using Function = std::uint64_t (*)() noexcept;
+      const auto bytes = compiler.native_bytes();
+      const auto additional = std::bit_cast<Function>(compiler.resolve(secondary_name));
+      const auto *same = compiler.resolve(secondary_name);
+      require(additional() == secondary_result && initialized == (object ? 2U : 1U) &&
+                  finalized == 0 && same == std::bit_cast<const void *>(additional) &&
+                  compiler.native_bytes() == bytes,
+              "Additional exports resolve without recompiling or repeating module initialization");
     }
   }
   require(initialized == 2 && finalized == 2,

@@ -2,6 +2,7 @@
 #include "jit/llvm/image.hpp"
 #include "jit/llvm/runtime.hpp"
 
+#include <array>
 #include <llvm-c/Error.h>
 #include <llvm-c/Transforms/PassBuilder.h>
 #include <llvm/IR/Attributes.h>
@@ -19,6 +20,7 @@
 #include <llvm/Transforms/IPO/Internalize.h>
 #include <memory>
 #include <set>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -34,14 +36,10 @@ bool isa_function(const llvm::Function &function) {
          (name.starts_with("_ZN8dsp563006detail") && name.contains("permitted_vector_"));
 }
 
-std::set<llvm::Function *> semantic_calls(llvm::Module &module, const std::string &entry) {
+std::set<llvm::Function *> semantic_calls(llvm::Module &module) {
   std::set<llvm::Function *> result;
   for (const auto &function : module) {
-    const auto name = function.getName();
-    if (name != entry && name != entry + ".dispatch" && !name.starts_with(entry + ".unit.") &&
-        !name.starts_with(entry + ".semantic.")) {
-      continue;
-    }
+    if (!function.hasFnAttribute("dsp56300-image-part")) { continue; }
     for (const auto &block : function) {
       for (const auto &instruction : block) {
         const auto *call = llvm::dyn_cast<llvm::CallBase>(&instruction);
@@ -85,19 +83,30 @@ llvm::IRHash fingerprint(const llvm::Module &module) {
 }
 
 void specialize_image(LlvmModule &module) {
+  const std::array entries{module.name()};
+  specialize_image(module, entries);
+}
+
+void specialize_image(LlvmModule &module, const std::span<const std::string> entries) {
   if (module.code() == nullptr) { throw std::logic_error("Image module was already transferred"); }
   auto &native = *llvm::unwrap(module.code());
-  const auto *entry = native.getFunction(module.name());
-  if (entry == nullptr || !entry->hasFnAttribute("dsp56300-image")) {
-    throw std::invalid_argument("Module has no lifted DSP image entry");
+  if (entries.empty()) { throw std::invalid_argument("DSP image requires prepared entry roots"); }
+  std::set<const llvm::GlobalValue *> roots;
+  for (const auto &name : entries) {
+    const auto *entry = native.getFunction(name);
+    if (entry == nullptr || entry->isDeclaration() || !entry->hasFnAttribute("dsp56300-image") ||
+        !roots.insert(entry).second) {
+      throw std::invalid_argument("Invalid or duplicate lifted DSP image entry: " + name);
+    }
   }
   std::string diagnostic;
   llvm::raw_string_ostream output(diagnostic);
   if (llvm::verifyModule(native, &output)) { throw std::invalid_argument(diagnostic); }
-  llvm::internalizeModule(native, [&](const llvm::GlobalValue &value) { return &value == entry; });
+  llvm::internalizeModule(native,
+                          [&](const llvm::GlobalValue &value) { return roots.contains(&value); });
   passes(module, "globaldce");
   for (;;) {
-    const auto frontier = semantic_calls(native, module.name());
+    const auto frontier = semantic_calls(native);
     if (frontier.empty()) { break; }
     const auto before = fingerprint(native);
     for (auto *function : frontier) {

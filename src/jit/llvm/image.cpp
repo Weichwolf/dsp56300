@@ -13,6 +13,7 @@
 #include <llvm/ADT/StringExtras.h>
 #include <llvm/IR/Attributes.h>
 #include <llvm/IR/BasicBlock.h>
+#include <llvm/IR/CallingConv.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
@@ -31,6 +32,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -81,10 +83,13 @@ llvm::Function *semantic_function(llvm::Module &module, const bool vector) {
 
 class ImageLifter {
 public:
-  ImageLifter(LlvmModule &module, const ImagePlan &plan, const bool vector = false)
+  ImageLifter(LlvmModule &module,
+              const ImagePlan &plan,
+              const std::string_view entry,
+              const bool vector = false)
       : module_(*llvm::unwrap(module.code())),
         ir_(module_.getContext()),
-        name_(module.name()),
+        name_(entry.empty() ? module.name() : std::string(entry)),
         plan_(plan),
         edges_(plan.edges()),
         semantic_(semantic_function(module_, vector)) {
@@ -125,6 +130,7 @@ private:
   }
 
   void attributes(llvm::Function *result) {
+    result->addFnAttr("dsp56300-image-part", "1");
     result->addFnAttr(llvm::Attribute::NoUnwind);
     result->addFnAttr(llvm::Attribute::StackProtectStrong);
     for (const auto *const key : {"target-cpu", "target-features", "frame-pointer"}) {
@@ -262,12 +268,26 @@ private:
     const auto key = std::pair(operation.opcode, operation.extension);
     const auto found = semantic_variants_.find(key);
     if (found != semantic_variants_.end()) { return found->second; }
-    const auto name = name_ + ".semantic." + llvm::utohexstr(key.first, true) + "." +
-                      llvm::utohexstr(key.second, true);
+    const auto *const kind = semantic_->arg_size() == 3 ? "ordinary." : "vector.";
+    const auto name = module_.getModuleIdentifier() + ".semantic." + kind +
+                      llvm::utohexstr(key.first, true) + "." + llvm::utohexstr(key.second, true);
     auto *type =
         llvm::FunctionType::get(ir_.getInt64Ty(), {ir_.getPtrTy(), ir_.getInt32Ty()}, false);
+    if (auto *existing = module_.getNamedValue(name)) {
+      auto *function = llvm::dyn_cast<llvm::Function>(existing);
+      if (function == nullptr || function->isDeclaration() || function->getFunctionType() != type ||
+          function->getCallingConv() != llvm::CallingConv::C ||
+          !function->hasFnAttribute("dsp56300-encoding") ||
+          function->getFnAttribute("dsp56300-encoding").getValueAsString() !=
+              semantic_->getName()) {
+        throw std::invalid_argument("DSP image encoding name conflicts with an existing symbol");
+      }
+      semantic_variants_.emplace(key, function);
+      return function;
+    }
     auto *result = llvm::Function::Create(type, llvm::GlobalValue::InternalLinkage, name, module_);
     attributes(result);
+    result->addFnAttr("dsp56300-encoding", semantic_->getName());
     const llvm::IRBuilderBase::InsertPointGuard insertion(ir_);
     ir_.SetInsertPoint(block(result, "entry"));
     std::vector<Value *> arguments{result->getArg(0)};
@@ -424,17 +444,17 @@ void lift_image(LlvmModule &module,
   lift_image(module, plan);
 }
 
-void lift_image(LlvmModule &module, const ImagePlan &plan) {
+void lift_image(LlvmModule &module, const ImagePlan &plan, const std::string_view entry) {
   if (module.code() == nullptr) { throw std::logic_error("Image module was already transferred"); }
   if (plan.instructions.empty()) { throw std::invalid_argument("Image has no instructions"); }
-  const ImageLifter lifter(module, plan);
+  const ImageLifter lifter(module, plan, entry);
 }
 
-void lift_vector(LlvmModule &module, const ImagePlan &plan) {
+void lift_vector(LlvmModule &module, const ImagePlan &plan, const std::string_view entry) {
   if (module.code() == nullptr) { throw std::logic_error("Image module was already transferred"); }
   if (plan.instructions.empty()) {
     throw std::invalid_argument("Vector image has no instructions");
   }
-  const ImageLifter lifter(module, plan, true);
+  const ImageLifter lifter(module, plan, entry, true);
 }
 }

@@ -448,6 +448,10 @@ const void *LlvmCompiler::install(LlvmModule &module) {
   return impl_->lookup(module.name());
 }
 
+const void *LlvmCompiler::resolve(const std::string &name) const {
+  return impl_->lookup(name);
+}
+
 std::vector<std::byte> LlvmCompiler::object(LlvmModule &module) {
   if (module.code() == nullptr) { throw std::logic_error("LLVM module was already transferred"); }
   relocatable(module.code());

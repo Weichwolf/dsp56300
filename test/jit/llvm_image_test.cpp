@@ -3,6 +3,7 @@
 #include "dsp56300/memory.hpp"
 #include "image_entry.hpp"
 #include "isa.hpp"
+#include "jit/image_plan.hpp"
 #include "jit/llvm/image.hpp"
 #include "jit/llvm/runtime.hpp"
 #include "support.hpp"
@@ -27,6 +28,7 @@
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Metadata.h>
 #include <llvm/IR/Module.h>
+#include <llvm/IR/Type.h>
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/raw_ostream.h>
 #include <span>
@@ -177,6 +179,91 @@ void materialization(const std::span<const std::byte> semantics) {
   require(module.code() == nullptr, "Direct installation consumes the lifted semantic module");
 }
 
+std::size_t shared_encodings(const LlvmModule &module) {
+  std::size_t count = 0;
+  for (const auto &function : *llvm::unwrap(module.code())) {
+    if (function.hasFnAttribute("dsp56300-encoding")) { ++count; }
+  }
+  return count;
+}
+
+void combined_images(const std::span<const std::byte> semantics) {
+  LlvmModule module("combined_images");
+  module.link_bitcode(semantics);
+  const auto plan = plan_image(code, entries);
+  const std::array roots{module.name(),
+                         module.name() + ".other",
+                         module.name() + ".vector.first",
+                         module.name() + ".vector.second"};
+  lift_image(module, plan);
+  const auto ordinary = shared_encodings(module);
+  require(ordinary != 0, "An ordinary image creates explicit shared encoding definitions");
+  lift_image(module, plan, roots[1]);
+  require(shared_encodings(module) == ordinary,
+          "Another code view reuses every identical ordinary encoding before expansion");
+  constexpr Word vector_address = 32;
+  const auto vector_plan =
+      plan_vector(vector_address, {opcode<isa::Opcode::nop>, opcode<isa::Opcode::nop>}, plan);
+  lift_vector(module, vector_plan, roots[2]);
+  require(shared_encodings(module) == ordinary + 1,
+          "Inserted-vector NOP effects remain distinct from ordinary NOP effects");
+  lift_vector(module, vector_plan, roots[3]);
+  require(shared_encodings(module) == ordinary + 1,
+          "Another inserted-vector root reuses its matching encoding definition");
+  specialize_image(module, roots);
+  const auto &native = *llvm::unwrap(module.code());
+  for (const auto &name : roots) {
+    const auto *function = native.getFunction(name);
+    require(function != nullptr && !function->isDeclaration() && !function->hasLocalLinkage(),
+            "All declared ordinary and vector roots survive joint specialization");
+  }
+  for (const auto &function : native) {
+    require(!function.hasFnAttribute("dsp56300-encoding"),
+            "Shared encoding definitions disappear into complete native image functions");
+  }
+  LlvmCompiler exported;
+  const auto object = exported.object(module);
+  control(std::bit_cast<ImageEntry>(exported.install_object(object, roots[0])));
+  for (std::size_t index = 1; index < roots.size(); ++index) {
+    control(std::bit_cast<ImageEntry>(exported.resolve(roots[index])));
+  }
+  LlvmCompiler direct;
+  control(std::bit_cast<ImageEntry>(direct.install(module)));
+  for (std::size_t index = 1; index < roots.size(); ++index) {
+    control(std::bit_cast<ImageEntry>(direct.resolve(roots[index])));
+  }
+}
+
+void invalid_image_roots(const std::span<const std::byte> semantics) {
+  LlvmModule module("invalid_image_roots");
+  module.link_bitcode(semantics);
+  lift_image(module, code, entries);
+  auto &native = *llvm::unwrap(module.code());
+  auto *type = llvm::FunctionType::get(llvm::Type::getVoidTy(native.getContext()), false);
+  auto *host =
+      llvm::Function::Create(type, llvm::GlobalValue::ExternalLinkage, "host_root", native);
+  llvm::IRBuilder<> ir(llvm::BasicBlock::Create(native.getContext(), "entry", host));
+  ir.CreateRetVoid();
+  auto *declaration =
+      llvm::Function::Create(type, llvm::GlobalValue::ExternalLinkage, "declared_root", native);
+  declaration->addFnAttr("dsp56300-image", "1");
+  const std::array<std::vector<std::string>, 5> rejected{std::vector<std::string>{},
+                                                         {"unknown_root"},
+                                                         {module.name(), module.name()},
+                                                         {"host_root"},
+                                                         {"declared_root"}};
+  const auto before = module.bitcode();
+  for (const auto &roots : rejected) {
+    bool failed = false;
+    try {
+      specialize_image(module, roots);
+    } catch (const std::invalid_argument &) { failed = true; }
+    require(failed && module.bitcode() == before,
+            "Invalid image-root inventories fail transactionally before internalization");
+  }
+  specialize_image(module);
+}
+
 void escaped_semantic(const std::span<const std::byte> semantics) {
   constexpr auto *canonical = "dsp56300_semantic_execute";
   constexpr auto *escaped = "\001dsp56300_semantic_execute";
@@ -277,6 +364,8 @@ int main(const int argc, const char *const *const argv) {
     rejected_abi(semantics);
     escaped_semantic(semantics);
     materialization(semantics);
+    combined_images(semantics);
+    invalid_image_roots(semantics);
     prepared_program_store(semantics);
     std::cout << test::checks
               << " native image compiler/control checks passed; no DSP ISA "

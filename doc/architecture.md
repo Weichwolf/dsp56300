@@ -82,6 +82,10 @@ gaps; transport fragments and instruction counts do not impose boundaries.
 Connect known successors directly with native tail transfers, including sequential
 edges crossing blocks. Keep dynamic targets in the prepared native table.
 Keep all functions in the same LLVM O3 module and let the optimizer choose inlining.
+Import semantic IR once for the complete image set. Share encoding definitions
+across prepared variants while keeping ordinary and inserted-vector effects
+distinct. Preserve every declared entry root and materialize all of them before
+admitting execution; additional exports never repeat module initialization.
 Bind each known instruction PC into semantic IR. Encode actual static successors,
 REP self-edges and DO backedges at the ending instruction's final word. Other
 dynamic transfers use the prepared native target table through tail calls;

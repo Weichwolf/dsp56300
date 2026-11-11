@@ -47,6 +47,8 @@ public:
   // Verify exact semantic IR, optimize with the native target, materialize now.
   // The single exported entry has the module's name. Code lives with this owner.
   [[nodiscard]] const void *install(LlvmModule &module);
+  // Resolve another export from a completely materialized native module.
+  [[nodiscard]] const void *resolve(const std::string &name) const;
   // Use the same verified native O3 pipeline, preserving the module owner.
   [[nodiscard]] std::vector<std::byte> object(LlvmModule &module);
   // Load a relocatable native object; code/binding identity belongs to the caller.
