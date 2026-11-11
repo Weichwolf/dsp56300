@@ -80,6 +80,38 @@ void check(const Function function) {
   }
 }
 
+void semantic_labels() {
+  for (const auto *name : {"dsp56300_semantic_execute",
+                           "dsp56300_semantic_vector_execute",
+                           "dsp56300_semantic_memory",
+                           "dsp56300_semantic_region"}) {
+    const auto escaped = std::string(1, '\001') + name;
+    LlvmModule source(escaped);
+    lift(source);
+    LlvmModule imported(name);
+    imported.link_bitcode(source.bitcode());
+    auto *const canonical = LLVMGetNamedFunction(imported.code(), name);
+    require(canonical != nullptr && LLVMGetFirstBasicBlock(canonical) != nullptr &&
+                LLVMGetNamedFunction(imported.code(), escaped.c_str()) == nullptr,
+            "Every private semantic asm label has one canonical definition after linking");
+    LlvmCompiler compiler;
+    check(std::bit_cast<Function>(compiler.install(imported)));
+
+    auto *function = LLVMGetNamedFunction(source.code(), escaped.c_str());
+    LLVMAddFunction(source.code(), name, LLVMGlobalGetValueType(function));
+    LlvmModule retained("retained_semantic_label");
+    lift(retained);
+    const auto before = retained.bitcode();
+    const auto *context = retained.context();
+    bool rejected = false;
+    try {
+      retained.link_bitcode(source.bitcode());
+    } catch (const std::runtime_error &) { rejected = true; }
+    require(rejected && retained.bitcode() == before && retained.context() == context,
+            "Ambiguous semantic labels fail without changing the destination module");
+  }
+}
+
 void failure_ownership(LlvmCompiler &compiler, const Function retained) {
   LlvmModule invalid("invalid");
   auto *const type = LLVMFunctionType(LLVMInt32TypeInContext(invalid.context()), nullptr, 0, 0);
@@ -294,6 +326,7 @@ void independent_owners() {
 }
 
 int main() try {
+  semantic_labels();
   independent_owners();
   exported_code();
   named_boundaries();
