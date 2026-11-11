@@ -94,6 +94,18 @@ void validate(const CodeImage image, const CompileOptions options) {
       throw std::invalid_argument("Duplicate DSP code variant");
     }
   }
+  std::set<std::pair<std::uint64_t, Word>> transfers;
+  for (const auto transfer : options.transitions) {
+    if (!ids.contains(transfer.from) || !ids.contains(transfer.to) ||
+        transfer.from == transfer.to || transfer.entry > word_mask ||
+        !transfers.emplace(transfer.from, transfer.entry).second) {
+      throw std::invalid_argument("Invalid or ambiguous DSP code transition");
+    }
+    const auto target = std::ranges::find(image.variants, transfer.to, &CodeVariant::id);
+    if (std::ranges::find(target->entries, transfer.entry) == target->entries.end()) {
+      throw std::invalid_argument("DSP code transition target is not a declared destination entry");
+    }
+  }
   std::set<std::uint64_t> layouts;
   for (const auto &layout : options.memory) {
     if (!ids.contains(layout.id) || !layouts.insert(layout.id).second) {
@@ -131,17 +143,21 @@ detail::ImageEntry NativeImage::Impl::vector_entry(const Word address,
 void NativeImage::Impl::prepare_vectors(const Variant &variant,
                                         const detail::ImagePlan &foreground,
                                         const std::string &name) {
+  std::vector<Word> external;
+  external.reserve(variant.transitions.size());
+  for (const auto &transfer : variant.transitions) { external.push_back(transfer.first); }
   for (const auto &[address, level] : interrupts) {
     static_cast<void>(level);
     const auto first = variant.words.find(address);
     const auto second = variant.words.find(address + 1);
+    if (first == variant.words.end() && second == variant.words.end()) { continue; }
     if (first == variant.words.end() || second == variant.words.end()) {
       throw std::invalid_argument("DSP vector requires both declared source words at P:$" +
                                   llvm::utohexstr(address, true, 6));
     }
     const std::array words{first->second, second->second};
     const auto key = std::tuple(address, words[0], words[1]);
-    const auto plan = detail::plan_vector(address, words, foreground);
+    const auto plan = detail::plan_vector(address, words, foreground, external);
     if (vectors.contains(key)) { continue; }
     detail::LlvmModule module(name + ".vector." + llvm::utohexstr(address, true));
     module.link_bitcode(detail::semantic_ir());
@@ -152,18 +168,62 @@ void NativeImage::Impl::prepare_vectors(const Variant &variant,
   }
 }
 
+void NativeImage::Impl::validate_vectors(const std::vector<detail::ImagePlan> &plans) const {
+  std::set<Word> available;
+  for (std::size_t index = 0; index < variants.size(); ++index) {
+    const auto &source = variants[index];
+    std::vector<Word> external;
+    external.reserve(source.transitions.size());
+    for (const auto &transfer : source.transitions) { external.push_back(transfer.first); }
+    for (const auto &[address, level] : interrupts) {
+      static_cast<void>(level);
+      const auto first = source.words.find(address);
+      const auto second = source.words.find(address + 1);
+      if (first == source.words.end() && second == source.words.end()) { continue; }
+      if (first == source.words.end() || second == source.words.end()) {
+        throw std::invalid_argument("DSP vector has incomplete source at P:$" +
+                                    llvm::utohexstr(address, true, 6));
+      }
+      static_cast<void>(
+          detail::plan_vector(address, {first->second, second->second}, plans[index], external));
+      available.insert(address);
+    }
+  }
+  for (const auto &[address, level] : interrupts) {
+    static_cast<void>(level);
+    if (!available.contains(address)) {
+      throw std::invalid_argument("DSP vector has no prepared source at P:$" +
+                                  llvm::utohexstr(address, true, 6));
+    }
+  }
+}
+
 NativeImage Core::compile(const CodeImage image, const CompileOptions options) {
   validate(image, options);
   auto result = std::make_shared<NativeImage::Impl>();
-  result->compiler = std::make_unique<detail::LlvmCompiler>();
   for (const auto request : options.interrupts) {
     result->interrupts.emplace(request.vector, request.level);
   }
   result->variants.reserve(image.variants.size());
+  std::vector<detail::ImagePlan> plans;
+  plans.reserve(image.variants.size());
   for (const auto &source : image.variants) {
-    const auto plan = detail::plan_image(source.code, source.entries);
     NativeImage::Impl::Variant variant;
     variant.id = source.id;
+    std::vector<Word> external;
+    external.reserve(options.transitions.size());
+    for (const auto transfer : options.transitions) {
+      if (transfer.from != source.id) { continue; }
+      variant.transitions.emplace(transfer.entry, transfer.to);
+      external.push_back(transfer.entry);
+    }
+    const auto plan = detail::plan_image(source, external);
+    for (const auto entry : external) {
+      if (plan.find(entry) != nullptr) {
+        throw std::invalid_argument(
+            "DSP transition entry is already resident in its source variant");
+      }
+    }
     variant.instructions = plan.instructions;
     variant.fixed_memory = !options.memory.empty();
     if (variant.fixed_memory) { variant.memory = regions(source.id, options); }
@@ -173,15 +233,21 @@ NativeImage Core::compile(const CodeImage image, const CompileOptions options) {
                               span.words[index]);
       }
     }
-    const auto name = symbol(source);
-    result->prepare_vectors(variant, plan, name);
+    plans.push_back(plan);
+    result->variants.push_back(std::move(variant));
+  }
+  result->validate_vectors(plans);
+  result->compiler = std::make_unique<detail::LlvmCompiler>();
+  for (std::size_t index = 0; index < image.variants.size(); ++index) {
+    auto &variant = result->variants[index];
+    const auto name = symbol(image.variants[index]);
+    result->prepare_vectors(variant, plans[index], name);
     detail::LlvmModule module(name);
     module.link_bitcode(detail::semantic_ir());
-    detail::lift_image(module, source.code, source.entries);
+    detail::lift_image(module, plans[index]);
     detail::specialize_image(module);
     variant.entry = std::bit_cast<detail::ImageEntry>(result->compiler->install(module));
     result->report.prepared_entries += variant.instructions.size();
-    result->variants.push_back(std::move(variant));
   }
   result->report.native_bytes = result->compiler->native_bytes();
   return NativeImage(std::move(result));

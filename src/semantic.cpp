@@ -13,7 +13,7 @@
 
 namespace dsp56300::detail {
 extern "C" const std::array<Word, semantic_abi_fields> dsp56300_semantic_abi{
-    2,
+    3,
     word_mask,
     sizeof(Instruction),
     offsetof(Instruction, opcode),

@@ -53,7 +53,9 @@ InstructionFetch Core::instruction_fetch() const {
 }
 
 RunResult Core::run_instruction(const InstructionWords words) {
-
+  if (impl_->next_image != nullptr) {
+    throw std::logic_error("Captured execution requires the pending image installation");
+  }
   if (impl_->executing || impl_->fault.kind != FaultKind::none ||
       impl_->cpu.processing != ExecutionState::running) {
     throw std::logic_error("Captured execution requires healthy stopped running state");
@@ -125,6 +127,7 @@ bool Core::interrupt_ready_opcode(const InstructionWords words) const {
 }
 
 bool Core::interrupt_ready_captured(const InstructionWords words, const bool complete) const {
+  if (impl_->next_image != nullptr) { return false; }
   auto decoded = detail::Instruction{};
   if (impl_->image) {
     const auto found = impl_->active_image->instructions.find(words.address);

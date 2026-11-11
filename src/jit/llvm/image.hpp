@@ -16,6 +16,7 @@ using ImageEntry = std::uint64_t (*)(void *, Word, std::uint32_t, std::uint64_t)
 // Link the exact semantic/binding bitcode first. Lift only explicitly declared code.
 // Mutable instance state remains in the owner argument, never in exported objects.
 void lift_image(LlvmModule &module, std::span<const CodeSpan> code, std::span<const Word> entries);
+void lift_image(LlvmModule &module, const ImagePlan &plan);
 void lift_vector(LlvmModule &module, const ImagePlan &plan);
 // Remove ordinary ISA calls before the shared native O3/export/install pipeline.
 void specialize_image(LlvmModule &module);

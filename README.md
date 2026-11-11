@@ -79,7 +79,12 @@ ownership and never fall back to ordinary decoding or emission. Code/mapping
 changes require a matching installation; unknown entries and unprepared
 cache/debug forms fail explicitly. Declare vector/priority pairs in CompileOptions
 before compilation; captured vector words survive selection of prepared newer
-resident code without replaying a peripheral action.
+resident code without replaying a peripheral action. Declare cross-version
+entries with `CompileOptions::transitions`: a real transfer to an absent target
+yields without a fault. Install exactly its declared destination after validating
+the resident words; rejected installations retain the pending transfer. Interrupt
+admission and captured execution wait for that installation. Explicit reset
+cancels it. Ordinary control flow stays within the native image.
 
 The [target architecture](doc/architecture.md) requires complete Ahead-of-Time
 Binary Translation of consumer-owned executable images and known variants.

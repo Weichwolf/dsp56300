@@ -63,13 +63,14 @@ std::optional<Word> encoded_target(const Word address, const Instruction &instru
   return flow.direct[flow.count - 1];
 }
 
-void validate_targets(const ImagePlan &plan) {
+void validate_targets(const ImagePlan &plan, const std::span<const Word> external_entries) {
   for (const auto entry : plan.entries) {
     if (plan.find(entry) == nullptr) { reject(entry, "entry is not a declared instruction start"); }
   }
   for (const auto &[address, instruction] : plan.instructions) {
     const auto target = encoded_target(address, instruction);
-    if (target && plan.find(*target) == nullptr) {
+    if (target && plan.find(*target) == nullptr &&
+        std::ranges::find(external_entries, *target) == external_entries.end()) {
       reject(address,
              "encoded target P:$" + llvm::utohexstr(*target, true, 6) +
                  " is not a declared instruction start");
@@ -126,7 +127,9 @@ std::map<Word, std::vector<Word>> ImagePlan::edges() const {
   return result;
 }
 
-ImagePlan plan_image(const std::span<const CodeSpan> code, const std::span<const Word> entries) {
+ImagePlan plan_image(const CodeVariant &source, const std::span<const Word> external_entries) {
+  const auto code = source.code;
+  const auto entries = source.entries;
   if (code.empty() || entries.empty()) {
     throw std::invalid_argument("DSP image requires executable streams and established entries");
   }
@@ -152,12 +155,18 @@ ImagePlan plan_image(const std::span<const CodeSpan> code, const std::span<const
   std::ranges::sort(result.entries);
   const auto duplicates = std::ranges::unique(result.entries);
   result.entries.erase(duplicates.begin(), duplicates.end());
-  validate_targets(result);
+  validate_targets(result, external_entries);
   return result;
 }
 
-ImagePlan
-plan_vector(const Word address, const std::array<Word, 2> words, const ImagePlan &foreground) {
+ImagePlan plan_image(const std::span<const CodeSpan> code, const std::span<const Word> entries) {
+  return plan_image(CodeVariant{.id = 0, .code = code, .entries = entries}, {});
+}
+
+ImagePlan plan_vector(const Word address,
+                      const std::array<Word, 2> words,
+                      const ImagePlan &foreground,
+                      const std::span<const Word> external_entries) {
   if (address > word_mask || (address & 1U) != 0) {
     reject(address, "vector address must be even and fit 24 bits");
   }
@@ -177,7 +186,8 @@ plan_vector(const Word address, const std::array<Word, 2> words, const ImagePlan
       instruction.extension = words[1];
     }
     const auto target = encoded_target(pc, instruction);
-    if (target && foreground.find(*target) == nullptr) {
+    if (target && foreground.find(*target) == nullptr &&
+        std::ranges::find(external_entries, *target) == external_entries.end()) {
       reject(pc, "vector call target is not a declared ordinary instruction");
     }
     result.instructions.emplace(pc, instruction);

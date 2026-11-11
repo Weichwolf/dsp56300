@@ -110,6 +110,8 @@ struct Core::Impl {
   [[nodiscard]] RunResult run_image(std::uint32_t quota);
   [[nodiscard]] detail::ImageEntry image_vector();
   [[nodiscard]] bool image_interrupt(Word address, unsigned level);
+  [[nodiscard]] bool image_transition(bool eligible);
+  [[nodiscard]] Word image_address(bool vector_fetch) const noexcept;
   void image_word_written(detail::ProgramCache::Write transfer) noexcept;
   void image_io_completed() noexcept;
   void unprepared(Word address, Word value = 0) noexcept;
@@ -216,6 +218,7 @@ struct Core::Impl {
   std::unique_ptr<CodePages> code_pages;
   std::shared_ptr<const NativeImage::Impl> image;
   const NativeImage::Impl::Variant *active_image = nullptr;
+  const NativeImage::Impl::Variant *next_image = nullptr;
   bool image_ready = false;
   std::uint64_t image_revision = 0;
   std::array<std::span<const MemoryWindow>, 2> image_windows{};

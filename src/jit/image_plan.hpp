@@ -25,7 +25,11 @@ struct ImagePlan {
 // Overlapping streams must agree on bytes; alternate starts require an explicit span.
 // Calls do not make their saved return addresses into executable-code obligations.
 [[nodiscard]] ImagePlan plan_image(std::span<const CodeSpan> code, std::span<const Word> entries);
+[[nodiscard]] ImagePlan plan_image(const CodeVariant &source,
+                                   std::span<const Word> external_entries);
 // A vector's two captured words form their own fetch context, including operands.
-[[nodiscard]] ImagePlan
-plan_vector(Word address, std::array<Word, 2> words, const ImagePlan &foreground);
+[[nodiscard]] ImagePlan plan_vector(Word address,
+                                    std::array<Word, 2> words,
+                                    const ImagePlan &foreground,
+                                    std::span<const Word> external_entries = {});
 }

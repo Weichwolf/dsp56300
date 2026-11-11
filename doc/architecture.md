@@ -83,7 +83,14 @@ REP self-edges and DO backedges at the ending instruction's final word. Other
 dynamic transfers use the prepared native target table through tail calls;
 do not create artificial all-to-all intrafunction dispatcher loops.
 Install code only at a stopped owner boundary after validating the captured code
-revision. Compilation failure leaves architecture/progress unchanged. Keep LLVM
+revision. Explicit cross-variant declarations bind an absent entry to one
+prepared destination version. A completed native transfer yields at the owner
+boundary without a fault, leaving registers, stacks, loops, captured vectors and
+progress intact. The owner validates resident words and selects that exact image;
+failed installation retains the boundary without replaying the jump. No global
+PC lookup chooses between different encodings. Declared interrupts may be absent
+in an earlier loader version; admission requires their source in the installed
+version. Compilation failure leaves architecture/progress unchanged. Keep LLVM
 handles private, instrument emitted native code explicitly in sanitizer builds,
 and initialize LLVM once per process before parallel preparation. Core destruction
 must not shut down LLVM while another core owns code. Preparation has no fixed

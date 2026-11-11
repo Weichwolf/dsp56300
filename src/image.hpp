@@ -27,6 +27,7 @@ struct NativeImage::Impl {
     std::uint64_t id = 0;
     std::map<Word, Word> words;
     std::map<Word, detail::Instruction> instructions;
+    std::map<Word, std::uint64_t> transitions;
     std::vector<RegionLayout> memory;
     bool fixed_memory = false;
     detail::ImageEntry entry = nullptr;
@@ -37,6 +38,7 @@ struct NativeImage::Impl {
   void prepare_vectors(const Variant &variant,
                        const detail::ImagePlan &foreground,
                        const std::string &name);
+  void validate_vectors(const std::vector<detail::ImagePlan> &plans) const;
   std::unique_ptr<detail::LlvmCompiler> compiler;
   std::vector<Variant> variants;
   std::set<std::pair<Word, unsigned>> interrupts;

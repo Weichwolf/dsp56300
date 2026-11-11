@@ -116,9 +116,16 @@ struct InterruptRequest {
   unsigned level;
 };
 
+struct CodeTransition {
+  std::uint64_t from, to;
+  Word entry;
+};
+
 struct CompileOptions {
   std::span<const VariantLayout> memory;
   std::span<const InterruptRequest> interrupts;
+  // An absent resident target may yield only to this explicitly prepared version.
+  std::span<const CodeTransition> transitions;
 };
 
 class NativeImage {

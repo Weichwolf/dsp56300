@@ -402,6 +402,12 @@ void lift_image(LlvmModule &module,
                 const std::span<const Word> entries) {
   if (module.code() == nullptr) { throw std::logic_error("Image module was already transferred"); }
   const auto plan = plan_image(code, entries);
+  lift_image(module, plan);
+}
+
+void lift_image(LlvmModule &module, const ImagePlan &plan) {
+  if (module.code() == nullptr) { throw std::logic_error("Image module was already transferred"); }
+  if (plan.instructions.empty()) { throw std::invalid_argument("Image has no instructions"); }
   const ImageLifter lifter(module, plan);
 }
 

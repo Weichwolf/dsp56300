@@ -262,6 +262,7 @@ void Core::reset() {
 
   impl_->cpu = {};
   impl_->vector = {};
+  impl_->next_image = nullptr;
   impl_->debug_vector = 0;
   impl_->cpu.processing = ExecutionState::running;
   impl_->icache.reset();
@@ -370,7 +371,7 @@ RunResult Core::run_until(const std::uint64_t base_cycle_deadline) {
 }
 
 bool Core::interrupt_ready() const {
-
+  if (impl_->next_image != nullptr) { return false; }
   if ((impl_->cpu.processing != ExecutionState::running &&
        impl_->cpu.processing != ExecutionState::waiting) ||
       (impl_->cpu.debug_flags & detail::debug_interrupt_pending) != 0 ||

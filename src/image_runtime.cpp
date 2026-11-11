@@ -86,6 +86,10 @@ void Core::install(const NativeImage &image, const std::uint64_t variant) {
   const detail::ExecutionGuard guard(self.executing);
   if (!image.impl_) { throw std::invalid_argument("Cannot install an empty DSP image"); }
   const auto &selected = image.impl_->variant(variant);
+  if (self.next_image != nullptr &&
+      (image.impl_ != self.image || selected.id != self.next_image->id)) {
+    throw std::invalid_argument("DSP transfer requires its declared target image variant");
+  }
   if (self.debug_ready() || self.instruction_cache_active()) {
     throw std::invalid_argument("DSP image does not prepare the current debug/cache fetch form");
   }
@@ -124,6 +128,7 @@ void Core::install(const NativeImage &image, const std::uint64_t variant) {
   self.image_windows = granted;
   self.image_revision = revision;
   self.image_ready = true;
+  self.next_image = nullptr;
 }
 
 void Core::Impl::unprepared(const Word address, const Word value) noexcept {
@@ -133,6 +138,7 @@ void Core::Impl::unprepared(const Word address, const Word value) noexcept {
 
 RunResult Core::Impl::run_image(const std::uint32_t quota) {
   RunResult result;
+  if (next_image != nullptr) { yield_requested = true; }
   while (result.retired < quota && cpu.cycles < cycle_deadline && fault.kind == FaultKind::none &&
          cpu.processing == ExecutionState::running && !yield_requested) {
     if (!image_ready || (io != nullptr && image_revision != io->program_revision()) ||
@@ -143,20 +149,20 @@ RunResult Core::Impl::run_image(const std::uint32_t quota) {
     const bool vector_fetch = exception_ready();
     const auto entry = vector_fetch ? image_vector() : active_image->entry;
     if (entry == nullptr) { break; }
-    const auto address =
-        vector_fetch
-            ? (vector.address + (vector.phase == VectorPhase::second ? 1U : 0U)) & word_mask
-            : cpu.reg.pc;
+    const auto address = image_address(vector_fetch);
     const auto outcome = detail::dsp56300_image_enter(
         entry, this, address, quota - result.retired, cycle_deadline - cpu.cycles);
     constexpr unsigned reason_shift = 32;
     const auto retired = static_cast<std::uint32_t>(outcome);
     result.retired += retired;
     if ((outcome >> reason_shift) == static_cast<unsigned>(detail::ImageExit::unprepared)) {
-      unprepared(vector_fetch ? address : cpu.reg.pc);
+      if (vector_fetch || !image_transition(result.retired != 0)) {
+        unprepared(vector_fetch ? address : cpu.reg.pc);
+      }
     }
     if (retired == 0) { break; }
   }
+  static_cast<void>(image_transition(result.retired != 0));
   result.progress = {.instructions = cpu.instructions, .estimated_cycles = cpu.cycles};
   result.fault = fault;
   result.state = cpu.processing;
@@ -164,10 +170,33 @@ RunResult Core::Impl::run_image(const std::uint32_t quota) {
   return result;
 }
 
+Word Core::Impl::image_address(const bool vector_fetch) const noexcept {
+  if (!vector_fetch) { return cpu.reg.pc; }
+  return (vector.address + (vector.phase == VectorPhase::second ? 1U : 0U)) & word_mask;
+}
+
+bool Core::Impl::image_transition(const bool eligible) {
+  if (!eligible || next_image != nullptr || active_image->transitions.empty() ||
+      fault.kind != FaultKind::none || cpu.processing == ExecutionState::debugging ||
+      exception_ready() || debug_ready() || instruction_cache_active()) {
+    return false;
+  }
+  const auto transfer = active_image->transitions.find(cpu.reg.pc);
+  if (transfer == active_image->transitions.end()) { return false; }
+  next_image = &image->variant(transfer->second);
+  image_ready = false;
+  yield_requested = true;
+  return true;
+}
+
 bool Core::Impl::image_interrupt(const Word address, const unsigned level) {
+  if (next_image != nullptr) {
+    throw std::logic_error("DSP interrupt admission requires the pending image installation");
+  }
   if (!image_ready || (io != nullptr && image_revision != io->program_revision()) ||
       debug_ready() || instruction_cache_active() ||
-      !image->interrupts.contains({address, level})) {
+      !image->interrupts.contains({address, level}) || !active_image->words.contains(address) ||
+      !active_image->words.contains(address + 1)) {
     unprepared(address, level);
     return false;
   }

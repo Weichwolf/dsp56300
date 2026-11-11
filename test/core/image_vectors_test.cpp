@@ -98,7 +98,8 @@ const NativeImage &image() {
         interrupts.push_back({.vector = vector, .level = level});
       }
     }
-    return Core::compile({.variants = versions}, {.memory = {}, .interrupts = interrupts});
+    return Core::compile({.variants = versions},
+                         {.memory = {}, .interrupts = interrupts, .transitions = {}});
   }();
   return result;
 }
