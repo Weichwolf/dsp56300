@@ -77,14 +77,16 @@ void verify(LLVMModuleRef module) {
 }
 
 void canonicalize_semantic_entry(LLVMModuleRef module) {
-  constexpr auto *name = "dsp56300_semantic_execute";
   // Clang's Mach-O asm label carries an LLVM mangling escape.
-  auto *escaped = LLVMGetNamedFunction(module, "\001dsp56300_semantic_execute");
-  if (escaped == nullptr) { return; }
-  if (LLVMGetNamedFunction(module, name) != nullptr) {
-    throw std::runtime_error("Ambiguous canonical and escaped DSP semantic entry symbols");
+  for (const auto *name : {"dsp56300_semantic_execute", "dsp56300_semantic_vector_execute"}) {
+    const auto alias = std::string(1, '\001') + name;
+    auto *escaped = LLVMGetNamedFunction(module, alias.c_str());
+    if (escaped == nullptr) { continue; }
+    if (LLVMGetNamedFunction(module, name) != nullptr) {
+      throw std::runtime_error("Ambiguous canonical and escaped DSP semantic entry symbols");
+    }
+    LLVMSetValueName2(escaped, name, std::string_view(name).size());
   }
-  LLVMSetValueName2(escaped, name, std::string_view(name).size());
 }
 
 Buffer buffer(const std::span<const std::byte> bytes) {

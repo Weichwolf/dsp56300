@@ -118,7 +118,7 @@ void Core::Impl::invalidate_program_word(const Word *const location) {
   if (address < program || address - program >= buffers.program.size_bytes()) { return; }
   image_word_written({.address = static_cast<Word>((address - program) / sizeof(Word)),
                       .value = *location & word_mask});
-  if (jit) { jit->invalidate(); }
+  if (!image && jit) { jit->invalidate(); }
 }
 
 std::span<Word> Core::Impl::area(const Space space) const {

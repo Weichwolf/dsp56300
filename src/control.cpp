@@ -157,10 +157,7 @@ void Core::Impl::execute_operation(const Instruction &decoded) {
 void Core::interrupt(const Word vector, const unsigned level) {
 
   const ExecutionGuard guard(impl_->executing);
-  if (impl_->image) {
-    impl_->unprepared(vector, level);
-    return;
-  }
+  if (impl_->image && !impl_->image_interrupt(vector, level)) { return; }
   auto &state = impl_->cpu.reg;
   const auto mask = (state.sr >> interrupt_level_shift) & interrupt_level_mask;
   if (vector > word_mask || (vector & 1U) != 0 || level > maximum_level || level < mask ||
@@ -173,7 +170,15 @@ void Core::interrupt(const Word vector, const unsigned level) {
   impl_->cpu.repeat_completed = false;
   while (impl_->vector.phase != Impl::VectorPhase::none && impl_->fault.kind == FaultKind::none &&
          impl_->cpu.processing == ExecutionState::running) {
-    impl_->step_vector();
+    if (impl_->image) {
+      const bool retained_yield = impl_->yield_requested;
+      impl_->yield_requested = false;
+      const auto result = impl_->run_image(1);
+      impl_->yield_requested = impl_->yield_requested || retained_yield;
+      if (result.retired == 0) { break; }
+    } else {
+      impl_->step_vector();
+    }
   }
 }
 } // namespace dsp56300

@@ -86,8 +86,14 @@ void Core::install(const NativeImage &image, const std::uint64_t variant) {
   const detail::ExecutionGuard guard(self.executing);
   if (!image.impl_) { throw std::invalid_argument("Cannot install an empty DSP image"); }
   const auto &selected = image.impl_->variant(variant);
-  if (self.exception_ready() || self.debug_ready() || self.instruction_cache_active()) {
-    throw std::invalid_argument("DSP image does not prepare the current vector/cache fetch form");
+  if (self.debug_ready() || self.instruction_cache_active()) {
+    throw std::invalid_argument("DSP image does not prepare the current debug/cache fetch form");
+  }
+  if (self.vector.phase != Impl::VectorPhase::none &&
+      (!image.impl_->interrupts.contains({self.vector.address, self.vector.level}) ||
+       (self.vector.loaded &&
+        image.impl_->vector_entry(self.vector.address, self.vector.words) == nullptr))) {
+    throw std::invalid_argument("DSP image does not prepare the retained vector continuation");
   }
   const auto revision = self.io != nullptr ? self.io->program_revision() : 0;
   const auto granted = self.external ? windows(self.io) : Windows{};
@@ -127,27 +133,70 @@ void Core::Impl::unprepared(const Word address, const Word value) noexcept {
 
 RunResult Core::Impl::run_image(const std::uint32_t quota) {
   RunResult result;
-  if (quota != 0 && cpu.cycles < cycle_deadline && fault.kind == FaultKind::none &&
-      cpu.processing == ExecutionState::running) {
+  while (result.retired < quota && cpu.cycles < cycle_deadline && fault.kind == FaultKind::none &&
+         cpu.processing == ExecutionState::running && !yield_requested) {
     if (!image_ready || (io != nullptr && image_revision != io->program_revision()) ||
-        exception_ready() || debug_ready() || instruction_cache_active()) {
+        debug_ready() || instruction_cache_active()) {
       unprepared(cpu.reg.pc);
-    } else {
-      const auto window = cycle_deadline - cpu.cycles;
-      const auto outcome =
-          detail::dsp56300_image_enter(active_image->entry, this, cpu.reg.pc, quota, window);
-      constexpr unsigned reason_shift = 32;
-      result.retired = static_cast<std::uint32_t>(outcome);
-      if ((outcome >> reason_shift) == static_cast<unsigned>(detail::ImageExit::unprepared)) {
-        unprepared(cpu.reg.pc);
-      }
+      break;
     }
+    const bool vector_fetch = exception_ready();
+    const auto entry = vector_fetch ? image_vector() : active_image->entry;
+    if (entry == nullptr) { break; }
+    const auto address =
+        vector_fetch
+            ? (vector.address + (vector.phase == VectorPhase::second ? 1U : 0U)) & word_mask
+            : cpu.reg.pc;
+    const auto outcome = detail::dsp56300_image_enter(
+        entry, this, address, quota - result.retired, cycle_deadline - cpu.cycles);
+    constexpr unsigned reason_shift = 32;
+    const auto retired = static_cast<std::uint32_t>(outcome);
+    result.retired += retired;
+    if ((outcome >> reason_shift) == static_cast<unsigned>(detail::ImageExit::unprepared)) {
+      unprepared(vector_fetch ? address : cpu.reg.pc);
+    }
+    if (retired == 0) { break; }
   }
   result.progress = {.instructions = cpu.instructions, .estimated_cycles = cpu.cycles};
   result.fault = fault;
   result.state = cpu.processing;
   result.yielded = yield_requested;
   return result;
+}
+
+bool Core::Impl::image_interrupt(const Word address, const unsigned level) {
+  if (!image_ready || (io != nullptr && image_revision != io->program_revision()) ||
+      debug_ready() || instruction_cache_active() ||
+      !image->interrupts.contains({address, level})) {
+    unprepared(address, level);
+    return false;
+  }
+  return true;
+}
+
+detail::ImageEntry Core::Impl::image_vector() {
+  if (!image->interrupts.contains({vector.address, vector.level})) {
+    unprepared(vector.address, vector.level);
+    return nullptr;
+  }
+  auto words = vector.words;
+  if (!vector.loaded) {
+    const auto first = active_image->words.find(vector.address);
+    const auto second = active_image->words.find(vector.address + 1);
+    if (first == active_image->words.end() || second == active_image->words.end()) {
+      unprepared(vector.address);
+      return nullptr;
+    }
+    words = {first->second, second->second};
+  }
+  const auto entry = image->vector_entry(vector.address, words);
+  if (entry == nullptr) {
+    unprepared(vector.address);
+    return nullptr;
+  }
+  vector.words = words;
+  vector.loaded = true;
+  return entry;
 }
 
 void Core::Impl::image_word_written(const detail::ProgramCache::Write transfer) noexcept {

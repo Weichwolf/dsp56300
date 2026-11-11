@@ -5,9 +5,7 @@
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
-#if !defined(__aarch64__)
 #include "vector_instruction.hpp"
-#endif
 
 #include <array>
 #if defined(__aarch64__)
@@ -94,6 +92,11 @@ void Core::Impl::step_vector() {
   if (retired != 0) { synchronize_cache_mode(); }
   synchronize_program_view();
 #else
+  step_vector_semantic(decoded);
+#endif
+}
+
+void Core::Impl::step_vector_semantic(const Instruction &decoded) {
   // The inserted vector contains exactly two words (FM 2.3.2.5/2.3.2.7).
   // A second-slot two-word call must not consume an invented zero extension.
   if (decoded.words == 2 && vector.phase == VectorPhase::second) {
@@ -123,6 +126,5 @@ void Core::Impl::step_vector() {
 
   synchronize_cache_mode();
   if (fault.kind == FaultKind::none) { retire_instruction(decoded.cycles); }
-#endif
 }
 } // namespace dsp56300

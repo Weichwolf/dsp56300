@@ -24,7 +24,7 @@ const MemoryWindow *Core::Impl::memory_window(const Space space,
 void Core::request_yield() noexcept {
   if (!impl_->executing) { return; }
   impl_->yield_requested = true;
-  if (impl_->jit) { impl_->jit->request_yield(); }
+  if (!impl_->image && impl_->jit) { impl_->jit->request_yield(); }
 }
 
 std::optional<Word> Core::Impl::jit_program(void *owner, const Word address) noexcept {

@@ -87,4 +87,35 @@ std::uint64_t Core::Impl::semantic_entry(void *const owner,
   const auto result = semantic_execute(owner, decoded);
   return result.pc | (static_cast<std::uint64_t>(result.flow) << flow_shift);
 }
+
+std::uint64_t Core::Impl::semantic_vector_entry(void *const owner,
+                                                const detail::Instruction &decoded) noexcept {
+  auto &self = *static_cast<Impl *>(owner);
+  if (self.vector.phase == VectorPhase::pending) {
+    self.cpu.reg.pc = self.vector.resume;
+    self.cpu.repeat_completed = false;
+    self.vector.phase = VectorPhase::first;
+  }
+  self.current_pc =
+      (self.vector.address + (self.vector.phase == VectorPhase::second ? 1U : 0U)) & word_mask;
+  self.current_words = decoded.words;
+  const auto previous_status = self.cpu.reg.sr;
+  self.step_vector_semantic(decoded);
+  self.check_interrupt_window(previous_status);
+  auto flow = detail::SemanticFlow::branch;
+  if (self.fault.kind != FaultKind::none) {
+    flow = detail::SemanticFlow::fault;
+  } else if (self.vector.phase == VectorPhase::none ||
+             self.cpu.processing != ExecutionState::running || self.debug_ready() ||
+             self.instruction_cache_active() || self.yield_requested) {
+    flow = detail::SemanticFlow::owner;
+  }
+  const auto next =
+      self.vector.phase == VectorPhase::none
+          ? self.cpu.reg.pc
+          : (self.vector.address + (self.vector.phase == VectorPhase::second ? 1U : 0U)) &
+                word_mask;
+  constexpr unsigned flow_shift = 32;
+  return next | (static_cast<std::uint64_t>(flow) << flow_shift);
+}
 } // namespace dsp56300

@@ -6,6 +6,7 @@
 #include "instruction.hpp"
 #include "jit.hpp"
 #include "jit/preparation.hpp"
+#include "vector_instruction.hpp"
 
 #include <algorithm>
 #include <array>
@@ -107,6 +108,39 @@ ImagePlan plan_image(const std::span<const CodeSpan> code, const std::span<const
   const auto duplicates = std::ranges::unique(result.entries);
   result.entries.erase(duplicates.begin(), duplicates.end());
   validate_targets(result);
+  return result;
+}
+
+ImagePlan
+plan_vector(const Word address, const std::array<Word, 2> words, const ImagePlan &foreground) {
+  if (address > word_mask || (address & 1U) != 0) {
+    reject(address, "vector address must be even and fit 24 bits");
+  }
+  ImagePlan result;
+  for (unsigned slot = 0; slot < words.size();) {
+    const auto pc = address + slot;
+    if (words[slot] > word_mask) { reject(pc, "vector word exceeds 24 bits"); }
+    auto instruction = decode(words[slot]);
+    const bool call = instruction.operation == Operation::call_short ||
+                      instruction.operation == Operation::call_effective;
+    if (!call && !permitted_vector_instruction(instruction)) {
+      reject(pc, "operation is not permitted in a fast vector");
+    }
+    if (instruction.words == 2) {
+      if (slot != 0) { reject(pc, "second vector slot requires a missing extension"); }
+      if (words[1] > word_mask) { reject(pc + 1, "vector extension exceeds 24 bits"); }
+      instruction.extension = words[1];
+    }
+    const auto target = encoded_target(pc, instruction);
+    if (target && foreground.find(*target) == nullptr) {
+      reject(pc, "vector call target is not a declared ordinary instruction");
+    }
+    result.instructions.emplace(pc, instruction);
+    slot += instruction.words;
+    // A first-slot call replaces the two-word vector with a long service.
+    if (call) { break; }
+  }
+  result.entries.push_back(address);
   return result;
 }
 }

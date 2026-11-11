@@ -77,7 +77,9 @@ absolute local cycle deadline. Core does not schedule an instrument or its audio
 Unsupported operations fail explicitly. Installed images retain shared code
 ownership and never fall back to ordinary decoding or emission. Code/mapping
 changes require a matching installation; unknown entries and unprepared
-vector/cache forms fail explicitly.
+cache/debug forms fail explicitly. Declare vector/priority pairs in CompileOptions
+before compilation; captured vector words survive selection of prepared newer
+resident code without replaying a peripheral action.
 
 The [target architecture](doc/architecture.md) requires complete Ahead-of-Time
 Binary Translation of consumer-owned executable images and known variants.

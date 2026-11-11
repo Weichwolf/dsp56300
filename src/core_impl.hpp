@@ -66,6 +66,7 @@ struct Core::Impl {
   void execute_cache(const detail::Instruction &decoded);
   void execute_exception(const detail::Instruction &decoded);
   void step_vector();
+  void step_vector_semantic(const detail::Instruction &decoded);
   [[nodiscard]] detail::Instruction vector_instruction();
   void call_vector(const detail::Instruction &decoded);
 
@@ -94,6 +95,9 @@ struct Core::Impl {
   [[nodiscard]] static std::uint64_t semantic_entry(void *owner,
                                                     const detail::Instruction &decoded) noexcept
       asm("dsp56300_semantic_execute");
+  [[nodiscard]] static std::uint64_t
+  semantic_vector_entry(void *owner, const detail::Instruction &decoded) noexcept
+      asm("dsp56300_semantic_vector_execute");
 #if defined(__aarch64__)
   void step_native(const detail::Instruction &decoded);
 #endif
@@ -104,6 +108,8 @@ struct Core::Impl {
   static void jit_access(void *owner, detail::NativeAccess &access) noexcept;
   void synchronize_program_view();
   [[nodiscard]] RunResult run_image(std::uint32_t quota);
+  [[nodiscard]] detail::ImageEntry image_vector();
+  [[nodiscard]] bool image_interrupt(Word address, unsigned level);
   void image_word_written(detail::ProgramCache::Write transfer) noexcept;
   void image_io_completed() noexcept;
   void unprepared(Word address, Word value = 0) noexcept;

@@ -59,6 +59,9 @@ RunResult Core::run_instruction(const InstructionWords words) {
     throw std::logic_error("Captured execution requires healthy stopped running state");
   }
   if (impl_->image) {
+    if (impl_->exception_ready() || impl_->debug_ready() || impl_->instruction_cache_active()) {
+      throw std::invalid_argument("Captured execution requires ordinary DSP fetch ownership");
+    }
     const auto found = impl_->active_image->instructions.find(words.address);
     if (words.address != impl_->cpu.reg.pc || found == impl_->active_image->instructions.end() ||
         found->second.opcode != words.opcode ||
@@ -149,10 +152,7 @@ bool Core::interrupt_ready_captured(const InstructionWords words, const bool com
 
 void Core::request_interrupt(const Word vector, const unsigned level) {
   if (impl_->executing) { throw std::logic_error("Interrupt requests require stopped execution"); }
-  if (impl_->image) {
-    impl_->unprepared(vector, level);
-    return;
-  }
+  if (impl_->image && !impl_->image_interrupt(vector, level)) { return; }
   constexpr unsigned maximum_level = 3;
   constexpr unsigned level_shift = 8;
   const auto mask = (impl_->cpu.reg.sr >> level_shift) & maximum_level;
@@ -172,10 +172,7 @@ void Core::request_interrupt(const Word vector,
                              const unsigned level,
                              const InstructionWords foreground) {
   if (impl_->executing) { throw std::logic_error("Interrupt requests require stopped execution"); }
-  if (impl_->image) {
-    impl_->unprepared(vector, level);
-    return;
-  }
+  if (impl_->image && !impl_->image_interrupt(vector, level)) { return; }
   constexpr unsigned maximum_level = 3;
   constexpr unsigned level_shift = 8;
   const auto mask = (impl_->cpu.reg.sr >> level_shift) & maximum_level;

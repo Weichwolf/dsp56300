@@ -4,6 +4,7 @@
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 
+#include <array>
 #include <map>
 #include <span>
 #include <vector>
@@ -20,4 +21,7 @@ struct ImagePlan {
 // Overlapping streams must agree on bytes; alternate starts require an explicit span.
 // Calls do not make their saved return addresses into executable-code obligations.
 [[nodiscard]] ImagePlan plan_image(std::span<const CodeSpan> code, std::span<const Word> entries);
+// A vector's two captured words form their own fetch context, including operands.
+[[nodiscard]] ImagePlan
+plan_vector(Word address, std::array<Word, 2> words, const ImagePlan &foreground);
 }

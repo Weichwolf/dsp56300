@@ -41,7 +41,7 @@ constexpr Word page_words = Word{1} << page_shift, page_mask = page_words - 1;
 using Value = llvm::Value;
 using Block = llvm::BasicBlock;
 
-llvm::Function *semantic_function(llvm::Module &module) {
+llvm::Function *semantic_function(llvm::Module &module, const bool vector) {
   const auto *abi = module.getGlobalVariable("dsp56300_semantic_abi");
   if (abi == nullptr || !abi->isConstant() || !abi->hasInitializer()) {
     throw std::invalid_argument("DSP image requires semantic ABI metadata");
@@ -61,7 +61,8 @@ llvm::Function *semantic_function(llvm::Module &module) {
       throw std::invalid_argument("DSP image semantic ABI differs from this compiler");
     }
   }
-  auto *function = module.getFunction("dsp56300_semantic_execute");
+  auto *function =
+      module.getFunction(vector ? "dsp56300_semantic_vector_execute" : "dsp56300_semantic_execute");
   if (function == nullptr || function->isDeclaration()) {
     throw std::invalid_argument("DSP image requires its complete semantic implementation");
   }
@@ -77,12 +78,15 @@ llvm::Function *semantic_function(llvm::Module &module) {
 
 class ImageLifter {
 public:
-  ImageLifter(LlvmModule &module, const ImagePlan &plan, const std::span<const CodeSpan> code)
+  ImageLifter(LlvmModule &module,
+              const ImagePlan &plan,
+              const std::span<const CodeSpan> code,
+              const bool vector = false)
       : module_(*llvm::unwrap(module.code())),
         ir_(module_.getContext()),
         name_(module.name()),
         plan_(plan),
-        semantic_(semantic_function(module_)) {
+        semantic_(semantic_function(module_, vector)) {
     if (module_.getNamedValue(name_) != nullptr) {
       throw std::invalid_argument("DSP image entry already exists");
     }
@@ -368,5 +372,13 @@ void lift_image(LlvmModule &module,
   if (module.code() == nullptr) { throw std::logic_error("Image module was already transferred"); }
   const auto plan = plan_image(code, entries);
   const ImageLifter lifter(module, plan, code);
+}
+
+void lift_vector(LlvmModule &module, const ImagePlan &plan) {
+  if (module.code() == nullptr) { throw std::logic_error("Image module was already transferred"); }
+  if (plan.instructions.empty()) {
+    throw std::invalid_argument("Vector image has no instructions");
+  }
+  const ImageLifter lifter(module, plan, {}, true);
 }
 }

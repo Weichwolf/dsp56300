@@ -159,6 +159,37 @@ void wrapping_and_extent() {
               full.instructions.rbegin()->first == start + length - 1,
           "Every instruction is inventoried without an arbitrary region-length limit");
 }
+
+void vector_forms() {
+  constexpr Word vector = 0x20;
+  constexpr std::array body{opcode<isa::Opcode::rti>};
+  constexpr std::array entries{helper};
+  const auto foreground =
+      plan_image(std::array{CodeSpan{.address = helper, .words = body}}, entries);
+  const auto reject =
+      [&](const Word address, const std::array<Word, 2> words, const std::string_view reason) {
+        bool caught = false;
+        try {
+          static_cast<void>(detail::plan_vector(address, words, foreground));
+        } catch (const std::invalid_argument &error) {
+          caught = std::string_view(error.what()).contains(reason);
+        }
+        require(caught, "Invalid vector fetch contexts fail during preparation");
+      };
+  constexpr Word nop = opcode<isa::Opcode::nop>;
+  constexpr Word call = opcode<isa::Opcode::jsr_effective> | (6U << 11);
+  reject(vector + 1, {nop, nop}, "even");
+  reject(word_mask + 1, {nop, nop}, "24 bits");
+  reject(vector, {word_mask + 1, nop}, "24 bits");
+  reject(vector, {nop, word_mask + 1}, "24 bits");
+  reject(vector, {opcode<isa::Opcode::rti>, nop}, "not permitted");
+  reject(vector, {nop, call}, "missing extension");
+  reject(vector, {call, start}, "not a declared ordinary instruction");
+  const auto prepared = detail::plan_vector(vector, {call, helper}, foreground);
+  require(prepared.instructions.size() == 1 && prepared.find(vector)->words == 2 &&
+              prepared.find(vector)->extension == helper && prepared.find(vector + 1) == nullptr,
+          "A two-word vector call prepares one operation and preserves its extension operand");
+}
 }
 
 int main() {
@@ -168,6 +199,7 @@ int main() {
     input_faults();
     overwritten_operands();
     wrapping_and_extent();
+    vector_forms();
     std::cout << test::checks << " explicit executable-inventory checks passed.\n";
     return 0;
   } catch (const std::exception &error) {
