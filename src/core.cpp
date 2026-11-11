@@ -112,13 +112,13 @@ bool Core::Impl::overlaps_program(const std::span<const Word> memory) const {
                          : other - program < buffers.program.size_bytes();
 }
 
-void Core::Impl::invalidate_program_word(const Word *const location) {
+void Core::Impl::invalidate_program_word(const Word *const location, const bool installed) {
   const auto program = reinterpret_cast<std::uintptr_t>(buffers.program.data());
   const auto address = reinterpret_cast<std::uintptr_t>(location);
   if (address < program || address - program >= buffers.program.size_bytes()) { return; }
   image_word_written({.address = static_cast<Word>((address - program) / sizeof(Word)),
                       .value = *location & word_mask});
-  if (!image && jit) { jit->invalidate(); }
+  if (!installed && jit) { jit->invalidate(); }
 }
 
 std::span<Word> Core::Impl::area(const Space space) const {
@@ -162,7 +162,7 @@ Word Core::Impl::read_memory(const Space space, const Word address) {
 }
 
 void Core::Impl::write_memory(const Space space, const Word address, const Word value) {
-
+  const bool installed = image != nullptr;
   if (external) {
     write_external(space, address, value);
     return;
@@ -184,7 +184,7 @@ void Core::Impl::write_memory(const Space space, const Word address, const Word 
     icache->write({.address = address, .value = value});
   }
   if (aliases_program[static_cast<std::size_t>(space)]) {
-    invalidate_program_word(&memory[address]);
+    invalidate_program_word(&memory[address], installed);
   }
 }
 
@@ -228,6 +228,7 @@ State Core::state() const {
 }
 
 void Core::load(const Space space, const Word address, const std::span<const Word> words) {
+  const bool installed = impl_->image != nullptr;
   const auto memory = impl_->area(space);
   if (address > memory.size() || words.size() > memory.size() - address) {
     throw std::out_of_range("DSP host load outside memory span");
@@ -246,7 +247,7 @@ void Core::load(const Space space, const Word address, const std::span<const Wor
     clear_code_cache();
   } else if (impl_->aliases_program[static_cast<std::size_t>(space)]) {
     for (std::size_t index = 0; index < words.size(); ++index) {
-      impl_->invalidate_program_word(&memory[address + index]);
+      impl_->invalidate_program_word(&memory[address + index], installed);
     }
   }
 }

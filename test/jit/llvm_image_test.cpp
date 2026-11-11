@@ -24,8 +24,11 @@
 #include <llvm/IR/GlobalVariable.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/InstrTypes.h>
+#include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/Metadata.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/Casting.h>
+#include <llvm/Support/raw_ostream.h>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -95,6 +98,46 @@ void direct_native_edges(const LlvmModule &module) {
     }
   }
   require(linked, "Ordinary static edges connect native blocks without the dynamic target table");
+}
+
+bool legacy_cache_access(const llvm::Instruction &instruction) {
+  const auto *const access = instruction.getMetadata(llvm::LLVMContext::MD_tbaa);
+  const auto *const base = access != nullptr && access->getNumOperands() != 0
+                               ? llvm::dyn_cast<llvm::MDNode>(access->getOperand(0).get())
+                               : nullptr;
+  const auto *const name = base != nullptr && base->getNumOperands() != 0
+                               ? llvm::dyn_cast<llvm::MDString>(base->getOperand(0).get())
+                               : nullptr;
+  return name != nullptr && name->getString().contains("detail3Jit4ImplE");
+}
+
+void prepared_program_store(const std::span<const std::byte> semantics) {
+  constexpr Word destination = 48;
+  constexpr std::array stores{opcode<isa::Opcode::movem_absolute_short> | (destination << 8) | 4U,
+                              opcode<isa::Opcode::stop>};
+  const std::array source{CodeSpan{.address = 0, .words = stores}};
+  LlvmModule module("prepared_program_store");
+  module.link_bitcode(semantics);
+  lift_image(module, source, entries);
+  specialize_image(module);
+  LlvmCompiler compiler;
+  require(!compiler.object(module).empty(), "Prepared program stores reach native object emission");
+  for (const auto &function : *llvm::unwrap(module.code())) {
+    for (const auto &block : function) {
+      for (const auto &instruction : block) {
+        const auto *call = llvm::dyn_cast<llvm::CallBase>(&instruction);
+        const auto *callee = call != nullptr ? call->getCalledFunction() : nullptr;
+        require(callee == nullptr || !callee->getName().contains("3Jit10invalidate"),
+                "Prepared program stores cannot invalidate the unused ordinary native cache");
+        if (legacy_cache_access(instruction)) {
+          llvm::errs() << "Unexpected ordinary-cache access in " << function.getName() << ':'
+                       << block.getName() << ": " << instruction << '\n';
+        }
+        require(!legacy_cache_access(instruction),
+                "Prepared program stores cannot access inlined ordinary native cache state");
+      }
+    }
+  }
 }
 
 void materialization(const std::span<const std::byte> semantics) {
@@ -234,6 +277,7 @@ int main(const int argc, const char *const *const argv) {
     rejected_abi(semantics);
     escaped_semantic(semantics);
     materialization(semantics);
+    prepared_program_store(semantics);
     std::cout << test::checks
               << " native image compiler/control checks passed; no DSP ISA "
                  "execution is claimed by this control-only test.\n";

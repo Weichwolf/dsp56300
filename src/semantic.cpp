@@ -27,7 +27,8 @@ extern "C" const std::array<Word, semantic_abi_fields> dsp56300_semantic_abi{
 namespace dsp56300 {
 // Native owners and every continuing native edge have already admitted this state.
 void Core::Impl::assume_image_admission() const noexcept {
-  const bool admitted = fault.kind == FaultKind::none &&
+  const bool admitted = image != nullptr && active_image != nullptr && image_ready &&
+                        fault.kind == FaultKind::none &&
                         cpu.processing == ExecutionState::running && !yield_requested &&
                         !debug_ready() && !instruction_cache_active();
   __builtin_assume(admitted);
@@ -74,6 +75,9 @@ detail::SemanticResult Core::Impl::semantic_execute(void *const owner,
   const auto pc = self.cpu.reg.pc;
   const auto previous_status = self.cpu.reg.sr;
   self.step_semantic(decoded);
+  // Synchronous callbacks cannot replace the executing owner's installed image.
+  const bool installed = self.image != nullptr;
+  __builtin_assume(installed);
   self.check_interrupt_window(previous_status);
   if (self.fault.kind != FaultKind::none) {
     return {.pc = self.cpu.reg.pc, .flow = detail::SemanticFlow::fault};
@@ -119,6 +123,8 @@ std::uint64_t Core::Impl::semantic_vector_entry(void *const owner,
   self.current_words = decoded.words;
   const auto previous_status = self.cpu.reg.sr;
   self.step_vector_semantic(decoded);
+  const bool installed = self.image != nullptr;
+  __builtin_assume(installed);
   self.check_interrupt_window(previous_status);
   auto flow = detail::SemanticFlow::branch;
   if (self.fault.kind != FaultKind::none) {

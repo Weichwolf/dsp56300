@@ -84,7 +84,7 @@ struct Core::Impl {
   [[nodiscard]] Word read_memory(Space space, Word address);
   void write_memory(Space space, Word address, Word value);
   [[nodiscard]] bool overlaps_program(std::span<const Word> memory) const;
-  void invalidate_program_word(const Word *location);
+  void invalidate_program_word(const Word *location, bool installed);
   [[nodiscard]] detail::Instruction instruction(Word pc);
   void step();
   void step_decoded(const detail::Instruction &decoded);

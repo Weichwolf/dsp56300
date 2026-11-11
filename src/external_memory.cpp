@@ -81,6 +81,7 @@ Word Core::Impl::read_external(const Space space, const Word address) {
 
 void Core::Impl::write_external(const Space space, const Word address, const Word value) {
   if (fault.kind != FaultKind::none) { return; }
+  const bool installed = image != nullptr;
   if (const auto *window = memory_window(space, address);
       window != nullptr && window->writable && !window->aliases_program) {
     const auto offset = address - window->address;
@@ -102,7 +103,8 @@ void Core::Impl::write_external(const Space space, const Word address, const Wor
   image_io_completed();
   // A low loader and a high ROM do not make the uninspected gap executable.
   // Dependencies include extensions and code inspected for fused regions.
-  if (space == Space::program && jit && code_pages->test(address >> code_page_shift)) {
+  if (!installed && space == Space::program && jit &&
+      code_pages->test(address >> code_page_shift)) {
     jit->invalidate();
   }
   if (space == Space::program && cacheable(address) && icache) {

@@ -244,6 +244,31 @@ void external_install() {
           "External code selection preserves the real native continuation and program write");
 }
 
+void unchanged_external_program_write() {
+  const auto native = compile(false);
+  External io;
+  Core core(Memory::external(), &io);
+  io.owner = &core;
+  io.native = &native;
+  auto initial = registers();
+  initial.pc = writer;
+  initial.x = code0[0];
+  core.set_registers(initial);
+  core.install(native, 0);
+  auto expected = initial;
+  expected.pc += 2;
+  const auto stored = core.run(1);
+  require(stored.retired == 1 && !stored.yielded && stored.fault == Fault{} &&
+              core.registers() == expected && core.progress().instructions == 1 && io.writes == 1 &&
+              io.storage.program[start] == code0[0],
+          "An unchanged external code store performs its callback once without revoking the image");
+  const auto resumed = core.run(2);
+  expected.pc = start + 1;
+  require(resumed.retired == 2 && !resumed.yielded && resumed.fault == Fault{} &&
+              core.registers() == expected && core.progress().instructions == 3 && io.writes == 1,
+          "The still-valid native image continues through the original jump and resident NOP");
+}
+
 void undeclared_interrupt() {
   Storage storage;
   Core core(storage.view());
@@ -282,6 +307,7 @@ int main() {
     bad_layout();
     guest_code_write();
     external_install();
+    unchanged_external_program_write();
     undeclared_interrupt();
     std::cout << test::checks << " public image lifecycle checks passed\n";
     return 0;

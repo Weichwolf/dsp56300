@@ -41,9 +41,10 @@ void Core::Impl::check_interrupt_window(const Word previous_status) noexcept {
       ((previous_status ^ cpu.reg.sr) & interrupt_mask) == 0) {
     return;
   }
+  const bool installed = image != nullptr;
   if (io->interrupt_pending(cpu.reg.sr)) {
     yield_requested = true;
-    if (!image) { jit->request_yield(); }
+    if (!installed) { jit->request_yield(); }
   }
   image_io_completed();
 }
