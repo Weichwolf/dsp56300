@@ -163,6 +163,54 @@ void unknown_word(const NativeImage &image) {
               core.registers() == initial && core.progress() == Progress{},
           "Fixed bounds never turn an unknown RAM word into a known read or retire its fault");
 }
+
+struct ControlCase {
+  Word operation, initial_mode, target_mode;
+};
+
+void control_mapping(const ControlCase item) {
+  constexpr std::array entries{start};
+  const std::array words{item.operation, code[1], code[2]};
+  const std::array spans{CodeSpan{.address = start, .words = words}};
+  const std::array variants{CodeVariant{.id = 0, .code = spans, .entries = entries}};
+  constexpr std::array memory{RegionLayout{.space = Space::x, .first = 0, .size = 1}};
+  const std::array layouts{VariantLayout{.id = 0, .memory = memory}};
+  const auto image = Core::compile(
+      {.variants = variants},
+      {.memory = layouts, .interrupts = {}, .transitions = {}, .callbacks = {}, .bindings = {}});
+  Bus bus;
+  bus.program[start] = item.operation;
+  Core core(Memory::external(), &bus);
+  bus.owner = &core;
+  auto expected = core.registers();
+  expected.pc = start;
+  expected.omr = item.initial_mode;
+  core.set_registers(expected);
+  core.install(image, 0);
+  const auto grants = bus.grants;
+  auto result = core.run();
+  expected.omr = item.target_mode;
+  expected.pc = start + 1;
+  const bool changed = item.initial_mode != item.target_mode;
+  if (changed) {
+    require(result.retired == 1 && result.yielded && result.fault == Fault{} &&
+                core.registers() == expected &&
+                core.progress() == Progress{.instructions = 1, .estimated_cycles = 3},
+            "ANDI/ORI OMR changes yield once before any read through stale installed RAM grants");
+    core.install(image, 0);
+    result = core.run();
+  } else {
+    require(!result.yielded && bus.grants == grants,
+            "An unchanged OMR byte neither refreshes grants nor adds a native return");
+  }
+  expected.pc = start + code.size();
+  expected.x = (item.target_mode & 1U) == 0 ? first_value : second_value;
+  require(result.retired == (changed ? 2U : 3U) && result.state == ExecutionState::stopped &&
+              result.fault == Fault{} && !result.yielded && bus.reads == 0 &&
+              core.registers() == expected &&
+              core.progress() == Progress{.instructions = 3, .estimated_cycles = 14},
+          "The original next load observes the control instruction's newly selected RAM");
+}
 }
 
 int main() {
@@ -191,6 +239,24 @@ int main() {
         if (tracked) { unknown_word(image); }
       }
     }
+    constexpr unsigned byte_shift = 8;
+    constexpr Word low_control = 2;
+    constexpr Word high_control = 3;
+    constexpr Word clear_low_bit = 0xfe;
+    constexpr Word high_mode = 1U << byte_shift;
+    constexpr Word set_mode = static_cast<Word>(isa::Opcode::ori_control) | (1U << byte_shift);
+    constexpr Word clear_mode =
+        static_cast<Word>(isa::Opcode::andi_control) | (clear_low_bit << byte_shift);
+    constexpr std::array cases{
+        ControlCase{.operation = set_mode | low_control, .initial_mode = 0, .target_mode = 1},
+        ControlCase{.operation = set_mode | low_control, .initial_mode = 1, .target_mode = 1},
+        ControlCase{.operation = clear_mode | low_control, .initial_mode = 1, .target_mode = 0},
+        ControlCase{.operation = clear_mode | low_control, .initial_mode = 0, .target_mode = 0},
+        ControlCase{
+            .operation = set_mode | high_control, .initial_mode = 0, .target_mode = high_mode},
+        ControlCase{
+            .operation = clear_mode | high_control, .initial_mode = high_mode, .target_mode = 0}};
+    for (const auto item : cases) { control_mapping(item); }
     std::cout << test::checks << " public image-mapping checks passed\n";
     return 0;
   } catch (const std::exception &error) {

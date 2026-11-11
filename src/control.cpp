@@ -134,7 +134,7 @@ void Core::Impl::execute_operation(const Instruction &decoded) {
 
       target = decoded.operation == Operation::and_control ? target & (value | ~byte_mask)
                                                            : target | value;
-
+      if (field >= 2) { image_io_completed(); }
       return;
     }
     case Operation::repeat_immediate:

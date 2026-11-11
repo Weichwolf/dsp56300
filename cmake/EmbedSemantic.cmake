@@ -19,3 +19,5 @@ add_custom_command(OUTPUT "${dsp56300_semantic_data}"
   DEPENDS "${DSP56300_SEMANTIC_IR}" "${dsp56300_source_list}" ${dsp56300_compiler_inputs}
   VERBATIM)
 target_sources(dsp56300_core PRIVATE "${dsp56300_semantic_data}")
+# Materialize .incbin now; LTO assembly would otherwise read this path at consumer link time.
+set_property(SOURCE "${dsp56300_semantic_data}" APPEND PROPERTY COMPILE_OPTIONS -fno-lto)
