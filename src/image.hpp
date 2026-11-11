@@ -26,12 +26,14 @@ struct ImageContracts {
     std::vector<RegionLayout> memory;
     bool fixed_memory = false;
     ImageEntry entry = nullptr;
+    std::map<Word, std::uint64_t> prefixes;
   };
 
   [[nodiscard]] std::map<std::tuple<Word, Word, Word>, ImagePlan>
   plan_vectors(const std::vector<ImagePlan> &plans) const;
   std::vector<Variant> variants;
   std::set<std::pair<Word, unsigned>> interrupts;
+  std::map<std::tuple<Word, Word, Word>, ImagePlan> vector_plans;
   PreparationReport report;
 };
 }

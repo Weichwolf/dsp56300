@@ -6,6 +6,7 @@
 #include "jit/llvm/bindings.hpp"
 #include "jit/llvm/image.hpp"
 #include "jit/llvm/runtime.hpp"
+#include "jit/prefixes.hpp"
 #include "semantic_ir.hpp"
 
 #include <algorithm>
@@ -247,6 +248,7 @@ SemanticImage Core::lower(const CodeImage image, const CompileOptions options) {
     variant.instructions = plan.instructions;
     variant.fixed_memory = !options.memory.empty();
     if (variant.fixed_memory) { variant.memory = regions(source.id, options); }
+    variant.prefixes = detail::foreground_prefixes(plan, variant.memory);
     for (const auto &span : source.code) {
       for (std::size_t index = 0; index < span.words.size(); ++index) {
         variant.words.emplace((span.address + static_cast<Word>(index)) & word_mask,
@@ -256,7 +258,8 @@ SemanticImage Core::lower(const CodeImage image, const CompileOptions options) {
     plans.push_back(plan);
     result->variants.push_back(std::move(variant));
   }
-  const auto vector_plans = result->plan_vectors(plans);
+  result->vector_plans = result->plan_vectors(plans);
+  const auto &vector_plans = result->vector_plans;
   const auto image_name = symbol(image, options);
   std::vector<std::string> names;
   names.reserve(image.variants.size());

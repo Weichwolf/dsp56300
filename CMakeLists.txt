@@ -80,7 +80,8 @@ set(dsp56300_semantic_sources
   src/transfer_parallel.cpp src/transfer_special.cpp src/viterbi.cpp)
 add_library(dsp56300_semantics OBJECT ${dsp56300_semantic_sources})
 add_library(dsp56300_core STATIC
-  src/io.cpp src/image_compile.cpp src/image_entry.cpp src/jit/preparation.cpp src/jit/image_plan.cpp src/jit/llvm/runtime.cpp
+  src/io.cpp src/image_compile.cpp src/image_entry.cpp src/jit/preparation.cpp src/jit/image_plan.cpp
+  src/jit/prefixes.cpp src/jit/prefix_access.cpp src/jit/llvm/runtime.cpp
   src/jit/llvm/lifecycle.cpp src/jit/llvm/bindings.cpp
   src/jit/llvm/image.cpp src/jit/llvm/image_specialize.cpp
   src/jit/llvm/region.cpp src/jit/llvm/region_plan.cpp src/jit/llvm/alu.cpp
@@ -152,6 +153,11 @@ add_custom_target(${DSP56300_FORMAT_TARGET}
   VERBATIM)
 
 if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
+  add_executable(dsp56300_prefixes_test test/jit/prefixes_test.cpp)
+  target_include_directories(dsp56300_prefixes_test PRIVATE src test/support)
+  target_link_libraries(dsp56300_prefixes_test PRIVATE dsp56300::core)
+  add_test(NAME prepared-native-prefixes COMMAND dsp56300_prefixes_test)
+  set_tests_properties(prepared-native-prefixes PROPERTIES TIMEOUT 30)
   foreach(owner IN ITEMS a b)
     add_library(dsp56300_llvm_owner_${owner} STATIC test/support/llvm_owner_${owner}.cpp)
     target_include_directories(dsp56300_llvm_owner_${owner} PRIVATE src test/support)

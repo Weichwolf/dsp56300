@@ -131,6 +131,18 @@ at real interrupt-mask changes and return before another instruction when an IRQ
 needs arbitration. The consumer owns priority and acknowledgement; the core owns
 eligibility, REP, interrupt shadows and native vector entry.
 
+Derive owner/context bounds from prepared code and actual memory grants. Ordinary
+control flow, retained REP bodies and inserted two-word vectors have distinct
+entry contracts. A fast vector can access a device in its first instruction;
+never add a fixed positive entry allowance. A long vector call preserves its
+real stack checks and ends the vector context before its service continues.
+Qualify repeated-body identity, remaining count and effects before aggregating
+pure repetitions. An inherited DO backedge comes from live loop/stack state;
+ordinary encoded edges alone cannot authorize that continuation. Source assertion
+times, device deadlines, clock segments and cross-core grants belong to the
+consumer. Instruction base-cycle bounds do not establish physical IRQ latency
+or calibrated pipeline/bus timing.
+
 Native instructions and cold helpers consume the same current RAM grants.
 Known reads and writable non-program-alias stores use borrowed memory directly.
 Insufficient grants retain owned callbacks, including unknown words, denied
