@@ -7,6 +7,7 @@
 #include "jit/image_plan.hpp"
 #include "jit/llvm/runtime.hpp"
 #include "semantic.hpp"
+#include "semantic_ir.hpp"
 
 #include <array>
 #include <cstdint>
@@ -29,6 +30,7 @@
 #include <llvm/Support/Alignment.h>
 #include <llvm/Support/Casting.h>
 #include <map>
+#include <set>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -456,5 +458,35 @@ void lift_vector(LlvmModule &module, const ImagePlan &plan, const std::string_vi
     throw std::invalid_argument("Vector image has no instructions");
   }
   const ImageLifter lifter(module, plan, entry, true);
+}
+
+ImageArtifact lower_images(const std::string_view name,
+                           const std::span<const ImageTranslation> translations) {
+  if (name.empty() || name.find('\0') != std::string_view::npos || translations.empty() ||
+      translations.front().name != name) {
+    throw std::invalid_argument("DSP semantic image requires its complete primary entry");
+  }
+  ImageArtifact result{.name = std::string(name), .entries = {}, .bitcode = {}};
+  result.entries.reserve(translations.size());
+  std::set<std::string_view> names;
+  for (const auto &translation : translations) {
+    if (translation.name.empty() || translation.name.find('\0') != std::string_view::npos ||
+        translation.plan.instructions.empty() || !names.insert(translation.name).second) {
+      throw std::invalid_argument("Invalid or duplicate DSP semantic image translation");
+    }
+    result.entries.emplace_back(translation.name);
+  }
+  LlvmModule module(result.name);
+  module.link_bitcode(semantic_ir());
+  for (const auto &translation : translations) {
+    if (translation.vector) {
+      lift_vector(module, translation.plan, translation.name);
+    } else {
+      lift_image(module, translation.plan, translation.name);
+    }
+  }
+  specialize_image(module, result.entries);
+  result.bitcode = module.bitcode();
+  return result;
 }
 }

@@ -170,35 +170,9 @@ detail::ImageEntry NativeImage::Impl::vector_entry(const Word address,
   return found == vectors.end() ? nullptr : found->second;
 }
 
-void NativeImage::Impl::lift_vectors(detail::LlvmModule &module,
-                                     const Variant &variant,
-                                     const detail::ImagePlan &foreground,
-                                     std::map<std::tuple<Word, Word, Word>, std::string> &symbols) {
-  std::vector<Word> external;
-  external.reserve(variant.transitions.size());
-  for (const auto &transfer : variant.transitions) { external.push_back(transfer.first); }
-  for (const auto &[address, level] : interrupts) {
-    static_cast<void>(level);
-    const auto first = variant.words.find(address);
-    const auto second = variant.words.find(address + 1);
-    if (first == variant.words.end() && second == variant.words.end()) { continue; }
-    if (first == variant.words.end() || second == variant.words.end()) {
-      throw std::invalid_argument("DSP vector requires both declared source words at P:$" +
-                                  llvm::utohexstr(address, true, 6));
-    }
-    const std::array words{first->second, second->second};
-    const auto key = std::tuple(address, words[0], words[1]);
-    const auto plan = detail::plan_vector(address, words, foreground, external);
-    if (symbols.contains(key)) { continue; }
-    const auto name = module.name() + ".vector." + llvm::utohexstr(address, true) + "." +
-                      llvm::utohexstr(words[0], true) + "." + llvm::utohexstr(words[1], true);
-    detail::lift_vector(module, plan, name);
-    symbols.emplace(key, name);
-    report.prepared_entries += plan.instructions.size();
-  }
-}
-
-void NativeImage::Impl::validate_vectors(const std::vector<detail::ImagePlan> &plans) const {
+std::map<std::tuple<Word, Word, Word>, detail::ImagePlan>
+NativeImage::Impl::plan_vectors(const std::vector<detail::ImagePlan> &plans) const {
+  std::map<std::tuple<Word, Word, Word>, detail::ImagePlan> result;
   std::set<Word> available;
   for (std::size_t index = 0; index < variants.size(); ++index) {
     const auto &source = variants[index];
@@ -214,8 +188,10 @@ void NativeImage::Impl::validate_vectors(const std::vector<detail::ImagePlan> &p
         throw std::invalid_argument("DSP vector has incomplete source at P:$" +
                                     llvm::utohexstr(address, true, 6));
       }
-      static_cast<void>(
-          detail::plan_vector(address, {first->second, second->second}, plans[index], external));
+      // Validate the target closure in every foreground variant, even for shared vectors.
+      auto plan =
+          detail::plan_vector(address, {first->second, second->second}, plans[index], external);
+      result.try_emplace(std::tuple(address, first->second, second->second), std::move(plan));
       available.insert(address);
     }
   }
@@ -226,6 +202,7 @@ void NativeImage::Impl::validate_vectors(const std::vector<detail::ImagePlan> &p
                                   llvm::utohexstr(address, true, 6));
     }
   }
+  return result;
 }
 
 NativeImage Core::compile(const CodeImage image, const CompileOptions options) {
@@ -266,23 +243,31 @@ NativeImage Core::compile(const CodeImage image, const CompileOptions options) {
     plans.push_back(plan);
     result->variants.push_back(std::move(variant));
   }
-  result->validate_vectors(plans);
-  detail::LlvmModule module(symbol(image, options));
-  module.link_bitcode(detail::semantic_ir());
+  const auto vector_plans = result->plan_vectors(plans);
+  const auto image_name = symbol(image, options);
   std::vector<std::string> names;
   names.reserve(image.variants.size());
   std::map<std::tuple<Word, Word, Word>, std::string> vector_symbols;
+  std::vector<detail::ImageTranslation> translations;
+  translations.reserve(plans.size() + vector_plans.size());
   for (std::size_t index = 0; index < image.variants.size(); ++index) {
-    auto &variant = result->variants[index];
-    names.push_back(index == 0 ? module.name()
-                               : module.name() + ".variant." + llvm::utohexstr(variant.id, true));
-    result->lift_vectors(module, variant, plans[index], vector_symbols);
-    detail::lift_image(module, plans[index], names.back());
+    const auto &variant = result->variants[index];
+    names.push_back(index == 0 ? image_name
+                               : image_name + ".variant." + llvm::utohexstr(variant.id, true));
+    translations.push_back({.name = names.back(), .plan = plans[index]});
     result->report.prepared_entries += variant.instructions.size();
   }
-  auto roots = names;
-  for (const auto &item : vector_symbols) { roots.push_back(item.second); }
-  detail::specialize_image(module, roots);
+  for (const auto &[key, plan] : vector_plans) {
+    const auto &[address, first, second] = key;
+    const auto name = image_name + ".vector." + llvm::utohexstr(address, true) + "." +
+                      llvm::utohexstr(first, true) + "." + llvm::utohexstr(second, true);
+    const auto symbol = vector_symbols.emplace(key, name).first;
+    translations.push_back({.name = symbol->second, .plan = plan, .vector = true});
+    result->report.prepared_entries += plan.instructions.size();
+  }
+  const auto artifact = detail::lower_images(image_name, translations);
+  detail::LlvmModule module(artifact.name);
+  module.link_bitcode(artifact.bitcode);
   result->compiler = std::make_unique<detail::LlvmCompiler>();
   result->variants.front().entry =
       std::bit_cast<detail::ImageEntry>(result->compiler->install(module));

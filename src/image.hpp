@@ -3,6 +3,7 @@
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
+#include "jit/image_plan.hpp"
 #include "jit/llvm/image.hpp"
 
 #include <array>
@@ -17,7 +18,6 @@
 
 namespace dsp56300::detail {
 class LlvmCompiler;
-class LlvmModule;
 }
 
 namespace dsp56300 {
@@ -36,11 +36,8 @@ struct NativeImage::Impl {
 
   [[nodiscard]] const Variant &variant(std::uint64_t id) const;
   [[nodiscard]] detail::ImageEntry vector_entry(Word address, std::array<Word, 2> words) const;
-  void lift_vectors(detail::LlvmModule &module,
-                    const Variant &variant,
-                    const detail::ImagePlan &foreground,
-                    std::map<std::tuple<Word, Word, Word>, std::string> &symbols);
-  void validate_vectors(const std::vector<detail::ImagePlan> &plans) const;
+  [[nodiscard]] std::map<std::tuple<Word, Word, Word>, detail::ImagePlan>
+  plan_vectors(const std::vector<detail::ImagePlan> &plans) const;
   std::unique_ptr<detail::LlvmCompiler> compiler;
   std::vector<Variant> variants;
   std::set<std::pair<Word, unsigned>> interrupts;
