@@ -17,6 +17,7 @@
 #include <limits>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constant.h>
+#include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/GlobalValue.h>
@@ -76,12 +77,33 @@ void control(const ImageEntry entry) {
   }
 }
 
+void direct_native_edges(const LlvmModule &module) {
+  bool linked = false;
+  for (const auto &function : *llvm::unwrap(module.code())) {
+    for (const auto &block : function) {
+      for (const auto &instruction : block) {
+        const auto *call = llvm::dyn_cast<llvm::CallInst>(&instruction);
+        const auto *callee = call != nullptr ? call->getCalledFunction() : nullptr;
+        if (callee == nullptr || callee == &function ||
+            !callee->getName().starts_with(module.name() + ".unit.")) {
+          continue;
+        }
+        require(call->isMustTailCall() && llvm::isa<llvm::ConstantInt>(call->getArgOperand(1)),
+                "Known native successors tail-transfer directly with their established PC");
+        linked = true;
+      }
+    }
+  }
+  require(linked, "Ordinary static edges connect native blocks without the dynamic target table");
+}
+
 void materialization(const std::span<const std::byte> semantics) {
   LlvmModule module("native_image_control");
   module.link_bitcode(semantics);
   require(llvm::unwrap(module.code())->getModuleIdentifier() == module.name(),
           "Semantic import preserves the unique native module initialization identity");
   lift_image(module, code, entries);
+  direct_native_edges(module);
   specialize_image(module);
   for (const auto &function : *llvm::unwrap(module.code())) {
     require(!function.getName().starts_with(module.name() + ".semantic."),

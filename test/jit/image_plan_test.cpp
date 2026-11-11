@@ -205,16 +205,16 @@ void native_units() {
                         CodeSpan{.address = nested, .words = leaf}};
   constexpr std::array entry{start};
   const auto plan = plan_image(code, entry);
-  require(plan.units() == std::vector<Word>{start, helper, nested},
-          "Native functions follow direct absolute/relative calls, not source fragment boundaries");
+  require(plan.units() == std::vector<Word>{start, start + 1, helper, helper + 2, nested},
+          "Native blocks follow calls and their return sites, not source fragment boundaries");
   const auto joined = std::array{caller[0], caller[1], tail[0]};
   const std::array regrouped{CodeSpan{.address = start, .words = joined}, code[2], code[3]};
   require(plan_image(regrouped, entry).units() == plan.units(),
           "Changing transport fragmentation cannot change native function boundaries");
   constexpr std::array alternate{start, helper + 2};
   require(plan_image(code, alternate).units() ==
-              std::vector<Word>{start, helper, helper + 2, nested},
-          "An established alternate entry retains its own native function boundary");
+              std::vector<Word>{start, start + 1, helper, helper + 2, nested},
+          "An established return entry reuses its existing native block boundary");
   const auto vector = detail::plan_vector(
       0, {opcode<isa::Opcode::jsr_absolute_short> | helper, opcode<isa::Opcode::nop>}, plan);
   require(vector.units() == std::vector<Word>{0},
@@ -228,6 +228,23 @@ void native_units() {
       separated.units() == std::vector<Word>{start, start + 1} &&
           separated.instructions.size() == 3,
       "A terminal transfer separates the following declared region without guessing its caller");
+}
+
+void conditional_blocks() {
+  constexpr std::array code{opcode<isa::Opcode::jeq_absolute_short> | (start + 4),
+                            opcode<isa::Opcode::nop>,
+                            opcode<isa::Opcode::jmp_absolute_short> | (start + 6),
+                            opcode<isa::Opcode::nop>,
+                            opcode<isa::Opcode::nop>,
+                            opcode<isa::Opcode::jmp_absolute_short> | (start + 6),
+                            opcode<isa::Opcode::stop>};
+  constexpr std::array entry{start};
+  const std::array spans{CodeSpan{.address = start, .words = code}};
+  const auto plan = plan_image(spans, entry);
+  require(plan.units() == std::vector<Word>{start, start + 1, start + 3, start + 4, start + 6},
+          "Conditional siblings, unreachable tails and shared joins have natural native entries");
+  require(plan.instructions.size() == code.size(),
+          "Natural block partitioning preserves every declared instruction, including dead code");
 }
 
 void native_edges() {
@@ -262,6 +279,7 @@ int main() {
     wrapping_and_extent();
     vector_forms();
     native_units();
+    conditional_blocks();
     native_edges();
     std::cout << test::checks << " explicit executable-inventory checks passed.\n";
     return 0;

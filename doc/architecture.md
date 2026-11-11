@@ -74,9 +74,11 @@ An interior or final loop boundary keeps precise specialized execution. Clear sh
 lookup on program/grant invalidation; retained storage is not evidence of a valid view.
 Run optimizing materialization only during explicit stopped-owner preparation.
 Installed images reject unprepared entries instead of decoding or emitting at first use.
-Form native functions at established entries and direct call targets, including
-conditional and relative calls. A non-fallthrough terminal separates the following
-declared region. Transport fragments do not impose native boundaries.
+Form native control-flow blocks at established entries, branch/call targets and
+fallthrough/return sites. Separate declared code after terminals and across address
+gaps; transport fragments and instruction counts do not impose boundaries.
+Connect known successors directly with native tail transfers, including sequential
+edges crossing blocks. Keep dynamic targets in the prepared native table.
 Keep all functions in the same LLVM O3 module and let the optimizer choose inlining.
 Bind each known instruction PC into semantic IR. Encode actual static successors,
 REP self-edges and DO backedges at the ending instruction's final word. Other

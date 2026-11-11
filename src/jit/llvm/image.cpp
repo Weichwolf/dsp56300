@@ -278,6 +278,26 @@ private:
     return result;
   }
 
+  Block *successor(const Word pc) {
+    const auto site = sites_.find(pc);
+    if (site != sites_.end()) { return site->second; }
+    const auto target = targets_.find(pc);
+    if (target == targets_.end()) { return exits_.at(ImageExit::unprepared); }
+    const auto [link, added] = links_.try_emplace(pc, nullptr);
+    if (added) {
+      const llvm::IRBuilderBase::InsertPointGuard insertion(ir_);
+      link->second = block(active_, "link." + llvm::utohexstr(pc, true));
+      ir_.SetInsertPoint(link->second);
+      tail(target->second,
+           active_->getArg(0),
+           ir_.getInt32(pc),
+           active_->getArg(2),
+           ir_.CreateLoad(ir_.getInt64Ty(), window_),
+           ir_.CreateLoad(ir_.getInt32Ty(), count_));
+    }
+    return link->second;
+  }
+
   void emit_instruction(const Word pc, const Instruction &operation) {
     ir_.SetInsertPoint(sites_.at(pc));
     auto *time = block(active_, "time");
@@ -322,20 +342,19 @@ private:
     ir_.SetInsertPoint(branched);
     auto *transfer = ir_.CreateSwitch(next, exits_.at(ImageExit::unprepared));
     for (const auto target : edges_.at(pc)) {
-      const auto site = sites_.find(target);
-      if (site != sites_.end()) { transfer->addCase(ir_.getInt32(target), site->second); }
+      if (targets_.contains(target)) { transfer->addCase(ir_.getInt32(target), successor(target)); }
     }
     ir_.SetInsertPoint(sequential);
     const auto expected = (pc + operation.words) & word_mask;
     auto *assume = llvm::Intrinsic::getDeclaration(&module_, llvm::Intrinsic::assume);
     ir_.CreateCall(assume, ir_.CreateICmpEQ(next, ir_.getInt32(expected)));
-    const auto target = sites_.find(expected);
-    ir_.CreateBr(target == sites_.end() ? exits_.at(ImageExit::unprepared) : target->second);
+    ir_.CreateBr(successor(expected));
   }
 
   void emit_unit(llvm::Function *unit) {
     active_ = unit;
     sites_.clear();
+    links_.clear();
     exits_.clear();
     auto *entry = block(unit, "entry");
     local_dispatch_ = block(unit, "dispatch");
@@ -390,7 +409,7 @@ private:
   llvm::GlobalVariable *table_ = nullptr;
   std::map<Word, llvm::Function *> units_, targets_;
   std::map<std::pair<Word, Word>, llvm::Function *> semantic_variants_;
-  std::map<Word, Block *> sites_;
+  std::map<Word, Block *> sites_, links_;
   std::map<ImageExit, Block *> exits_;
   Block *local_dispatch_ = nullptr;
   Value *count_ = nullptr, *window_ = nullptr, *pc_ = nullptr;

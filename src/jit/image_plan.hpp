@@ -15,7 +15,7 @@ struct ImagePlan {
   std::map<Word, Instruction> instructions;
   std::vector<Word> entries;
   [[nodiscard]] const Instruction *find(Word address) const noexcept;
-  // Entry/callee boundaries, independent of transport fragments and execution quotas.
+  // Natural control-flow blocks, independent of transport fragments and execution quotas.
   [[nodiscard]] std::vector<Word> units() const;
   // Encoding-derived edges plus real REP/DO backedges; other targets use native dispatch.
   [[nodiscard]] std::map<Word, std::vector<Word>> edges() const;

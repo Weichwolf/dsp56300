@@ -88,15 +88,15 @@ std::vector<Word> ImagePlan::units() const {
   if (instructions.empty()) { return {}; }
   std::set<Word> heads(entries.begin(), entries.end());
   heads.insert(instructions.begin()->first);
+  std::optional<Word> linear;
   for (const auto &[address, instruction] : instructions) {
-    const auto flow = successors({.instruction = instruction, .pc = address});
+    if (!linear || address != *linear) { heads.insert(address); }
     const auto next = (address + instruction.words) & word_mask;
-    const auto direct = std::span(flow.direct).first(flow.count);
-    if (std::ranges::find(direct, next) == direct.end() && find(next) != nullptr) {
-      heads.insert(next);
-    }
-    if (flow.call && !flow.indirect && flow.count != 0) {
-      const auto target = flow.direct[flow.count - 1];
+    linear = next;
+    const auto flow = successors({.instruction = instruction, .pc = address});
+    if (flow.count == 1 && flow.direct[0] == next && !flow.indirect && !flow.call) { continue; }
+    if (find(next) != nullptr) { heads.insert(next); }
+    for (const auto target : std::span(flow.direct).first(flow.count)) {
       if (find(target) != nullptr) { heads.insert(target); }
     }
   }
