@@ -28,7 +28,6 @@
 #include <llvm/Support/Alignment.h>
 #include <llvm/Support/Casting.h>
 #include <map>
-#include <set>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -78,10 +77,7 @@ llvm::Function *semantic_function(llvm::Module &module, const bool vector) {
 
 class ImageLifter {
 public:
-  ImageLifter(LlvmModule &module,
-              const ImagePlan &plan,
-              const std::span<const CodeSpan> code,
-              const bool vector = false)
+  ImageLifter(LlvmModule &module, const ImagePlan &plan, const bool vector = false)
       : module_(*llvm::unwrap(module.code())),
         ir_(module_.getContext()),
         name_(module.name()),
@@ -90,9 +86,7 @@ public:
     if (module_.getNamedValue(name_) != nullptr) {
       throw std::invalid_argument("DSP image entry already exists");
     }
-    std::set<Word> heads{plan_.instructions.begin()->first};
-    for (const auto &span : code) { heads.insert(span.address); }
-    for (const auto head : heads) {
+    for (const auto head : plan_.units()) {
       units_.emplace(head, function(name_ + ".unit." + llvm::utohexstr(head, true), true));
     }
     for (const auto &[pc, instruction] : plan_.instructions) {
@@ -102,7 +96,6 @@ public:
       targets_.emplace(pc, found->second);
     }
     dispatch_ = function(name_ + ".dispatch", true);
-    dispatch_->removeFnAttr(llvm::Attribute::NoInline);
     dispatch_->addFnAttr(llvm::Attribute::AlwaysInline);
     table_ = table();
     emit_dispatch();
@@ -124,7 +117,6 @@ private:
                                           module_);
     result->addFnAttr(llvm::Attribute::NoUnwind);
     result->addFnAttr(llvm::Attribute::StackProtectStrong);
-    if (internal) { result->addFnAttr(llvm::Attribute::NoInline); }
     for (const auto *const key : {"target-cpu", "target-features", "frame-pointer"}) {
       if (semantic_->hasFnAttribute(key)) { result->addFnAttr(semantic_->getFnAttribute(key)); }
     }
@@ -371,7 +363,7 @@ void lift_image(LlvmModule &module,
                 const std::span<const Word> entries) {
   if (module.code() == nullptr) { throw std::logic_error("Image module was already transferred"); }
   const auto plan = plan_image(code, entries);
-  const ImageLifter lifter(module, plan, code);
+  const ImageLifter lifter(module, plan);
 }
 
 void lift_vector(LlvmModule &module, const ImagePlan &plan) {
@@ -379,6 +371,6 @@ void lift_vector(LlvmModule &module, const ImagePlan &plan) {
   if (plan.instructions.empty()) {
     throw std::invalid_argument("Vector image has no instructions");
   }
-  const ImageLifter lifter(module, plan, {}, true);
+  const ImageLifter lifter(module, plan, true);
 }
 }

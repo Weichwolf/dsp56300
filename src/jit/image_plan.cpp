@@ -14,10 +14,12 @@
 #include <llvm/ADT/StringExtras.h>
 #include <map>
 #include <optional>
+#include <set>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace dsp56300::detail {
 namespace {
@@ -79,6 +81,20 @@ void validate_targets(const ImagePlan &plan) {
 const Instruction *ImagePlan::find(const Word address) const noexcept {
   const auto found = instructions.find(address);
   return found == instructions.end() ? nullptr : &found->second;
+}
+
+std::vector<Word> ImagePlan::units() const {
+  if (instructions.empty()) { return {}; }
+  std::set<Word> heads(entries.begin(), entries.end());
+  heads.insert(instructions.begin()->first);
+  for (const auto &[address, instruction] : instructions) {
+    const auto flow = successors({.instruction = instruction, .pc = address});
+    if (flow.call && !flow.indirect && flow.count != 0) {
+      const auto target = flow.direct[flow.count - 1];
+      if (find(target) != nullptr) { heads.insert(target); }
+    }
+  }
+  return {heads.begin(), heads.end()};
 }
 
 ImagePlan plan_image(const std::span<const CodeSpan> code, const std::span<const Word> entries) {

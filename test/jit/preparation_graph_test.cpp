@@ -104,7 +104,8 @@ void absolute_edges() {
     const auto direct = flow({.opcode = short_form | short_target, .extension = 0, .pc = pc});
     const auto extended = flow({.opcode = effective | (0x30U << 8), .extension = target, .pc = pc});
     const auto indirect = flow({.opcode = effective | (4U << 11), .extension = 0, .pc = pc});
-    require(!direct.indirect && direct.count == (call ? 2U : 1U) &&
+    require(direct.call == call && extended.call == call && indirect.call == call &&
+                !direct.indirect && direct.count == (call ? 2U : 1U) &&
                 direct.direct[call ? 1U : 0U] == short_target && (!call || direct.direct[0] == 0) &&
                 !extended.indirect && extended.count == (call ? 2U : 1U) &&
                 extended.direct[call ? 1U : 0U] == target && (!call || extended.direct[0] == 1) &&
@@ -116,8 +117,8 @@ void absolute_edges() {
           call ? opcode<isa::Opcode::jscc_absolute_short> : opcode<isa::Opcode::jcc_absolute_short>;
       const auto branch = flow(
           {.opcode = conditional | (condition << 12) | short_target, .extension = 0, .pc = pc});
-      require(branch.count == 2 && !branch.indirect && branch.direct[0] == 0 &&
-                  branch.direct[1] == short_target,
+      require(branch.call == call && branch.count == 2 && !branch.indirect &&
+                  branch.direct[0] == 0 && branch.direct[1] == short_target,
               "Every conditional absolute transfer retains both possible successors");
     }
   }
@@ -133,7 +134,8 @@ void short_relative_edges(const Word pc, const bool call) {
       const auto branch =
           flow({.opcode = base | (condition << 12) | encoded, .extension = 0, .pc = pc});
       const auto signed_offset = offset < 256 ? offset : word_mask - (511 - offset);
-      require(branch.count == 2 && !branch.indirect && branch.direct[0] == ((pc + 1) & word_mask) &&
+      require(branch.call == call && branch.count == 2 && !branch.indirect &&
+                  branch.direct[0] == ((pc + 1) & word_mask) &&
                   branch.direct[1] == ((pc + signed_offset) & word_mask),
               "Short relative edges use signed nine-bit displacement from instruction PC");
     }
@@ -150,7 +152,8 @@ void relative_edges() {
       const auto relative_register = call ? opcode<isa::Opcode::bsr_relative_register>
                                           : opcode<isa::Opcode::bra_relative_register>;
       const auto indirect = flow({.opcode = relative_register, .extension = 0, .pc = pc});
-      require(direct.count == (call ? 2U : 1U) && !direct.indirect &&
+      require(direct.call == call && indirect.call == call && direct.count == (call ? 2U : 1U) &&
+                  !direct.indirect &&
                   direct.direct[call ? 1U : 0U] == ((pc + word_mask) & word_mask) &&
                   (!call || direct.direct[0] == ((pc + 2) & word_mask)) && indirect.indirect &&
                   indirect.count == (call ? 1U : 0U),

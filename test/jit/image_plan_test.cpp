@@ -190,6 +190,36 @@ void vector_forms() {
               prepared.find(vector)->extension == helper && prepared.find(vector + 1) == nullptr,
           "A two-word vector call prepares one operation and preserves its extension operand");
 }
+
+void native_units() {
+  constexpr Word nested = helper + 16;
+  constexpr std::array caller{opcode<isa::Opcode::jsr_absolute_short> | helper,
+                              opcode<isa::Opcode::nop>};
+  constexpr std::array tail{opcode<isa::Opcode::stop>};
+  constexpr std::array callee{
+      opcode<isa::Opcode::bsr_relative_long>, nested - helper, opcode<isa::Opcode::rts>};
+  constexpr std::array leaf{opcode<isa::Opcode::rts>};
+  const std::array code{CodeSpan{.address = start, .words = caller},
+                        CodeSpan{.address = start + caller.size(), .words = tail},
+                        CodeSpan{.address = helper, .words = callee},
+                        CodeSpan{.address = nested, .words = leaf}};
+  constexpr std::array entry{start};
+  const auto plan = plan_image(code, entry);
+  require(plan.units() == std::vector<Word>{start, helper, nested},
+          "Native functions follow direct absolute/relative calls, not source fragment boundaries");
+  const auto joined = std::array{caller[0], caller[1], tail[0]};
+  const std::array regrouped{CodeSpan{.address = start, .words = joined}, code[2], code[3]};
+  require(plan_image(regrouped, entry).units() == plan.units(),
+          "Changing transport fragmentation cannot change native function boundaries");
+  constexpr std::array alternate{start, helper + 2};
+  require(plan_image(code, alternate).units() ==
+              std::vector<Word>{start, helper, helper + 2, nested},
+          "An established alternate entry retains its own native function boundary");
+  const auto vector = detail::plan_vector(
+      0, {opcode<isa::Opcode::jsr_absolute_short> | helper, opcode<isa::Opcode::nop>}, plan);
+  require(vector.units() == std::vector<Word>{0},
+          "A captured vector does not invent the ordinary callee inside its inserted words");
+}
 }
 
 int main() {
@@ -200,6 +230,7 @@ int main() {
     overwritten_operands();
     wrapping_and_extent();
     vector_forms();
+    native_units();
     std::cout << test::checks << " explicit executable-inventory checks passed.\n";
     return 0;
   } catch (const std::exception &error) {

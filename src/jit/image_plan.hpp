@@ -15,6 +15,8 @@ struct ImagePlan {
   std::map<Word, Instruction> instructions;
   std::vector<Word> entries;
   [[nodiscard]] const Instruction *find(Word address) const noexcept;
+  // Entry/callee boundaries, independent of transport fragments and execution quotas.
+  [[nodiscard]] std::vector<Word> units() const;
 };
 
 // Decode every declared stream without running a Core or fetching other memory.

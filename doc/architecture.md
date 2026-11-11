@@ -73,7 +73,10 @@ DO contexts only when their current loop end lies outside the complete region.
 An interior or final loop boundary keeps precise specialized execution. Clear shared
 lookup on program/grant invalidation; retained storage is not evidence of a valid view.
 Run optimizing materialization only during explicit stopped-owner preparation.
-Newly reached code uses the fast native emitter rather than blocking execution on O3.
+Installed images reject unprepared entries instead of decoding or emitting at first use.
+Form native functions at established entries and direct call targets, including
+conditional and relative calls. Transport fragments do not impose native boundaries.
+Keep all functions in the same LLVM O3 module and let the optimizer choose inlining.
 Install code only at a stopped owner boundary after validating the captured code
 revision. Compilation failure leaves architecture/progress unchanged. Keep LLVM
 handles private, instrument emitted native code explicitly in sanitizer builds,

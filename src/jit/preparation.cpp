@@ -31,7 +31,7 @@ Successors jump_successors(const BlockInstruction &operation) {
   const bool call = conditional
                         ? (opcode & (1U << 16)) != 0
                         : kind == Operation::call_short || kind == Operation::call_effective;
-  Successors result;
+  Successors result{.call = call};
   if (conditional || call) {
     result.direct[result.count++] = (operation.pc + instruction.words) & word_mask;
   }
@@ -50,7 +50,7 @@ Successors relative_successors(const BlockInstruction &operation) {
   const bool short_form = (opcode & relative_group_mask) == short_relative_group;
   const bool unconditional = (opcode & (1U << (short_form ? 11U : 7U))) != 0;
   const bool call = (opcode & (1U << (short_form ? 10U : 6U))) == 0;
-  Successors result;
+  Successors result{.call = call};
   if (!unconditional || call) {
     result.direct[result.count++] = (operation.pc + instruction.words) & word_mask;
   }

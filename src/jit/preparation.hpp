@@ -14,6 +14,7 @@ struct Successors {
   unsigned count = 0;
   // Register/stack/vector targets and implicit DO/REP continuation stay open.
   bool indirect = false;
+  bool call = false;
 };
 
 struct PreparationGraph {
