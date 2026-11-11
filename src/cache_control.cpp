@@ -4,6 +4,7 @@
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
+#include "io.hpp"
 #include "program_cache.hpp"
 
 #include <memory>
@@ -24,7 +25,7 @@ Word Core::Impl::fetch_program(const Word address) {
     auto &core = *static_cast<Impl *>(context);
     Word value = 0;
     if (core.fault.kind != FaultKind::none || core.io == nullptr ||
-        !core.io->read(Space::program, index, core.current_pc, value)) {
+        !dsp56300_io_read(core.io, Space::program, index, core.current_pc, value)) {
       core.fail(FaultKind::memory_read, Space::program, index);
       return std::nullopt;
     }

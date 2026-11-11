@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "jit/llvm/runtime.hpp"
 
+#include "jit/llvm/bindings.hpp"
 #include "jit/llvm/lifecycle.hpp"
 #include "jit/llvm/native.hpp"
 
@@ -415,6 +416,7 @@ void LlvmCompiler::Impl::prepare(LlvmModule &module) const {
   compatible(
       module.code(),
       {.triple = LLVMOrcLLJITGetTripleString(jit), .layout = LLVMOrcLLJITGetDataLayoutStr(jit)});
+  inline_io(module);
   LLVMSetTarget(module.code(), LLVMOrcLLJITGetTripleString(jit));
   LLVMSetDataLayout(module.code(), LLVMOrcLLJITGetDataLayoutStr(jit));
   constexpr bool address_sanitizer = __has_feature(address_sanitizer);

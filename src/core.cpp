@@ -6,6 +6,7 @@
 #include "dsp56300/memory.hpp"
 #include "execution_guard.hpp"
 #include "instruction.hpp"
+#include "io.hpp"
 #include "jit.hpp"
 
 #include <algorithm>
@@ -144,7 +145,7 @@ Word Core::Impl::read_memory(const Space space, const Word address) {
   if (external) { return read_external(space, address); }
   if (space != Space::program && address >= detail::io_begin) {
     Word value = 0;
-    if (io == nullptr || !io->read(space, address, current_pc, value)) {
+    if (io == nullptr || !dsp56300_io_read(io, space, address, current_pc, value)) {
       fail(FaultKind::io_read, space, address);
     }
     image_io_completed();
@@ -168,7 +169,7 @@ void Core::Impl::write_memory(const Space space, const Word address, const Word 
     return;
   }
   if (space != Space::program && address >= detail::io_begin) {
-    if (io == nullptr || !io->write(space, address, current_pc, value & word_mask)) {
+    if (io == nullptr || !dsp56300_io_write(io, space, address, current_pc, value & word_mask)) {
       fail(FaultKind::io_write, space, address, value);
     }
     image_io_completed();
@@ -300,7 +301,7 @@ PreparationReport Core::prepare(const std::span<const Word> established_entries)
     return report;
   }
   const auto revision =
-      impl_->external ? std::optional(impl_->io->program_revision()) : std::nullopt;
+      impl_->external ? std::optional(dsp56300_io_revision(impl_->io)) : std::nullopt;
   if (revision && (!impl_->windows_bound || *revision != impl_->program_revision ||
                    impl_->program_omr != impl_->cpu.reg.omr)) {
     if (const auto error = impl_->bind_memory_windows(); error.kind != FaultKind::none) {

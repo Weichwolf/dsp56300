@@ -6,6 +6,7 @@
 #include "dsp56300/memory.hpp"
 #include "fields.hpp"
 #include "instruction.hpp"
+#include "io.hpp"
 
 #include <cstdint>
 
@@ -88,7 +89,8 @@ bool Core::Impl::access_bit(const Instruction &decoded, const BitAction action) 
   if (address >= io_begin) {
 
     bool previous = false;
-    if (io == nullptr || !io->bit(operand.space, address, current_pc, bit, action, previous)) {
+    if (io == nullptr ||
+        !dsp56300_io_bit(io, operand.space, address, current_pc, bit, action, previous)) {
       fail(FaultKind::io_bit, operand.space, address, bit);
     }
     image_io_completed();

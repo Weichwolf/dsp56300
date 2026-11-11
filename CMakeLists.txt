@@ -80,8 +80,8 @@ set(dsp56300_semantic_sources
   src/transfer_parallel.cpp src/transfer_special.cpp src/viterbi.cpp)
 add_library(dsp56300_semantics OBJECT ${dsp56300_semantic_sources})
 add_library(dsp56300_core STATIC
-  src/image_compile.cpp src/image_entry.cpp src/jit/preparation.cpp src/jit/image_plan.cpp src/jit/llvm/runtime.cpp
-  src/jit/llvm/lifecycle.cpp
+  src/io.cpp src/image_compile.cpp src/image_entry.cpp src/jit/preparation.cpp src/jit/image_plan.cpp src/jit/llvm/runtime.cpp
+  src/jit/llvm/lifecycle.cpp src/jit/llvm/bindings.cpp
   src/jit/llvm/image.cpp src/jit/llvm/image_specialize.cpp
   src/jit/llvm/region.cpp src/jit/llvm/region_plan.cpp src/jit/llvm/alu.cpp
   src/jit/arena.cpp src/jit/block_parse.cpp src/jit/block_emit.cpp
@@ -97,7 +97,16 @@ target_link_libraries(dsp56300_core PUBLIC dsp56300_quality PRIVATE dsp56300_sem
 include(cmake/Llvm.cmake)
 set(dsp56300_own_targets dsp56300_core dsp56300_semantics)
 set(DSP56300_SEMANTIC_TARGET dsp56300_semantics)
+# Retain public Io call boundaries until consumer binding, without changing native helpers.
+add_library(dsp56300_io_ir OBJECT src/io.cpp)
+target_include_directories(dsp56300_io_ir PRIVATE include src)
+target_link_libraries(dsp56300_io_ir PRIVATE dsp56300_quality)
+target_compile_definitions(dsp56300_io_ir PRIVATE DSP56300_BINDING_IR)
+target_compile_options(dsp56300_io_ir PRIVATE -emit-llvm)
+set_target_properties(dsp56300_io_ir PROPERTIES INTERPROCEDURAL_OPTIMIZATION_RELEASE OFF)
+list(APPEND dsp56300_own_targets dsp56300_io_ir)
 if(DSP56300_SANITIZER STREQUAL "address-undefined")
+  target_compile_options(dsp56300_io_ir PRIVATE -Xclang -disable-llvm-passes)
   # Keep frontend UBSan checks; defer LLVM optimization/ASan until the final
   # generated functions exist. Native helpers retain their normal instrumentation.
   add_library(dsp56300_semantic_ir_objects OBJECT ${dsp56300_semantic_sources})
@@ -224,6 +233,28 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
     add_dependencies(dsp56300_image_semantic_test dsp56300-semantic-ir)
     add_test(NAME semantic-image-lowering COMMAND dsp56300_image_semantic_test)
     set_tests_properties(semantic-image-lowering PROPERTIES TIMEOUT 30)
+    add_library(dsp56300_image_io_bindings OBJECT test/jit/image_io_bindings.cpp)
+    target_include_directories(dsp56300_image_io_bindings PRIVATE include test/support)
+    target_link_libraries(dsp56300_image_io_bindings PRIVATE dsp56300_quality)
+    target_compile_options(dsp56300_image_io_bindings PRIVATE -emit-llvm)
+    if(DSP56300_SANITIZER STREQUAL "address-undefined")
+      target_compile_options(dsp56300_image_io_bindings PRIVATE -Xclang -disable-llvm-passes)
+    endif()
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
+      target_compile_options(dsp56300_image_io_bindings PRIVATE $<$<CONFIG:Release>:-mcpu=native>)
+    else()
+      target_compile_options(dsp56300_image_io_bindings PRIVATE $<$<CONFIG:Release>:-march=native>)
+    endif()
+    set_target_properties(dsp56300_image_io_bindings PROPERTIES INTERPROCEDURAL_OPTIMIZATION_RELEASE OFF)
+    add_executable(dsp56300_image_io_test test/jit/image_io_test.cpp)
+    target_include_directories(dsp56300_image_io_test PRIVATE src test/support)
+    target_include_directories(dsp56300_image_io_test SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
+    target_link_libraries(dsp56300_image_io_test PRIVATE dsp56300::core)
+    set_target_properties(dsp56300_image_io_test PROPERTIES ENABLE_EXPORTS ON)
+    add_dependencies(dsp56300_image_io_test dsp56300-semantic-ir dsp56300_image_io_bindings)
+    add_test(NAME public-image-io COMMAND dsp56300_image_io_test "${DSP56300_SEMANTIC_IR}"
+      "$<TARGET_OBJECTS:dsp56300_image_io_bindings>")
+    set_tests_properties(public-image-io PROPERTIES TIMEOUT 60)
   endif()
   add_executable(dsp56300_preparation_test test/jit/preparation_test.cpp)
   target_link_libraries(dsp56300_preparation_test PRIVATE dsp56300::core)
@@ -1297,7 +1328,10 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
       target_link_libraries(${core_test_target} PRIVATE dsp56300_codegen_observer)
     endif()
     if(core_test_sources MATCHES "test/")
-      target_include_directories(${core_test_target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/test/support" "${CMAKE_CURRENT_SOURCE_DIR}/src")
+      target_include_directories(${core_test_target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/test/support")
+      if(NOT core_test_target STREQUAL "dsp56300_image_io_bindings")
+        target_include_directories(${core_test_target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+      endif()
     endif()
   endforeach()
 endif()

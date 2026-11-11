@@ -3,6 +3,7 @@
 #include "core_impl.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "io.hpp"
 #include "program_cache.hpp"
 
 #include <bitset>
@@ -42,7 +43,7 @@ void Core::Impl::observe_program_word(const Word address) const noexcept {
 
 void Core::Impl::synchronize_program_view() {
   if (!external || !jit || io == nullptr) { return; }
-  const auto next = io->program_revision();
+  const auto next = dsp56300_io_revision(io);
   if (!windows_bound || next != program_revision || program_omr != cpu.reg.omr) {
     if (const auto error = bind_memory_windows(); error.kind != FaultKind::none) {
       current_pc = cpu.reg.pc;
@@ -71,7 +72,8 @@ Word Core::Impl::read_external(const Space space, const Word address) {
     }
   }
   Word value = 0;
-  if (address > word_mask || io == nullptr || !io->read(space, address, current_pc, value)) {
+  if (address > word_mask || io == nullptr ||
+      !dsp56300_io_read(io, space, address, current_pc, value)) {
     const bool peripheral = space != Space::program && address >= detail::io_begin;
     fail(peripheral ? FaultKind::io_read : FaultKind::memory_read, space, address);
   }
@@ -92,7 +94,7 @@ void Core::Impl::write_external(const Space space, const Word address, const Wor
     }
   }
   if (address > word_mask || io == nullptr ||
-      !io->write(space, address, current_pc, value & word_mask)) {
+      !dsp56300_io_write(io, space, address, current_pc, value & word_mask)) {
     const bool peripheral = space != Space::program && address >= detail::io_begin;
     fail(peripheral ? FaultKind::io_write : FaultKind::memory_write, space, address, value);
     return;
