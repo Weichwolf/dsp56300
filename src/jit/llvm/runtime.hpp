@@ -23,8 +23,8 @@ public:
 
   [[nodiscard]] const std::string &name() const noexcept { return name_; }
 
-  // Cold, owner-free compiler artifacts. A successful link replaces this module;
-  // previously borrowed LLVM values must be reacquired. Failure retains it.
+  // Successful cold links replace module/context; reacquire borrowed LLVM values.
+  // Failure preserves both, including serialized metadata identity.
   [[nodiscard]] std::vector<std::byte> bitcode() const;
   void link_bitcode(std::span<const std::byte> source);
   [[nodiscard]] LLVMOrcThreadSafeModuleRef release() noexcept;

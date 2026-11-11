@@ -64,6 +64,17 @@ void verify(LLVMModuleRef module) {
   if (invalid != 0) { throw std::runtime_error(text.get()); }
 }
 
+void canonicalize_semantic_entry(LLVMModuleRef module) {
+  constexpr auto *name = "dsp56300_semantic_execute";
+  // Clang's Mach-O asm label carries an LLVM mangling escape.
+  auto *escaped = LLVMGetNamedFunction(module, "\001dsp56300_semantic_execute");
+  if (escaped == nullptr) { return; }
+  if (LLVMGetNamedFunction(module, name) != nullptr) {
+    throw std::runtime_error("Ambiguous canonical and escaped DSP semantic entry symbols");
+  }
+  LLVMSetValueName2(escaped, name, std::string_view(name).size());
+}
+
 Buffer buffer(const std::span<const std::byte> bytes) {
   return Buffer(LLVMCreateMemoryBufferWithMemoryRangeCopy(
       reinterpret_cast<const char *>(bytes.data()), bytes.size(), "native_compiler_input"));
@@ -301,25 +312,33 @@ std::vector<std::byte> LlvmModule::bitcode() const {
 
 void LlvmModule::link_bitcode(const std::span<const std::byte> source) {
   if (module_ == nullptr) { throw std::logic_error("LLVM module was already transferred"); }
-  const auto input = buffer(source);
+  LlvmModule candidate(name_);
+  const Diagnostics diagnostics(candidate.context());
+  const auto original = buffer(bitcode());
   LLVMModuleRef parsed = nullptr;
-  const Diagnostics diagnostics(context());
-  const auto failed = LLVMParseBitcodeInContext2(context(), input.get(), &parsed);
+  auto failed = LLVMParseBitcodeInContext2(candidate.context(), original.get(), &parsed);
+  Module retained(parsed);
+  diagnostics.check(failed != 0 || !retained, "LLVM 19 cannot retain compiler bitcode");
+  LLVMDisposeModule(std::exchange(candidate.module_, retained.release()));
+  const auto input = buffer(source);
+  parsed = nullptr;
+  failed = LLVMParseBitcodeInContext2(candidate.context(), input.get(), &parsed);
   Module incoming(parsed);
   diagnostics.check(failed != 0 || !incoming, "LLVM 19 cannot parse semantic bitcode");
   verify(incoming.get());
-  const std::string_view target(LLVMGetTarget(module_));
-  const std::string_view layout(LLVMGetDataLayoutStr(module_));
+  canonicalize_semantic_entry(incoming.get());
+  const std::string_view target(LLVMGetTarget(candidate.module_));
+  const std::string_view layout(LLVMGetDataLayoutStr(candidate.module_));
   if (!target.empty() || !layout.empty()) {
     compatible(incoming.get(),
                {.triple = target.empty() ? LLVMGetTarget(incoming.get()) : target,
                 .layout = layout.empty() ? LLVMGetDataLayoutStr(incoming.get()) : layout});
   }
-  Module candidate(LLVMCloneModule(module_));
-  diagnostics.check(LLVMLinkModules2(candidate.get(), incoming.release()) != 0,
+  diagnostics.check(LLVMLinkModules2(candidate.module_, incoming.release()) != 0,
                     "LLVM 19 cannot link semantic bitcode");
-  verify(candidate.get());
-  LLVMDisposeModule(std::exchange(module_, candidate.release()));
+  verify(candidate.module_);
+  std::swap(module_, candidate.module_);
+  std::swap(context_, candidate.context_);
 }
 
 LLVMOrcThreadSafeModuleRef LlvmModule::release() noexcept {

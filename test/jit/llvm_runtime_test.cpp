@@ -22,6 +22,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <type_traits>
 #include <vector>
@@ -101,16 +102,36 @@ void failure_ownership(LlvmCompiler &compiler, const Function retained) {
   check(install(compiler, "after_failure"));
 }
 
+std::vector<std::byte> duplicate_metadata(const std::span<const std::byte> bitcode) {
+  LlvmModule incoming("new_metadata_duplicate");
+  incoming.link_bitcode(bitcode);
+  auto *function = LLVMGetFirstFunction(incoming.code());
+  while (function != nullptr && LLVMGetFirstBasicBlock(function) == nullptr) {
+    function = LLVMGetNextFunction(function);
+  }
+  require(function != nullptr, "The duplicate source must retain its real fixture body");
+  auto *instruction = LLVMGetFirstInstruction(LLVMGetFirstBasicBlock(function));
+  constexpr std::string_view name = "dsp56300.rejected.context.metadata";
+  const auto kind =
+      LLVMGetMDKindIDInContext(incoming.context(), name.data(), static_cast<unsigned>(name.size()));
+  auto *node = LLVMMDNodeInContext2(incoming.context(), nullptr, 0);
+  LLVMSetMetadata(instruction, kind, LLVMMetadataAsValue(incoming.context(), node));
+  return incoming.bitcode();
+}
+
 void bitcode_linking(LlvmModule &module) {
   const auto before = module.bitcode();
+  const auto *context = module.context();
+  const auto metadata = duplicate_metadata(before);
   constexpr std::array corrupt{std::byte{1}};
-  for (const auto input :
-       {std::span<const std::byte>(corrupt), std::span<const std::byte>(before)}) {
+  for (const auto input : {std::span<const std::byte>(corrupt),
+                           std::span<const std::byte>(before),
+                           std::span<const std::byte>(metadata)}) {
     bool rejected = false;
     try {
       module.link_bitcode(input);
     } catch (const std::runtime_error &) { rejected = true; }
-    require(rejected && module.bitcode() == before,
+    require(rejected && module.bitcode() == before && module.context() == context,
             "Malformed or duplicate bitcode retains the complete original compiler module");
   }
 }

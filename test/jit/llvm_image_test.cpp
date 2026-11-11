@@ -16,11 +16,13 @@
 #include <limits>
 #include <llvm/IR/Constant.h>
 #include <llvm/IR/Function.h>
+#include <llvm/IR/GlobalValue.h>
 #include <llvm/IR/GlobalVariable.h>
 #include <llvm/IR/Module.h>
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -89,6 +91,41 @@ void materialization(const std::span<const std::byte> semantics) {
   require(module.code() == nullptr, "Direct installation consumes the lifted semantic module");
 }
 
+void escaped_semantic(const std::span<const std::byte> semantics) {
+  constexpr auto *canonical = "dsp56300_semantic_execute";
+  constexpr auto *escaped = "\001dsp56300_semantic_execute";
+  LlvmModule producer("escaped_semantic_producer");
+  producer.link_bitcode(semantics);
+  auto &source = *llvm::unwrap(producer.code());
+  auto *entry = source.getFunction(canonical);
+  require(entry != nullptr && !entry->isDeclaration(), "The producer retains the real ISA body");
+  entry->setName(escaped);
+  LlvmModule consumer("escaped_semantic_image");
+  consumer.link_bitcode(producer.bitcode());
+  auto &native = *llvm::unwrap(consumer.code());
+  require(native.getFunction(canonical) != nullptr &&
+              !native.getFunction(canonical)->isDeclaration() &&
+              native.getFunction(escaped) == nullptr,
+          "A target asm-label escape must import as the stable compiler semantic ABI symbol");
+  lift_image(consumer, code, entries);
+  specialize_image(consumer);
+  LlvmCompiler compiler;
+  control(std::bit_cast<ImageEntry>(compiler.install(consumer)));
+  llvm::Function::Create(
+      entry->getFunctionType(), llvm::GlobalValue::ExternalLinkage, canonical, source);
+  LlvmModule rejected("ambiguous_semantic_image");
+  const auto before = rejected.bitcode();
+  bool failed = false;
+  try {
+    rejected.link_bitcode(producer.bitcode());
+  } catch (const std::runtime_error &error) {
+    failed = std::string_view(error.what()).contains("Ambiguous canonical and escaped");
+  }
+  require(failed, "Ambiguous semantic ABI aliases must fail for their exact naming conflict");
+  require(rejected.bitcode() == before,
+          "A failed semantic ABI import must retain the complete original compiler module");
+}
+
 void unprepared_source(const std::span<const std::byte> semantics) {
   LlvmModule module("invalid_image_source");
   module.link_bitcode(semantics);
@@ -140,6 +177,7 @@ int main(const int argc, const char *const *const argv) {
     const auto semantics = read(argv[1]);
     unprepared_source(semantics);
     rejected_abi(semantics);
+    escaped_semantic(semantics);
     materialization(semantics);
     std::cout << test::checks
               << " native image compiler/control checks passed; no DSP ISA "
