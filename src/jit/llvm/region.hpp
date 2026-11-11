@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string_view>
 
 namespace dsp56300::detail {
 // A complete non-call control region with no captured interior/final DO boundary.
@@ -25,6 +26,10 @@ struct PreparedRegion {
 [[nodiscard]] bool lift_region(LlvmModule &module,
                                std::span<const BlockInstruction> operations,
                                const JitRuntime &runtime);
+[[nodiscard]] bool lift_region(LlvmModule &module,
+                               std::span<const BlockInstruction> operations,
+                               std::span<const RegionLayout> memory,
+                               std::string_view entry = {});
 
 // Complete arithmetic/RAM regions with non-call control; other effects retain ISA lowering.
 [[nodiscard]] std::optional<PreparedRegion>

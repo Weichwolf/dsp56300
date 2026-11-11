@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "jit/llvm/image.hpp"
 
+#include "architecture.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 #include "jit/image_plan.hpp"
 #include "jit/llvm/bindings.hpp"
+#include "jit/llvm/image_regions.hpp"
+#include "jit/llvm/region.hpp"
 #include "jit/llvm/runtime.hpp"
 #include "semantic.hpp"
 #include "semantic_ir.hpp"
@@ -110,6 +113,7 @@ public:
     if (module_.getNamedValue(name_) != nullptr) {
       throw std::invalid_argument("DSP image entry already exists");
     }
+    if (!vector && memory_) { prepare_regions(module, *memory_); }
     for (const auto head : plan_.units()) {
       units_.emplace(head, function(name_ + ".unit." + llvm::utohexstr(head, true), true));
     }
@@ -128,6 +132,82 @@ public:
   }
 
 private:
+  struct FastRegion {
+    llvm::GlobalVariable *site;
+    Word count, cost, last_pc, last_words;
+  };
+
+  void prepare_regions(LlvmModule &module, const std::span<const RegionLayout> memory) {
+    constexpr std::array modes{0U,
+                               rounding_mode,
+                               scale_down,
+                               scale_up,
+                               rounding_mode | scale_down,
+                               rounding_mode | scale_up};
+    for (auto operations : image_regions(plan_)) {
+      for (const auto mode : modes) {
+        Word cost = 0;
+        for (auto &operation : operations) {
+          operation.mode = mode;
+          cost += operation.instruction.cycles;
+        }
+        const auto first = operations.front().pc;
+        const auto &last = operations.back();
+        const auto name = name_ + ".region." + llvm::utohexstr(first, true) + "." +
+                          llvm::utohexstr(last.loop_address, true) + "." +
+                          llvm::utohexstr(mode, true);
+        if (!lift_region(module, operations, memory, name)) { continue; }
+        auto *function = module_.getFunction(name);
+        function->setLinkage(llvm::GlobalValue::InternalLinkage);
+        function->addFnAttr(llvm::Attribute::AlwaysInline);
+        const std::array<llvm::Constant *, 3> fields{
+            function, ir_.getInt32(last.pc), ir_.getInt32(last.instruction.words)};
+        auto *site =
+            constant(name + ".site", llvm::ConstantStruct::getAnon(module_.getContext(), fields));
+        site->setAlignment(llvm::Align(alignof(SemanticRegion)));
+        regions_.emplace(first,
+                         FastRegion{.site = site,
+                                    .count = static_cast<Word>(operations.size()),
+                                    .cost = cost,
+                                    .last_pc = last.pc,
+                                    .last_words = last.instruction.words});
+      }
+    }
+  }
+
+  void emit_regions(const Word pc, Value *count, Value *window) {
+    const auto [first, last] = regions_.equal_range(pc);
+    if (first == last) { return; }
+    auto *adapter = module_.getFunction("dsp56300_semantic_region");
+    if (adapter == nullptr || adapter->isDeclaration() || adapter->arg_size() != 4 ||
+        !adapter->getReturnType()->isIntegerTy(64)) {
+      throw std::invalid_argument("DSP image lacks its private region admission ABI");
+    }
+    for (auto found = first; found != last; ++found) {
+      const auto &region = found->second;
+      auto *continued = block(active_, "region.complete");
+      auto *precise = block(active_, "region.precise");
+      auto *outcome = ir_.CreateCall(
+          adapter,
+          {active_->getArg(0), ir_.CreateSub(active_->getArg(2), count), region.site, window});
+      auto *retired = ir_.CreateTrunc(outcome, ir_.getInt32Ty());
+      ir_.CreateCondBr(ir_.CreateICmpNE(retired, ir_.getInt32(0)), continued, precise);
+      ir_.SetInsertPoint(continued);
+      auto *next = ir_.CreateTrunc(ir_.CreateLShr(outcome, flow_shift), ir_.getInt32Ty());
+      auto *turns = ir_.CreateUDiv(retired, ir_.getInt32(region.count));
+      auto *cost =
+          ir_.CreateMul(ir_.CreateZExt(turns, ir_.getInt64Ty()), ir_.getInt64(region.cost));
+      ir_.CreateStore(ir_.CreateAdd(count, retired), count_);
+      ir_.CreateStore(ir_.CreateSub(window, cost), window_);
+      ir_.CreateStore(next, pc_);
+      const auto end = (region.last_pc + region.last_words) & word_mask;
+      auto *transfer = ir_.CreateSwitch(next, exits_.at(ImageExit::unprepared), 2);
+      transfer->addCase(ir_.getInt32(pc), successor(pc));
+      transfer->addCase(ir_.getInt32(end), successor(end));
+      ir_.SetInsertPoint(precise);
+    }
+  }
+
   llvm::Function *function(const std::string &name, const bool internal) {
     auto *pointer = ir_.getPtrTy();
     std::vector<llvm::Type *> parameters{
@@ -348,6 +428,7 @@ private:
     ir_.CreateCondBr(
         ir_.CreateICmpNE(window, ir_.getInt64(0)), execute, exits_.at(ImageExit::deadline));
     ir_.SetInsertPoint(execute);
+    emit_regions(pc, count, window);
     memory_contracts();
     auto *outcome =
         ir_.CreateCall(semantic_variant(operation), {active_->getArg(0), ir_.getInt32(pc)});
@@ -505,6 +586,7 @@ private:
   llvm::GlobalVariable *table_ = nullptr;
   std::map<Word, llvm::Function *> units_, targets_;
   std::map<std::pair<Word, Word>, llvm::Function *> semantic_variants_;
+  std::multimap<Word, FastRegion> regions_;
   std::map<Word, Block *> sites_, links_;
   std::map<ImageExit, Block *> exits_;
   Block *local_dispatch_ = nullptr;

@@ -7,6 +7,15 @@
 #include <cstdint>
 
 namespace dsp56300::detail {
+struct Cpu;
+struct NativeContext;
+using RegionEntry = std::uint32_t (*)(Cpu *, NativeContext *) noexcept;
+
+struct SemanticRegion {
+  RegionEntry entry;
+  Word pc, words;
+};
+
 enum class SemanticFlow : std::uint8_t { fault, owner, sequential, branch };
 
 // Compiler-facing values, with architectural state retained by Core.

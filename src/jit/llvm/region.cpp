@@ -28,6 +28,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace dsp56300::detail {
@@ -42,14 +43,13 @@ class RegionLifter {
 public:
   RegionLifter(LlvmModule &module,
                const RegionPlan &plan,
-               const JitRuntime &runtime,
-               const void *fallback)
+               const void *fallback,
+               const std::string_view entry = {})
       : context_(module.context()),
-        function_(make_function(module)),
+        function_(make_function(module, entry)),
         ir_(context_, LLVMAppendBasicBlockInContext(context_, function_, "entry")),
         plan_(plan),
         dynamic_(fallback == nullptr),
-        windowed_{!runtime.windows[0].empty(), !runtime.windows[1].empty()},
         cpu_(LLVMGetParam(function_, 0)),
         owner_(LLVMGetParam(function_, 1)) {
     generate(fallback);
@@ -62,12 +62,13 @@ private:
 
   V boolean(const bool value) { return LLVMConstInt(ir_.getIntNTy(1), value ? 1U : 0U, 0); }
 
-  static LLVMValueRef make_function(LlvmModule &module) {
+  static LLVMValueRef make_function(LlvmModule &module, const std::string_view entry) {
     auto *pointer = LLVMPointerTypeInContext(module.context(), 0);
     std::array arguments{pointer, pointer};
     auto *type = LLVMFunctionType(
         LLVMInt32TypeInContext(module.context()), arguments.data(), arguments.size(), 0);
-    auto *function = LLVMAddFunction(module.code(), module.name().c_str(), type);
+    auto *function = LLVMAddFunction(
+        module.code(), entry.empty() ? module.name().c_str() : std::string(entry).c_str(), type);
     return function;
   }
 
@@ -176,11 +177,11 @@ private:
     }
   }
 
-  V known_words(const MemoryWindow &window,
+  V known_words(const RegionWindow &window,
                 const Bounds bounds,
                 const bool writing,
                 V dynamic_known) {
-    if (window.known.empty()) { return boolean(true); }
+    if (!window.tracked) { return boolean(true); }
     auto *prior = LLVMGetInsertBlock(ir_.get());
     auto *condition = LLVMAppendBasicBlockInContext(context_, function_, "known_condition");
     auto *body = LLVMAppendBasicBlockInContext(context_, function_, "known_body");
@@ -193,11 +194,10 @@ private:
     LLVMAddIncoming(index, &first, &prior, 1);
     LLVMBuildCondBr(ir_.get(), ir_.CreateICmpULT(index, bounds.last), body, done);
     ir_.SetInsertPoint(body);
-    auto *base =
-        dynamic_
-            ? dynamic_known
-            : LLVMConstIntToPtr(ir_.getInt64(std::bit_cast<std::uintptr_t>(window.known.data())),
-                                ir_.getPtrTy());
+    auto *base = dynamic_
+                     ? dynamic_known
+                     : LLVMConstIntToPtr(ir_.getInt64(std::bit_cast<std::uintptr_t>(window.known)),
+                                         ir_.getPtrTy());
     auto *value = ir_.CreateLoad(ir_.getInt8Ty(), ir_.CreateGEP(ir_.getInt8Ty(), base, index));
     // Ordinary stores normalize knowledge to one. Only canonical destination
     // bytes can omit that metadata write on the optimized path.
@@ -223,16 +223,16 @@ private:
 
   Binding binding(const unsigned bank, const unsigned index, const bool writing) {
     const auto &window = plan_.windows[bank][index];
-    const bool explicit_windows = windowed_[bank];
+    const bool explicit_windows = plan_.windowed[bank];
     const auto flags = (window.writable ? region_writable : 0U) |
-                       (!window.known.empty() ? region_tracked : 0U) |
+                       (window.tracked ? region_tracked : 0U) |
                        (window.aliases_program ? region_program_alias : 0U) |
                        (explicit_windows ? region_windowed : 0U) | (writing ? region_writing : 0U);
     std::array values{ir_.getInt32(bank),
                       ir_.getInt32(index),
                       ir_.getInt32(static_cast<Word>(plan_.windows[bank].size())),
                       ir_.getInt32(window.address),
-                      ir_.getInt32(static_cast<Word>(window.words.size())),
+                      ir_.getInt32(static_cast<Word>(window.size)),
                       ir_.getInt32(flags)};
     auto *layout = LLVMConstStructInContext(context_, values.data(), values.size(), 0);
     auto *module = LLVMGetGlobalParent(function_);
@@ -268,7 +268,7 @@ private:
       const auto &window = plan_.windows[bank][index];
       if (!permitted(window, writing)) { continue; }
       auto *begin = ir_.getInt64(window.address);
-      auto *end = ir_.getInt64(window.address + window.words.size());
+      auto *end = ir_.getInt64(window.address + window.size);
       auto *matches = ir_.CreateAnd(ir_.CreateICmpUGE(bounds.first, begin),
                                     ir_.CreateICmpULT(bounds.last, end));
       matches = ir_.CreateAnd(matches, ir_.CreateICmpULT(bounds.first, end));
@@ -285,7 +285,7 @@ private:
                                ir_.getInt64(0))};
       auto *admitted = ir_.CreateAnd(matches, known_words(window, range, writing, bound.known));
       auto *pointer = dynamic_ ? LLVMBuildPtrToInt(ir_.get(), bound.data, ir_.getInt64Ty(), "")
-                               : ir_.getInt64(std::bit_cast<std::uintptr_t>(window.words.data()));
+                               : ir_.getInt64(std::bit_cast<std::uintptr_t>(window.data));
       auto *biased = LLVMBuildIntToPtr(
           ir_.get(),
           ir_.CreateSub(pointer, ir_.getInt64(std::uint64_t{window.address} * sizeof(Word))),
@@ -707,7 +707,6 @@ private:
   llvm19::Builder ir_;
   const RegionPlan &plan_;
   bool dynamic_;
-  std::array<bool, 2> windowed_{};
   V cpu_, owner_, initial_cycles_ = nullptr, initial_instructions_ = nullptr;
   V status_ = nullptr, lc_ = nullptr, sp_ = nullptr, sc_ = nullptr, saved_ = nullptr;
   V turns_ = nullptr, forever_ = nullptr, finite_count_ = nullptr, eligible_ = nullptr;
@@ -746,7 +745,7 @@ std::optional<PreparedRegion> compile_region(std::unique_ptr<LlvmCompiler> &comp
   if (!compiler) { compiler = std::make_unique<LlvmCompiler>(); }
   const auto before = compiler->native_bytes();
   LlvmModule module("dsp_region_" + std::to_string(std::bit_cast<std::uintptr_t>(fallback)));
-  const RegionLifter lift(module, *plan, runtime, fallback);
+  const RegionLifter lift(module, *plan, fallback);
   const auto *entry = compiler->install(module);
   return PreparedRegion{.entry = entry, .native_bytes = compiler->native_bytes() - before};
 }
@@ -760,7 +759,23 @@ bool lift_region(LlvmModule &module,
   }
   const auto plan = plan_region(operations, runtime);
   if (!plan) { return false; }
-  const RegionLifter lift(module, *plan, runtime, nullptr);
+  const RegionLifter lift(module, *plan, nullptr);
   return true;
 }
+
+bool lift_region(LlvmModule &module,
+                 const std::span<const BlockInstruction> operations,
+                 const std::span<const RegionLayout> memory,
+                 const std::string_view entry) {
+  if (module.code() == nullptr) { throw std::logic_error("Region module was already transferred"); }
+  const auto name = entry.empty() ? module.name() : std::string(entry);
+  if (LLVMGetNamedFunction(module.code(), name.c_str()) != nullptr) {
+    throw std::invalid_argument("Region module already has its entry");
+  }
+  const auto plan = plan_region(operations, memory);
+  if (!plan) { return false; }
+  const RegionLifter lift(module, *plan, nullptr, name);
+  return true;
+}
+
 }

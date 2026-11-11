@@ -17,30 +17,37 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace dsp56300::detail {
-bool permitted(const MemoryWindow &window, const bool writing) {
-  return !window.words.empty() && window.address < io_begin &&
-         window.words.size() <= io_begin - window.address &&
-         (window.known.empty() || window.known.size() == window.words.size()) &&
+bool permitted(const RegionWindow &window, const bool writing) {
+  return window.size != 0 && window.address < io_begin &&
+         window.size <= io_begin - window.address &&
          (!writing || (window.writable && !window.aliases_program));
 }
 
 namespace {
 auto declared_windows(const JitRuntime &runtime) {
-  std::array<std::vector<MemoryWindow>, 2> result;
+  std::array<std::vector<RegionWindow>, 2> result;
   for (std::size_t bank = 0; bank < result.size(); ++bank) {
     if (!runtime.windows[bank].empty()) {
-      result[bank].assign(runtime.windows[bank].begin(), runtime.windows[bank].end());
+      for (const auto &window : runtime.windows[bank]) {
+        result[bank].push_back({.address = window.address,
+                                .size = window.words.size(),
+                                .tracked = !window.known.empty(),
+                                .writable = window.writable,
+                                .aliases_program = window.aliases_program,
+                                .data = window.words.data(),
+                                .known = window.known.data()});
+      }
       continue;
     }
     const auto &memory = runtime.memory[bank];
     if (memory.data != nullptr && memory.words != 0) {
-      result[bank].push_back({.words = {memory.data, std::min(memory.words, std::size_t{io_begin})},
-                              .known = {},
-                              .writable = true,
-                              .aliases_program = memory.aliases_program});
+      result[bank].push_back({.size = std::min(memory.words, std::size_t{io_begin}),
+                              .aliases_program = memory.aliases_program,
+                              .data = memory.data});
     }
   }
   return result;
@@ -50,7 +57,7 @@ bool stable_knowledge(const RegionPlan &plan) {
   std::vector<std::span<const std::byte>> masks;
   for (const auto &bank : plan.windows) {
     for (const auto &window : bank) {
-      if (!window.known.empty()) { masks.push_back(std::as_bytes(window.known)); }
+      if (window.tracked) { masks.push_back(std::as_bytes(std::span(window.known, window.size))); }
     }
   }
   for (std::size_t bank = 0; bank < plan.windows.size(); ++bank) {
@@ -60,10 +67,11 @@ bool stable_knowledge(const RegionPlan &plan) {
     }
     for (const auto &window : plan.windows[bank]) {
       if (!permitted(window, true)) { continue; }
-      const auto data = std::bit_cast<std::uintptr_t>(window.words.data());
+      const auto data = std::bit_cast<std::uintptr_t>(window.data);
       for (const auto mask : masks) {
         const auto known = std::bit_cast<std::uintptr_t>(mask.data());
-        if (data <= known ? known - data < window.words.size_bytes() : data - known < mask.size()) {
+        if (data <= known ? known - data < window.size * sizeof(Word)
+                          : data - known < mask.size()) {
           return false;
         }
       }
@@ -188,10 +196,9 @@ bool append(RegionPlan &plan, const BlockInstruction &operation) {
   plan.steps.push_back({.memory = moves, .registers = registers});
   return true;
 }
-}
 
-std::optional<RegionPlan> plan_region(const std::span<const BlockInstruction> operations,
-                                      const JitRuntime &runtime) {
+std::optional<RegionPlan> make_plan(RegionPlan plan) {
+  const auto operations = plan.operations;
   if (operations.empty()) { return {}; }
   constexpr Word supported_modes = rounding_mode | scale_down | scale_up;
   const auto mode = operations.front().mode;
@@ -199,8 +206,6 @@ std::optional<RegionPlan> plan_region(const std::span<const BlockInstruction> op
       (mode & (scale_down | scale_up)) == (scale_down | scale_up)) {
     return {};
   }
-  RegionPlan plan{
-      .operations = operations, .steps = {}, .windows = declared_windows(runtime), .control = {}};
   plan.control = control(operations.back());
   plan.batch = at_loop_end(operations.back()) && !plan.control.valid;
   auto pc = operations.front().pc;
@@ -223,7 +228,46 @@ std::optional<RegionPlan> plan_region(const std::span<const BlockInstruction> op
       })) {
     return {};
   }
-  if (!stable_knowledge(plan)) { return {}; }
   return plan;
+}
+}
+
+std::optional<RegionPlan> plan_region(const std::span<const BlockInstruction> operations,
+                                      const JitRuntime &runtime) {
+  for (const auto windows : runtime.windows) {
+    for (const auto &window : windows) {
+      if (!window.known.empty() && window.known.size() != window.words.size()) { return {}; }
+    }
+  }
+  auto plan = make_plan({.operations = operations,
+                         .steps = {},
+                         .windows = declared_windows(runtime),
+                         .windowed = {!runtime.windows[0].empty(), !runtime.windows[1].empty()},
+                         .control = {}});
+  if (plan && !stable_knowledge(*plan)) { return {}; }
+  return plan;
+}
+
+std::optional<RegionPlan> plan_region(const std::span<const BlockInstruction> operations,
+                                      const std::span<const RegionLayout> memory) {
+  const bool external = std::ranges::none_of(
+      memory, [](const auto &region) { return region.space == Space::program; });
+  RegionPlan plan{.operations = operations,
+                  .steps = {},
+                  .windows = {},
+                  .windowed = {external, external},
+                  .control = {}};
+  for (const auto &region : memory) {
+    if (region.space != Space::x && region.space != Space::y) { continue; }
+    if (!external && (region.first != 0 || region.tracked || !region.writable)) { return {}; }
+    plan.windows[region.space == Space::x ? 0 : 1].push_back(
+        {.address = region.first,
+         .size = external ? region.size : std::min(region.size, std::size_t{io_begin}),
+         .tracked = region.tracked,
+         .writable = region.writable,
+         .aliases_program = region.aliases_program});
+  }
+  // Exported entries validate actual storage and mask aliases at admission.
+  return make_plan(std::move(plan));
 }
 }

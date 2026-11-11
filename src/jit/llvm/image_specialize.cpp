@@ -30,7 +30,8 @@ namespace {
 bool isa_function(const llvm::Function &function) {
   const auto name = function.getName();
   return name == "dsp56300_semantic_execute" || name == "dsp56300_semantic_vector_execute" ||
-         name == "dsp56300_semantic_memory" || name.starts_with("_ZN8dsp563004Core4Impl") ||
+         name == "dsp56300_semantic_memory" || name == "dsp56300_semantic_region" ||
+         name.starts_with("_ZN8dsp563004Core4Impl") ||
          name.starts_with("_ZNK8dsp563004Core4Impl") ||
          name.starts_with("_ZN8dsp563006detail10repeatableE") ||
          (name.starts_with("_ZN8dsp563006detail") && name.contains("permitted_vector_"));

@@ -75,7 +75,7 @@ set(dsp56300_semantic_sources
   src/integer.cpp src/iteration.cpp src/jit.cpp src/loop.cpp
   src/memory_windows.cpp src/move.cpp src/processing.cpp src/products.cpp
   src/program_cache.cpp src/registers.cpp src/repeat.cpp src/runtime.cpp
-  src/saturation.cpp src/semantic.cpp src/image_runtime.cpp src/shifts.cpp src/state.cpp
+  src/saturation.cpp src/semantic_region.cpp src/semantic.cpp src/image_runtime.cpp src/shifts.cpp src/state.cpp
   src/jit/llvm/region_memory.cpp
   src/transfer.cpp src/transfer_description.cpp src/transfer_info.cpp
   src/transfer_parallel.cpp src/transfer_special.cpp src/viterbi.cpp)
@@ -84,7 +84,7 @@ add_library(dsp56300_core STATIC
   src/io.cpp src/image_compile.cpp src/image_entry.cpp src/jit/preparation.cpp src/jit/image_plan.cpp
   src/jit/prefixes.cpp src/jit/prefix_access.cpp src/jit/llvm/runtime.cpp
   src/jit/llvm/lifecycle.cpp src/jit/llvm/bindings.cpp
-  src/jit/llvm/image.cpp src/jit/llvm/image_specialize.cpp
+  src/jit/llvm/image.cpp src/jit/llvm/image_regions.cpp src/jit/llvm/image_specialize.cpp
   src/jit/llvm/region.cpp src/jit/llvm/region_plan.cpp src/jit/llvm/alu.cpp
   src/jit/arena.cpp src/jit/block_parse.cpp src/jit/block_emit.cpp
   src/jit/index.cpp src/jit/move.cpp src/jit/resident_plan.cpp
@@ -256,6 +256,12 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
     target_link_libraries(dsp56300_image_semantic_test PRIVATE dsp56300::core ${CMAKE_DL_LIBS})
     add_dependencies(dsp56300_image_semantic_test dsp56300-semantic-ir)
     add_test(NAME semantic-image-lowering COMMAND dsp56300_image_semantic_test)
+    add_executable(dsp56300_image_regions_test test/jit/image_regions_test.cpp)
+    target_include_directories(dsp56300_image_regions_test PRIVATE src test/support)
+    target_include_directories(dsp56300_image_regions_test SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
+    target_link_libraries(dsp56300_image_regions_test PRIVATE dsp56300::core)
+    add_test(NAME native-image-regions COMMAND dsp56300_image_regions_test)
+    set_tests_properties(native-image-regions PROPERTIES TIMEOUT 60)
     set_tests_properties(semantic-image-lowering PROPERTIES TIMEOUT 30)
     add_library(dsp56300_image_io_bindings OBJECT test/jit/image_io_bindings.cpp)
     target_include_directories(dsp56300_image_io_bindings PRIVATE include test/support)

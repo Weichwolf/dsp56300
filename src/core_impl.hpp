@@ -92,6 +92,11 @@ struct Core::Impl {
   void assume_image_admission() const noexcept;
   static void semantic_memory(void *owner, const detail::SemanticMemory &memory) noexcept
       asm("dsp56300_semantic_memory");
+  [[nodiscard]] static std::uint64_t semantic_region(void *owner,
+                                                     std::uint32_t budget,
+                                                     const detail::SemanticRegion &region,
+                                                     std::uint64_t window) noexcept
+      asm("dsp56300_semantic_region");
   [[nodiscard]] static detail::SemanticResult
   semantic_execute(void *owner, const detail::Instruction &decoded) noexcept;
   // Stable private LLVM boundary; the packed result does not depend on struct-return ABI.
