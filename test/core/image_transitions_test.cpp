@@ -39,7 +39,11 @@ NativeImage compile(const std::span<const CodeTransition> transitions,
                             CodeVariant{.id = 2, .code = alternate, .entries = runtime_entry}};
   constexpr std::array interrupts{InterruptRequest{.vector = vector, .level = 0}};
   return Core::compile({.variants = variants},
-                       {.memory = {}, .interrupts = interrupts, .transitions = transitions});
+                       {.memory = {},
+                        .interrupts = interrupts,
+                        .transitions = transitions,
+                        .callbacks = {},
+                        .bindings = {}});
 }
 
 bool same(const State &left, const State &right) {

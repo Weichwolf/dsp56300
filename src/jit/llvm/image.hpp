@@ -28,7 +28,8 @@ struct ImageArtifact {
 };
 
 [[nodiscard]] ImageArtifact lower_images(std::string_view name,
-                                         std::span<const ImageTranslation> translations);
+                                         std::span<const ImageTranslation> translations,
+                                         std::span<const CallbackBinding> callbacks = {});
 enum class ImageExit : std::uint8_t { owner, fault, budget, deadline, unprepared };
 // Result: low 32 bits are retired instructions; high 32 bits contain ImageExit.
 using ImageEntry = std::uint64_t (*)(void *, Word, std::uint32_t, std::uint64_t) noexcept;

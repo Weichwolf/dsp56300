@@ -78,6 +78,10 @@ its exact `NativeSymbols` view to `Core::bind`. Bound images retain the supplied
 shared code owner; RAM and device state remain instance-owned. Shared native
 text size describes that owner once, rather than a sum across bound components.
 `Core::compile` uses the same lower/materialize/bind path for one component.
+`CompileOptions::callbacks` selects public Io roles and external symbols;
+`lower` declares them without host definitions. Standalone `compile` accepts
+their native-target LLVM bitcode through `CompileOptions::bindings` and validates
+it before linking and final O3. Unselected roles retain normal Io behavior.
 
 Memory belongs to the consumer and must outlive Core. One thread owns execution;
 state inspection is optional. Use Io for device effects and run_until() for an

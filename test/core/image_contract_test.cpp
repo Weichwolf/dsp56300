@@ -44,7 +44,9 @@ NativeImage compile(const bool fixed_memory = true) {
                        {.memory = fixed_memory ? std::span<const VariantLayout>(layouts)
                                                : std::span<const VariantLayout>{},
                         .interrupts = {},
-                        .transitions = {}});
+                        .transitions = {},
+                        .callbacks = {},
+                        .bindings = {}});
 }
 
 const NativeImage &image() {

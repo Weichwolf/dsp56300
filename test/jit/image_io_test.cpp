@@ -4,9 +4,7 @@
 #include "image_io_fixture.hpp"
 #include "isa.hpp"
 #include "jit/llvm/bindings.hpp"
-#include "jit/llvm/image.hpp"
 #include "jit/llvm/runtime.hpp"
-#include "semantic_ir.hpp"
 #include "support.hpp"
 
 #include <algorithm>
@@ -16,12 +14,14 @@
 #include <exception>
 #include <fstream>
 #include <iostream>
+#include <llvm-c/Core.h>
 #include <llvm/IR/Attributes.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/Casting.h>
+#include <memory>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -33,7 +33,6 @@ namespace {
 using namespace dsp56300;
 using namespace dsp56300::detail;
 using namespace dsp56300::test;
-std::span<const std::byte> active_semantics;
 constexpr unsigned x0_register = 4, byte_shift = 8;
 constexpr Word initial_x = 0x654321, initial_mask = 0x300, clear_mask = 0xfc;
 constexpr std::array program{
@@ -43,12 +42,13 @@ constexpr std::array program{
     static_cast<Word>(isa::Opcode::andi_control) | (clear_mask << byte_shift),
     static_cast<Word>(isa::Opcode::reset),
     static_cast<Word>(isa::Opcode::stop)};
-constexpr std::array roles{IoBinding{.role = IoRole::read, .name = "image_io_read"},
-                           IoBinding{.role = IoRole::write, .name = "image_io_write"},
-                           IoBinding{.role = IoRole::bit, .name = "image_io_bit"},
-                           IoBinding{.role = IoRole::reset, .name = "image_io_reset"},
-                           IoBinding{.role = IoRole::pending, .name = "image_io_pending"},
-                           IoBinding{.role = IoRole::revision, .name = "image_io_revision"}};
+constexpr std::array roles{
+    CallbackBinding{.role = CallbackRole::read, .symbol = "image_io_read"},
+    CallbackBinding{.role = CallbackRole::write, .symbol = "image_io_write"},
+    CallbackBinding{.role = CallbackRole::bit, .symbol = "image_io_bit"},
+    CallbackBinding{.role = CallbackRole::reset, .symbol = "image_io_reset"},
+    CallbackBinding{.role = CallbackRole::pending, .symbol = "image_io_pending"},
+    CallbackBinding{.role = CallbackRole::revision, .symbol = "image_io_revision"}};
 
 std::vector<std::byte> read(const char *path) {
   std::ifstream file(path, std::ios::binary | std::ios::ate);
@@ -62,12 +62,59 @@ std::vector<std::byte> read(const char *path) {
   return bytes;
 }
 
-NativeImage compile(const std::span<const std::byte> semantics) {
-  active_semantics = semantics;
+SemanticImage lower(const std::span<const CallbackBinding> callbacks,
+                    const std::span<const std::byte> bindings = {}) {
   const std::array code{CodeSpan{.address = io_entry, .words = program}};
   constexpr std::array entries{io_entry};
   const std::array versions{CodeVariant{.id = 0, .code = code, .entries = entries}};
-  return Core::compile({.variants = versions}, {});
+  return Core::lower({.variants = versions},
+                     {.memory = {},
+                      .interrupts = {},
+                      .transitions = {},
+                      .callbacks = callbacks,
+                      .bindings = bindings});
+}
+
+NativeImage compile(const std::span<const CallbackBinding> callbacks,
+                    const std::span<const std::byte> bindings) {
+  const std::array code{CodeSpan{.address = io_entry, .words = program}};
+  constexpr std::array entries{io_entry};
+  const std::array versions{CodeVariant{.id = 0, .code = code, .entries = entries}};
+  return Core::compile({.variants = versions},
+                       {.memory = {},
+                        .interrupts = {},
+                        .transitions = {},
+                        .callbacks = callbacks,
+                        .bindings = bindings});
+}
+
+NativeImage detached(const std::span<const std::byte> host) {
+  const auto semantic = lower(roles);
+  const auto repeated = lower(roles, host);
+  require(semantic.identity() == repeated.identity() &&
+              std::ranges::equal(semantic.bitcode(), repeated.bitcode()),
+          "Lowering needs no host definitions and owns the same IR with or without supplied ones");
+  LlvmModule module(std::string(semantic.exports().front().name));
+  module.link_bitcode(semantic.bitcode());
+  for (const auto &binding : roles) {
+    const auto *function = llvm::unwrap(module.code())->getFunction(binding.symbol);
+    require(function != nullptr && function->isDeclaration() && function->doesNotThrow(),
+            "Detached IR retains every selected public callback's typed external contract");
+  }
+  link_callbacks(module, host, roles);
+  auto owner = std::make_shared<LlvmCompiler>();
+  const auto *const first = owner->install(module);
+  std::vector<NativeSymbol> addresses;
+  for (const auto &entry : semantic.exports()) {
+    addresses.push_back(
+        {.name = entry.name,
+         .address = addresses.empty() ? first : owner->resolve(std::string(entry.name))});
+  }
+  return Core::bind(semantic,
+                    {.owner = owner,
+                     .symbols = addresses,
+                     .identity = semantic.identity(),
+                     .native_bytes = owner->native_bytes()});
 }
 
 struct Prefix {
@@ -249,17 +296,15 @@ void qualification(const NativeImage &reference,
   }
 }
 
-void code_quality(const std::span<const std::byte> semantics) {
-  LlvmModule module("public_io_code_quality");
-  module.link_bitcode(semantics);
-  const std::array code{CodeSpan{.address = io_entry, .words = program}};
-  constexpr std::array entries{io_entry};
-  lift_image(module, code, entries);
-  specialize_image(module);
+void code_quality(const std::span<const std::byte> host) {
+  const auto semantic = lower(roles);
+  LlvmModule module(std::string(semantic.exports().front().name));
+  module.link_bitcode(semantic.bitcode());
+  link_callbacks(module, host, roles);
   LlvmCompiler compiler;
-  require(!compiler.object(module).empty(), "The fused public Io program reaches native emission");
+  require(!compiler.object(module).empty(), "The public callback artifact reaches native emission");
   for (const auto &function : *llvm::unwrap(module.code())) {
-    require(!function.getName().starts_with("dsp56300_io_"),
+    require(!function.hasFnAttribute("dsp56300-io-adapter"),
             "Final O3 removes every temporary public Io adapter definition");
     for (const auto &block : function) {
       for (const auto &instruction : block) {
@@ -272,29 +317,24 @@ void code_quality(const std::span<const std::byte> semantics) {
   }
 }
 
-struct BindingInputs {
-  std::span<const std::byte> semantics, host;
-};
-
-void rejected(const BindingInputs inputs) {
+void rejected(const std::span<const std::byte> host) {
   const auto check = [&](const std::span<const std::byte> input,
-                         const std::span<const IoBinding> bindings) {
+                         const std::span<const CallbackBinding> bindings) {
     bool failed = false;
     try {
-      static_cast<void>(fuse_io(inputs.semantics, input, bindings));
+      static_cast<void>(compile(bindings, input));
     } catch (const std::exception &) { failed = true; }
     require(failed, "Invalid public Io role, definition or scalar ABI fails before publication");
   };
   check({}, roles);
-  check(inputs.host, {});
   const std::array duplicate{roles[0], roles[0]};
-  check(inputs.host, duplicate);
-  const std::array missing{IoBinding{.role = IoRole::read, .name = "absent"}};
-  check(inputs.host, missing);
-  const std::array wrong{IoBinding{.role = IoRole::read, .name = roles[1].name}};
-  check(inputs.host, wrong);
+  check(host, duplicate);
+  const std::array missing{CallbackBinding{.role = CallbackRole::read, .symbol = "absent"}};
+  check(host, missing);
+  const std::array wrong{CallbackBinding{.role = CallbackRole::read, .symbol = roles[1].symbol}};
+  check(host, wrong);
   LlvmModule changed("invalid_io_abi");
-  changed.link_bitcode(inputs.host);
+  changed.link_bitcode(host);
   auto *function = llvm::unwrap(changed.code())->getFunction("image_io_read");
   require(function != nullptr, "Independent public binding fixture contains the read definition");
   if (function->hasRetAttribute(llvm::Attribute::ZExt)) {
@@ -304,13 +344,13 @@ void rejected(const BindingInputs inputs) {
   }
   check(changed.bitcode(), roles);
   LlvmModule aliased("invalid_io_owner");
-  aliased.link_bitcode(inputs.host);
+  aliased.link_bitcode(host);
   auto *owner = llvm::unwrap(aliased.code())->getFunction("image_io_read");
   require(owner != nullptr, "The public owner binding exists before the aliasing negative control");
   owner->addParamAttr(0, llvm::Attribute::NoAlias);
   check(aliased.bitcode(), roles);
   LlvmModule extent("invalid_io_extent");
-  extent.link_bitcode(inputs.host);
+  extent.link_bitcode(host);
   auto *output = llvm::unwrap(extent.code())->getFunction("image_io_read");
   require(output != nullptr, "The public read output exists before its extent negative control");
   output->addParamAttr(4,
@@ -320,33 +360,30 @@ void rejected(const BindingInputs inputs) {
 }
 }
 
-namespace dsp56300::detail {
-// Only replace the immutable semantic provider in this unit-test executable.
-// Normal Core::compile/install/run perform every ISA, fault and device effect.
-std::span<const std::byte> semantic_ir() noexcept {
-  return active_semantics;
-}
-
-std::string_view compiler_identity() noexcept {
-  return "public-io-fusion-test";
-}
-}
-
 int main(const int argc, const char *const *const argv) {
   try {
-    if (argc != 3) {
-      throw std::invalid_argument("Expected semantic and public Io bitcode inputs");
-    }
-    const auto semantics = read(argv[1]);
-    const auto host = read(argv[2]);
-    rejected({.semantics = semantics, .host = host});
-    const auto reference = compile(semantics);
-    const auto fused_ir = fuse_io(semantics, host, roles);
-    code_quality(fused_ir);
-    const auto fused = compile(fused_ir);
-    const auto partial_ir = fuse_io(semantics, host, std::span(roles).first(1));
-    const auto partial = compile(partial_ir);
+    if (argc != 2) { throw std::invalid_argument("Expected public Io bitcode input"); }
+    const auto host = read(argv[1]);
+    rejected(host);
+    bool missing = false;
+    try {
+      static_cast<void>(compile(roles, {}));
+    } catch (const std::invalid_argument &) { missing = true; }
+    require(missing, "Selected callbacks require definitions before native materialization");
+    LlvmModule neutral("public_io_target_neutral");
+    neutral.link_bitcode(host);
+    LLVMSetTarget(neutral.code(), "");
+    LLVMSetDataLayout(neutral.code(), "");
+    const auto neutral_ir = neutral.bitcode();
+    const auto neutral_image = compile(roles, neutral_ir);
+    const auto reference = compile({}, {});
+    code_quality(host);
+    const auto fused = compile(roles, host);
+    const auto partial = compile(std::span(roles).first(1), host);
+    const auto external = detached(host);
     qualification(reference, fused, partial);
+    qualification(reference, external, partial);
+    qualification(reference, neutral_image, partial);
     std::cout << test::checks << " public Io fusion/state/effect checks passed.\n";
     return 0;
   } catch (const std::exception &error) {

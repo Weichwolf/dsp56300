@@ -360,6 +360,12 @@ void LlvmModule::link_bitcode(const std::span<const std::byte> source) {
                {.triple = target.empty() ? LLVMGetTarget(incoming.get()) : target,
                 .layout = layout.empty() ? LLVMGetDataLayoutStr(incoming.get()) : layout});
   }
+  if (!target.empty() && std::string_view(LLVMGetTarget(incoming.get())).empty()) {
+    LLVMSetTarget(incoming.get(), LLVMGetTarget(candidate.module_));
+  }
+  if (!layout.empty() && std::string_view(LLVMGetDataLayoutStr(incoming.get())).empty()) {
+    LLVMSetDataLayout(incoming.get(), LLVMGetDataLayoutStr(candidate.module_));
+  }
   diagnostics.check(LLVMLinkModules2(candidate.module_, incoming.release()) != 0,
                     "LLVM 19 cannot link semantic bitcode");
   LLVMSetModuleIdentifier(candidate.module_, name_.data(), name_.size());

@@ -146,7 +146,11 @@ int main() {
     const CodeVariant version{.id = 0, .code = spans, .entries = entries};
     constexpr std::array interrupts{InterruptRequest{.vector = vector, .level = 0}};
     const auto image = Core::compile({.variants = {&version, 1}},
-                                     {.memory = {}, .interrupts = interrupts, .transitions = {}});
+                                     {.memory = {},
+                                      .interrupts = interrupts,
+                                      .transitions = {},
+                                      .callbacks = {},
+                                      .bindings = {}});
     guest_mapping(image, 0);
     guest_mapping(image, 1);
     host_mapping(image, false);

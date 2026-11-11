@@ -99,7 +99,11 @@ const NativeImage &image() {
       }
     }
     return Core::compile({.variants = versions},
-                         {.memory = {}, .interrupts = interrupts, .transitions = {}});
+                         {.memory = {},
+                          .interrupts = interrupts,
+                          .transitions = {},
+                          .callbacks = {},
+                          .bindings = {}});
   }();
   return result;
 }

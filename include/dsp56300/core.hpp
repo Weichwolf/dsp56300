@@ -122,11 +122,20 @@ struct CodeTransition {
   Word entry;
 };
 
+enum class CallbackRole : std::uint8_t { read, write, bit, reset, pending, revision };
+
+struct CallbackBinding {
+  CallbackRole role;
+  std::string_view symbol;
+};
+
 struct CompileOptions {
   std::span<const VariantLayout> memory;
   std::span<const InterruptRequest> interrupts;
   // An absent resident target may yield only to this explicitly prepared version.
   std::span<const CodeTransition> transitions;
+  std::span<const CallbackBinding> callbacks;
+  std::span<const std::byte> bindings;
 };
 
 struct SemanticExport {
@@ -233,7 +242,7 @@ public:
   // Cold translation only; all source/layout/entry/IRQ/transition contracts are owned.
   [[nodiscard]] static SemanticImage lower(CodeImage image, CompileOptions options);
   // Cold native address binding; the shared owner retains code, never device state.
-  [[nodiscard]] static NativeImage bind(const SemanticImage &image, NativeSymbols symbols);
+  [[nodiscard]] static NativeImage bind(const SemanticImage &image, const NativeSymbols &symbols);
   [[nodiscard]] static NativeImage compile(CodeImage image, CompileOptions options);
   // Cold owner boundary: validate code/layout and bind RAM/events before publishing.
   void install(const NativeImage &image, std::uint64_t variant);

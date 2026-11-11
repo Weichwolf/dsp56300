@@ -3,6 +3,7 @@
 #include "dsp56300/memory.hpp"
 #include "image.hpp"
 #include "jit/image_plan.hpp"
+#include "jit/llvm/bindings.hpp"
 #include "jit/llvm/image.hpp"
 #include "jit/llvm/runtime.hpp"
 #include "semantic_ir.hpp"
@@ -85,6 +86,12 @@ std::string symbol(const CodeImage image, const CompileOptions options) {
     hash_word(hash, transfer.from);
     hash_word(hash, transfer.to);
     hash_word(hash, transfer.entry);
+  }
+  hash_word(hash, options.callbacks.size());
+  for (const auto &binding : options.callbacks) {
+    hash_word(hash, static_cast<unsigned>(binding.role));
+    hash_word(hash, binding.symbol.size());
+    hash.update(llvm::StringRef(binding.symbol));
   }
   return "dsp56300_image_" + llvm::toHex(hash.final(), true);
 }
@@ -264,7 +271,7 @@ SemanticImage Core::lower(const CodeImage image, const CompileOptions options) {
     translations.push_back({.name = symbol->second, .plan = plan, .vector = true});
     result->report.prepared_entries += plan.instructions.size();
   }
-  auto artifact = detail::lower_images(image_name, translations);
+  auto artifact = detail::lower_images(image_name, translations, options.callbacks);
   result->bitcode = std::move(artifact.bitcode);
   result->names = std::move(artifact.entries);
   result->abis = std::move(artifact.abis);
@@ -297,7 +304,7 @@ std::string_view SemanticImage::identity() const noexcept {
   return impl_ ? std::string_view(impl_->identity) : std::string_view{};
 }
 
-NativeImage Core::bind(const SemanticImage &image, NativeSymbols symbols) {
+NativeImage Core::bind(const SemanticImage &image, const NativeSymbols &symbols) {
   if (!image.impl_ || !symbols.owner || image.identity() != symbols.identity ||
       symbols.symbols.size() != image.exports().size()) {
     throw std::invalid_argument("DSP native binding requires its exact component and code owner");
@@ -316,7 +323,7 @@ NativeImage Core::bind(const SemanticImage &image, NativeSymbols symbols) {
   }
   auto result = std::make_shared<NativeImage::Impl>();
   static_cast<detail::ImageContracts &>(*result) = *image.impl_;
-  result->owner = std::move(symbols.owner);
+  result->owner = symbols.owner;
   result->report.native_bytes = symbols.native_bytes;
   for (std::size_t index = 0; index < result->variants.size(); ++index) {
     result->variants[index].entry =
@@ -332,6 +339,7 @@ NativeImage Core::compile(const CodeImage image, const CompileOptions options) {
   const auto semantic = lower(image, options);
   detail::LlvmModule module(std::string(semantic.exports().front().name));
   module.link_bitcode(semantic.bitcode());
+  detail::link_callbacks(module, options.bindings, options.callbacks);
   auto compiler = std::make_shared<detail::LlvmCompiler>();
   std::vector<NativeSymbol> addresses;
   addresses.reserve(semantic.exports().size());

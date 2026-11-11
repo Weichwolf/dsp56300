@@ -252,7 +252,7 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
     target_link_libraries(dsp56300_image_io_test PRIVATE dsp56300::core)
     set_target_properties(dsp56300_image_io_test PROPERTIES ENABLE_EXPORTS ON)
     add_dependencies(dsp56300_image_io_test dsp56300-semantic-ir dsp56300_image_io_bindings)
-    add_test(NAME public-image-io COMMAND dsp56300_image_io_test "${DSP56300_SEMANTIC_IR}"
+    add_test(NAME public-image-io COMMAND dsp56300_image_io_test
       "$<TARGET_OBJECTS:dsp56300_image_io_bindings>")
     set_tests_properties(public-image-io PROPERTIES TIMEOUT 60)
     add_executable(dsp56300_image_binding_test test/jit/image_binding_test.cpp)

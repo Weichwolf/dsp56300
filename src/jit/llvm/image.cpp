@@ -464,7 +464,8 @@ void lift_vector(LlvmModule &module, const ImagePlan &plan, const std::string_vi
 }
 
 ImageArtifact lower_images(const std::string_view name,
-                           const std::span<const ImageTranslation> translations) {
+                           const std::span<const ImageTranslation> translations,
+                           const std::span<const CallbackBinding> callbacks) {
   if (name.empty() || name.find('\0') != std::string_view::npos || translations.empty() ||
       translations.front().name != name) {
     throw std::invalid_argument("DSP semantic image requires its complete primary entry");
@@ -482,6 +483,7 @@ ImageArtifact lower_images(const std::string_view name,
   LlvmModule module(result.name);
   module.link_bitcode(semantic_ir());
   mark_io(module);
+  declare_callbacks(module, callbacks);
   for (const auto &translation : translations) {
     if (translation.vector) {
       lift_vector(module, translation.plan, translation.name);
@@ -495,15 +497,26 @@ ImageArtifact lower_images(const std::string_view name,
     const auto *function = llvm::unwrap(module.code())->getFunction(result.entries[entry]);
     std::string abi;
     llvm::raw_string_ostream stream(abi);
-    stream << (translations[entry].vector ? "event;" : "entry;")
-           << "cc=" << function->getCallingConv() << ";type=";
+    stream << "llvm19;cc=" << function->getCallingConv() << ";type=";
     function->getFunctionType()->print(stream);
-    stream << ";noexcept="
-           << (function->hasFnAttribute(llvm::Attribute::NoUnwind) ? "true" : "false")
-           << ";ret=" << function->getAttributes().getRetAttrs().getAsString();
-    for (unsigned index = 0; index < function->arg_size(); ++index) {
-      stream << ";arg" << index << '='
-             << function->getAttributes().getParamAttrs(index).getAsString();
+    constexpr std::array attributes{llvm::Attribute::SExt,
+                                    llvm::Attribute::ZExt,
+                                    llvm::Attribute::InReg,
+                                    llvm::Attribute::StructRet,
+                                    llvm::Attribute::ByVal,
+                                    llvm::Attribute::ByRef,
+                                    llvm::Attribute::InAlloca,
+                                    llvm::Attribute::Preallocated,
+                                    llvm::Attribute::Nest,
+                                    llvm::Attribute::SwiftSelf,
+                                    llvm::Attribute::SwiftError,
+                                    llvm::Attribute::SwiftAsync,
+                                    llvm::Attribute::Returned};
+    for (unsigned index = 0; index <= function->arg_size(); ++index) {
+      for (const auto kind : attributes) {
+        const auto attribute = function->getAttributes().getAttributeAtIndex(index, kind);
+        if (attribute.isValid()) { stream << ';' << index << ':' << attribute.getAsString(); }
+      }
     }
     result.abis.push_back(std::move(abi));
   }

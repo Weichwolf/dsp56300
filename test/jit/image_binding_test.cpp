@@ -35,7 +35,7 @@ SemanticImage lower(const bool left) {
   const std::array variants{CodeVariant{.id = 7, .code = code, .entries = entries}};
   auto image = Core::lower({.variants = variants}, {});
   require(words == unchanged && !image.bitcode().empty() && image.exports().size() == 1 &&
-              !image.identity().empty() && image.exports().front().abi.starts_with("entry;"),
+              !image.identity().empty() && image.exports().front().abi.starts_with("llvm19;"),
           "Public lowering owns complete IR, ABI exports and identity without changing source");
   return image;
 }

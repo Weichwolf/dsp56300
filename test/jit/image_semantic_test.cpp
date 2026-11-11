@@ -97,6 +97,40 @@ SemanticImage public_lower() {
   return image;
 }
 
+void unused_declarations() {
+  constexpr std::array words{static_cast<Word>(isa::Opcode::stop)};
+  const std::array code{CodeSpan{.address = 0, .words = words}};
+  constexpr std::array<Word, 1> entries{0};
+  const std::array variants{CodeVariant{.id = 2, .code = code, .entries = entries}};
+  constexpr std::array callbacks{
+      CallbackBinding{.role = CallbackRole::read, .symbol = "unused_read"},
+      CallbackBinding{.role = CallbackRole::bit, .symbol = "unused_bit"}};
+  constexpr std::array invalid_host{std::byte{0}};
+  const auto image = Core::lower({.variants = variants},
+                                 {.memory = {},
+                                  .interrupts = {},
+                                  .transitions = {},
+                                  .callbacks = callbacks,
+                                  .bindings = invalid_host});
+  require(engines == 0 && machines == 0 && image.exports().size() == 1,
+          "Even unused selected roles lower without definitions, Core state or native compilation");
+  LlvmModule module(std::string(image.exports().front().name));
+  module.link_bitcode(image.bitcode());
+  for (const auto &binding : callbacks) {
+    const auto *function = llvm::unwrap(module.code())->getFunction(binding.symbol);
+    require(function != nullptr && function->isDeclaration() && function->doesNotThrow(),
+            "Unused public callback contracts remain typed external declarations in detached IR");
+  }
+  auto renamed = callbacks;
+  renamed[0].symbol = "other_read";
+  const auto other = Core::lower(
+      {.variants = variants},
+      {.memory = {}, .interrupts = {}, .transitions = {}, .callbacks = renamed, .bindings = {}});
+  require(image.identity() != other.identity() &&
+              image.exports().front().name != other.exports().front().name,
+          "Selected callback contracts participate in component identity and symbol namespace");
+}
+
 void materialize(const ImageArtifact &artifact, const SemanticImage &guest) {
   LlvmModule module(artifact.name);
   module.link_bitcode(artifact.bitcode);
@@ -188,6 +222,7 @@ extern "C" LLVMTargetMachineRef LLVMCreateTargetMachine(LLVMTargetRef target,
 int main() {
   try {
     invalid_translations();
+    unused_declarations();
     const auto guest = public_lower();
     const auto artifact = detached();
     materialize(artifact, guest);
