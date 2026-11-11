@@ -9,6 +9,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string_view>
 
 namespace dsp56300 {
 inline constexpr std::uint64_t long_mask = 0x0000ffffffffffff;
@@ -128,6 +129,37 @@ struct CompileOptions {
   std::span<const CodeTransition> transitions;
 };
 
+struct SemanticExport {
+  std::string_view name, abi;
+};
+
+struct NativeSymbol {
+  std::string_view name;
+  const void *address = nullptr;
+};
+
+struct NativeSymbols {
+  std::shared_ptr<const void> owner;
+  std::span<const NativeSymbol> symbols;
+  std::string_view identity;
+  std::uint64_t native_bytes = 0;
+};
+
+// Immutable owned pre-O3 code/contracts; no Core, RAM or native execution owner.
+class SemanticImage {
+public:
+  SemanticImage() = default;
+  [[nodiscard]] std::span<const std::byte> bitcode() const noexcept;
+  [[nodiscard]] std::span<const SemanticExport> exports() const noexcept;
+  [[nodiscard]] std::string_view identity() const noexcept;
+
+private:
+  struct Impl;
+  explicit SemanticImage(std::shared_ptr<const Impl> image) noexcept;
+  std::shared_ptr<const Impl> impl_;
+  friend class Core;
+};
+
 class NativeImage {
 public:
   NativeImage() = default;
@@ -198,6 +230,10 @@ public:
   ~Core();
   Core(const Core &) = delete;
   Core &operator=(const Core &) = delete;
+  // Cold translation only; all source/layout/entry/IRQ/transition contracts are owned.
+  [[nodiscard]] static SemanticImage lower(CodeImage image, CompileOptions options);
+  // Cold native address binding; the shared owner retains code, never device state.
+  [[nodiscard]] static NativeImage bind(const SemanticImage &image, NativeSymbols symbols);
   [[nodiscard]] static NativeImage compile(CodeImage image, CompileOptions options);
   // Cold owner boundary: validate code/layout and bind RAM/events before publishing.
   void install(const NativeImage &image, std::uint64_t variant);

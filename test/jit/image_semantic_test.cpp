@@ -21,10 +21,12 @@
 #include <llvm-c/TargetMachine.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Module.h>
+#include <memory>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace {
 using namespace dsp56300;
@@ -83,9 +85,22 @@ void control(const ImageEntry entry) {
           "Reparsed ordinary/vector roots preserve the expired-window boundary");
 }
 
-void materialize(const ImageArtifact &artifact) {
+SemanticImage public_lower() {
+  constexpr std::array words{static_cast<Word>(isa::Opcode::nop),
+                             static_cast<Word>(isa::Opcode::stop)};
+  const std::array code{CodeSpan{.address = 0, .words = words}};
+  constexpr std::array<Word, 1> entries{0};
+  const std::array variants{CodeVariant{.id = 1, .code = code, .entries = entries}};
+  auto image = Core::lower({.variants = variants}, {});
+  require(engines == 0 && machines == 0 && !image.bitcode().empty(),
+          "Public lowering creates neither an execution engine nor a native target machine");
+  return image;
+}
+
+void materialize(const ImageArtifact &artifact, const SemanticImage &guest) {
   LlvmModule module(artifact.name);
   module.link_bitcode(artifact.bitcode);
+  module.link_bitcode(guest.bitcode());
   for (const auto &entry : artifact.entries) {
     const auto *function = llvm::unwrap(module.code())->getFunction(entry);
     require(function != nullptr && !function->isDeclaration() && function->hasExternalLinkage() &&
@@ -94,16 +109,32 @@ void materialize(const ImageArtifact &artifact) {
   }
   require(engines == 0 && machines == 0,
           "Importing an expired producer's artifact still creates no native compiler");
-  LlvmCompiler compiler;
+  auto compiler = std::make_shared<LlvmCompiler>();
   require(engines == 1 && machines != 0,
           "The independent observer detects the later native materializer's engine and machines");
-  const auto object = compiler.object(module);
-  require(!object.empty() && compiler.native_bytes() == 0,
+  const auto object = compiler->object(module);
+  require(!object.empty() && compiler->native_bytes() == 0,
           "Final native O3 and object emission are separate from semantic lowering");
-  control(std::bit_cast<ImageEntry>(compiler.install_object(object, artifact.name)));
+  control(std::bit_cast<ImageEntry>(compiler->install_object(object, artifact.name)));
   for (const auto &entry : artifact.entries) {
-    control(std::bit_cast<ImageEntry>(compiler.resolve(entry)));
+    control(std::bit_cast<ImageEntry>(compiler->resolve(entry)));
   }
+  std::vector<NativeSymbol> addresses;
+  for (const auto &entry : guest.exports()) {
+    addresses.push_back(
+        {.name = entry.name, .address = compiler->resolve(std::string(entry.name))});
+  }
+  const auto before_engines = engines;
+  const auto before_machines = machines;
+  const auto native = Core::bind(guest,
+                                 {.owner = compiler,
+                                  .symbols = addresses,
+                                  .identity = guest.identity(),
+                                  .native_bytes = compiler->native_bytes()});
+  require(engines == before_engines && machines == before_machines &&
+              native.report().prepared_entries == 2 &&
+              native.report().native_bytes == compiler->native_bytes(),
+          "Public binding retains checked code without creating another compiler or owner");
 }
 
 void invalid_translations() {
@@ -157,8 +188,9 @@ extern "C" LLVMTargetMachineRef LLVMCreateTargetMachine(LLVMTargetRef target,
 int main() {
   try {
     invalid_translations();
+    const auto guest = public_lower();
     const auto artifact = detached();
-    materialize(artifact);
+    materialize(artifact, guest);
     std::cout << test::checks << " owned semantic image lowering checks passed.\n";
     return 0;
   } catch (const std::exception &error) {

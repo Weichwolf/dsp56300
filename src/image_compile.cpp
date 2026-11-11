@@ -22,6 +22,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -151,8 +152,6 @@ void validate(const CodeImage image, const CompileOptions options) {
 
 NativeImage::NativeImage(std::shared_ptr<const Impl> image) noexcept : impl_(std::move(image)) {}
 
-NativeImage::Impl::~Impl() = default;
-
 PreparationReport NativeImage::report() const noexcept {
   return impl_ ? impl_->report
                : PreparationReport{.failure = {.kind = FaultKind::unprepared_execution}};
@@ -171,7 +170,7 @@ detail::ImageEntry NativeImage::Impl::vector_entry(const Word address,
 }
 
 std::map<std::tuple<Word, Word, Word>, detail::ImagePlan>
-NativeImage::Impl::plan_vectors(const std::vector<detail::ImagePlan> &plans) const {
+detail::ImageContracts::plan_vectors(const std::vector<detail::ImagePlan> &plans) const {
   std::map<std::tuple<Word, Word, Word>, detail::ImagePlan> result;
   std::set<Word> available;
   for (std::size_t index = 0; index < variants.size(); ++index) {
@@ -205,9 +204,9 @@ NativeImage::Impl::plan_vectors(const std::vector<detail::ImagePlan> &plans) con
   return result;
 }
 
-NativeImage Core::compile(const CodeImage image, const CompileOptions options) {
+SemanticImage Core::lower(const CodeImage image, const CompileOptions options) {
   validate(image, options);
-  auto result = std::make_shared<NativeImage::Impl>();
+  auto result = std::make_shared<SemanticImage::Impl>();
   for (const auto request : options.interrupts) {
     result->interrupts.emplace(request.vector, request.level);
   }
@@ -215,7 +214,7 @@ NativeImage Core::compile(const CodeImage image, const CompileOptions options) {
   std::vector<detail::ImagePlan> plans;
   plans.reserve(image.variants.size());
   for (const auto &source : image.variants) {
-    NativeImage::Impl::Variant variant;
+    detail::ImageContracts::Variant variant;
     variant.id = source.id;
     std::vector<Word> external;
     external.reserve(options.transitions.size());
@@ -265,21 +264,87 @@ NativeImage Core::compile(const CodeImage image, const CompileOptions options) {
     translations.push_back({.name = symbol->second, .plan = plan, .vector = true});
     result->report.prepared_entries += plan.instructions.size();
   }
-  const auto artifact = detail::lower_images(image_name, translations);
-  detail::LlvmModule module(artifact.name);
-  module.link_bitcode(artifact.bitcode);
-  result->compiler = std::make_unique<detail::LlvmCompiler>();
-  result->variants.front().entry =
-      std::bit_cast<detail::ImageEntry>(result->compiler->install(module));
-  for (std::size_t index = 1; index < names.size(); ++index) {
+  auto artifact = detail::lower_images(image_name, translations);
+  result->bitcode = std::move(artifact.bitcode);
+  result->names = std::move(artifact.entries);
+  result->abis = std::move(artifact.abis);
+  result->variant_names = std::move(names);
+  result->vector_symbols = std::move(vector_symbols);
+  result->exports.reserve(result->names.size());
+  for (std::size_t index = 0; index < result->names.size(); ++index) {
+    result->exports.push_back({.name = result->names[index], .abi = result->abis[index]});
+  }
+  llvm::SHA256 hash;
+  hash.update(llvm::StringRef(image_name));
+  hash_bytes(hash, result->bitcode);
+  result->identity = "dsp56300_component_" + llvm::toHex(hash.final(), true);
+  return SemanticImage(std::move(result));
+}
+
+SemanticImage::SemanticImage(std::shared_ptr<const Impl> image) noexcept
+    : impl_(std::move(image)) {}
+
+std::span<const std::byte> SemanticImage::bitcode() const noexcept {
+  return impl_ ? std::span<const std::byte>(impl_->bitcode) : std::span<const std::byte>{};
+}
+
+std::span<const SemanticExport> SemanticImage::exports() const noexcept {
+  return impl_ ? std::span<const SemanticExport>(impl_->exports)
+               : std::span<const SemanticExport>{};
+}
+
+std::string_view SemanticImage::identity() const noexcept {
+  return impl_ ? std::string_view(impl_->identity) : std::string_view{};
+}
+
+NativeImage Core::bind(const SemanticImage &image, NativeSymbols symbols) {
+  if (!image.impl_ || !symbols.owner || image.identity() != symbols.identity ||
+      symbols.symbols.size() != image.exports().size()) {
+    throw std::invalid_argument("DSP native binding requires its exact component and code owner");
+  }
+  std::map<std::string_view, const void *> addresses;
+  for (const auto &symbol : symbols.symbols) {
+    if (symbol.name.empty() || symbol.name.find('\0') != std::string_view::npos ||
+        symbol.address == nullptr || !addresses.emplace(symbol.name, symbol.address).second) {
+      throw std::invalid_argument("DSP native binding has an invalid or duplicate export");
+    }
+  }
+  for (const auto &entry : image.exports()) {
+    if (!addresses.contains(entry.name)) {
+      throw std::invalid_argument("DSP native binding lacks export " + std::string(entry.name));
+    }
+  }
+  auto result = std::make_shared<NativeImage::Impl>();
+  static_cast<detail::ImageContracts &>(*result) = *image.impl_;
+  result->owner = std::move(symbols.owner);
+  result->report.native_bytes = symbols.native_bytes;
+  for (std::size_t index = 0; index < result->variants.size(); ++index) {
     result->variants[index].entry =
-        std::bit_cast<detail::ImageEntry>(result->compiler->resolve(names[index]));
+        std::bit_cast<detail::ImageEntry>(addresses.at(image.impl_->variant_names[index]));
   }
-  for (const auto &[key, name] : vector_symbols) {
-    result->vectors.emplace(key,
-                            std::bit_cast<detail::ImageEntry>(result->compiler->resolve(name)));
+  for (const auto &[key, name] : image.impl_->vector_symbols) {
+    result->vectors.emplace(key, std::bit_cast<detail::ImageEntry>(addresses.at(name)));
   }
-  result->report.native_bytes = result->compiler->native_bytes();
   return NativeImage(std::move(result));
+}
+
+NativeImage Core::compile(const CodeImage image, const CompileOptions options) {
+  const auto semantic = lower(image, options);
+  detail::LlvmModule module(std::string(semantic.exports().front().name));
+  module.link_bitcode(semantic.bitcode());
+  auto compiler = std::make_shared<detail::LlvmCompiler>();
+  std::vector<NativeSymbol> addresses;
+  addresses.reserve(semantic.exports().size());
+  const auto *const first = compiler->install(module);
+  for (const auto &entry : semantic.exports()) {
+    addresses.push_back(
+        {.name = entry.name,
+         .address = addresses.empty() ? first : compiler->resolve(std::string(entry.name))});
+  }
+  return bind(semantic,
+              {.owner = compiler,
+               .symbols = addresses,
+               .identity = semantic.identity(),
+               .native_bytes = compiler->native_bytes()});
 }
 }

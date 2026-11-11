@@ -20,5 +20,6 @@ struct IoBinding {
                                              std::span<const std::byte> host,
                                              std::span<const IoBinding> bindings);
 // Retained adapter boundaries are cold binding points, never extra runtime calls.
+void mark_io(LlvmModule &module);
 void inline_io(LlvmModule &module);
 }

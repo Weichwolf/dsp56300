@@ -137,13 +137,23 @@ std::vector<std::byte> fuse_io(const std::span<const std::byte> semantics,
   return module.bitcode();
 }
 
-void inline_io(LlvmModule &module) {
+void mark_io(LlvmModule &module) {
   auto &native = *llvm::unwrap(module.code());
   for (const auto *name : names) {
-    auto *function = native.getFunction(name);
-    if (function == nullptr || function->isDeclaration()) { continue; }
-    function->removeFnAttr(llvm::Attribute::NoInline);
-    function->addFnAttr(llvm::Attribute::AlwaysInline);
+    if (auto *function = native.getFunction(name);
+        function != nullptr && !function->isDeclaration()) {
+      function->addFnAttr("dsp56300-io-adapter");
+    }
+  }
+}
+
+void inline_io(LlvmModule &module) {
+  mark_io(module);
+  auto &native = *llvm::unwrap(module.code());
+  for (auto &function : native) {
+    if (!function.hasFnAttribute("dsp56300-io-adapter")) { continue; }
+    function.removeFnAttr(llvm::Attribute::NoInline);
+    function.addFnAttr(llvm::Attribute::AlwaysInline);
   }
 }
 }

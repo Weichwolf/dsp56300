@@ -23,7 +23,7 @@ struct ImageTranslation {
 // Owned pre-O3 IR and exports; no execution owner or native compiler is retained.
 struct ImageArtifact {
   std::string name;
-  std::vector<std::string> entries;
+  std::vector<std::string> entries, abis;
   std::vector<std::byte> bitcode;
 };
 

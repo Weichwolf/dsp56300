@@ -5,11 +5,13 @@
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 #include "jit/image_plan.hpp"
+#include "jit/llvm/bindings.hpp"
 #include "jit/llvm/runtime.hpp"
 #include "semantic.hpp"
 #include "semantic_ir.hpp"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <llvm/ADT/StringExtras.h>
 #include <llvm/IR/Attributes.h>
@@ -29,6 +31,7 @@
 #include <llvm/IR/Value.h>
 #include <llvm/Support/Alignment.h>
 #include <llvm/Support/Casting.h>
+#include <llvm/Support/raw_ostream.h>
 #include <map>
 #include <set>
 #include <span>
@@ -466,7 +469,7 @@ ImageArtifact lower_images(const std::string_view name,
       translations.front().name != name) {
     throw std::invalid_argument("DSP semantic image requires its complete primary entry");
   }
-  ImageArtifact result{.name = std::string(name), .entries = {}, .bitcode = {}};
+  ImageArtifact result{.name = std::string(name), .entries = {}, .abis = {}, .bitcode = {}};
   result.entries.reserve(translations.size());
   std::set<std::string_view> names;
   for (const auto &translation : translations) {
@@ -478,6 +481,7 @@ ImageArtifact lower_images(const std::string_view name,
   }
   LlvmModule module(result.name);
   module.link_bitcode(semantic_ir());
+  mark_io(module);
   for (const auto &translation : translations) {
     if (translation.vector) {
       lift_vector(module, translation.plan, translation.name);
@@ -486,6 +490,23 @@ ImageArtifact lower_images(const std::string_view name,
     }
   }
   specialize_image(module, result.entries);
+  inline_io(module);
+  for (std::size_t entry = 0; entry < result.entries.size(); ++entry) {
+    const auto *function = llvm::unwrap(module.code())->getFunction(result.entries[entry]);
+    std::string abi;
+    llvm::raw_string_ostream stream(abi);
+    stream << (translations[entry].vector ? "event;" : "entry;")
+           << "cc=" << function->getCallingConv() << ";type=";
+    function->getFunctionType()->print(stream);
+    stream << ";noexcept="
+           << (function->hasFnAttribute(llvm::Attribute::NoUnwind) ? "true" : "false")
+           << ";ret=" << function->getAttributes().getRetAttrs().getAsString();
+    for (unsigned index = 0; index < function->arg_size(); ++index) {
+      stream << ";arg" << index << '='
+             << function->getAttributes().getParamAttrs(index).getAsString();
+    }
+    result.abis.push_back(std::move(abi));
+  }
   result.bitcode = module.bitcode();
   return result;
 }

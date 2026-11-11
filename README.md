@@ -71,6 +71,14 @@ int main() {
 }
 ```
 
+For external native materialization, `Core::lower` returns an immutable
+`SemanticImage` with owned pre-O3 bitcode, ABI exports and a component identity.
+Link prepared components before final native O3, resolve every export, then pass
+its exact `NativeSymbols` view to `Core::bind`. Bound images retain the supplied
+shared code owner; RAM and device state remain instance-owned. Shared native
+text size describes that owner once, rather than a sum across bound components.
+`Core::compile` uses the same lower/materialize/bind path for one component.
+
 Memory belongs to the consumer and must outlive Core. One thread owns execution;
 state inspection is optional. Use Io for device effects and run_until() for an
 absolute local cycle deadline. Core does not schedule an instrument or its audio.
