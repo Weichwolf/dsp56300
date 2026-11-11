@@ -89,7 +89,11 @@ revision. Explicit cross-variant declarations bind an absent entry to one
 prepared destination version. A completed native transfer yields at the owner
 boundary without a fault, leaving registers, stacks, loops, captured vectors and
 progress intact. The owner validates resident words and selects that exact image;
-failed installation retains the boundary without replaying the jump. No global
+failed installation retains the boundary without replaying the jump. Establish
+host mapping registers before installation. A real external-memory OMR change
+ends at its completed instruction and invalidates captured grants; validate and
+reinstall the prepared image before resuming. Unchanged OMR writes keep running.
+No global
 PC lookup chooses between different encodings. Declared interrupts may be absent
 in an earlier loader version; admission requires their source in the installed
 version. Compilation failure leaves architecture/progress unchanged. Keep LLVM

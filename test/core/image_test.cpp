@@ -273,10 +273,16 @@ const NativeImage &compiled_image() {
   return image;
 }
 
+void bind_image(Core &core) {
+  // Establish the mapping registers before capturing the consumer's RAM grants.
+  core.set_registers(initial(0));
+  core.install(compiled_image(), 0);
+}
+
 void matrix() {
   Fixture fixture;
   Core core(Memory::external(), &fixture);
-  core.install(compiled_image(), 0);
+  bind_image(core);
   constexpr std::array loops{Loop{},
                              Loop{.active = true, .address = entry - 1},
                              Loop{.active = true, .address = entry + length},
@@ -309,7 +315,7 @@ void matrix() {
 void unknown_data() {
   Fixture fixture;
   Core core(Memory::external(), &fixture);
-  core.install(compiled_image(), 0);
+  bind_image(core);
   const auto state = initial(0, {.active = true, .address = previous_la});
   auto wanted = expected(fixture, state, {.instructions = 3});
   ++wanted.reg.pc;
@@ -331,7 +337,7 @@ void denied_store() {
   fixture.window.writable = false;
   ++fixture.revision;
   Core core(Memory::external(), &fixture);
-  core.install(compiled_image(), 0);
+  bind_image(core);
   const auto state = initial(0, {.active = true, .address = previous_la});
   auto wanted = expected(fixture, state, {.instructions = 2});
   const auto address = wanted.reg.r[3];
@@ -356,7 +362,7 @@ void unprepared_target() {
   Fixture fixture;
   fixture.code[target] = named(Opcode::nop);
   Core core(Memory::external(), &fixture);
-  core.install(compiled_image(), 0);
+  bind_image(core);
   auto state = initial(0);
   state.pc = target;
   core.set_registers(state);
@@ -386,7 +392,7 @@ struct RepeatGrant {
 void repeat_case(const Word mode, const Word flags, const RepeatGrant grant) {
   Fixture fixture;
   Core core(Memory::external(), &fixture);
-  core.install(compiled_image(), 0);
+  bind_image(core);
   auto state = initial(mode, {}, flags);
   state.pc = repeat_entry;
   state.lc = saved_count;
@@ -462,7 +468,7 @@ void repeat_boundaries() {
 void direct_grants() {
   Fixture fixture;
   Core core(Memory::external(), &fixture);
-  core.install(compiled_image(), 0);
+  bind_image(core);
   const auto queries = fixture.window_queries;
   compare(core, fixture, initial(0), {});
   require(fixture.window_queries == queries && fixture.accesses == 0,
@@ -472,7 +478,7 @@ void direct_grants() {
 void owner_boundaries() {
   Fixture fixture;
   Core core(Memory::external(), &fixture);
-  core.install(compiled_image(), 0);
+  bind_image(core);
   auto state = initial(0);
   state.pc = 0;
   core.set_registers(state);
@@ -481,7 +487,7 @@ void owner_boundaries() {
               stopped.fault == Fault{} && core.registers().pc == 1,
           "Original STOP semantics retire once and return to the native owner");
   Core interrupt(Memory::external(), &fixture);
-  interrupt.install(compiled_image(), 0);
+  bind_image(interrupt);
   state = initial(0);
   state.pc = irq_entry;
   state.sr = irq_mask;

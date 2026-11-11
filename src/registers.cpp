@@ -96,7 +96,10 @@ void Core::Impl::write_register(const unsigned number, const Word value) {
       reg.sr = value;
       synchronize_cache_mode();
       break;
-    case omr_register: reg.omr = value; break;
+    case omr_register:
+      reg.omr = value;
+      image_io_completed();
+      break;
     case sp_register: reg.sp = value & (stack_entries * 4 - 1); break;
     case la_register: reg.la = value; break;
     case lc_register: reg.lc = value; break;

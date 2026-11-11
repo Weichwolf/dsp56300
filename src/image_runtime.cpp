@@ -127,6 +127,7 @@ void Core::install(const NativeImage &image, const std::uint64_t variant) {
   self.active_image = &selected;
   self.image_windows = granted;
   self.image_revision = revision;
+  self.program_omr = self.cpu.reg.omr;
   self.image_ready = true;
   self.next_image = nullptr;
 }
@@ -141,8 +142,9 @@ RunResult Core::Impl::run_image(const std::uint32_t quota) {
   if (next_image != nullptr) { yield_requested = true; }
   while (result.retired < quota && cpu.cycles < cycle_deadline && fault.kind == FaultKind::none &&
          cpu.processing == ExecutionState::running && !yield_requested) {
-    if (!image_ready || (io != nullptr && image_revision != io->program_revision()) ||
-        debug_ready() || instruction_cache_active()) {
+    if (!image_ready || (external && program_omr != cpu.reg.omr) ||
+        (io != nullptr && image_revision != io->program_revision()) || debug_ready() ||
+        instruction_cache_active()) {
       unprepared(cpu.reg.pc);
       break;
     }
@@ -193,10 +195,10 @@ bool Core::Impl::image_interrupt(const Word address, const unsigned level) {
   if (next_image != nullptr) {
     throw std::logic_error("DSP interrupt admission requires the pending image installation");
   }
-  if (!image_ready || (io != nullptr && image_revision != io->program_revision()) ||
-      debug_ready() || instruction_cache_active() ||
-      !image->interrupts.contains({address, level}) || !active_image->words.contains(address) ||
-      !active_image->words.contains(address + 1)) {
+  if (!image_ready || (external && program_omr != cpu.reg.omr) ||
+      (io != nullptr && image_revision != io->program_revision()) || debug_ready() ||
+      instruction_cache_active() || !image->interrupts.contains({address, level}) ||
+      !active_image->words.contains(address) || !active_image->words.contains(address + 1)) {
     unprepared(address, level);
     return false;
   }
@@ -237,7 +239,9 @@ void Core::Impl::image_word_written(const detail::ProgramCache::Write transfer) 
 }
 
 void Core::Impl::image_io_completed() noexcept {
-  if (!image || io == nullptr || image_revision == io->program_revision()) { return; }
+  if (!image || io == nullptr) { return; }
+  const bool remapped = external && program_omr != cpu.reg.omr;
+  if (!remapped && image_revision == io->program_revision()) { return; }
   image_ready = false;
   yield_requested = true;
   if (!external) { return; }
