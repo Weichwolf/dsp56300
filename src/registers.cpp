@@ -92,7 +92,10 @@ void Core::Impl::write_register(const unsigned number, const Word value) {
     case vba_register: reg.vba = value & (word_mask ^ byte_mask); break;
     case sc_register: reg.sc = value & (stack_entries * 2 - 1); break;
     case sz_register: reg.sz = value; break;
-    case sr_register: reg.sr = value; break;
+    case sr_register:
+      reg.sr = value;
+      synchronize_cache_mode();
+      break;
     case omr_register: reg.omr = value; break;
     case sp_register: reg.sp = value & (stack_entries * 4 - 1); break;
     case la_register: reg.la = value; break;

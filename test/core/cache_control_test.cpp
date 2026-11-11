@@ -3,6 +3,7 @@
 #include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "isa.hpp"
 #include "native_sequence_model.hpp"
 #include "support.hpp"
 
@@ -178,6 +179,34 @@ void mode_and_reset(const Backend backend, const unsigned width) {
   fixture.run({.pc = external, .length = 2, .cost = 2, .x0 = third});
 }
 
+void vector_mode_boundary(const Backend backend, const unsigned width) {
+  Fixture fixture(backend, width);
+  fixture.prime();
+  fixture.core.write(Space::program, external + 1, second);
+  constexpr Word vector = 32;
+  constexpr Word source = 48;
+  constexpr Word sr = 57;
+  constexpr Word read_direction = 1U << 15;
+  constexpr auto move = static_cast<Word>(isa::Opcode::movem_absolute_short);
+  const std::array code{move | read_direction | (source << 8) | sr,
+                        static_cast<Word>(isa::Opcode::nop)};
+  fixture.core.load(Space::program, vector, code);
+  fixture.core.write(Space::program, source, 0);
+  const auto before = fixture.core.registers();
+  const auto progress = fixture.core.progress();
+  auto expected = before;
+  expected.sr = 0;
+  fixture.core.interrupt(vector, 3);
+  require(fixture.core.fault() == Fault{} && fixture.core.registers() == expected &&
+              fixture.core.progress() ==
+                  Progress{.instructions = progress.instructions + 2,
+                           .estimated_cycles = progress.estimated_cycles + 7},
+          "A fast-vector PMOVE to SR clears CE without changing its foreground continuation");
+  expected.sr = ce;
+  fixture.core.set_registers(expected);
+  fixture.run({.pc = external, .length = 2, .cost = 2, .x0 = second});
+}
+
 void native_mode_boundary(const unsigned width) {
   Fixture fixture(Backend::jit, width);
   fixture.core.reset();
@@ -308,6 +337,7 @@ int main() {
         dsp56300::test::burst_fetch(backend, width, false);
         dsp56300::test::burst_fetch(backend, width, true);
         dsp56300::test::mode_and_reset(backend, width);
+        dsp56300::test::vector_mode_boundary(backend, width);
       }
       dsp56300::test::native_mode_boundary(width);
     }

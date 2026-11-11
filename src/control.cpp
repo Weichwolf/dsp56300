@@ -52,6 +52,7 @@ void Core::Impl::execute_return(const Instruction &decoded) {
   if (decoded.operation == Operation::return_interrupt) {
 
     cpu.reg.sr = static_cast<Word>(frame) & word_mask;
+    synchronize_cache_mode();
 
     cpu.interrupt_inhibited = true;
   }

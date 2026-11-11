@@ -22,7 +22,9 @@
 #include <llvm/IR/GlobalValue.h>
 #include <llvm/IR/GlobalVariable.h>
 #include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Module.h>
+#include <llvm/Support/Casting.h>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -84,6 +86,14 @@ void materialization(const std::span<const std::byte> semantics) {
   for (const auto &function : *llvm::unwrap(module.code())) {
     require(!function.getName().starts_with(module.name() + ".semantic."),
             "Specialized effects are fully inlined; no per-instruction wrapper survives");
+    for (const auto &block : function) {
+      for (const auto &instruction : block) {
+        const auto *call = llvm::dyn_cast<llvm::CallBase>(&instruction);
+        const auto *callee = call != nullptr ? call->getCalledFunction() : nullptr;
+        require(callee == nullptr || !callee->getName().contains("_Zdl"),
+                "NOP, ordinary jumps/returns and STOP cannot deallocate instruction caches");
+      }
+    }
   }
   LlvmCompiler first_owner;
   const auto object = first_owner.object(module);

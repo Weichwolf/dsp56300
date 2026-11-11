@@ -38,7 +38,6 @@ void Core::Impl::step_semantic(const detail::Instruction &decoded) {
   cpu.interrupt_inhibited = false;
   cpu.reg.pc = (current_pc + decoded.words) & word_mask;
   execute_operation(decoded);
-  synchronize_cache_mode();
   if (fault.kind != FaultKind::none) { return; }
   if (repeating) {
     cpu.repeat_opcode = decoded.opcode;

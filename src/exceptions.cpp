@@ -124,7 +124,6 @@ void Core::Impl::step_vector_semantic(const Instruction &decoded) {
     }
   }
 
-  synchronize_cache_mode();
   if (fault.kind == FaultKind::none) { retire_instruction(decoded.cycles); }
 }
 } // namespace dsp56300
