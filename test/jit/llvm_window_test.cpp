@@ -6,6 +6,7 @@
 #include "jit.hpp"
 #include "jit/block.hpp"
 #include "jit/llvm/region.hpp"
+#include "jit/llvm/region_memory.hpp"
 #include "jit/llvm/runtime.hpp"
 #include "loop_frames.hpp"
 #include "register_model.hpp"
@@ -450,9 +451,105 @@ void cross_space_cursor(const Forms forms) {
               nonlinear.cycles == 0 && nonlinear.instructions == 0,
           "Nonlinear modifiers retain exact ordinary execution without speculative memory work");
 }
+
+const void *link_region(detail::LlvmCompiler &compiler, Fixture &fixture, const Registers &seed) {
+  const auto runtime = fixture.runtime();
+  const auto operations = detail::parse_block(fixture.program, seed, runtime);
+  detail::LlvmModule module("owned_window_region");
+  require(detail::lift_region(module, operations, runtime),
+          "A complete guarded region must lower independently of native ISA fallback code");
+  compiler.define("dsp56300_region_memory",
+                  std::bit_cast<const void *>(&detail::dsp56300_region_memory));
+  if constexpr (__has_feature(address_sanitizer)) { return compiler.install(module); }
+  const auto object = compiler.object(module);
+  require(!object.empty(), "A real relocatable object rejects embedded absolute host pointers");
+  return compiler.install_object(object, module.name());
+}
+
+void linked_owner(const void *entry_point, Fixture &fixture, const Registers &seed) {
+  const auto wanted = expected(fixture, seed, {.instructions = 6});
+  auto shifted = seed;
+  shifted.a <<= detail::padding_bits;
+  shifted.b <<= detail::padding_bits;
+  detail::Cpu cpu{.reg = shifted};
+  detail::NativeContext owner{
+      .runtime = fixture.runtime(), .budget = 6, .cycle_deadline = wanted.cycles};
+  const auto retired = detail::enter_block(entry_point, cpu, owner);
+  cpu.reg.a >>= detail::padding_bits;
+  cpu.reg.b >>= detail::padding_bits;
+  require(retired == 6 && cpu.reg == wanted.reg && cpu.instructions == wanted.retired &&
+              cpu.cycles == wanted.cycles && fixture.data == wanted.data &&
+              fixture.known == wanted.known && cpu.repeat_remaining == 0 && !cpu.repeat_loaded &&
+              !cpu.repeat_completed && !cpu.interrupt_inhibited && cpu.debug_flags == 0 &&
+              cpu.processing == ExecutionState::running && owner.failure == Fault{} &&
+              owner.boundary == detail::NativeBoundary::context && !owner.program_written,
+          "One retained region uses each current owner's RAM and preserves complete copy effects");
+}
+
+void linked_miss(const void *entry_point,
+                 Fixture &fixture,
+                 const Registers &seed,
+                 const Grant grant = {.instructions = 6, .cycles = 6}) {
+  auto shifted = seed;
+  shifted.a <<= detail::padding_bits;
+  shifted.b <<= detail::padding_bits;
+  detail::Cpu cpu{.reg = shifted};
+  detail::NativeContext owner{
+      .runtime = fixture.runtime(), .budget = grant.instructions, .cycle_deadline = grant.cycles};
+  const auto data = fixture.data;
+  const auto known = fixture.known;
+  require(detail::enter_block(entry_point, cpu, owner) == 0 && cpu.reg == shifted &&
+              cpu.instructions == 0 && cpu.cycles == 0 && fixture.data == data &&
+              fixture.known == known && owner.failure == Fault{} &&
+              owner.boundary == detail::NativeBoundary::none,
+          "A rejected region returns unchanged state and RAM without entering any ISA fallback");
+}
+
+void linkable_windows() {
+  Fixture original;
+  Fixture independent;
+  const auto seed = initial({}, 0);
+  detail::LlvmCompiler compiler;
+  const auto *const region = link_region(compiler, original, seed);
+  const auto native_bytes = compiler.native_bytes();
+  for (Word flags = 0; flags <= status_byte; ++flags) {
+    original.reset();
+    independent.reset();
+    constexpr Word tag = 0x231;
+    for (auto &word : independent.data[1]) { word ^= tag; }
+    auto state = seed;
+    state.sr |= flags;
+    linked_owner(region, original, state);
+    linked_owner(region, independent, state);
+  }
+  independent.reset();
+  linked_miss(region, independent, seed, {.instructions = 0, .cycles = 6});
+  linked_miss(region, independent, seed, {.instructions = 1, .cycles = 6});
+  linked_miss(region, independent, seed, {.instructions = 6, .cycles = 0});
+  linked_miss(region, independent, seed, {.instructions = 6, .cycles = 1});
+  independent.windows[2].writable = false;
+  linked_miss(region, independent, seed);
+  independent.windows[2].writable = true;
+  independent.windows[2].aliases_program = true;
+  linked_miss(region, independent, seed);
+  independent.windows[2].aliases_program = false;
+  independent.known[2] = 0;
+  linked_miss(region, independent, seed);
+  independent.known[2] = 2;
+  linked_miss(region, independent, seed);
+  independent.reset();
+  constexpr Word canonical_bytes = 0x01010101;
+  independent.data[2].fill(canonical_bytes);
+  independent.windows[2].known = {reinterpret_cast<std::uint8_t *>(independent.data[2].data()),
+                                  words};
+  linked_miss(region, independent, seed);
+  require(compiler.native_bytes() == native_bytes,
+          "Independent owners and rejected contexts do not compile or materialize more code");
+}
 }
 
 int main() try {
+  linkable_windows();
   for (const auto mode : modes) { cases(mode); }
   for (const auto mode : modes) { signed_cases(mode); }
   knowledge_alias();

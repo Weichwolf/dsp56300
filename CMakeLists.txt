@@ -76,6 +76,7 @@ set(dsp56300_semantic_sources
   src/memory_windows.cpp src/move.cpp src/processing.cpp src/products.cpp
   src/program_cache.cpp src/registers.cpp src/repeat.cpp src/runtime.cpp
   src/saturation.cpp src/semantic.cpp src/image_runtime.cpp src/shifts.cpp src/state.cpp
+  src/jit/llvm/region_memory.cpp
   src/transfer.cpp src/transfer_description.cpp src/transfer_info.cpp
   src/transfer_parallel.cpp src/transfer_special.cpp src/viterbi.cpp)
 add_library(dsp56300_semantics OBJECT ${dsp56300_semantic_sources})
@@ -298,6 +299,11 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   target_include_directories(dsp56300_llvm_window_test SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
   target_link_libraries(dsp56300_llvm_window_test PRIVATE dsp56300::core)
   add_test(NAME optimizing-memory-windows COMMAND dsp56300_llvm_window_test)
+  add_executable(dsp56300_llvm_memory_binding_test test/jit/llvm_memory_binding_test.cpp)
+  target_include_directories(dsp56300_llvm_memory_binding_test PRIVATE src src/jit test/support)
+  target_include_directories(dsp56300_llvm_memory_binding_test SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
+  target_link_libraries(dsp56300_llvm_memory_binding_test PRIVATE dsp56300::core)
+  add_test(NAME optimizing-memory-bindings COMMAND dsp56300_llvm_memory_binding_test)
   add_executable(dsp56300_llvm_region_test test/jit/llvm_region_test.cpp)
   target_include_directories(dsp56300_llvm_region_test PRIVATE src src/jit test/support)
   target_include_directories(dsp56300_llvm_region_test SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})

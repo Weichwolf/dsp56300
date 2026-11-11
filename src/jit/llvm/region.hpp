@@ -20,6 +20,12 @@ struct PreparedRegion {
   std::uint64_t native_bytes = 0;
 };
 
+// Linkable guarded region with dynamic owner storage and no ISA fallback or
+// embedded instance addresses. A guard miss returns zero without CPU effects.
+[[nodiscard]] bool lift_region(LlvmModule &module,
+                               std::span<const BlockInstruction> operations,
+                               const JitRuntime &runtime);
+
 // Complete arithmetic/RAM regions with non-call control; other effects retain ISA lowering.
 [[nodiscard]] std::optional<PreparedRegion>
 compile_region(std::unique_ptr<LlvmCompiler> &compiler,
