@@ -81,6 +81,7 @@ set(dsp56300_semantic_sources
 add_library(dsp56300_semantics OBJECT ${dsp56300_semantic_sources})
 add_library(dsp56300_core STATIC
   src/jit/preparation.cpp src/jit/image_plan.cpp src/jit/llvm/runtime.cpp
+  src/jit/llvm/image.cpp src/jit/llvm/image_specialize.cpp
   src/jit/llvm/region.cpp src/jit/llvm/region_plan.cpp src/jit/llvm/alu.cpp
   src/jit/arena.cpp src/jit/block_parse.cpp src/jit/block_emit.cpp
   src/jit/index.cpp src/jit/move.cpp src/jit/resident_plan.cpp
@@ -152,6 +153,16 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   target_include_directories(dsp56300_image_plan_test PRIVATE src test/support)
   target_link_libraries(dsp56300_image_plan_test PRIVATE dsp56300::core)
   add_test(NAME explicit-executable-inventory COMMAND dsp56300_image_plan_test)
+  # Semantic export uses the same optimized ThinLTO objects as production.
+  if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    add_executable(dsp56300_llvm_image_test test/jit/llvm_image_test.cpp)
+    target_include_directories(dsp56300_llvm_image_test PRIVATE src test/support)
+    target_include_directories(dsp56300_llvm_image_test SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
+    target_link_libraries(dsp56300_llvm_image_test PRIVATE dsp56300::core)
+    add_dependencies(dsp56300_llvm_image_test dsp56300-semantic-ir)
+    add_test(NAME native-image-control COMMAND dsp56300_llvm_image_test "${DSP56300_SEMANTIC_IR}")
+    set_tests_properties(native-image-control PROPERTIES TIMEOUT 60)
+  endif()
   add_executable(dsp56300_preparation_test test/jit/preparation_test.cpp)
   target_link_libraries(dsp56300_preparation_test PRIVATE dsp56300::core)
   add_test(NAME optimized-preparation COMMAND dsp56300_preparation_test)

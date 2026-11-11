@@ -89,6 +89,10 @@ struct Core::Impl {
   void step_semantic(const detail::Instruction &decoded);
   [[nodiscard]] static detail::SemanticResult
   semantic_execute(void *owner, const detail::Instruction &decoded) noexcept;
+  // Stable private LLVM boundary; the packed result does not depend on struct-return ABI.
+  [[nodiscard]] static std::uint64_t semantic_entry(void *owner,
+                                                    const detail::Instruction &decoded) noexcept
+      asm("dsp56300_semantic_execute");
 #if defined(__aarch64__)
   void step_native(const detail::Instruction &decoded);
 #endif

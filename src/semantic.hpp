@@ -2,6 +2,8 @@
 #pragma once
 #include "dsp56300/memory.hpp"
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 
 namespace dsp56300::detail {
@@ -12,4 +14,7 @@ struct SemanticResult {
   Word pc;
   SemanticFlow flow;
 };
+
+inline constexpr std::size_t semantic_abi_fields = 9;
+extern "C" const std::array<Word, semantic_abi_fields> dsp56300_semantic_abi;
 } // namespace dsp56300::detail

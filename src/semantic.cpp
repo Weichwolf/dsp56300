@@ -7,6 +7,23 @@
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 
+#include <array>
+#include <cstddef>
+#include <cstdint>
+
+namespace dsp56300::detail {
+extern "C" const std::array<Word, semantic_abi_fields> dsp56300_semantic_abi{
+    1,
+    word_mask,
+    sizeof(Instruction),
+    offsetof(Instruction, opcode),
+    offsetof(Instruction, extension),
+    offsetof(Instruction, operation),
+    offsetof(Instruction, words),
+    offsetof(Instruction, cycles),
+    static_cast<Word>(Operation::conditional_debug) + 1};
+}
+
 namespace dsp56300 {
 // Portable ISA, REP and DO effects are available to semantic IR translation
 // without entering an architecture-specific native execution owner.
@@ -62,5 +79,12 @@ detail::SemanticResult Core::Impl::semantic_execute(void *const owner,
   return {.pc = self.cpu.reg.pc,
           .flow = self.cpu.reg.pc == next ? detail::SemanticFlow::sequential
                                           : detail::SemanticFlow::branch};
+}
+
+std::uint64_t Core::Impl::semantic_entry(void *const owner,
+                                         const detail::Instruction &decoded) noexcept {
+  constexpr unsigned flow_shift = 32;
+  const auto result = semantic_execute(owner, decoded);
+  return result.pc | (static_cast<std::uint64_t>(result.flow) << flow_shift);
 }
 } // namespace dsp56300
