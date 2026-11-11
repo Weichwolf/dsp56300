@@ -174,6 +174,72 @@ void continuous(Machine &machine, const NativeImage &image) {
   expected.progress = {.instructions = count, .estimated_cycles = iterations * loop_cycles};
   compare(machine.core, machine.core.run(count), expected);
 }
+
+struct ResetIo final : Io {
+  bool reset_peripherals(const Word pc) noexcept override {
+    if (calls >= addresses.size()) { return false; }
+    addresses[calls] = pc;
+    visible[calls] = owner->registers().pc;
+    ++calls;
+    if (calls == 1) { owner->request_yield(); }
+    return true;
+  }
+
+  bool read(Space /*space*/, Word /*address*/, Word /*pc*/, Word & /*value*/) noexcept override {
+    return false;
+  }
+
+  bool write(Space /*space*/, Word /*address*/, Word /*pc*/, Word /*value*/) noexcept override {
+    return false;
+  }
+
+  bool bit(Space /*space*/,
+           Word /*address*/,
+           Word /*pc*/,
+           Word /*bit*/,
+           BitAction /*action*/,
+           bool & /*previous*/) noexcept override {
+    return false;
+  }
+
+  Core *owner = nullptr;
+  std::array<Word, 2> addresses{}, visible{};
+  unsigned calls = 0;
+};
+
+void shared_io() {
+  constexpr std::uint64_t total_cycles = (2 * 7) + 10;
+  constexpr std::array code{op<isa::Opcode::reset>, op<isa::Opcode::reset>, op<isa::Opcode::stop>};
+  const std::array spans{CodeSpan{.address = entry, .words = code}};
+  constexpr std::array entries{entry};
+  const CodeVariant version{.id = 0, .code = spans, .entries = entries};
+  const auto image = Core::compile({.variants = {&version, 1}}, {});
+  std::array<Word, 512> program{};
+  std::array<Word, 1> x{};
+  std::array<Word, 1> y{};
+  std::ranges::copy(code, program.begin() + entry);
+  ResetIo io;
+  Core core(Memory::separate({.program = program, .x = x, .y = y}), &io);
+  io.owner = &core;
+  auto initial = test::register_model::seed(0);
+  initial.pc = entry;
+  initial.sr = status_mask;
+  core.set_registers(initial);
+  core.install(image, 0);
+  require(io.calls == 0, "Cold specialization and installation perform no real I/O");
+  const auto first = core.run();
+  require(first.retired == 1 && first.yielded && first.fault == Fault{} && io.calls == 1 &&
+              core.progress() == Progress{.instructions = 1, .estimated_cycles = 7},
+          "A real first action yields at its exact completed native prefix");
+  const auto rest = core.run();
+  initial.pc += code.size();
+  require(rest.retired == 2 && !rest.yielded && rest.fault == Fault{} && io.calls == 2 &&
+              rest.state == ExecutionState::stopped && core.registers() == initial &&
+              core.progress() == Progress{.instructions = 3, .estimated_cycles = total_cycles} &&
+              io.addresses == std::array<Word, 2>{entry, entry + 1} &&
+              io.visible == std::array<Word, 2>{entry + 1, entry + 2},
+          "Repeated identical encodings keep distinct real I/O PCs and never replay an action");
+}
 }
 
 int main() {
@@ -182,6 +248,7 @@ int main() {
     Machine machine(image);
     boundaries(machine);
     continuous(machine, image);
+    shared_io();
     std::cout << test::checks << " public native function-transfer checks passed\n";
     return 0;
   } catch (const std::exception &error) {

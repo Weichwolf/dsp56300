@@ -78,6 +78,10 @@ void materialization(const std::span<const std::byte> semantics) {
           "Semantic import preserves the unique native module initialization identity");
   lift_image(module, code, entries);
   specialize_image(module);
+  for (const auto &function : *llvm::unwrap(module.code())) {
+    require(!function.getName().starts_with(module.name() + ".semantic."),
+            "Specialized effects are fully inlined; no per-instruction wrapper survives");
+  }
   LlvmCompiler first_owner;
   const auto object = first_owner.object(module);
   require(!object.empty() && first_owner.native_bytes() == 0 && module.code() != nullptr,

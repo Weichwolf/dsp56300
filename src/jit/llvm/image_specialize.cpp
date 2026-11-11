@@ -11,6 +11,7 @@
 #include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Module.h>
+#include <llvm/IR/StructuralHash.h>
 #include <llvm/IR/Value.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/Support/Casting.h>
@@ -37,7 +38,8 @@ std::set<llvm::Function *> semantic_calls(llvm::Module &module, const std::strin
   std::set<llvm::Function *> result;
   for (const auto &function : module) {
     const auto name = function.getName();
-    if (name != entry && name != entry + ".dispatch" && !name.starts_with(entry + ".unit.")) {
+    if (name != entry && name != entry + ".dispatch" && !name.starts_with(entry + ".unit.") &&
+        !name.starts_with(entry + ".semantic.")) {
       continue;
     }
     for (const auto &block : function) {
@@ -73,6 +75,13 @@ void passes(LlvmModule &module, const char *pipeline) {
                                                                        &LLVMDisposeErrorMessage);
   throw std::runtime_error(text.get());
 }
+
+llvm::IRHash fingerprint(const llvm::Module &module) {
+  std::string diagnostic;
+  llvm::raw_string_ostream output(diagnostic);
+  if (llvm::verifyModule(module, &output)) { throw std::invalid_argument(diagnostic); }
+  return llvm::StructuralHash(module, true);
+}
 }
 
 void specialize_image(LlvmModule &module) {
@@ -89,8 +98,8 @@ void specialize_image(LlvmModule &module) {
   passes(module, "globaldce");
   for (;;) {
     const auto frontier = semantic_calls(native, module.name());
-    if (frontier.empty()) { return; }
-    const auto before = module.bitcode();
+    if (frontier.empty()) { break; }
+    const auto before = fingerprint(native);
     for (auto *function : frontier) {
       if (function->hasFnAttribute(llvm::Attribute::OptimizeNone)) {
         throw std::invalid_argument("DSP image requires optimized own semantic IR");
@@ -101,9 +110,17 @@ void specialize_image(LlvmModule &module) {
     passes(module,
            "always-inline,function(instcombine<max-iterations=8;verify-fixpoint>,"
            "simplifycfg),globaldce");
-    if (module.bitcode() == before) {
+    if (fingerprint(native) == before) {
       throw std::runtime_error("DSP semantic specialization made no progress");
     }
   }
+  // Specialize each complete encoding once before replicating its reduced effects
+  // into native functions. The final code retains no per-instruction wrapper calls.
+  for (auto &function : native) {
+    if (function.getName().starts_with(module.name() + ".semantic.")) {
+      function.addFnAttr(llvm::Attribute::AlwaysInline);
+    }
+  }
+  passes(module, "always-inline,globaldce");
 }
 }

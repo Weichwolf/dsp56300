@@ -31,6 +31,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace dsp56300::detail {
@@ -115,12 +116,16 @@ private:
                                                    : llvm::GlobalValue::ExternalLinkage,
                                           name,
                                           module_);
+    attributes(result);
+    return result;
+  }
+
+  void attributes(llvm::Function *result) {
     result->addFnAttr(llvm::Attribute::NoUnwind);
     result->addFnAttr(llvm::Attribute::StackProtectStrong);
     for (const auto *const key : {"target-cpu", "target-features", "frame-pointer"}) {
       if (semantic_->hasFnAttribute(key)) { result->addFnAttr(semantic_->getFnAttribute(key)); }
     }
-    return result;
   }
 
   Block *block(llvm::Function *function, const std::string &name) {
@@ -236,7 +241,7 @@ private:
     ir_.CreateRet(call);
   }
 
-  llvm::GlobalVariable *descriptor(const Word pc, const Instruction &operation) {
+  llvm::GlobalVariable *descriptor(const std::string &name, const Instruction &operation) {
     const std::array<llvm::Constant *, 5> fields{
         ir_.getInt32(operation.opcode),
         ir_.getInt32(operation.extension),
@@ -244,9 +249,25 @@ private:
         ir_.getInt8(operation.words),
         ir_.getInt8(operation.cycles)};
     auto *value = llvm::ConstantStruct::getAnon(module_.getContext(), fields);
-    auto *global = constant(name_ + ".op." + llvm::utohexstr(pc, true), value);
+    auto *global = constant(name + ".op", value);
     global->setAlignment(llvm::Align(alignof(Instruction)));
     return global;
+  }
+
+  llvm::Function *semantic_variant(const Instruction &operation) {
+    const auto key = std::pair(operation.opcode, operation.extension);
+    const auto found = semantic_variants_.find(key);
+    if (found != semantic_variants_.end()) { return found->second; }
+    const auto name = name_ + ".semantic." + llvm::utohexstr(key.first, true) + "." +
+                      llvm::utohexstr(key.second, true);
+    auto *type = llvm::FunctionType::get(ir_.getInt64Ty(), {ir_.getPtrTy()}, false);
+    auto *result = llvm::Function::Create(type, llvm::GlobalValue::InternalLinkage, name, module_);
+    attributes(result);
+    const llvm::IRBuilderBase::InsertPointGuard insertion(ir_);
+    ir_.SetInsertPoint(block(result, "entry"));
+    ir_.CreateRet(ir_.CreateCall(semantic_, {result->getArg(0), descriptor(name, operation)}));
+    semantic_variants_.emplace(key, result);
+    return result;
   }
 
   void emit_instruction(const Word pc, const Instruction &operation) {
@@ -264,7 +285,7 @@ private:
     ir_.CreateCondBr(
         ir_.CreateICmpNE(window, ir_.getInt64(0)), execute, exits_.at(ImageExit::deadline));
     ir_.SetInsertPoint(execute);
-    auto *outcome = ir_.CreateCall(semantic_, {active_->getArg(0), descriptor(pc, operation)});
+    auto *outcome = ir_.CreateCall(semantic_variant(operation), {active_->getArg(0)});
     auto *next = ir_.CreateTrunc(outcome, ir_.getInt32Ty());
     auto *flow = ir_.CreateTrunc(ir_.CreateLShr(outcome, flow_shift), ir_.getInt8Ty());
     ir_.CreateStore(next, pc_);
@@ -351,6 +372,7 @@ private:
   llvm::Function *semantic_, *dispatch_ = nullptr, *active_ = nullptr;
   llvm::GlobalVariable *table_ = nullptr;
   std::map<Word, llvm::Function *> units_, targets_;
+  std::map<std::pair<Word, Word>, llvm::Function *> semantic_variants_;
   std::map<Word, Block *> sites_;
   std::map<ImageExit, Block *> exits_;
   Block *local_dispatch_ = nullptr;
