@@ -136,5 +136,7 @@ void specialize_image(LlvmModule &module, const std::span<const std::string> ent
     }
   }
   passes(module, "always-inline,globaldce");
+  // Reduce memory-dependence graphs before the final O3 pipeline.
+  passes(module, "function(sroa,early-cse<memssa>,newgvn)");
 }
 }
