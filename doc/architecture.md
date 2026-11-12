@@ -88,6 +88,10 @@ indirect targets and keep the host stack bounded across cycles. Retain immutable
 translations and live values across native edges; no length caps, budget-specific
 recompilation, continuous hashing or hot-path allocations/telemetry.
 
+Admit complete straight-line spans against instruction and nominal-cycle grants.
+Use the same LLVM semantics for precise partial-grant prefixes. A failed span
+admission transfers current state without repeating committed work.
+
 Represent exact integer/flag, memory and ordered device effects in IR. Apply
 constant/range propagation, CSE, dead-store elimination, forwarding, register
 propagation and legal loop/vector optimization. Arithmetic lowers inline to

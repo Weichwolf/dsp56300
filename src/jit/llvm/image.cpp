@@ -17,6 +17,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <llvm/ADT/StringExtras.h>
 #include <llvm/IR/Attributes.h>
 #include <llvm/IR/BasicBlock.h>
@@ -38,6 +39,7 @@
 #include <llvm/Support/raw_ostream.h>
 #include <map>
 #include <optional>
+#include <ranges>
 #include <set>
 #include <span>
 #include <stdexcept>
@@ -102,7 +104,8 @@ public:
               const ImagePlan &plan,
               const std::string_view entry,
               const bool vector = false,
-              const std::optional<std::span<const RegionLayout>> memory = std::nullopt)
+              const std::optional<std::span<const RegionLayout>> memory = std::nullopt,
+              const bool exact = false)
       : module_(*llvm::unwrap(module.code())),
         ir_(module_.getContext()),
         name_(entry.empty() ? module.name() : std::string(entry)),
@@ -113,7 +116,14 @@ public:
     if (module_.getNamedValue(name_) != nullptr) {
       throw std::invalid_argument("DSP image entry already exists");
     }
-    if (!vector && memory_) { prepare_regions(module, *memory_); }
+    if (!vector && !exact) {
+      const auto precise_name = name_ + ".precise";
+      const ImageLifter precise(module, plan, precise_name, false, memory, true);
+      precise_ = module_.getFunction(precise_name);
+      precise_->setLinkage(llvm::GlobalValue::InternalLinkage);
+      prepare_admissions();
+    }
+    if (!vector && !exact && memory_) { prepare_regions(module, *memory_); }
     for (const auto head : plan_.units()) {
       units_.emplace(head, function(name_ + ".unit." + llvm::utohexstr(head, true), true));
     }
@@ -132,6 +142,31 @@ public:
   }
 
 private:
+  struct Admission {
+    Word instructions = 0;
+    std::uint64_t before_last = 0;
+  };
+
+  void prepare_admissions() {
+    const auto heads = plan_.units();
+    auto stop = plan_.instructions.end();
+    for (const auto head : std::views::reverse(heads)) {
+      const auto first = plan_.instructions.find(head);
+      auto position = stop;
+      Admission suffix;
+      const auto last_cost = std::prev(stop)->second.cycles;
+      std::uint64_t cost = 0;
+      while (position != first) {
+        --position;
+        cost += position->second.cycles;
+        suffix.before_last = cost - last_cost;
+        ++suffix.instructions;
+        costs_.emplace(position->first, suffix);
+      }
+      stop = first;
+    }
+  }
+
   struct FastRegion {
     llvm::GlobalVariable *site;
     Word count, cost, last_pc, last_words, mode;
@@ -421,7 +456,7 @@ private:
 
   Block *successor(const Word pc) {
     const auto site = sites_.find(pc);
-    if (site != sites_.end()) { return site->second; }
+    if (site != sites_.end()) { return precise_ != nullptr ? admissions_.at(pc) : site->second; }
     const auto target = targets_.find(pc);
     if (target == targets_.end()) { return exits_.at(ImageExit::unprepared); }
     const auto [link, added] = links_.try_emplace(pc, nullptr);
@@ -441,19 +476,23 @@ private:
 
   void emit_instruction(const Word pc, const Instruction &operation) {
     ir_.SetInsertPoint(sites_.at(pc));
-    auto *time = block(active_, "time");
     auto *execute = block(active_, "execute");
     auto *commit = block(active_, "commit");
     auto *continued = block(active_, "continued");
     auto *sequential = block(active_, "sequential");
     auto *branched = block(active_, "branch");
     auto *count = ir_.CreateLoad(ir_.getInt32Ty(), count_);
-    ir_.CreateCondBr(
-        ir_.CreateICmpULT(count, active_->getArg(2)), time, exits_.at(ImageExit::budget));
-    ir_.SetInsertPoint(time);
     auto *window = ir_.CreateLoad(ir_.getInt64Ty(), window_);
-    ir_.CreateCondBr(
-        ir_.CreateICmpNE(window, ir_.getInt64(0)), execute, exits_.at(ImageExit::deadline));
+    if (precise_ == nullptr) {
+      auto *time = block(active_, "time");
+      ir_.CreateCondBr(
+          ir_.CreateICmpULT(count, active_->getArg(2)), time, exits_.at(ImageExit::budget));
+      ir_.SetInsertPoint(time);
+      ir_.CreateCondBr(
+          ir_.CreateICmpNE(window, ir_.getInt64(0)), execute, exits_.at(ImageExit::deadline));
+    } else {
+      ir_.CreateBr(execute);
+    }
     ir_.SetInsertPoint(execute);
     memory_contracts();
     emit_regions(pc, count, window);
@@ -491,7 +530,8 @@ private:
     const auto expected = (pc + operation.words) & word_mask;
     auto *assume = llvm::Intrinsic::getDeclaration(&module_, llvm::Intrinsic::assume);
     ir_.CreateCall(assume, ir_.CreateICmpEQ(next, ir_.getInt32(expected)));
-    ir_.CreateBr(successor(expected));
+    const auto following = sites_.find(expected);
+    ir_.CreateBr(following != sites_.end() ? following->second : successor(expected));
   }
 
   void memory_contract(const SemanticMemory &memory) {
@@ -554,9 +594,32 @@ private:
     }
   }
 
+  void emit_admissions() {
+    if (precise_ == nullptr) { return; }
+    auto *fallback = block(active_, "precise");
+    ir_.SetInsertPoint(fallback);
+    auto *count = ir_.CreateLoad(ir_.getInt32Ty(), count_);
+    auto *outcome = ir_.CreateCall(precise_,
+                                   {active_->getArg(0),
+                                    ir_.CreateLoad(ir_.getInt32Ty(), pc_),
+                                    ir_.CreateSub(active_->getArg(2), count),
+                                    ir_.CreateLoad(ir_.getInt64Ty(), window_)});
+    ir_.CreateRet(ir_.CreateAdd(outcome, ir_.CreateZExt(count, ir_.getInt64Ty())));
+    for (const auto &[pc, admission] : admissions_) {
+      ir_.SetInsertPoint(admission);
+      const auto &cost = costs_.at(pc);
+      auto *remaining = ir_.CreateSub(active_->getArg(2), ir_.CreateLoad(ir_.getInt32Ty(), count_));
+      auto *window = ir_.CreateLoad(ir_.getInt64Ty(), window_);
+      auto *ready = ir_.CreateAnd(ir_.CreateICmpUGE(remaining, ir_.getInt32(cost.instructions)),
+                                  ir_.CreateICmpUGT(window, ir_.getInt64(cost.before_last)));
+      ir_.CreateCondBr(ready, sites_.at(pc), fallback);
+    }
+  }
+
   void emit_unit(llvm::Function *unit) {
     active_ = unit;
     sites_.clear();
+    admissions_.clear();
     links_.clear();
     exits_.clear();
     auto *entry = block(unit, "entry");
@@ -577,12 +640,18 @@ private:
       exits_.emplace(reason, block(unit, "exit"));
     }
     for (const auto &[pc, target] : targets_) {
-      if (target == unit) { sites_.emplace(pc, block(unit, "pc." + llvm::utohexstr(pc, true))); }
+      if (target == unit) {
+        sites_.emplace(pc, block(unit, "pc." + llvm::utohexstr(pc, true)));
+        if (precise_ != nullptr) { admissions_.emplace(pc, block(unit, "admit")); }
+      }
     }
     ir_.SetInsertPoint(local_dispatch_);
     auto *switch_pc =
         ir_.CreateSwitch(ir_.CreateLoad(ir_.getInt32Ty(), pc_), exits_.at(ImageExit::unprepared));
-    for (const auto &[pc, site] : sites_) { switch_pc->addCase(ir_.getInt32(pc), site); }
+    for (const auto &[pc, site] : sites_) {
+      switch_pc->addCase(ir_.getInt32(pc), precise_ != nullptr ? admissions_.at(pc) : site);
+    }
+    emit_admissions();
     for (const auto &[pc, site] : sites_) {
       static_cast<void>(site);
       emit_instruction(pc, plan_.instructions.at(pc));
@@ -608,13 +677,14 @@ private:
   std::string name_;
   const ImagePlan &plan_;
   const std::map<Word, std::vector<Word>> edges_;
-  llvm::Function *semantic_, *dispatch_ = nullptr, *active_ = nullptr;
+  llvm::Function *semantic_, *dispatch_ = nullptr, *active_ = nullptr, *precise_ = nullptr;
   const std::optional<std::span<const RegionLayout>> memory_;
   llvm::GlobalVariable *table_ = nullptr;
   std::map<Word, llvm::Function *> units_, targets_;
   std::map<std::pair<Word, Word>, llvm::Function *> semantic_variants_;
   std::multimap<Word, FastRegion> regions_;
-  std::map<Word, Block *> sites_, links_;
+  std::map<Word, Block *> sites_, links_, admissions_;
+  std::map<Word, Admission> costs_;
   std::map<ImageExit, Block *> exits_;
   Block *local_dispatch_ = nullptr;
   Value *count_ = nullptr, *window_ = nullptr, *pc_ = nullptr;
