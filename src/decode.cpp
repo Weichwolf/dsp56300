@@ -136,15 +136,16 @@ Instruction decode(const Word opcode) noexcept {
                 static_cast<std::uint8_t>(rule.cycles + (rule_penalty(rule, opcode) ? 1 : 0))};
   }
 
-  // FM 2.3.2.2: audited unallocated control/short-call families raise III.
-  // Legal ANDI/ORI forms in the first domain have already matched their rules.
-  // Other unmatched encodings remain unsupported, not automatically undefined.
-  constexpr Word byte_prefix_mask = 0xffff00;
-  constexpr Word control_domain = 0x000100;
+  // FM chapter 13 has no remaining format in this audited control domain.
+  // Preserve twelve permissive-o control aliases as unqualified, not undefined.
+  constexpr Word control_end = 0x010000;
+  constexpr Word ignored_control_bits = 0x50;
+  constexpr std::array uncertain_controls{Word{0x84}, Word{0x86}, Word{0x87}, Word{0x8c}};
+  const bool uncertain = std::ranges::find(uncertain_controls, opcode & ~ignored_control_bits) !=
+                         uncertain_controls.end();
   constexpr Word nibble_prefix_mask = 0xfff000;
   constexpr Word call_domain = 0x0d2000;
-  if ((opcode & byte_prefix_mask) == control_domain ||
-      (opcode & nibble_prefix_mask) == call_domain) {
+  if ((opcode < control_end && !uncertain) || (opcode & nibble_prefix_mask) == call_domain) {
     return {.opcode = opcode, .operation = Operation::undefined};
   }
   return {.opcode = opcode};

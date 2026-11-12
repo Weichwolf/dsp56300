@@ -26,7 +26,7 @@ namespace dsp56300::detail {
 
 [[nodiscard]] inline bool permitted_vector_instruction(const Instruction &instruction) {
   const auto kind = instruction.operation;
-  return kind == Operation::parallel || kind == Operation::nop ||
+  return kind == Operation::undefined || kind == Operation::parallel || kind == Operation::nop ||
          kind == Operation::move_peripheral_memory || kind == Operation::move_peripheral_program ||
          permitted_vector_move(instruction) || kind == Operation::reset_peripherals ||
          kind == Operation::debug || kind == Operation::conditional_debug;

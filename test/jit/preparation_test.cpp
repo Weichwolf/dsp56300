@@ -270,7 +270,7 @@ void changing_revision() {
 
 void independent_entries() {
   Fixture fixture({}, false);
-  constexpr Word invalid = 0x000007; // Reserved encoding, deliberately not an ISA operation.
+  constexpr Word invalid = 0x0d3000; // Unaudited encoding, deliberately not an ISA operation.
   fixture.program[0] = invalid;
   Core core(Memory::separate({.program = fixture.program, .x = fixture.x, .y = fixture.y}));
   constexpr std::array<Word, 2> entries{0, setup};

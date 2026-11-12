@@ -20,10 +20,11 @@ using namespace dsp56300;
 using test::require;
 template <isa::Opcode operation> constexpr Word op = static_cast<Word>(operation);
 constexpr Word start = 0x200, handler = 0x400, relocated = 0x800;
-constexpr Word repeat_start = start + 16, instruction_stride = 4, priority_mask = 0x300;
-// Independently selected boundaries of two documented unallocated encoding domains.
+constexpr Word repeat_start = start + 32, instruction_stride = 4, priority_mask = 0x300;
+// Independently selected members of documented unallocated encoding domains.
 // These are not manufacturer program words or substitutes for every unsupported opcode.
-constexpr std::array reserved{Word{0x000100}, Word{0x0001ff}, Word{0x0d2000}, Word{0x0d2fff}};
+constexpr std::array reserved{
+    Word{0x000007}, Word{0x00325a}, Word{0x000100}, Word{0x0001ff}, Word{0x0d2000}, Word{0x0d2fff}};
 constexpr std::array fast_vector{op<isa::Opcode::nop>, op<isa::Opcode::nop>};
 constexpr std::array long_vector{op<isa::Opcode::jsr_effective> | (6U << 11), handler};
 constexpr std::array service{op<isa::Opcode::rti>};
@@ -165,7 +166,7 @@ void returns() {
 }
 
 void unsupported() {
-  constexpr Word unaudited = 7;
+  constexpr Word unaudited = 0x0d3000;
   Machine machine(false, false);
   machine.program[start] = unaudited;
   machine.core.set_registers(seed({.pc = start, .vba = 0, .status = priority_mask}));

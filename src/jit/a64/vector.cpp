@@ -100,7 +100,7 @@ void Emitter::vector_operation(const BlockInstruction &operation) {
 }
 
 void Emitter::finish_vector(const BlockInstruction &operation) {
-  if (!call(operation)) {
+  if (!call(operation) && operation.instruction.operation != Operation::undefined) {
     code_.load(Reg::x15, context, vector_pointer, Access::doubleword);
     Label final;
     Label complete;

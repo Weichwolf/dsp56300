@@ -23,7 +23,7 @@ using namespace dsp56300;
 using test::require;
 template <isa::Opcode operation> constexpr Word opcode = static_cast<Word>(operation);
 constexpr Word target = 0x123456;
-constexpr Word unrecognized = 0x000007; // Reserved encoding; deliberately no ISA operation.
+constexpr Word unrecognized = 0x0d3000; // Unaudited encoding; deliberately no ISA operation.
 constexpr Word helper = 24, helper_return = helper + 1, absolute_ea = 0x30;
 
 struct CodeView {

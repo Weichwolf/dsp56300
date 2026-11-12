@@ -72,11 +72,16 @@ void Emitter::exception_request(const BlockInstruction &operation) {
              Access::doubleword);
   code_.load(Reg::x0, Reg::x2, offsetof(VectorState, phase), Access::byte);
   Label pending;
-  code_.branch_zero_far(Reg::x0, pending, Width::w32, true);
+  code_.constant(Reg::x17, static_cast<std::uint8_t>(VectorPhase::pending));
+  code_.compare(Reg::x0, Reg::x17);
+  code_.branch_far(Condition::equal, pending);
+  Label retained;
+  code_.branch_zero_far(Reg::x0, retained, Width::w32, true);
   const bool illegal = operation.instruction.operation == Operation::illegal;
   const bool instruction_fault = illegal || operation.instruction.operation == Operation::undefined;
   code_.constant(Reg::x0, (operation.pc + (illegal ? 2U : 1U)) & word_mask);
   code_.store(Reg::x0, Reg::x2, offsetof(VectorState, resume));
+  code_.bind(retained);
   code_.load(Reg::x0, cpu, offsetof(Registers, vba));
   constexpr Word bank = 0xffff00;
   constexpr Word illegal_offset = 4;

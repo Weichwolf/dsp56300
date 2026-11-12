@@ -160,7 +160,7 @@ std::uint64_t Core::Impl::semantic_vector_entry(void *const owner,
   auto flow = detail::SemanticFlow::branch;
   if (self.fault.kind != FaultKind::none) {
     flow = detail::SemanticFlow::fault;
-  } else if (self.vector.phase == VectorPhase::none ||
+  } else if (self.vector.phase == VectorPhase::none || self.vector.phase == VectorPhase::pending ||
              self.cpu.processing != ExecutionState::running || self.debug_ready() ||
              self.instruction_cache_active() || self.yield_requested) {
     flow = detail::SemanticFlow::owner;

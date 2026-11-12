@@ -89,14 +89,14 @@ void check_loop(const dsp56300::Backend backend) {
 
 void check_fail_stop(const dsp56300::Backend backend) {
   Fixture fixture(backend);
-  // Reserved word 7 is not a valid DSP56300 instruction.
-  constexpr Word reserved_word = 7;
+  // This reserved domain is outside the audited undefined-opcode coverage.
+  constexpr Word reserved_word = 0x0d3000;
   fixture.core.write(dsp56300::Space::program, start, reserved_word);
   const auto result = fixture.core.run(1);
   require(result.retired == 0 &&
               result.fault.kind == dsp56300::FaultKind::unsupported_instruction &&
               result.fault.pc == start && result.fault.value == reserved_word,
-          "A reserved instruction word reports explicit context");
+          "An unsupported instruction word reports explicit context");
   require(fixture.core.run(1).retired == 0, "Failed core does not resume");
 }
 

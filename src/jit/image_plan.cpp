@@ -216,8 +216,8 @@ ImagePlan plan_vector(const Word address,
     }
     result.instructions.emplace(pc, instruction);
     slot += instruction.words;
-    // A first-slot call replaces the two-word vector with a long service.
-    if (call) { break; }
+    // A call or undefined opcode replaces the vector before its next slot executes.
+    if (call || instruction.operation == Operation::undefined) { break; }
   }
   result.entries.push_back(address);
   return result;

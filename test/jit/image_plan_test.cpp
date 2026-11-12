@@ -24,7 +24,7 @@ using test::require;
 template <isa::Opcode operation> constexpr Word opcode = static_cast<Word>(operation);
 constexpr Word start = 0x100, helper = 0x800;
 constexpr Word absolute = opcode<isa::Opcode::jmp_effective> | (0x30U << 8);
-constexpr Word reserved = 0x000007; // Deliberate reserved encoding, not an ISA operation.
+constexpr Word reserved = 0x0d3000; // Unaudited reserved domain, not an ISA operation.
 
 void rejected(const std::span<const CodeSpan> spans,
               const std::span<const Word> entries,

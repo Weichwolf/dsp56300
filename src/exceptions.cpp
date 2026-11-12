@@ -30,11 +30,13 @@ void Core::Impl::execute_exception(const Instruction &decoded) {
     return;
   }
   // REP defers and coalesces instruction exceptions until all attempts finish.
-  if (vector.phase != VectorPhase::none) { return; }
+  if (vector.phase == VectorPhase::pending) { return; }
   const bool illegal = decoded.operation == Operation::illegal;
   const bool instruction_fault = illegal || decoded.operation == Operation::undefined;
 
-  vector = {.resume = illegal ? address_add(current_pc, 2) : cpu.reg.pc,
+  const auto foreground_resume = illegal ? address_add(current_pc, 2) : cpu.reg.pc;
+  const auto resume = vector.phase == VectorPhase::none ? foreground_resume : vector.resume;
+  vector = {.resume = resume,
             .address = (cpu.reg.vba & vector_base_mask) |
                        (instruction_fault ? illegal_vector : trap_vector),
             .level = maximum_level,
@@ -115,6 +117,10 @@ void Core::Impl::step_vector_semantic(const Instruction &decoded) {
     }
     execute_operation(decoded);
     if (fault.kind != FaultKind::none) { return; }
+    if (decoded.operation == Operation::undefined) {
+      retire_instruction(decoded.cycles);
+      return;
+    }
     if (decoded.words == 2 || vector.phase == VectorPhase::second) {
 
       vector.phase = VectorPhase::none;
