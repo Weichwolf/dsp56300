@@ -51,12 +51,20 @@ public:
         ir_(context_, LLVMAppendBasicBlockInContext(context_, function_, "entry")),
         plan_(plan),
         dynamic_(fallback == nullptr),
+        self_loop_(dynamic_ && !plan_.batch && region_independent(plan_.operations) &&
+                   plan_.control.valid &&
+                   (plan_.control.reg < agu_registers ||
+                    plan_.control.target == plan_.operations.front().pc)),
         cpu_(LLVMGetParam(function_, 0)),
         owner_(LLVMGetParam(function_, 1)) {
     for (unsigned bank = 0; bank < bindings_.size(); ++bank) {
       bindings_[bank].resize(plan_.windows[bank].size());
     }
-    generate(fallback);
+    if (self_loop_) {
+      generate_self_loop();
+    } else {
+      generate(fallback);
+    }
   }
 
 private:
@@ -131,8 +139,11 @@ private:
                                      ir_.CreateZExt(lc_, ir_.getInt64Ty()));
     forever_ =
         ir_.CreateICmpNE(ir_.CreateAnd(status_, ir_.getInt32(forever_flag)), ir_.getInt32(0));
-    turns_ = plan_.batch ? ir_.CreateSelect(forever_, turns_, minimum(turns_, finite_count_))
-                         : minimum(turns_, ir_.getInt64(1));
+    if (plan_.batch) {
+      turns_ = ir_.CreateSelect(forever_, turns_, minimum(turns_, finite_count_));
+    } else if (!self_loop_) {
+      turns_ = minimum(turns_, ir_.getInt64(1));
+    }
     eligible_ = ir_.CreateICmpUGT(turns_, ir_.getInt64(0));
     require(ir_.CreateICmpEQ(ir_.CreateAnd(status_, ir_.getInt32(numeric_mode_mask)),
                              ir_.getInt32(plan_.operations.front().mode)));
@@ -716,6 +727,128 @@ private:
     }
   }
 
+  struct Live {
+    std::array<V, 4> banks;
+    std::array<V, agu_registers> cursors, strides;
+    V status;
+  };
+
+  [[nodiscard]] Live live() const {
+    return {.banks = banks_, .cursors = cursors_, .strides = strides_, .status = status_};
+  }
+
+  void restore_live(const Live &state) {
+    banks_ = state.banks;
+    cursors_ = state.cursors;
+    strides_ = state.strides;
+    status_ = state.status;
+  }
+
+  Live live_phis(const Live &initial, LLVMBasicBlockRef predecessor) {
+    const auto phi = [&](V value, const char *name) {
+      auto *result = LLVMBuildPhi(ir_.get(), LLVMTypeOf(value), name);
+      LLVMAddIncoming(result, &value, &predecessor, 1);
+      return result;
+    };
+    Live result{};
+    for (unsigned index = 0; index < result.banks.size(); ++index) {
+      result.banks[index] = phi(initial.banks[index], "bank");
+    }
+    for (unsigned index = 0; index < agu_registers; ++index) {
+      result.cursors[index] = phi(initial.cursors[index], "cursor");
+      result.strides[index] = phi(initial.strides[index], "stride");
+    }
+    result.status = phi(initial.status, "status");
+    return result;
+  }
+
+  static void
+  self_loop_backedge(const Live &phis, const Live &after, LLVMBasicBlockRef predecessor) {
+    const auto incoming = [&](V phi, V value) { LLVMAddIncoming(phi, &value, &predecessor, 1); };
+    for (unsigned index = 0; index < phis.banks.size(); ++index) {
+      incoming(phis.banks[index], after.banks[index]);
+    }
+    for (unsigned index = 0; index < agu_registers; ++index) {
+      incoming(phis.cursors[index], after.cursors[index]);
+      incoming(phis.strides[index], after.strides[index]);
+    }
+    incoming(phis.status, after.status);
+  }
+
+  void self_loop_bindings() {
+    for (unsigned bank = 0; bank < bindings_.size(); ++bank) {
+      for (const bool writing : {false, true}) {
+        if (!std::ranges::any_of(plan_.extents[bank], [writing](const auto &extent) {
+              return extent.accessed && extent.writing == writing;
+            })) {
+          continue;
+        }
+        for (const auto index : window_order(bank, writing)) {
+          static_cast<void>(binding(bank, index, writing));
+        }
+      }
+    }
+  }
+
+  void self_loop_finish(const Live &state, V completed) {
+    restore_live(state);
+    turns_ = completed;
+    finish();
+  }
+
+  void generate_self_loop() {
+    auto *start = LLVMAppendBasicBlockInContext(context_, function_, "self_loop_start");
+    auto *loop = LLVMAppendBasicBlockInContext(context_, function_, "self_loop_loop");
+    auto *step = LLVMAppendBasicBlockInContext(context_, function_, "self_loop_body");
+    auto *guard_miss = LLVMAppendBasicBlockInContext(context_, function_, "self_loop_guard_miss");
+    auto *prior = LLVMAppendBasicBlockInContext(context_, function_, "self_loop_prior");
+    auto *complete = LLVMAppendBasicBlockInContext(context_, function_, "self_loop_complete");
+    auto *miss = LLVMAppendBasicBlockInContext(context_, function_, "ordinary");
+    admission();
+    auto *limit = turns_;
+    LLVMBuildCondBr(ir_.get(), eligible_, start, miss);
+    ir_.SetInsertPoint(start);
+    self_loop_bindings();
+    for (unsigned bank = 0; bank < banks_.size(); ++bank) {
+      banks_[bank] = reg(64, bank_fields[bank]);
+    }
+    const auto initial = live();
+    LLVMBuildBr(ir_.get(), loop);
+    ir_.SetInsertPoint(loop);
+    const auto phis = live_phis(initial, start);
+    restore_live(phis);
+    auto *completed = LLVMBuildPhi(ir_.get(), ir_.getInt64Ty(), "completed");
+    auto *zero = ir_.getInt64(0);
+    LLVMAddIncoming(completed, &zero, &start, 1);
+    for (unsigned index = 0; index < agu_registers; ++index) {
+      if (plan_.agu[index]) {
+        origins_[index] = ir_.CreateAnd(cursors_[index], ir_.CreateNot(masks_[index]));
+      }
+    }
+    eligible_ = boolean(true);
+    initial_memory_guards();
+    LLVMBuildCondBr(ir_.get(), eligible_, step, guard_miss);
+    ir_.SetInsertPoint(step);
+    body(guard_miss);
+    const auto after = live();
+    auto *next = ir_.CreateAdd(completed, ir_.getInt64(1));
+    auto *again =
+        ir_.CreateAnd(ir_.CreateICmpULT(next, limit),
+                      ir_.CreateICmpEQ(next_pc(), ir_.getInt32(plan_.operations.front().pc)));
+    auto *backedge = LLVMGetInsertBlock(ir_.get());
+    self_loop_backedge(phis, after, backedge);
+    LLVMAddIncoming(completed, &next, &backedge, 1);
+    LLVMBuildCondBr(ir_.get(), again, loop, complete);
+    ir_.SetInsertPoint(complete);
+    self_loop_finish(after, next);
+    ir_.SetInsertPoint(guard_miss);
+    LLVMBuildCondBr(ir_.get(), ir_.CreateICmpNE(completed, ir_.getInt64(0)), prior, miss);
+    ir_.SetInsertPoint(prior);
+    self_loop_finish(phis, completed);
+    ir_.SetInsertPoint(miss);
+    LLVMBuildRet(ir_.get(), ir_.getInt32(0));
+  }
+
   void generate(const void *fallback) {
     auto *windows = LLVMAppendBasicBlockInContext(context_, function_, "windows");
     auto *start = LLVMAppendBasicBlockInContext(context_, function_, "admitted");
@@ -792,7 +925,7 @@ private:
   LLVMValueRef function_;
   llvm19::Builder ir_;
   const RegionPlan &plan_;
-  bool dynamic_;
+  bool dynamic_, self_loop_;
   V cpu_, owner_, initial_cycles_ = nullptr, initial_instructions_ = nullptr;
   V status_ = nullptr, lc_ = nullptr, sp_ = nullptr, sc_ = nullptr, saved_ = nullptr;
   V turns_ = nullptr, forever_ = nullptr, finite_count_ = nullptr, eligible_ = nullptr;
