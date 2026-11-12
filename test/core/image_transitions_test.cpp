@@ -18,6 +18,7 @@ using namespace dsp56300;
 using test::require;
 template <isa::Opcode operation> constexpr Word op = static_cast<Word>(operation);
 constexpr Word start = 16, destination = 48, vector = 32;
+constexpr Word absolute_address = 0x30;
 constexpr std::array loader{op<isa::Opcode::movem_absolute_short> | (destination << 8) | 4U,
                             op<isa::Opcode::jmp_absolute_short> | destination};
 constexpr std::array loaded{op<isa::Opcode::stop>};
@@ -276,6 +277,82 @@ void multiple_targets() {
   }
 }
 
+NativeImage boundary_image(const Word target) {
+  constexpr std::array entry{start};
+  constexpr std::array seed{destination};
+  const std::array jump{op<isa::Opcode::jmp_absolute_short> | target};
+  constexpr std::array body{op<isa::Opcode::nop>,
+                            op<isa::Opcode::stop>,
+                            op<isa::Opcode::jmp_effective> | (absolute_address << 8U),
+                            destination + 1};
+  const std::array first{CodeSpan{.address = start, .words = jump}};
+  const std::array second{CodeSpan{.address = destination, .words = body}};
+  const std::array variants{
+      CodeVariant{.id = 0, .code = first, .entries = entry, .failed_fetches = {}},
+      CodeVariant{.id = 1, .code = second, .entries = seed, .failed_fetches = {}}};
+  const CodeTransition handoff{.from = 0, .to = 1, .entry = target};
+  return Core::compile({.variants = variants},
+                       {.memory = {},
+                        .interrupts = {},
+                        .transitions = std::span(&handoff, 1),
+                        .callbacks = {},
+                        .bindings = {}});
+}
+
+void prepared_boundaries() {
+  constexpr Word target = destination + 1;
+  const auto image = boundary_image(target);
+  require(image.report().failure == Fault{} && image.report().prepared_entries == 4,
+          "The full declared stream is native independently of its optimization seed");
+  std::array<Word, 128> ram{};
+  ram[start] = op<isa::Opcode::jmp_absolute_short> | target;
+  ram[destination] = op<isa::Opcode::nop>;
+  ram[target] = op<isa::Opcode::stop>;
+  ram[destination + 2] = op<isa::Opcode::jmp_effective> | (absolute_address << 8U);
+  ram[destination + 3] = target;
+  Core core(Memory::unified(ram));
+  auto initial = test::register_model::seed(0);
+  initial.pc = start;
+  initial.sr = 0;
+  core.set_registers(initial);
+  core.install(image, 0);
+  const auto jumped = core.run();
+  auto expected = initial;
+  expected.pc = target;
+  require(jumped.retired == 1 && jumped.yielded && jumped.fault == Fault{} &&
+              core.registers() == expected &&
+              core.progress() == Progress{.instructions = 1, .estimated_cycles = 3},
+          "A real jump reaches an already decoded interior start without first-use compilation");
+  const auto pending = core.state();
+  ram[target] = op<isa::Opcode::nop>;
+  bool refused = false;
+  try {
+    core.install(image, 1);
+  } catch (const std::invalid_argument &) { refused = true; }
+  require(refused && same(pending, core.state()) && core.run().retired == 0,
+          "Unseeded targets still require exact actual source and preserve pending ownership");
+  ram[target] = op<isa::Opcode::stop>;
+  core.install(image, 1);
+  require(same(pending, core.state()), "Binding changes no completed instruction or state");
+  const std::array resume{target};
+  const auto prepared = core.prepare(resume);
+  require(prepared.failure == Fault{} && prepared.prepared_entries == 3 &&
+              prepared.unresolved_entries == 0 &&
+              prepared.native_bytes == image.report().native_bytes && same(pending, core.state()),
+          "The interior start was fully prepared without another entry hint");
+  const auto result = core.run();
+  expected.pc = target + 1;
+  require(result.retired == 1 && result.state == ExecutionState::stopped &&
+              result.fault == Fault{} && core.registers() == expected &&
+              core.progress() == Progress{.instructions = 2, .estimated_cycles = 13},
+          "The native target executes only STOP, without replaying its preceding NOP");
+  refused = false;
+  try {
+    static_cast<void>(boundary_image(destination + 3));
+  } catch (const std::invalid_argument &) { refused = true; }
+  require(refused, "A real extension word remains ineligible as a transition destination");
+}
+
 void invalid_contracts() {
   const auto rejected = [](const std::span<const CodeTransition> declarations) {
     bool refused = false;
@@ -298,6 +375,7 @@ void invalid_contracts() {
 
 int main() {
   try {
+    prepared_boundaries();
     multiple_targets();
     invalid_contracts();
     const auto image = compile(std::span(&transfer, 1));

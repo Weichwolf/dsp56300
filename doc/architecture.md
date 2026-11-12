@@ -53,6 +53,11 @@ explicit empty layout requires zero grants. Fixed layouts validate every actual
 region and enable direct-memory optimization without constraining generic loader
 variants in the same image.
 
+Transition destinations are validated against the complete decoded instruction
+map or explicit failed-fetch contract before LLVM lowering. Optimization entry
+hints do not limit which prepared instruction starts may receive a handoff;
+extension words remain ineligible unless separately declared as code.
+
 Install only on a stopped owner after validating actual source, complete layout
 and the relevant revision. Explicit failed-fetch endpoints may be prepared entries
 or transfer destinations only while their actual source is unreadable. They do

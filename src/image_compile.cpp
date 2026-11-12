@@ -149,15 +149,24 @@ void validate(const CodeImage image, const CompileOptions options) {
         !transfers.emplace(transfer.from, transfer.entry, transfer.to).second) {
       throw std::invalid_argument("Invalid or duplicate DSP code transition");
     }
-    const auto target = std::ranges::find(image.variants, transfer.to, &CodeVariant::id);
-    if (std::ranges::find(target->entries, transfer.entry) == target->entries.end()) {
-      throw std::invalid_argument("DSP code transition target is not a declared destination entry");
-    }
   }
   std::set<std::uint64_t> layouts;
   for (const auto &layout : options.memory) {
     if (!ids.contains(layout.id) || !layouts.insert(layout.id).second) {
       throw std::invalid_argument("Unknown or duplicate DSP variant layout");
+    }
+  }
+}
+
+void validate_transitions(const detail::ImageContracts &image,
+                          const std::span<const CodeTransition> transitions) {
+  for (const auto transfer : transitions) {
+    const auto target =
+        std::ranges::find(image.variants, transfer.to, &detail::ImageContracts::Variant::id);
+    if (!target->instructions.contains(transfer.entry) &&
+        !target->failed_fetches.contains(transfer.entry)) {
+      throw std::invalid_argument(
+          "DSP code transition target is not a prepared instruction or failed-fetch boundary");
     }
   }
 }
@@ -260,6 +269,7 @@ SemanticImage Core::lower(const CodeImage image, const CompileOptions options) {
     plans.push_back(plan);
     result->variants.push_back(std::move(variant));
   }
+  validate_transitions(*result, options.transitions);
   result->vector_plans = result->plan_vectors(plans);
   const auto &vector_plans = result->vector_plans;
   const auto image_name = symbol(image, options);

@@ -20,13 +20,16 @@ constexpr std::array jump{static_cast<Word>(isa::Opcode::jmp_absolute_short) | a
 constexpr std::array before{start}, after{absent};
 constexpr CodeTransition transfer{.from = 0, .to = 1, .entry = absent};
 
-NativeImage compile(const bool known_failure, const bool fixed_storage = false) {
+NativeImage compile(const bool known_failure,
+                    const bool fixed_storage = false,
+                    const bool seed_failure = true) {
   const std::array code{CodeSpan{.address = start, .words = jump}};
   const std::array variants{
       CodeVariant{.id = 0, .code = code, .entries = before, .failed_fetches = {}},
       CodeVariant{.id = 1,
                   .code = code,
-                  .entries = after,
+                  .entries =
+                      seed_failure ? std::span<const Word>(after) : std::span<const Word>(before),
                   .failed_fetches =
                       known_failure ? std::span<const Word>(after) : std::span<const Word>{}}};
   const std::array layouts{VariantLayout{.id = 1, .memory = {}}};
@@ -147,11 +150,13 @@ int main() {
     } catch (const std::invalid_argument &) { rejected = true; }
     require(rejected, "An absent entry with no failed-fetch contract still rejects preparation");
     for (const auto fixed_storage : {false, true}) {
-      const auto image = compile(true, fixed_storage);
-      require(image.report().failure == Fault{} && image.report().prepared_entries == 2,
-              "Only the two real jump streams count as translated instructions");
-      failed_destination(image);
-      initial_failure(image);
+      for (const auto seed_failure : {false, true}) {
+        const auto image = compile(true, fixed_storage, seed_failure);
+        require(image.report().failure == Fault{} && image.report().prepared_entries == 2,
+                "Only the two real jump streams count as translated instructions");
+        failed_destination(image);
+        initial_failure(image);
+      }
     }
     std::cout << test::checks << " declared native failed-entry checks passed\n";
     return 0;
