@@ -46,6 +46,11 @@ typed maps; borrowed symbol names/compiler inputs may expire after binding.
 Initialize/finalize the shared native owner once and count native text once,
 not per component/variant. Consumers never invoke private guest entry ABIs.
 
+Memory contracts are per variant: omitted layouts retain dynamic grants; an
+explicit empty layout requires zero grants. Fixed layouts validate every actual
+region and enable direct-memory optimization without constraining generic loader
+variants in the same image.
+
 Install only on a stopped owner after validating actual source, complete layout
 and the relevant revision. Installation emits no guest/event code and changes no
 architectural state, memory or time. Rejected installation preserves the previous

@@ -133,6 +133,7 @@ struct CallbackBinding {
 };
 
 struct CompileOptions {
+  // Per variant: omitted means dynamic grants; an empty declared layout requires zero grants.
   std::span<const VariantLayout> memory;
   std::span<const InterruptRequest> interrupts;
   // An absent resident target may yield only to this explicitly prepared version.

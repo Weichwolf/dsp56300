@@ -160,9 +160,6 @@ void validate(const CodeImage image, const CompileOptions options) {
       throw std::invalid_argument("Unknown or duplicate DSP variant layout");
     }
   }
-  if (!layouts.empty() && layouts != ids) {
-    throw std::invalid_argument("DSP image memory layouts do not cover every variant");
-  }
 }
 
 }
@@ -250,7 +247,8 @@ SemanticImage Core::lower(const CodeImage image, const CompileOptions options) {
     }
     variant.instructions = plan.instructions;
     variant.failed_fetches.insert(source.failed_fetches.begin(), source.failed_fetches.end());
-    variant.fixed_memory = !options.memory.empty();
+    variant.fixed_memory =
+        std::ranges::find(options.memory, source.id, &VariantLayout::id) != options.memory.end();
     if (variant.fixed_memory) { variant.memory = regions(source.id, options); }
     variant.prefixes = detail::foreground_prefixes(plan, variant.memory);
     for (const auto &span : source.code) {
