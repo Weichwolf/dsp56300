@@ -26,9 +26,9 @@ organizational boundaries. Keep LLVM private and production execution native-onl
 - Validate invariant layout/rights/alias/initialization facts during AOT/binding.
   Release omits optional diagnostic/sanitizer checks and redundant proved checks;
   Debug instruments our generated code. Required dynamic semantics remain equal.
-- Allow substantial preparation without a fixed budget. Development runs complete
-  AOT; deployment may reuse validated code artifacts keyed by code, compiler,
-  target, build mode and bindings. Never cache instance pointers or device state.
+- Allow substantial preparation without a fixed budget. Validated code artifacts
+  keyed by code, compiler, target, build mode and bindings may be reused in
+  development and deployment. Never cache instance pointers or device state.
 - Preserve P/X/Y aliases, 24-bit words, 56-bit accumulators, raw partial fields,
   all numeric modes, parallel old operands, AGU, REP/DO and vector state. All
   56-bit arithmetic, rounding/saturation and required flags must remain inline.
