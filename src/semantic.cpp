@@ -13,7 +13,7 @@
 
 namespace dsp56300::detail {
 extern "C" const std::array<Word, semantic_abi_fields> dsp56300_semantic_abi{
-    5,
+    6,
     word_mask,
     sizeof(Instruction),
     offsetof(Instruction, opcode),
@@ -27,6 +27,10 @@ extern "C" const std::array<Word, semantic_abi_fields> dsp56300_semantic_abi{
 }
 
 namespace dsp56300 {
+Word Core::Impl::semantic_numeric_mode(void *const owner) noexcept {
+  return static_cast<const Impl *>(owner)->cpu.reg.sr & detail::numeric_mode_mask;
+}
+
 // Installation validates these layout values. Reassert them at each admitted
 // ordinary site after loop/I/O edges; real remapping yields before the next site.
 // RAM pointers, contents and per-word initialization remain dynamic.

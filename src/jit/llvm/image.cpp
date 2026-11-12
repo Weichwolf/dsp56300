@@ -134,7 +134,7 @@ public:
 private:
   struct FastRegion {
     llvm::GlobalVariable *site;
-    Word count, cost, last_pc, last_words;
+    Word count, cost, last_pc, last_words, mode;
   };
 
   void prepare_regions(LlvmModule &module, const std::span<const RegionLayout> memory) {
@@ -170,9 +170,26 @@ private:
                                     .count = static_cast<Word>(operations.size()),
                                     .cost = cost,
                                     .last_pc = last.pc,
-                                    .last_words = last.instruction.words});
+                                    .last_words = last.instruction.words,
+                                    .mode = mode});
       }
     }
+  }
+
+  void commit_region(Value *outcome, const FastRegion &region, const Word pc) {
+    auto *count = ir_.CreateLoad(ir_.getInt32Ty(), count_);
+    auto *window = ir_.CreateLoad(ir_.getInt64Ty(), window_);
+    auto *retired = ir_.CreateTrunc(outcome, ir_.getInt32Ty());
+    auto *next = ir_.CreateTrunc(ir_.CreateLShr(outcome, flow_shift), ir_.getInt32Ty());
+    auto *turns = ir_.CreateUDiv(retired, ir_.getInt32(region.count));
+    auto *cost = ir_.CreateMul(ir_.CreateZExt(turns, ir_.getInt64Ty()), ir_.getInt64(region.cost));
+    ir_.CreateStore(ir_.CreateAdd(count, retired), count_);
+    ir_.CreateStore(ir_.CreateSub(window, cost), window_);
+    ir_.CreateStore(next, pc_);
+    const auto end = (region.last_pc + region.last_words) & word_mask;
+    auto *transfer = ir_.CreateSwitch(next, exits_.at(ImageExit::unprepared), 2);
+    transfer->addCase(ir_.getInt32(pc), successor(pc));
+    if (end != pc) { transfer->addCase(ir_.getInt32(end), successor(end)); }
   }
 
   void emit_regions(const Word pc, Value *count, Value *window) {
@@ -183,29 +200,39 @@ private:
         !adapter->getReturnType()->isIntegerTy(64)) {
       throw std::invalid_argument("DSP image lacks its private region admission ABI");
     }
-    for (auto found = first; found != last; ++found) {
-      const auto &region = found->second;
-      auto *continued = block(active_, "region.complete");
-      auto *precise = block(active_, "region.precise");
-      auto *outcome = ir_.CreateCall(
-          adapter,
-          {active_->getArg(0), ir_.CreateSub(active_->getArg(2), count), region.site, window});
-      auto *retired = ir_.CreateTrunc(outcome, ir_.getInt32Ty());
-      ir_.CreateCondBr(ir_.CreateICmpNE(retired, ir_.getInt32(0)), continued, precise);
-      ir_.SetInsertPoint(continued);
-      auto *next = ir_.CreateTrunc(ir_.CreateLShr(outcome, flow_shift), ir_.getInt32Ty());
-      auto *turns = ir_.CreateUDiv(retired, ir_.getInt32(region.count));
-      auto *cost =
-          ir_.CreateMul(ir_.CreateZExt(turns, ir_.getInt64Ty()), ir_.getInt64(region.cost));
-      ir_.CreateStore(ir_.CreateAdd(count, retired), count_);
-      ir_.CreateStore(ir_.CreateSub(window, cost), window_);
-      ir_.CreateStore(next, pc_);
-      const auto end = (region.last_pc + region.last_words) & word_mask;
-      auto *transfer = ir_.CreateSwitch(next, exits_.at(ImageExit::unprepared), 2);
-      transfer->addCase(ir_.getInt32(pc), successor(pc));
-      if (end != pc) { transfer->addCase(ir_.getInt32(end), successor(end)); }
-      ir_.SetInsertPoint(precise);
+    auto *mode = module_.getFunction("dsp56300_semantic_numeric_mode");
+    if (mode == nullptr || mode->isDeclaration() || mode->arg_size() != 1 ||
+        !mode->getReturnType()->isIntegerTy(32)) {
+      throw std::invalid_argument("DSP image lacks its private numeric-mode ABI");
     }
+    std::map<Word, std::vector<const FastRegion *>> candidates;
+    for (auto found = first; found != last; ++found) {
+      candidates[found->second.mode].push_back(&found->second);
+    }
+    auto *precise = block(active_, "region.precise");
+    auto *selection = ir_.CreateSwitch(ir_.CreateCall(mode, {active_->getArg(0)}),
+                                       precise,
+                                       static_cast<unsigned>(candidates.size()));
+    for (const auto &[numeric, regions] : candidates) {
+      auto *selected = block(active_, "region.mode");
+      selection->addCase(ir_.getInt32(numeric), selected);
+      ir_.SetInsertPoint(selected);
+      for (const auto *region : regions) {
+        auto *continued = block(active_, "region.complete");
+        auto *miss = region == regions.back() ? precise : block(active_, "region.next");
+        auto *outcome = ir_.CreateCall(
+            adapter,
+            {active_->getArg(0), ir_.CreateSub(active_->getArg(2), count), region->site, window});
+        ir_.CreateCondBr(
+            ir_.CreateICmpNE(ir_.CreateTrunc(outcome, ir_.getInt32Ty()), ir_.getInt32(0)),
+            continued,
+            miss);
+        ir_.SetInsertPoint(continued);
+        commit_region(outcome, *region, pc);
+        ir_.SetInsertPoint(miss);
+      }
+    }
+    ir_.SetInsertPoint(precise);
   }
 
   llvm::Function *function(const std::string &name, const bool internal) {

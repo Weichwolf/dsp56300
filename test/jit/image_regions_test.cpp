@@ -6,6 +6,7 @@
 #include "jit/llvm/image_regions.hpp"
 #include "jit/llvm/runtime.hpp"
 #include "loop_frames.hpp"
+#include "saturated_shift_model.hpp"
 #include "support.hpp"
 
 #include <algorithm>
@@ -121,8 +122,10 @@ NativeImage compile(const SemanticImage &semantic, const bool expect_loops = tru
       for (const auto &instruction : block) {
         if (const auto *call = llvm::dyn_cast<llvm::CallBase>(&instruction)) {
           const auto *callee = call->getCalledFunction();
-          require(callee == nullptr || callee->getName() != "dsp56300_region_memory",
-                  "Fixed-image IR inlines the storage resolver before native optimization");
+          require(callee == nullptr || (callee->getName() != "dsp56300_region_memory" &&
+                                        callee->getName() != "dsp56300_semantic_numeric_mode"),
+                  "Fixed-image IR inlines storage and numeric-mode bindings before native "
+                  "optimization");
         }
         if (llvm::isa<llvm::PHINode>(instruction) &&
             instruction.getName().starts_with("remaining")) {
@@ -312,6 +315,61 @@ void setup(const NativeImage &image, const Word mode) {
                 core.registers() == expected && fixture.data == wanted && fixture.callbacks == 0,
             "A resumed image retains absolute time, fresh loop credit and exact DO restoration");
   }
+}
+
+void mode_routing() {
+  constexpr Word length = 3;
+  constexpr Word saturation = 1U << 20;
+  constexpr Word narrow = 1U << 17;
+  Fixture source(length);
+  source.code[3] = op(isa::Opcode::asl_a);
+  const auto image = compile(lower(source));
+  for (const auto mode : modes) {
+    for (const Word flags : {0U, test::status_byte}) {
+      Fixture fixture(length);
+      fixture.code = source.code;
+      fixture.data[0] = test::sign24 - 1;
+      auto seed = initial(fixture, mode | saturation);
+      seed.sr = (seed.sr & ~test::status_byte) | flags;
+      seed.a = std::uint64_t{test::sign24 - 1} << test::word_bits;
+      auto expected = seed;
+      auto wanted = fixture.data;
+      expected.x = (expected.x & ~std::uint64_t{word_mask}) | wanted[0];
+      ++expected.r[0];
+      const auto old = expected;
+      test::shift_model::apply(expected, old, {.left = true});
+      wanted[destination] = static_cast<Word>(expected.x) & word_mask;
+      ++expected.r[1];
+      --expected.lc;
+      expected.pc = body;
+      Core core(Memory::external(), &fixture);
+      core.set_registers(seed);
+      core.install(image, 0);
+      const auto result = core.run(length);
+      require(result.retired == length && result.fault == Fault{} &&
+                  result.progress == Progress{.instructions = length, .estimated_cycles = length} &&
+                  core.registers() == expected && fixture.data == wanted && fixture.callbacks == 0,
+              "A numeric mode outside SSA coverage retains exact saturated arithmetic and flags");
+    }
+  }
+  Fixture fixture(length);
+  fixture.code = source.code;
+  const auto seed = initial(fixture, narrow);
+  auto expected = seed;
+  ++expected.pc;
+  const auto data = fixture.data;
+  Core core(Memory::external(), &fixture);
+  core.set_registers(seed);
+  core.install(image, 0);
+  const auto result = core.run(length);
+  require(result.retired == 0 && result.progress == Progress{} &&
+              result.fault == Fault{.kind = FaultKind::unsupported_mode,
+                                    .space = Space::program,
+                                    .address = body,
+                                    .value = seed.sr,
+                                    .pc = body} &&
+              core.registers() == expected && fixture.data == data && fixture.callbacks == 0,
+          "An unsupported numeric mode reaches its original exact fault before any RAM effects");
 }
 
 void ordinary_discovery() {
@@ -520,6 +578,7 @@ void raw_execution() {
 }
 
 int main() try {
+  mode_routing();
   ordinary_discovery();
   ordinary_execution();
   raw_execution();
