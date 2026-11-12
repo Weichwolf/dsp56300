@@ -18,6 +18,10 @@ std::uint64_t Core::Impl::semantic_region(void *const owner,
   self.assume_image_admission();
   const bool ordinary = !self.exception_ready();
   __builtin_assume(ordinary);
+  constexpr unsigned pc_shift = 32;
+  if (!self.image_storage_admitted) {
+    return static_cast<std::uint64_t>(self.cpu.reg.pc) << pc_shift;
+  }
   detail::NativeContext context{
       .runtime = {.memory = {detail::JitMemory{.data = self.buffers.x.data(),
                                                .words = self.buffers.x.size(),
@@ -25,7 +29,8 @@ std::uint64_t Core::Impl::semantic_region(void *const owner,
                              detail::JitMemory{.data = self.buffers.y.data(),
                                                .words = self.buffers.y.size(),
                                                .aliases_program = self.aliases_program[2]}},
-                  .windows = self.image_windows},
+                  .windows = self.image_windows,
+                  .admitted_memory = true},
       .budget = budget,
       .cycle_deadline =
           self.cpu.cycles +
@@ -35,7 +40,6 @@ std::uint64_t Core::Impl::semantic_region(void *const owner,
     self.current_pc = region.pc;
     self.current_words = region.words;
   }
-  constexpr unsigned pc_shift = 32;
   return retired | (static_cast<std::uint64_t>(self.cpu.reg.pc) << pc_shift);
 }
 }

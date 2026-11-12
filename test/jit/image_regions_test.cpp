@@ -8,10 +8,12 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <iostream>
 #include <limits>
+#include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/Casting.h>
@@ -62,6 +64,8 @@ struct Fixture final : Io {
     return space == Space::x ? std::span(&window, 1) : std::span<const MemoryWindow>{};
   }
 
+  [[nodiscard]] std::uint64_t program_revision() const noexcept override { return revision; }
+
   bool read(Space /*space*/, Word /*at*/, Word /*pc*/, Word & /*value*/) noexcept override {
     ++callbacks;
     return false;
@@ -88,6 +92,7 @@ struct Fixture final : Io {
   std::array<std::uint8_t, 32> known{};
   MemoryWindow window;
   unsigned callbacks = 0;
+  std::uint64_t revision = 0;
 };
 
 SemanticImage lower(Fixture &fixture) {
@@ -110,6 +115,11 @@ NativeImage compile(const SemanticImage &semantic) {
   for (const auto &function : *llvm::unwrap(module.code())) {
     for (const auto &block : function) {
       for (const auto &instruction : block) {
+        if (const auto *call = llvm::dyn_cast<llvm::CallBase>(&instruction)) {
+          const auto *callee = call->getCalledFunction();
+          require(callee == nullptr || callee->getName() != "dsp56300_region_memory",
+                  "Fixed-image IR inlines the storage resolver before native optimization");
+        }
         if (llvm::isa<llvm::PHINode>(instruction) &&
             instruction.getName().starts_with("remaining")) {
           ++loops;
@@ -195,11 +205,11 @@ void prefix(const NativeImage &image, const Case &scenario) {
           "A shared image preserves every quota/deadline prefix, owner RAM, flags and DO frame");
 }
 
-void unknown(const NativeImage &image) {
+void unknown(const NativeImage &image, const bool after_install = false) {
   constexpr Word length = 3;
   constexpr Word missing = 2;
   Fixture fixture(length);
-  fixture.known[missing] = 0;
+  if (!after_install) { fixture.known[missing] = 0; }
   auto wanted = fixture.data;
   for (Word index = 0; index < missing; ++index) {
     wanted[destination + index] = fixture.data[index];
@@ -207,6 +217,7 @@ void unknown(const NativeImage &image) {
   Core core(Memory::external(), &fixture);
   core.set_registers(initial(fixture, 0));
   core.install(image, 0);
+  if (after_install) { fixture.known[missing] = 0; }
   const auto result = core.run(length * turns);
   require(result.retired == length * missing &&
               result.progress == Progress{.instructions = std::uint64_t{length} * missing,
@@ -217,6 +228,40 @@ void unknown(const NativeImage &image) {
                                     .pc = body} &&
               fixture.data == wanted && fixture.known[missing] == 0 && fixture.callbacks == 1,
           "An unknown word reaches the real failed read after the exact prepared prefix");
+}
+
+void metadata_alias(const NativeImage &image) {
+  constexpr Word length = 3;
+  constexpr Word known_pattern = 0x01010101;
+  Fixture fixture(length);
+  fixture.data[0] = 0;
+  auto bytes = std::as_writable_bytes(std::span(fixture.data).subspan(destination, 8));
+  std::ranges::fill(bytes, std::byte{1});
+  auto wanted = fixture.data;
+  wanted[destination] = 0;
+  auto expected = initial(fixture, 0);
+  const auto seed = expected;
+  expected.x &= ~std::uint64_t{word_mask};
+  expected.r[0] += 2;
+  ++expected.r[1];
+  --expected.lc;
+  expected.pc = body + 1;
+  Core core(Memory::external(), &fixture);
+  core.set_registers(seed);
+  core.install(image, 0);
+  fixture.window.known = {reinterpret_cast<std::uint8_t *>(bytes.data()), fixture.data.size()};
+  ++fixture.revision;
+  core.install(image, 0);
+  const auto result = core.run(length * turns);
+  require(result.retired == length &&
+              result.progress == Progress{.instructions = length, .estimated_cycles = length} &&
+              result.fault == Fault{.kind = FaultKind::memory_read,
+                                    .space = Space::x,
+                                    .address = base + 1,
+                                    .pc = body} &&
+              core.registers() == expected && fixture.data == wanted &&
+              fixture.data[destination + 1] == known_pattern && fixture.callbacks == 1,
+          "Cold alias rejection preserves the real prefix and fault after a store clears metadata");
 }
 
 void setup(const NativeImage &image, const Word mode) {
@@ -270,6 +315,8 @@ int main() try {
   Fixture fixture(short_length);
   const auto image = compile(lower(fixture));
   unknown(image);
+  unknown(image, true);
+  metadata_alias(image);
   for (const auto mode : modes) {
     setup(image, mode);
     for (Word limit = 0; limit <= short_length * turns; ++limit) {

@@ -100,6 +100,54 @@ void protected_storage() {
           "Binding admission neither executes nor materializes another CPU state");
 }
 
+void cold_storage() {
+  Cpu cpu;
+  NativeContext owner;
+  Data first{};
+  Data second{};
+  Known first_known{};
+  Known second_known{};
+  std::array views{MemoryWindow{.words = first, .known = first_known, .writable = true},
+                   MemoryWindow{.words = second, .known = second_known, .writable = true}};
+  owner.runtime.windows = {std::span(views).first(1), std::span(views).subspan(1)};
+  const auto state = std::as_bytes(std::span(&cpu, 1));
+  require(admit_region_memory(state, owner.runtime),
+          "Cold storage admission permits disjoint RAM with dynamically unknown words");
+  views[1].known = {reinterpret_cast<std::uint8_t *>(first.data()), words};
+  require(!admit_region_memory(state, owner.runtime),
+          "Cold admission rejects writes aliasing another bank's initialization metadata");
+  views[1].known = second_known;
+  views[0].words = cpu.reg.r;
+  require(!admit_region_memory(state, owner.runtime),
+          "Cold admission rejects RAM overlapping protected execution state");
+  views[0].words = first;
+  views[0].known = {reinterpret_cast<std::uint8_t *>(&cpu), words};
+  require(!admit_region_memory(state, owner.runtime),
+          "Cold admission rejects knowledge bytes overlapping execution state");
+  views[0].known = first_known;
+  owner.runtime.admitted_memory = admit_region_memory(state, owner.runtime);
+  const RegionMemory memory{.bank = 0,
+                            .index = 0,
+                            .regions = 1,
+                            .first = 0,
+                            .words = words,
+                            .flags = region_windowed | region_writable | region_tracked};
+  Word *data = nullptr;
+  std::uint8_t *known = nullptr;
+  require(dsp56300_region_memory(&cpu, &owner, &memory, &data, &known) == 1 &&
+              data == first.data() && known == first_known.data() && first_known == Known{},
+          "An admitted binding retains actual unknown bytes instead of asserting initialization");
+  owner.runtime.windows = {};
+  owner.runtime.memory = {JitMemory{.data = first.data(), .words = words},
+                          JitMemory{.data = second.data(), .words = words}};
+  require(admit_region_memory(state, owner.runtime),
+          "Cold admission also covers ordinary flat owner storage");
+  owner.runtime.memory[0].data = cpu.reg.r.data();
+  require(!admit_region_memory(state, owner.runtime) && cpu.reg == Registers{} &&
+              cpu.instructions == 0 && cpu.cycles == 0,
+          "Flat overlap rejection is side-effect-free");
+}
+
 void linked_flat_storage() {
   constexpr Word entry = 2;
   constexpr Word loop = 1U << 15;
@@ -150,6 +198,7 @@ void linked_flat_storage() {
 int main() try {
   flat_storage();
   protected_storage();
+  cold_storage();
   linked_flat_storage();
 } catch (const std::exception &error) {
 

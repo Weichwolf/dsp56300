@@ -229,6 +229,7 @@ struct Core::Impl {
   const NativeImage::Impl::Variant *active_image = nullptr;
   const std::vector<std::uint64_t> *next_images = nullptr;
   bool image_ready = false;
+  bool image_storage_admitted = false;
   std::uint64_t image_revision = 0;
   std::array<std::span<const MemoryWindow>, 2> image_windows{};
 };

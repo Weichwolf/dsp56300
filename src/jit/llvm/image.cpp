@@ -428,8 +428,8 @@ private:
     ir_.CreateCondBr(
         ir_.CreateICmpNE(window, ir_.getInt64(0)), execute, exits_.at(ImageExit::deadline));
     ir_.SetInsertPoint(execute);
-    emit_regions(pc, count, window);
     memory_contracts();
+    emit_regions(pc, count, window);
     auto *outcome =
         ir_.CreateCall(semantic_variant(operation), {active_->getArg(0), ir_.getInt32(pc)});
     auto *next = ir_.CreateTrunc(outcome, ir_.getInt32Ty());

@@ -42,6 +42,7 @@ struct JitRuntime {
   std::array<std::span<const MemoryWindow>, 2> windows{};
   // Conservative for standalone low-level contexts without a declared chip map.
   bool cacheable_program = true;
+  bool admitted_memory = false;
 };
 
 enum class NativeBoundary : std::uint8_t { none, owner, context };

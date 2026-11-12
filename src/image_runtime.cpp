@@ -7,7 +7,9 @@
 #include "image.hpp"
 #include "image_entry.hpp"
 #include "io.hpp"
+#include "jit.hpp"
 #include "jit/llvm/image.hpp"
+#include "jit/llvm/region_memory.hpp"
 #include "program_cache.hpp"
 
 #include <algorithm>
@@ -148,12 +150,23 @@ void Core::install(const NativeImage &image, const std::uint64_t variant) {
       throw std::invalid_argument("DSP image differs from the latched REP instruction");
     }
   }
+  const detail::JitRuntime storage{
+      .memory = {detail::JitMemory{.data = self.buffers.x.data(),
+                                   .words = self.buffers.x.size(),
+                                   .aliases_program = self.aliases_program[1]},
+                 detail::JitMemory{.data = self.buffers.y.data(),
+                                   .words = self.buffers.y.size(),
+                                   .aliases_program = self.aliases_program[2]}},
+      .windows = granted};
+  const bool admitted = selected.fixed_memory &&
+                        detail::admit_region_memory(std::as_bytes(std::span(&self, 1)), storage);
   if (self.io != nullptr && revision != dsp56300_io_revision(*self.io)) {
     throw std::invalid_argument("DSP image binding changed during installation");
   }
   self.image = image.impl_;
   self.active_image = &selected;
   self.image_windows = granted;
+  self.image_storage_admitted = admitted;
   self.image_revision = revision;
   self.program_omr = self.cpu.reg.omr;
   self.image_ready = true;
