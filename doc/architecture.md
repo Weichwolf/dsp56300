@@ -1,180 +1,160 @@
-# Target Ahead-of-Time Binary Translation architecture
+# Target architecture
 
-Shared design for cpu12 and dsp56300.
+Core owns complete readable state; consumers own memory, firmware, device clocks
+and scheduling. Only core.hpp and memory.hpp are public. Each core has one
+execution owner; independent cores communicate through consumer-owned contracts.
+Keep LLVM handles, native entry ABIs and implementation layouts private.
+
+## Complete preparation and composition
 
 ```text
-consumer memory + I/O -> Core -> retained native regions and loops
-                                  |                     |
-                             direct RAM          real event/I/O/fault
+CodeImage + CompileOptions -> Core::lower -> SemanticImage
+                                                |
+other core IR + eligible host IR ---------------+
+                                                v
+                          native target + joint LLVM19 optimization
+                                                |
+                              shared code owner + export map
+                                                |
+                      Core::bind -> NativeImage -> stopped install
 ```
 
-Core owns complete readable state; consumers own memory and device scheduling.
-Only core.hpp and memory.hpp are public. One owner executes each core; different
-cores may run independently. No board model, universal core hierarchy, checkpoint
-API, effect-ticket API or production interpreter belongs in the library.
+Declare every established executable stream/start, source variant and event
+contract separately from readable data. A saved return address need not be code.
+Validate complete instruction extents, operands and coherent overlapping sources.
+Include known indirect targets, loader outputs, IRQ vectors and retained fetch
+forms. Unknown dynamic transfers may select only prepared targets. Incomplete
+coverage fails with identity, address and reason before execution.
 
-The consumer orchestrates Ahead-of-Time Binary Translation of complete known
-executable images and variants. Core libraries
-provide semantic ISA translation; they own no firmware or host device lifecycle.
-Prefer startup firmware loading and full AOT before playback; preserve the same
-native code-quality contract as build-time compilation. Startup/compiler memory
-is separate from warm throughput; no lazy translation during playing qualifies.
-Mandatory preparation may generate a local build-time translation compiled/linked
-with the application, or execute before run. Fuse compatible concrete host IR with
-ISA IR before LLVM 19 O3. The result runs as native host code over borrowed host
-RAM; preserve program words where code itself observes or changes them.
+Core::lower owns source/variant/layout metadata and detached pre-O3 IR without a
+runtime Core, borrowed execution RAM, TargetMachine or native engine. Preserve
+all guest/event roots. Compile exact ISA semantics once; consumers never copy
+lowering or reconstruct private core state. Core::compile uses the same
+lower/materialize/bind path for standalone composition.
 
-Complete coverage gates execution for each validated code/binding version.
-Translate every established executable function, interrupt/indirect entry and
-known variant before playback; a partial optimizing subset is insufficient.
-An incomplete translation reports identity, address and reason. Known loader
-output and instruction templates select already prepared native variants while
-genuine program writes retain their effects. Do not assume arbitrary new code
-during playing without evidence. Runtime data remains mutable host RAM.
-Keep generated firmware artifacts untracked; reject mismatched images, ABI or
-host features.
+Link eligible host implementations before final optimization. Validate target,
+layout, features, scalar/aggregate types, calling convention, ABI attributes,
+noexcept and parameter/memory guarantees before linker attribute merging.
+Callbacks use public Io roles and per-instance owners; they may observe public
+Core state or request synchronous yield. Do not assume callbacks cannot alias
+Core state. Missing selected definitions fail materialization, not lowering.
+Retain unselected roles' normal owned I/O semantics.
 
-One semantic frontend and optimization pipeline serves both materialization paths:
-install native code in the stopped startup owner, or export linkable LLVM bitcode
-or relocatable native objects for build-time AOT. Core projects must provide this
-capability; a consumer must not copy ISA lowering internals. Export artifacts carry
-code/variant hashes, compiler/target/features and binding ABI identity. Resolve
-memory/context/device symbols by linking or validated relocation, never serialized
-process pointers. Keep LLVM ownership private; expose only the minimal consumer
-artifact/binding contract. Shared IR is optimized together before host lowering.
-Development always exercises the full AOT pipeline. Provide persistent validated
-artifacts for deployment, preserving exact code/variant, core/LLVM pipeline, host
-features and binding identity. Rebuild rejected artifacts before execution.
-Design generated code and host integration for the consumer's 10x throughput target.
-Treat translated code and concrete host functions as one optimized native path.
-Inline stable bindings and remove avoidable call/dispatch boundaries, state
-copies, spills and repeated validation. Qualify generated code and connected
-profiles while preserving every required memory/device effect.
+Core::bind requires exact identity, every declared export once, nonnull addresses
+and shared executable ownership. Reject missing/extra/duplicate symbols. Copy
+typed maps; borrowed symbol names/compiler inputs may expire after binding.
+Initialize/finalize the shared native owner once and count native text once,
+not per component/variant. Consumers never invoke private guest entry ABIs.
 
-Compile from actual code entries along natural control flow. Retain immutable
-translations for the core lifetime and link successors natively. No instruction
-count caps, budget-specific recompilation, continuous hashing or cache eviction.
-Changed executable identities require an explicit owner transition; unrelated
-programs use a fresh core. Provide explicit preparation before execution: capture
-initialized immutable code from established entries, share decoded fetch metadata
-with ordinary compilation, and follow explicit direct branch/call/return-site
-edges. Keep unknown code, register/stack targets, IRQs and implicit REP/DO flow
-unresolved until their contracts are proved. Never scan unrelated data or execute
-guest instructions, I/O or clocks during preparation.
+Install only on a stopped owner after validating actual source, complete layout
+and the relevant revision. Installation emits no guest/event code and changes no
+architectural state, memory or time. Rejected installation preserves the previous
+binding and pending source-version handoff. Fault recovery is an explicit
+register/reset boundary, not a side effect of installing code.
 
-Lift complete arithmetic/RAM regions and terminal non-call jumps into LLVM 19
-CFG/SSA, preserving flags,
-aliases, ordered effects and precise event/cycle prefixes. Use constant/range
-propagation, dead-store elimination, forwarding and loop optimization before
-native lowering; optimizing the C++ emitter alone is insufficient. Both hosts
-share this semantic pipeline; target lowering and native execution ABI differ.
-Prepare established CFG headers and share one-pass control regions across enclosing
-DO contexts only when their current loop end lies outside the complete region.
-An interior or final loop boundary keeps precise specialized execution. Clear shared
-lookup on program/grant invalidation; retained storage is not evidence of a valid view.
-Run optimizing materialization only during explicit stopped-owner preparation.
-Installed images reject unprepared entries instead of decoding or emitting at first use.
-Expose checked owner-admission facts to semantic optimization; preserve the
-different ordinary and inserted-vector fetch conditions and all real side exits.
-Form native control-flow blocks at established entries, branch/call targets and
-fallthrough/return sites. Separate declared code after terminals and across address
-gaps; transport fragments and instruction counts do not impose boundaries.
-Connect known successors directly with native tail transfers, including sequential
-edges crossing blocks. Keep dynamic targets in the prepared native table.
-Keep all functions in the same LLVM O3 module and let the optimizer choose inlining.
-Import semantic IR once for the complete image set. Share encoding definitions
-across prepared variants while keeping ordinary and inserted-vector effects
-distinct. Preserve every declared entry root and materialize all of them before
-admitting execution; additional exports never repeat module initialization.
-Bind each known instruction PC into semantic IR. Encode actual static successors,
-REP self-edges and DO backedges at the ending instruction's final word. Other
-dynamic transfers use the prepared native target table through tail calls;
-do not create artificial all-to-all intrafunction dispatcher loops.
-Install code only at a stopped owner boundary after validating the captured code
-revision. Explicit cross-variant declarations bind an absent entry to one
-prepared destination version. A completed native transfer yields at the owner
-boundary without a fault, leaving registers, stacks, loops, captured vectors and
-progress intact. The owner validates resident words and selects that exact image;
-failed installation retains the boundary without replaying the jump. Establish
-host mapping registers before installation. A real external-memory OMR change
-ends at its completed instruction and invalidates captured grants; validate and
-reinstall the prepared image before resuming. Unchanged OMR writes keep running.
-No global
-PC lookup chooses between different encodings. Declared interrupts may be absent
-in an earlier loader version; admission requires their source in the installed
-version. Compilation failure leaves architecture/progress unchanged. Keep LLVM
-handles private, instrument emitted native code explicitly in sanitizer builds,
-and initialize LLVM once per process before parallel preparation. Core destruction
-must not shut down LLVM while another core owns code. Preparation has no fixed
-time cap. Development always runs complete AOT/optimization; persistent validated
-artifacts serve operation and preserve exact code/binding/target identity.
+Declared cross-version transfers return the completed prefix without replaying
+the jump. Retain registers, stacks, captured events and nominal progress; validate
+and install exactly the required prepared destination. Remaps or source changes
+revoke dependent callers/targets. Unrelated RAM must not force retranslation of
+independent code. Unknown entries and undeclared events fail before new decoding
+or emission; no production interpreter or ordinary-emitter coverage fallback.
 
-On Linux x86-64, resolve both 24-bit PCs and complete 32-bit numeric/loop keys
-with one indexed load from non-executable, demand-zero target tables. Reserve
-128 MiB of virtual addresses per PC table and 32 GiB for the core's context
-catalog, without committing RAM or swap for untouched entries. Physical backing
-follows populated pages; clearing visits installed targets rather than the whole
-key range. Mapping failures remain visible. Other hosts retain sparse radix routing.
+## Native code and validation
 
-Keep live values in GPR/SIMD registers across instructions and backedges. Preserve
-old operands, aliases, flags and ordered effects. Eliminate dead work and hoist
-bounds/permission checks only with valid proofs. Exact faults, interrupts and
-owner observations publish complete architectural state. Actual I/O calls may
-continue natively; generic ISA helper execution remains an explicit coverage gap.
+Build natural connected CFG/SSA regions, functions and loops, independent of
+quotas and catalogue entry density. Preserve all declared starts without turning
+each into a function boundary. Link known successors directly, use prepared
+indirect targets and keep the host stack bounded across cycles. Retain immutable
+translations and live values across native edges; no length caps, budget-specific
+recompilation, continuous hashing or hot-path allocations/telemetry.
 
-Use compact executable arenas, deliberate layout and cold failure paths. Avoid
-per-instruction dispatch, state copies, allocations and telemetry. Translation
-boundaries do not depend on execution grants; event handling retains precise
-observable ISA prefixes. Consumer buffering and pacing do not change guest time.
-Masked external IRQs leave ordinary native execution running. Query the consumer
-at real interrupt-mask changes and return before another instruction when an IRQ
-needs arbitration. The consumer owns priority and acknowledgement; the core owns
-eligibility, REP, interrupt shadows and native vector entry.
+Represent exact integer/flag, memory and ordered device effects in IR. Apply
+constant/range propagation, CSE, dead-store elimination, forwarding, register
+propagation and legal loop/vector optimization. Arithmetic lowers inline to
+native integer operations; opaque per-opcode helpers are not optimized native
+coverage. Materialize state only at required observable/fault/IRQ/partial-grant
+boundaries. Preserve old parallel operands, aliases and precise prefixes.
 
-Derive owner/context bounds from prepared code and actual memory grants. Ordinary
-control flow, retained REP bodies and inserted two-word vectors have distinct
-entry contracts. A fast vector can access a device in its first instruction;
-never add a fixed positive entry allowance. A long vector call preserves its
-real stack checks and ends the vector context before its service continues.
-Qualify repeated-body identity, remaining count and effects before aggregating
-pure repetitions. An inherited DO backedge comes from live loop/stack state;
-ordinary encoded edges alone cannot authorize that continuation. Source assertion
-times, device deadlines, clock segments and cross-core grants belong to the
-consumer. Instruction base-cycle bounds do not establish physical IRQ latency
-or calibrated pipeline/bus timing.
+Prove code/layout/rights and storage/knowledge-alias invariants during AOT or
+stopped binding. Revalidate relevant revisions, then expose valid contracts to
+LLVM. Fully initialized stable RAM uses direct accesses without repeated word
+knowledge checks. Removing a check requires a proof covering invalidating writes,
+remaps and legal inputs; a code hash or warm trace alone is insufficient.
+OS protection does not establish guest mapping, initialization or MMIO semantics.
+Do not infer outermost-allocation noalias guarantees merely from range separation.
 
-Native instructions and cold helpers consume the same current RAM grants.
-Known reads and writable non-program-alias stores use borrowed memory directly.
-Insufficient grants retain owned callbacks, including unknown words, denied
-writes and executable aliases; genuine stores update their knowledge bytes.
+Keep unavoidable dynamic address/device/fault selection and cold exits precise.
+Real device operations can continue natively; never repeat a committed effect
+after a guard fails. Run and event handling use exact grants without arbitrary
+instruction slices or changed guest time. Consumer horizons and source timestamps
+remain separate from local nominal-cycle bounds.
 
-Measure realistic continuous workloads against equivalent portable C++ compiled
-by Clang 19 O3 for the same host CPU/features, targeting throughput parity.
-Match inputs, fixed-width arithmetic, flags/state and observable memory effects;
-check results independently and prevent dead-code elimination. Report actual
-guest lowering, complete preparation coverage and remaining boundary costs.
-An ordinary native-emitter run is not an LLVM-O3/AOT result. Retain matched
-ASM/SIMD comparisons and existing gates as separate additional references. Report
-cold translation, warm execution, API/boundary costs, code size and each slow case.
->=70% warm host-ASM throughput is a reference, not an integration gate. Keep
-hardware-factor assumptions explicit. SIMD is optional; add complexity only for
-correctness or measured speed. Test ISA/flags, RAM/aliases, control, IRQ/wait,
-Mandelbrot/FFT and application-appropriate streams. Benchmarks live in test/bench/.
+Generated code follows the host build mode. Debug includes assertions and selected
+diagnostic/sanitizer instrumentation. Release uses joint LLVM19 O3 with no optional
+Debug/sanitizer work or redundant proved checks. Both preserve the same required
+ISA/fault/device semantics. Verify source/IR/bindings during preparation; inspect
+optimized code to qualify the execution path. Instrument our host/generated code,
+not packaged foreign libraries. Sanitizer checks execute at runtime after insertion.
 
-Preserve logical P/X/Y spaces and physical aliases over borrowed host memory,
-24-bit words, 56-bit accumulators, fixed-point rounding/saturation/sticky flags,
-parallel old-value transfers, AGU modulo/reverse carry, REP/DO and IRQ semantics.
-Prove dependencies and ranges before batching independent loop iterations;
-retain exact feedback, lane effects and partial exits. Cover FIR, biquad, FFT,
-nonlinear feedback, communications, transforms and control workloads.
+## Artifacts and ownership
 
-Prove every accumulator prefix before reducing channel results. Structured RAM
-loads and stores require both iteration independence and preserved read/write
-order for aliases. Retain ordered native execution when either proof fails.
+Prefer startup loading/full AOT before playback; support build-time IR/object
+export through the same frontend and code-quality contract. Preparation is
+side-effect-free and has no fixed time budget. Complete native initialization
+before execution. Initialize LLVM once per process before parallel preparation;
+never shut it down while another image owns code.
 
-Binary-translation precedents: N64Recomp (native C functions and known overlays),
-XenonRecomp (C++ plus a consumer runtime) and Remill (C++ ISA semantics lifted to
-LLVM with consumer-owned memory bindings). These are design references, not
-dependencies or evidence of this core's coverage/performance.
+Development always runs full AOT. Operational artifacts include code/variants,
+exact core/LLVM pipeline, binding ABI, host target/features and build mode.
+Resolve relocations safely; never serialize instance pointers or device snapshots.
+Reject stale/corrupt entries and rebuild before execution. Manufacturer inputs
+and derived artifacts stay outside tracked source/tests.
 
-Primary references: references.json.
+## Qualification
+
+Compare authored guest algorithms translated through LLVM19 O3 against equivalent
+Clang19 O3 C++ on the same CPU/features, with exact numeric/state/memory semantics
+and independently checked outputs. Prevent dead-code elimination. Report coverage,
+cold compilation, warm throughput, code size, API costs and every slow case.
+Retain ASM/SIMD comparisons separately; >=70% matched host-ASM is an additional
+reference. Model clock ratios do not establish measured silicon speed.
+The consumer's >=10x instrument target requires actual original audio;
+microbenchmarks do not qualify it.
+
+## DSP56300 contracts
+
+Preserve logical P/X/Y spaces and physical aliases, 24-bit words, 56-bit
+accumulators, raw partial fields, fixed-point rounding/saturation/sticky flags,
+parallel old-value transfers, AGU modulo/reverse carry, REP/DO and native IRQs.
+All 56-bit arithmetic and required numeric/status effects must be inline; no
+opaque arithmetic helper calls. Preserve every accumulator prefix before any
+reduction or vectorization and retain feedback and alias read/write order.
+
+Resolve real control flow, including REP self-edges, DO backedges at the ending
+instruction's final word and dynamic loop state. Share a region across inherited
+DO contexts only when the actual loop end lies outside it. Interior/final loop
+boundaries retain precise execution; retained code storage is not a valid grant.
+
+Prepare ordinary, inserted-vector and latched-instruction forms separately.
+Fast vectors may access a device immediately; no fixed positive entry allowance
+is valid. Preserve foreground context through vector restart, real stack checks,
+mask/priority/shadow handling and REP completion. The consumer arbitrates and
+acknowledges real sources; the core owns eligibility and native entry. A local
+cycle bound establishes neither source assertion time nor physical IRQ latency.
+
+External-memory OMR changes finish their selecting instruction, revoke affected
+grants and return for matching prepared installation. Unchanged mappings keep
+running. Cross-version handoffs retain captured vectors and original program
+writes. Known RAM reads and writable non-program-alias stores use actual borrowed
+grants; unknown words, protected writes and executable aliases retain precise
+owned effects. Stores update knowledge when required.
+
+Cover independent FIR, biquad, FFT, nonlinear feedback, transforms, communications
+and control programs. Unsupported legal ISA forms remain visible until completed.
+
+## References
+
+Primary manuals and source identities are in [references.json](references.json).
+N64Recomp, XenonRecomp and Remill inform static translation/overlays, native
+integration and exact LLVM semantics; they are references, not runtime dependencies
+or evidence of this core's coverage/performance.

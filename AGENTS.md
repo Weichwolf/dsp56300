@@ -1,61 +1,47 @@
 # dsp56300
 
-- Build an independent complete DSP56300 native JIT. Keep application firmware,
-  device clocks, peripherals and scheduling in consumers; no foreign core.
-- Expose only core.hpp and memory.hpp, aligned with the other core. Core owns
-  readable state; consumers own memory. One owner executes each core.
-- Production execution is native-only. Keep all implemented ISA semantics.
-  Compile natural control-flow regions once, retain immutable code and link
-  native successors.
-  No instruction-count translation caps, checkpoints or public effect tickets.
-- Target Ahead-of-Time Binary Translation for consumer-owned executable images.
-  Complete preparation of all known code/variants is mandatory before execution;
-  incomplete translation fails explicitly. Prefer startup loading/full AOT;
-  build-time translation is allowed with the same code-quality contract.
-  Export linkable LLVM bitcode or relocatable objects through the same semantic
-  pipeline used for startup installation; no duplicated lowering or public LLVM
-  handles. Validate code/binding/target identity and relocations.
-  Consumers may compile/link generated firmware code with a host application
-  at build time. Keep firmware out of cores.
-  Fuse compatible consumer binding IR before LLVM O3; benchmark against equivalent
-  Clang 19 O3 C++ with parity as the target and explicit lowering/coverage scope.
-  Design for the complete instrument's 10x throughput target; 4x is intermediate.
-  Development always runs complete AOT; validated persistent artifacts serve
-  operation after the full translation path.
-- Lower ordinary ISA natively; distinguish actual I/O calls from ISA fallback
-  gaps. Keep unsupported cases visible. Fix generic integration defects here.
-- Keep code small, registers live and RAM direct. SIMD needs measured benefit.
-  Representative warm >=70% matched host-ASM throughput is a reference, not an
-  instrument-integration gate. Report cold latency and every slow scenario.
-- Test programs are independently authored and use test/support/isa.hpp.
+- Build an independent complete DSP56300 translator; follow OBJECTIVE.md and
+  doc/architecture.md. Only core.hpp and memory.hpp are public. Core owns state;
+  consumers own memory, devices, scheduling and firmware. One owner executes a core.
+- Require complete known AOT/variants before execution. Use one semantic pipeline
+  for startup installation and build-time IR/object export, with private LLVM
+  handles, exact identities and validated relocations. No production interpreter,
+  instruction-count caps, checkpoints, public backend selectors or effect tickets.
+- Fuse eligible host IR before LLVM19 O3. Keep RAM direct, registers live and
+  arithmetic inline. Validate proved invariants during preparation/binding;
+  Debug instrumentation stays out of Release. Preserve dynamic effects/faults.
+- Preserve every supported ISA form and exact state/time/IRQ semantics. Report
+  missing lowering explicitly. Test independently authored programs through
+  test/support/isa.hpp; never change correct tests to hide a defect.
+- Target parity with equivalent Clang19 O3 C++; report coverage, preparation,
+  API costs and every slow case. >=70% matched host-ASM is an additional reference.
+  The instrument target is >=10x sustained offline, >=4x intermediate, with
+  physical key-to-analog latency 2-5 ms/max 10 ms; core benchmarks do not qualify it.
 
-## Working rules
+## Work
 
-- Speak German with the user; code, comments, documentation and commits are English.
-- C++23, LLVM 19, CMake/Ninja; strict warnings/linking, clang-format, zero-finding
-  clang-tidy, functions <=120 lines. Never suppress or weaken checks.
-- Prioritize complete instrument functionality and >=4x sustained MIDI-to-WAV
-  throughput. Use Release and focused independent checks while iterating. Strict
-  build/test rules cover our code; use packaged foreign libraries, never rebuild
-  LLVM/compiler-rt or instrument foreign code. Defer routine sanitizers until the
-  instrument goal; earlier ASan/UBSan/TSan runs need a concrete defect/risk reason.
-  Sanitizer coverage includes our generated JIT code. No GitHub workflows.
-- Blofeld firmware probes stop within 10 host seconds and fail unless playable.
-  Until real time, no long firmware runs or unchanged failed-probe repetitions.
-- Telemetry is runtime-selectable and off by default; no hot-path statistics.
-- Documentation describes the required target, not implementation status. README
-  defines intended use, OBJECTIVE acceptance, doc/ the architecture and primary
-  references. Keep actual qualification results in the acceptance catalogue.
-  No diaries or result archives.
-- Keep firmware, samples, manuals, disassemblies and private analysis untracked.
-  Reference inputs: ignored build/local/; artifacts: build/. Preserve inputs and
-  source/size/hash manifests. Original source is GPL-3.0-only with SPDX notices.
-- Keep canonical main current. Commit reviewed increments; push only configured
-  upstream/main (blofeld-emu) or origin/main (cores). No backup branches or
-  --all/--mirror; preserve unrelated work and coordinate consumer dependency pins.
-- Issues belong only in private Weichwolf/blofeld-src; no routine status spam.
-  Consult local implementations such as Gearmulator for known register maps,
-  protocols and algorithms; write our implementation independently. Keep
-  reference checkouts unchanged and preserve existing dependency notices.
-  Do not import GPL-2.0-only octa-capture code. Run as a regular user.
-- Validate ARM64 on macOS and x86-64 on Linux; communicate revisions in commits.
+- German with the user; English code/comments/docs/commits. C++23, LLVM19,
+  CMake/Ninja, strict warnings/linking, clang-format, zero-finding clang-tidy,
+  functions <=120 lines. Never suppress or weaken checks.
+- Prioritize functionality/performance with focused independent Release checks.
+  Defer routine own-code/generated-JIT ASan/UBSan and separate TSan until the goal;
+  earlier runs need a concrete reason. Use packaged foreign dependencies without
+  source builds or sanitizer instrumentation. No GitHub workflows.
+- Purpose-specific finite firmware guards allow startup; stop promptly on faults.
+  No fixed ten-second cap or unchanged failed repetition. Telemetry is selectable,
+  off by default and absent from the normal hot path.
+- README documents use, OBJECTIVE acceptance, doc/architecture.md the current
+  target; code is the implementation. Preserve primary source/size/hash references
+  and qualification evidence, not diaries, obsolete attempts or history archives.
+  Git holds history. Manufacturer inputs/private analysis stay in ignored
+  build/local/, generated artifacts in build/. Preserve GPL-3.0-only/SPDX and all
+  dependency notices; no GPL-2.0-only octa-capture code or altered reference checkouts.
+  Run as a regular user.
+- Keep canonical main current. Commit reviewed increments and push every qualified
+  core increment only to origin/main; no backup branches, force pushes,
+  --all/--mirror or unrelated edits. Coordinate consumer pins in commits.
+  Each developer validates their native macOS ARM64 or Linux x86-64 host.
+- Coordinate only in private Weichwolf/blofeld-src: #23 instrument performance and
+  platform ownership; #28 DSP AOT/entries/backend; #25 arithmetic/filter/LFO;
+  #26 MIDI/SysEx; #27 MCU IRQ/display/USB ordering; #29 documentation cleanup.
+  Use existing specialist issues and local implementation references; no status spam.
