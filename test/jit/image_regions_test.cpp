@@ -64,7 +64,8 @@ struct Fixture final : Io {
   }
 
   std::span<const MemoryWindow> memory_windows(const Space space) noexcept override {
-    return space == Space::x ? std::span(&window, 1) : std::span<const MemoryWindow>{};
+    if (space != Space::x) { return {}; }
+    return views.empty() ? std::span(&window, 1) : views;
   }
 
   [[nodiscard]] std::uint64_t program_revision() const noexcept override { return revision; }
@@ -94,6 +95,7 @@ struct Fixture final : Io {
   Data data{};
   std::array<std::uint8_t, 32> known{};
   MemoryWindow window;
+  std::span<const MemoryWindow> views;
   unsigned callbacks = 0;
   std::uint64_t revision = 0;
 };
@@ -372,6 +374,138 @@ void mode_routing() {
           "An unsupported numeric mode reaches its original exact fault before any RAM effects");
 }
 
+struct WindowCase {
+  Word from, to, mode, quota;
+  std::optional<Word> missing = std::nullopt;
+  bool noncanonical = false, rebind = false;
+};
+
+void window_prefix(const NativeImage &image, const WindowCase input) {
+  constexpr Word length = 4;
+  constexpr Word half = 16;
+  Fixture fixture(length);
+  fixture.code[3] = fixture.code[2] | (2U << 8);
+  auto spare = fixture.data;
+  for (auto &word : spare) { word ^= test::sign24 - 1; }
+  auto spare_known = fixture.known;
+  std::array views{MemoryWindow{.address = base,
+                                .words = std::span(fixture.data).first(half),
+                                .known = std::span(fixture.known).first(half),
+                                .writable = true},
+                   MemoryWindow{.address = base + half,
+                                .words = std::span(fixture.data).subspan(half),
+                                .known = std::span(fixture.known).subspan(half),
+                                .writable = true}};
+  fixture.views = views;
+  auto seed = initial(fixture, input.mode);
+  constexpr std::uint64_t seed_x = 0xabcdef123456;
+  seed.x = seed_x;
+  seed.r[0] = base + input.from;
+  seed.r[1] = base + input.to;
+  seed.r[2] = base + (input.from < half ? half : 0);
+  Core core(Memory::external(), &fixture);
+  core.set_registers(seed);
+  core.install(image, 0);
+  if (input.rebind) {
+    views[0].words = std::span(spare).first(half);
+    views[1].words = std::span(spare).subspan(half);
+    views[0].known = std::span(spare_known).first(half);
+    views[1].known = std::span(spare_known).subspan(half);
+    ++fixture.revision;
+    core.install(image, 0);
+  }
+  auto &data = input.rebind ? spare : fixture.data;
+  auto &known = input.rebind ? spare_known : fixture.known;
+  if (input.missing) { known[*input.missing] = 0; }
+  if (input.noncanonical) { known[input.to + 1] = 0x80; }
+  const auto original = fixture.data;
+  auto wanted = data;
+  auto wanted_known = known;
+  auto expected = seed;
+  Fault failure;
+  Word retired = 0;
+  for (; retired < input.quota; ++retired) {
+    const auto iteration = retired / length;
+    const auto slot = retired % length;
+    expected.pc = body + slot + 1;
+    if (slot <= 1) {
+      const auto index = expected.r[slot == 0 ? 0U : 2U]++ - base;
+      if (wanted_known[index] == 0) {
+        failure = {.kind = FaultKind::memory_read,
+                   .space = Space::x,
+                   .address = base + index,
+                   .pc = body + slot};
+        break;
+      }
+      expected.x = (expected.x & ~std::uint64_t{word_mask}) | wanted[index];
+    }
+    if (slot != length - 1) { continue; }
+    const auto index = expected.r[1]++ - base;
+    wanted[index] = static_cast<Word>(expected.x) & word_mask;
+    wanted_known[index] = 1;
+    if (iteration + 1 == turns) {
+      test::loop_frames::complete(expected);
+    } else {
+      --expected.lc;
+      expected.pc = body;
+    }
+  }
+  const auto result = core.run(input.quota);
+  require(
+      result.retired == retired && result.fault == failure &&
+          result.progress == Progress{.instructions = retired, .estimated_cycles = retired} &&
+          core.registers() == expected && data == wanted && known == wanted_known &&
+          fixture.callbacks == (failure == Fault{} ? 0U : 1U) &&
+          (!input.rebind || fixture.data == original),
+      "Window choice preserves crossed ranges, ordered aliases, faults, knowledge and rebinding");
+}
+
+void window_selection() {
+  constexpr Word length = 4;
+  constexpr Word half = 16;
+  constexpr Word tail = (half * 2) - turns;
+  constexpr Word last = (half * 2) - 1;
+  constexpr Word missing_second = half + 2;
+  Fixture fixture(length);
+  fixture.code[3] = fixture.code[2] | (2U << 8);
+  const std::array code{CodeSpan{.address = first, .words = fixture.code}};
+  constexpr std::array entries{first, body};
+  const std::array variants{
+      CodeVariant{.id = 0, .code = code, .entries = entries, .failed_fetches = {}}};
+  const std::array regions{
+      RegionLayout{.space = Space::x, .first = base, .size = half, .tracked = true},
+      RegionLayout{.space = Space::x, .first = base + half, .size = half, .tracked = true}};
+  const std::array layouts{VariantLayout{.id = 0, .memory = regions}};
+  const auto image = compile(Core::lower(
+      {.variants = variants},
+      {.memory = layouts, .interrupts = {}, .transitions = {}, .callbacks = {}, .bindings = {}}));
+  constexpr std::array positions{std::array{0U, 16U},
+                                 std::array{16U, 0U},
+                                 std::array{14U, 12U},
+                                 std::array{12U, 14U},
+                                 std::array{28U, 0U},
+                                 std::array{0U, 28U},
+                                 std::array{0U, 17U}};
+  for (const auto mode : modes) {
+    for (const auto pair : positions) {
+      for (Word quota = 0; quota <= length * turns; ++quota) {
+        window_prefix(image, {.from = pair[0], .to = pair[1], .mode = mode, .quota = quota});
+      }
+    }
+    window_prefix(image,
+                  {.from = 0, .to = 16, .mode = mode, .quota = length * turns, .missing = 2});
+    window_prefix(
+        image,
+        {.from = 0, .to = tail, .mode = mode, .quota = length * turns, .missing = missing_second});
+    window_prefix(image,
+                  {.from = tail, .to = 0, .mode = mode, .quota = length * turns, .missing = last});
+    window_prefix(
+        image, {.from = 16, .to = 0, .mode = mode, .quota = length * turns, .noncanonical = true});
+    window_prefix(image,
+                  {.from = 0, .to = 16, .mode = mode, .quota = length * turns, .rebind = true});
+  }
+}
+
 void ordinary_discovery() {
   constexpr Word length = 3;
   const Fixture fixture(length);
@@ -578,6 +712,7 @@ void raw_execution() {
 }
 
 int main() try {
+  window_selection();
   mode_routing();
   ordinary_discovery();
   ordinary_execution();

@@ -16,6 +16,7 @@
 #include "jit/move.hpp"
 #include "translation.hpp"
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstddef>
@@ -269,39 +270,77 @@ private:
     return cached;
   }
 
-  V select_window(const unsigned bank, const Bounds bounds, const bool writing) {
-    auto *base = LLVMConstNull(ir_.getPtrTy());
-    auto *accepted = boolean(false);
-    for (unsigned index = 0; index < plan_.windows[bank].size(); ++index) {
-      const auto &window = plan_.windows[bank][index];
+  [[nodiscard]] std::vector<unsigned> window_order(const unsigned bank, const bool writing) const {
+    const auto &windows = plan_.windows[bank];
+    std::vector<unsigned> order;
+    bool disjoint = true;
+    for (unsigned index = 0; index < windows.size(); ++index) {
+      const auto &window = windows[index];
       if (!permitted(window, writing)) { continue; }
+      for (const auto prior : order) {
+        const auto &other = windows[prior];
+        if (window.address < other.address + other.size &&
+            other.address < window.address + window.size) {
+          disjoint = false;
+        }
+      }
+      order.push_back(index);
+    }
+    if (!disjoint) { std::ranges::reverse(order); }
+    return order;
+  }
+
+  V select_window(const unsigned bank, const Bounds bounds, const bool writing) {
+    const auto order = window_order(bank, writing);
+    if (dynamic_) {
+      for (const auto index : order) { static_cast<void>(binding(bank, index, writing)); }
+    }
+    auto *done = LLVMAppendBasicBlockInContext(context_, function_, "window_selected");
+    std::vector<V> pointers;
+    std::vector<V> acceptance;
+    std::vector<LLVMBasicBlockRef> predecessors;
+    for (const auto index : order) {
+      const auto &window = plan_.windows[bank][index];
       auto *begin = ir_.getInt64(window.address);
       auto *end = ir_.getInt64(window.address + window.size);
       auto *matches = ir_.CreateAnd(ir_.CreateICmpUGE(bounds.first, begin),
                                     ir_.CreateICmpULT(bounds.last, end));
       matches = ir_.CreateAnd(matches, ir_.CreateICmpULT(bounds.first, end));
-      Binding bound{.data = nullptr, .known = nullptr, .valid = nullptr};
-      if (dynamic_) {
-        bound = binding(bank, index, writing);
-        matches = ir_.CreateAnd(matches, bound.valid);
-      }
-      const Bounds range{
-          .first = ir_.CreateSelect(matches, ir_.CreateSub(bounds.first, begin), ir_.getInt64(0)),
-          .last =
-              ir_.CreateSelect(matches,
-                               ir_.CreateAdd(ir_.CreateSub(bounds.last, begin), ir_.getInt64(1)),
-                               ir_.getInt64(0))};
-      auto *admitted = ir_.CreateAnd(matches, known_words(window, range, writing, bound.known));
+      const auto bound = dynamic_ ? binding(bank, index, writing) : Binding{};
+      if (dynamic_) { matches = ir_.CreateAnd(matches, bound.valid); }
+      auto *inspect = LLVMAppendBasicBlockInContext(context_, function_, "window_known");
+      auto *selected = LLVMAppendBasicBlockInContext(context_, function_, "window_match");
+      auto *next = LLVMAppendBasicBlockInContext(context_, function_, "window_next");
+      LLVMBuildCondBr(ir_.get(), matches, inspect, next);
+      ir_.SetInsertPoint(inspect);
+      const Bounds range{.first = ir_.CreateSub(bounds.first, begin),
+                         .last = ir_.CreateAdd(ir_.CreateSub(bounds.last, begin), ir_.getInt64(1))};
+      auto *known = known_words(window, range, writing, bound.known);
+      LLVMBuildCondBr(ir_.get(), known, selected, next);
+      ir_.SetInsertPoint(selected);
       auto *pointer = dynamic_ ? LLVMBuildPtrToInt(ir_.get(), bound.data, ir_.getInt64Ty(), "")
                                : ir_.getInt64(std::bit_cast<std::uintptr_t>(window.data));
-      auto *biased = LLVMBuildIntToPtr(
+      pointers.push_back(LLVMBuildIntToPtr(
           ir_.get(),
           ir_.CreateSub(pointer, ir_.getInt64(std::uint64_t{window.address} * sizeof(Word))),
           ir_.getPtrTy(),
-          "");
-      base = ir_.CreateSelect(admitted, biased, base);
-      accepted = ir_.CreateOr(accepted, admitted);
+          ""));
+      acceptance.push_back(boolean(true));
+      predecessors.push_back(LLVMGetInsertBlock(ir_.get()));
+      LLVMBuildBr(ir_.get(), done);
+      ir_.SetInsertPoint(next);
     }
+    pointers.push_back(LLVMConstNull(ir_.getPtrTy()));
+    acceptance.push_back(boolean(false));
+    predecessors.push_back(LLVMGetInsertBlock(ir_.get()));
+    LLVMBuildBr(ir_.get(), done);
+    ir_.SetInsertPoint(done);
+    auto *base = LLVMBuildPhi(ir_.get(), ir_.getPtrTy(), "window_base");
+    auto *accepted = LLVMBuildPhi(ir_.get(), ir_.getIntNTy(1), "window_accepted");
+    LLVMAddIncoming(
+        base, pointers.data(), predecessors.data(), static_cast<unsigned>(pointers.size()));
+    LLVMAddIncoming(
+        accepted, acceptance.data(), predecessors.data(), static_cast<unsigned>(acceptance.size()));
     require(accepted);
     return base;
   }
