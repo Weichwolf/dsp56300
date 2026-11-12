@@ -19,6 +19,7 @@
 #include <optional>
 #include <span>
 #include <stdexcept>
+#include <vector>
 
 namespace {
 using namespace dsp56300;
@@ -258,11 +259,13 @@ NativeImage prepare_image() {
                                                      {irq_entry, 2},
                                                      {repeat_entry, 3}};
   std::array<CodeSpan, units.size()> code{};
-  std::array<Word, units.size()> entries{};
+  std::vector<Word> entries;
   for (std::size_t index = 0; index < units.size(); ++index) {
     code[index] = {.address = units[index][0],
                    .words = std::span(program).subspan(units[index][0], units[index][1])};
-    entries[index] = units[index][0];
+    for (Word offset = 0; offset < units[index][1]; ++offset) {
+      entries.push_back(units[index][0] + offset);
+    }
   }
   const std::array variants{
       CodeVariant{.id = 0, .code = code, .entries = entries, .failed_fetches = {}}};
@@ -308,6 +311,22 @@ void matrix() {
                 initial(mode, loop),
                 {.instructions = std::numeric_limits<Word>::max(), .deadline = deadline},
                 true);
+      }
+    }
+  }
+}
+
+void interior_entries() {
+  Fixture fixture;
+  Core core(Memory::external(), &fixture);
+  bind_image(core);
+  for (const auto mode : modes) {
+    for (Word offset = 0; offset < length; ++offset) {
+      for (Word quota = 0; quota <= length - offset; ++quota) {
+        fixture.reset();
+        auto state = initial(mode);
+        state.pc += offset;
+        compare(core, fixture, state, {.instructions = quota});
       }
     }
   }
@@ -512,6 +531,7 @@ int main() {
                 report.native_bytes != 0 && report.failure == Fault{},
             "The public factory prepares the complete authored image before execution");
     matrix();
+    interior_entries();
     unknown_data();
     owner_boundaries();
     direct_grants();

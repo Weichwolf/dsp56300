@@ -108,7 +108,7 @@ const Instruction *ImagePlan::find(const Word address) const noexcept {
 
 std::vector<Word> ImagePlan::units() const {
   if (instructions.empty()) { return {}; }
-  std::set<Word> heads(entries.begin(), entries.end());
+  std::set<Word> heads;
   heads.insert(instructions.begin()->first);
   std::optional<Word> linear;
   for (const auto &[address, instruction] : instructions) {

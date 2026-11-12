@@ -245,6 +245,15 @@ void conditional_blocks() {
           "Conditional siblings, unreachable tails and shared joins have natural native entries");
   require(plan.instructions.size() == code.size(),
           "Natural block partitioning preserves every declared instruction, including dead code");
+  std::array<Word, code.size()> dense{};
+  for (std::size_t index = 0; index < dense.size(); ++index) {
+    dense[index] = start + static_cast<Word>(index);
+  }
+  const auto admitted = plan_image(spans, dense);
+  require(admitted.entries == std::vector<Word>(dense.begin(), dense.end()) &&
+              admitted.instructions == plan.instructions && admitted.edges() == plan.edges() &&
+              admitted.units() == plan.units(),
+          "Admitting interior starts preserves all sites without fragmenting natural blocks");
 }
 
 void native_edges() {
