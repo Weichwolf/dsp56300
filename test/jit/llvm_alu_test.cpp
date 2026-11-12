@@ -79,7 +79,9 @@ std::vector<Case> cases() {
   for (const auto function : {bfu_model::Function::bit_and,
                               bfu_model::Function::bit_or,
                               bfu_model::Function::bit_xor,
-                              bfu_model::Function::complement}) {
+                              bfu_model::Function::complement,
+                              bfu_model::Function::left,
+                              bfu_model::Function::right}) {
     for (unsigned source = 0; source < 4; ++source) {
       for (const bool destination : {false, true}) {
         const bfu_model::Input input{

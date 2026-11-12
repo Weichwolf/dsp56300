@@ -52,6 +52,9 @@ public:
         dynamic_(fallback == nullptr),
         cpu_(LLVMGetParam(function_, 0)),
         owner_(LLVMGetParam(function_, 1)) {
+    for (unsigned bank = 0; bank < bindings_.size(); ++bank) {
+      bindings_[bank].resize(plan_.windows[bank].size());
+    }
     generate(fallback);
   }
 
@@ -138,9 +141,11 @@ private:
         ir_.CreateICmpNE(ir_.CreateAnd(status_, ir_.getInt32(loop_flag)), ir_.getInt32(0)),
         reg(32, offsetof(Registers, la)),
         ir_.getInt32(inactive_loop));
-    if (region_independent(plan_.operations)) {
-      const auto &last = plan_.operations.back();
-      const auto final_word = (last.pc + last.instruction.words - 1) & word_mask;
+    const auto &last = plan_.operations.back();
+    const auto final_word = (last.pc + last.instruction.words - 1) & word_mask;
+    const bool uncaptured =
+        last.loop_address == inactive_loop && plan_.operations.front().pc <= final_word;
+    if (uncaptured || region_independent(plan_.operations)) {
       require(ir_.CreateOr(ir_.CreateICmpULT(active_la, ir_.getInt32(plan_.operations.front().pc)),
                            ir_.CreateICmpUGT(active_la, ir_.getInt32(final_word))));
     } else {
@@ -218,10 +223,12 @@ private:
   }
 
   struct Binding {
-    V data, known, valid;
+    V data = nullptr, known = nullptr, valid = nullptr;
   };
 
   Binding binding(const unsigned bank, const unsigned index, const bool writing) {
+    auto &cached = bindings_[bank][index][writing ? 1U : 0U];
+    if (cached.valid != nullptr) { return cached; }
     const auto &window = plan_.windows[bank][index];
     const bool explicit_windows = plan_.windowed[bank];
     const auto flags = (window.writable ? region_writable : 0U) |
@@ -256,9 +263,10 @@ private:
     if (helper == nullptr) { helper = LLVMAddFunction(module, "dsp56300_region_memory", type); }
     std::array arguments{cpu_, owner_, description, data, known};
     auto *valid = LLVMBuildCall2(ir_.get(), type, helper, arguments.data(), arguments.size(), "");
-    return {.data = ir_.CreateLoad(ir_.getPtrTy(), data),
-            .known = ir_.CreateLoad(ir_.getPtrTy(), known),
-            .valid = ir_.CreateICmpNE(valid, ir_.getInt32(0))};
+    cached = {.data = ir_.CreateLoad(ir_.getPtrTy(), data),
+              .known = ir_.CreateLoad(ir_.getPtrTy(), known),
+              .valid = ir_.CreateICmpNE(valid, ir_.getInt32(0))};
+    return cached;
   }
 
   V select_window(const unsigned bank, const Bounds bounds, const bool writing) {
@@ -336,16 +344,13 @@ private:
     return form.mode == 5 || form.mode == 7 ? next : prior;
   }
 
-  void memory_guards() {
-    if (plan_.batch) {
-      batch_memory_guards();
-      return;
-    }
+  auto memory_bounds(const Word roots, const std::span<const RegionPlan::Step> steps) {
     auto proof = cursors_;
     std::array<std::array<Bounds, agu_registers>, 2> bounds{};
-    for (const auto &step : plan_.steps) {
+    for (const auto &step : steps) {
       V paired = nullptr;
       for (const auto &move : std::span(step.memory.transfers).first(step.memory.count)) {
+        if ((roots & (1U << move.address.index)) == 0) { continue; }
         auto *at =
             step.memory.long_pair && paired != nullptr ? paired : effective(proof, move.address);
         paired = at;
@@ -357,13 +362,30 @@ private:
                          : ir_.CreateSelect(ir_.CreateICmpUGT(wide, range.last), wide, range.last);
       }
     }
+    return bounds;
+  }
+
+  void memory_guards(const Word roots, const std::span<const RegionPlan::Step> steps) {
+    const auto bounds = memory_bounds(roots, steps);
     for (unsigned bank = 0; bank < 2; ++bank) {
       for (unsigned index = 0; index < agu_registers; ++index) {
-        if (!plan_.extents[bank][index].accessed) { continue; }
+        if ((roots & (1U << index)) == 0 || !plan_.extents[bank][index].accessed) { continue; }
         memory_bases_[bank][index] =
             select_window(bank, bounds[bank][index], plan_.extents[bank][index].writing);
       }
     }
+  }
+
+  void initial_memory_guards() {
+    if (plan_.batch) {
+      batch_memory_guards();
+      return;
+    }
+    Word roots = 0;
+    for (unsigned index = 0; index < agu_registers; ++index) {
+      if (!plan_.deferred[index]) { roots |= 1U << index; }
+    }
+    memory_guards(roots, plan_.steps);
   }
 
   V memory(const NativeMove &move, V at) {
@@ -380,6 +402,15 @@ private:
       return llvm19::transfer_word(
           ir_, values[number - a_register], plan_.operations.front().mode, status_);
     }
+    if (number >= a0_register && number <= b1_register) {
+      constexpr std::array shifts{padding_bits, accumulator_bits, bus_shift};
+      const auto part = (number - a0_register) / 2;
+      auto *value = values[(number - a0_register) & 1U];
+      auto *shift = ir_.getInt64(shifts[part]);
+      auto *word =
+          part == 1 ? LLVMBuildAShr(ir_.get(), value, shift, "") : ir_.CreateLShr(value, shift);
+      return ir_.CreateAnd(ir_.CreateTrunc(word, ir_.getInt32Ty()), ir_.getInt32(word_mask));
+    }
     auto *value = values[number < y0_register ? 2U : 3U];
     return ir_.CreateAnd(
         ir_.CreateTrunc(ir_.CreateLShr(value, ir_.getInt64(std::uint64_t{number & 1U} * word_bits)),
@@ -393,13 +424,24 @@ private:
       return;
     }
     if (number >= r_register_base) {
-      cursors_[number - r_register_base] = word;
+      const auto index = number - r_register_base;
+      cursors_[index] = word;
+      if (plan_.agu[index]) { origins_[index] = ir_.CreateAnd(word, ir_.CreateNot(masks_[index])); }
       return;
     }
     if (number == a_register || number == b_register) {
       banks_[number - a_register] = ir_.CreateShl(
           ir_.CreateSExt(ir_.CreateTrunc(word, ir_.getIntNTy(word_bits)), ir_.getInt64Ty()),
           ir_.getInt64(bus_shift));
+      return;
+    }
+    if (number >= a0_register && number <= b1_register) {
+      constexpr std::array shifts{padding_bits, accumulator_bits, bus_shift};
+      const auto shift = shifts[(number - a0_register) / 2];
+      auto *&value = banks_[(number - a0_register) & 1U];
+      value =
+          ir_.CreateOr(ir_.CreateAnd(value, ir_.getInt64(~(std::uint64_t{word_mask} << shift))),
+                       ir_.CreateShl(ir_.CreateZExt(word, ir_.getInt64Ty()), ir_.getInt64(shift)));
       return;
     }
     const auto bank = number < y0_register ? 2U : 3U;
@@ -547,7 +589,7 @@ private:
     for (unsigned bank = 0; bank < banks_.size(); ++bank) { put(banks_[bank], bank_fields[bank]); }
     for (unsigned index = 0; index < agu_registers; ++index) {
       if (plan_.extents[0][index].accessed || plan_.extents[1][index].accessed ||
-          plan_.changed_r[index]) {
+          plan_.definitions[index].has_value()) {
         put(ir_.CreateAnd(cursors_[index], ir_.getInt32(word_mask)),
             offsetof(Registers, r) + (index * sizeof(Word)));
       }
@@ -611,6 +653,30 @@ private:
     LLVMBuildRet(ir_.get(), ir_.CreateTrunc(retired, ir_.getInt32Ty()));
   }
 
+  void body(LLVMBasicBlockRef miss) {
+    for (std::size_t index = 0; index < plan_.steps.size(); ++index) {
+      const auto before = banks_;
+      const auto &step = plan_.steps[index];
+      if (step.registers.valid()) {
+        write_register(step.registers.destination, read_register(before, step.registers.source));
+      }
+      const auto &instruction = plan_.operations[index].instruction;
+      if (instruction.operation == Operation::arithmetic_shift_immediate) {
+        llvm19::lower_arithmetic_shift(
+            ir_, instruction.opcode, plan_.operations[index].mode, banks_, status_);
+      } else if (!plan_.control.valid || index + 1 != plan_.steps.size()) {
+        transfers(step.memory, instruction.opcode);
+        llvm19::lower_alu(
+            ir_, instruction.opcode, plan_.operations[index].mode, before, banks_, status_);
+      }
+      if (step.guards == 0) { continue; }
+      memory_guards(step.guards, std::span(plan_.steps).subspan(index + 1));
+      auto *ready = LLVMAppendBasicBlockInContext(context_, function_, "computed_address");
+      LLVMBuildCondBr(ir_.get(), eligible_, ready, miss);
+      ir_.SetInsertPoint(ready);
+    }
+  }
+
   void generate(const void *fallback) {
     auto *windows = LLVMAppendBasicBlockInContext(context_, function_, "windows");
     auto *start = LLVMAppendBasicBlockInContext(context_, function_, "admitted");
@@ -620,7 +686,7 @@ private:
     admission();
     LLVMBuildCondBr(ir_.get(), eligible_, windows, miss);
     ir_.SetInsertPoint(windows);
-    memory_guards();
+    initial_memory_guards();
     LLVMBuildCondBr(ir_.get(), eligible_, start, miss);
     ir_.SetInsertPoint(miss);
     if (fallback == nullptr) {
@@ -666,37 +732,18 @@ private:
     cursors_ = addresses;
     strides_ = strides;
     status_ = status;
-    for (std::size_t index = 0; index < plan_.steps.size(); ++index) {
-      const auto before = banks_;
-      const auto &step = plan_.steps[index];
-      if (step.registers.valid()) {
-        write_register(step.registers.destination, read_register(before, step.registers.source));
-      }
-      const auto &instruction = plan_.operations[index].instruction;
-      if (instruction.operation == Operation::arithmetic_shift_immediate) {
-        llvm19::lower_arithmetic_shift(
-            ir_, instruction.opcode, plan_.operations[index].mode, banks_, status_);
-        continue;
-      }
-      if (plan_.control.valid && index + 1 == plan_.steps.size()) { continue; }
-      transfers(step.memory, instruction.opcode);
-      llvm19::lower_alu(ir_,
-                        plan_.operations[index].instruction.opcode,
-                        plan_.operations[index].mode,
-                        before,
-                        banks_,
-                        status_);
-    }
+    body(miss);
+    auto *backedge = LLVMGetInsertBlock(ir_.get());
     for (unsigned bank = 0; bank < values.size(); ++bank) {
-      LLVMAddIncoming(values[bank], &banks_[bank], &loop, 1);
+      LLVMAddIncoming(values[bank], &banks_[bank], &backedge, 1);
     }
     for (unsigned index = 0; index < agu_registers; ++index) {
-      LLVMAddIncoming(addresses[index], &cursors_[index], &loop, 1);
-      LLVMAddIncoming(strides[index], &strides_[index], &loop, 1);
+      LLVMAddIncoming(addresses[index], &cursors_[index], &backedge, 1);
+      LLVMAddIncoming(strides[index], &strides_[index], &backedge, 1);
     }
-    LLVMAddIncoming(status, &status_, &loop, 1);
+    LLVMAddIncoming(status, &status_, &backedge, 1);
     auto *left = ir_.CreateSub(remaining, ir_.getInt64(1));
-    LLVMAddIncoming(remaining, &left, &loop, 1);
+    LLVMAddIncoming(remaining, &left, &backedge, 1);
     LLVMBuildCondBr(ir_.get(), ir_.CreateICmpEQ(left, ir_.getInt64(0)), complete, loop);
     ir_.SetInsertPoint(complete);
     finish();
@@ -713,6 +760,7 @@ private:
   std::array<V, 4> banks_{};
   std::array<V, agu_registers> cursors_{}, strides_{}, masks_{}, origins_{};
   std::array<std::array<V, agu_registers>, 2> memory_bases_{};
+  std::array<std::vector<std::array<Binding, 2>>, 2> bindings_;
 };
 }
 

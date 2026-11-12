@@ -2,6 +2,8 @@
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "isa.hpp"
+#include "jit/image_plan.hpp"
+#include "jit/llvm/image_regions.hpp"
 #include "jit/llvm/runtime.hpp"
 #include "loop_frames.hpp"
 #include "support.hpp"
@@ -95,9 +97,11 @@ struct Fixture final : Io {
   std::uint64_t revision = 0;
 };
 
-SemanticImage lower(Fixture &fixture) {
-  const std::array spans{CodeSpan{.address = first, .words = fixture.code}};
-  constexpr std::array entries{first, body};
+SemanticImage lower(Fixture &fixture, const bool ordinary = false) {
+  const auto code = std::span(fixture.code);
+  const std::array spans{
+      CodeSpan{.address = ordinary ? body : first, .words = ordinary ? code.subspan(2) : code}};
+  const std::array entries{ordinary ? body : first, body};
   const std::array variants{
       CodeVariant{.id = 0, .code = spans, .entries = entries, .failed_fetches = {}}};
   const std::array regions{
@@ -108,7 +112,7 @@ SemanticImage lower(Fixture &fixture) {
       {.memory = layouts, .interrupts = {}, .transitions = {}, .callbacks = {}, .bindings = {}});
 }
 
-NativeImage compile(const SemanticImage &semantic) {
+NativeImage compile(const SemanticImage &semantic, const bool expect_loops = true) {
   detail::LlvmModule module(std::string(semantic.exports().front().name));
   module.link_bitcode(semantic.bitcode());
   unsigned loops = 0;
@@ -127,8 +131,10 @@ NativeImage compile(const SemanticImage &semantic) {
       }
     }
   }
-  require(loops >= modes.size(),
-          "Every supported numeric mode has an SSA loop before target optimization");
+  if (expect_loops) {
+    require(loops >= modes.size(),
+            "Every supported numeric mode has an SSA loop before target optimization");
+  }
   auto compiler = std::make_shared<detail::LlvmCompiler>();
   const auto *entry = compiler->install(module);
   const std::array symbols{NativeSymbol{.name = semantic.exports().front().name, .address = entry}};
@@ -307,9 +313,216 @@ void setup(const NativeImage &image, const Word mode) {
             "A resumed image retains absolute time, fresh loop credit and exact DO restoration");
   }
 }
+
+void ordinary_discovery() {
+  constexpr Word length = 3;
+  const Fixture fixture(length);
+  const std::array spans{CodeSpan{.address = body, .words = std::span(fixture.code).subspan(2)}};
+  constexpr std::array entries{body};
+  const auto regions = detail::image_regions(detail::plan_image(spans, entries));
+  require(std::ranges::any_of(regions,
+                              [](const auto &region) {
+                                return region.front().pc == body &&
+                                       region.back().pc == body + length - 1;
+                              }),
+          "An ordinary RAM block is a guarded SSA candidate without a declared DO");
+}
+
+struct OrdinaryCase {
+  Word mode, quota;
+  std::optional<Word> loop_address;
+  bool timed = false;
+};
+
+void ordinary_prefix(const NativeImage &image, const OrdinaryCase &scenario) {
+  constexpr Word length = 3;
+  Fixture fixture(length);
+  auto seed = initial(fixture, scenario.mode);
+  if (scenario.loop_address) {
+    seed.la = *scenario.loop_address;
+  } else {
+    seed.sr &= ~loop;
+  }
+  auto expected = seed;
+  auto wanted = fixture.data;
+  for (Word retired = 0; retired < scenario.quota; ++retired) {
+    const auto pc = expected.pc++;
+    require(pc >= body && pc < body + length, "Ordinary expectation stays in its supplied body");
+    if (pc == body) {
+      expected.x = (expected.x & ~std::uint64_t{word_mask}) | wanted.at(expected.r[0] - base);
+      ++expected.r[0];
+    }
+    if (pc == body + length - 1) {
+      wanted.at(expected.r[1] - base) = static_cast<Word>(expected.x) & word_mask;
+      ++expected.r[1];
+    }
+    if ((expected.sr & loop) != 0 && pc == expected.la) {
+      if (expected.lc == 1) {
+        test::loop_frames::complete(expected);
+      } else {
+        --expected.lc;
+        expected.pc = body;
+      }
+    }
+  }
+  Core core(Memory::external(), &fixture);
+  core.set_registers(seed);
+  core.install(image, 0);
+  const auto result = scenario.timed ? core.run_until(scenario.quota) : core.run(scenario.quota);
+  require(result.fault == Fault{} && result.retired == scenario.quota &&
+              result.progress ==
+                  Progress{.instructions = scenario.quota, .estimated_cycles = scenario.quota} &&
+              core.registers() == expected && fixture.data == wanted && fixture.callbacks == 0,
+          "Ordinary SSA preserves every prefix and unrelated or interior inherited DO state");
+}
+
+void ordinary_execution() {
+  constexpr Word length = 3;
+  Fixture fixture(length);
+  const auto image = compile(lower(fixture, true), false);
+  constexpr std::array<std::optional<Word>, 4> loops{
+      std::nullopt, old_la, body + 1, body + length - 1};
+  for (const auto mode : modes) {
+    for (const auto address : loops) {
+      const auto count = address && *address < body + length
+                             ? ((*address - body + 1) * turns) + body + length - *address - 1
+                             : length;
+      for (Word quota = 0; quota <= count; ++quota) {
+        ordinary_prefix(image, {.mode = mode, .quota = quota, .loop_address = address});
+        ordinary_prefix(image,
+                        {.mode = mode, .quota = quota, .loop_address = address, .timed = true});
+      }
+    }
+  }
+  Fixture unknown_fixture(length);
+  unknown_fixture.known[0] = 0;
+  Core core(Memory::external(), &unknown_fixture);
+  auto seed = initial(unknown_fixture, 0);
+  seed.sr &= ~loop;
+  core.set_registers(seed);
+  core.install(image, 0);
+  const auto result = core.run(length);
+  require(result.retired == 0 && result.progress == Progress{} &&
+              result.fault == Fault{.kind = FaultKind::memory_read,
+                                    .space = Space::x,
+                                    .address = base,
+                                    .pc = body} &&
+              unknown_fixture.callbacks == 1,
+          "An unknown ordinary source reaches its precise real failed read without retirement");
+}
+
+constexpr std::array<Word, 6> raw_registers{8, 9, 10, 11, 12, 13};
+constexpr Word raw_length = 5 * raw_registers.size();
+constexpr Word raw_extension_mask = word_mask ^ 0xff;
+constexpr std::uint64_t raw_a_seed = 0x80123456abcdef, raw_b_seed = 0x7ffedcba543210;
+constexpr std::uint64_t raw_accumulator_mask = 0xffffffffffffff;
+
+void raw_code(Fixture &fixture) {
+  Word index = 2;
+  const auto move = [](const Word source, const Word target) {
+    return Word{0x200000} | (source << 13) | (target << 8);
+  };
+  const auto store = [](const Word reg) {
+    return (op(isa::Opcode::move_x_effective) & ~(7U << 16)) | (reg << 16) | (3U << 11) | (1U << 8);
+  };
+  for (const auto reg : raw_registers) {
+    fixture.code[index++] = move(reg, 5);
+    fixture.code[index++] = store(5);
+    fixture.code[index++] = move(4, reg);
+    fixture.code[index++] = move(reg, 6);
+    fixture.code[index++] = store(6);
+  }
+}
+
+Word raw_word(const Registers &state, const Word reg) {
+  const auto value = (reg & 1U) == 0 ? state.a : state.b;
+  constexpr std::array shifts{0U, 48U, 24U};
+  const auto part = (reg - 8) / 2;
+  const auto word = static_cast<Word>(value >> shifts[part]) & word_mask;
+  return part == 1 && (word & 0x80) != 0 ? word | raw_extension_mask : word;
+}
+
+void raw_write(Registers &state, const Word reg) {
+  auto &value = (reg & 1U) == 0 ? state.a : state.b;
+  const auto word = state.x & word_mask;
+  constexpr std::array shifts{0U, 48U, 24U};
+  const auto shift = shifts[(reg - 8) / 2];
+  const auto mask = std::uint64_t{word_mask} << shift;
+  value = ((value & ~mask) | (word << shift)) & raw_accumulator_mask;
+}
+
+struct RawCase {
+  Word mode, value, quota;
+};
+
+void raw_prefix(const NativeImage &image, const RawCase &scenario) {
+  const auto [mode, value, quota] = scenario;
+  Fixture fixture(raw_length);
+  raw_code(fixture);
+  auto seed = initial(fixture, mode);
+  seed.sr &= ~loop;
+  seed.a = raw_a_seed;
+  seed.b = raw_b_seed;
+  seed.x = (seed.x & ~std::uint64_t{word_mask}) | value;
+  auto expected = seed;
+  auto wanted = fixture.data;
+  for (Word step = 0; step < quota; ++step) {
+    const auto reg = raw_registers[step / 5];
+    switch (step % 5) {
+      case 0:
+        expected.x =
+            (expected.x & word_mask) | (std::uint64_t{raw_word(expected, reg)} << test::word_bits);
+        break;
+      case 1:
+        wanted[expected.r[1]++ - base] = static_cast<Word>(expected.x >> test::word_bits);
+        break;
+      case 2: raw_write(expected, reg); break;
+      case 3:
+        expected.y = (expected.y & ~std::uint64_t{word_mask}) | raw_word(expected, reg);
+        break;
+      case 4: wanted[expected.r[1]++ - base] = static_cast<Word>(expected.y) & word_mask; break;
+      default: break;
+    }
+    ++expected.pc;
+  }
+  Core core(Memory::external(), &fixture);
+  core.set_registers(seed);
+  core.install(image, 0);
+  const auto result = core.run(quota);
+  require(result.retired == quota && result.fault == Fault{} &&
+              result.progress == Progress{.instructions = quota, .estimated_cycles = quota} &&
+              core.registers() == expected && fixture.data == wanted && fixture.callbacks == 0,
+          "Raw accumulator parts preserve untouched fields, signed extension, flags and prefixes");
+}
+
+void raw_execution() {
+  Fixture fixture(raw_length);
+  raw_code(fixture);
+  const std::array spans{CodeSpan{.address = body, .words = std::span(fixture.code).subspan(2)}};
+  constexpr std::array entries{body};
+  const std::array memory{
+      RegionLayout{.space = Space::x, .first = base, .size = fixture.data.size(), .tracked = true}};
+  const auto regions = detail::image_regions(detail::plan_image(spans, entries), memory);
+  require(std::ranges::any_of(regions,
+                              [](const auto &region) {
+                                return region.front().pc == body && region.size() == raw_length;
+                              }),
+          "All raw partial-register transfers remain in one admitted ordinary SSA region");
+  const auto image = compile(lower(fixture, true), false);
+  for (const auto mode : modes) {
+    for (const auto value : {0U, 0x7fffffU, 0x800000U, 0xffffffU, 0x123456U, 0x80U}) {
+      for (Word quota = 0; quota <= raw_length; ++quota) {
+        raw_prefix(image, {.mode = mode, .value = value, .quota = quota});
+      }
+    }
+  }
+}
 }
 
 int main() try {
+  ordinary_discovery();
+  ordinary_execution();
+  raw_execution();
   constexpr Word short_length = 3;
   constexpr Word long_length = 70;
   Fixture fixture(short_length);

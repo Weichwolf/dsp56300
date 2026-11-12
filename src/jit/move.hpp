@@ -40,4 +40,5 @@ struct NativeAddressImmediate {
 [[nodiscard]] NativeAddressImmediate plan_address_immediate(const Instruction &instruction);
 [[nodiscard]] NativeMoves plan_moves(const Instruction &instruction);
 [[nodiscard]] NativeRegisterMove plan_register_move(const Instruction &instruction);
+[[nodiscard]] NativeRegisterMove plan_register_move(const Instruction &instruction, bool partial);
 } // namespace dsp56300::detail

@@ -1,13 +1,13 @@
 # Objective
 
-Build a complete independent DSP56300 native translator for Linux x86-64 and
-macOS ARM64. Preserve ISA/state, memory ordering, flags, reset, IRQ/wait and
-precise nominal progress. Implement missing legal forms with independent tests;
+Build complete DSP56300 native translation for the Blofeld Desktop SL instrument
+on Linux x86-64 and macOS ARM64. Preserve ISA/state, memory ordering, flags, reset,
+IRQ/wait and precise nominal progress. Implement missing legal forms with independent tests;
 unsupported inputs fail explicitly with identity, address and reason.
 
-Expose only core.hpp and memory.hpp. Core owns readable state; consumers own
-memory, firmware, devices, clocks and scheduling. Keep the public shape aligned
-with the other core, LLVM private and production execution native-only.
+Choose minimal public APIs, state ownership/layouts and LLVM composition for the
+complete instrument's maximum performance and efficiency. Core repositories are
+organizational boundaries. Keep LLVM private and production execution native-only.
 
 ## Compilation and execution
 

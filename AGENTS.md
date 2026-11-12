@@ -1,8 +1,9 @@
 # dsp56300
 
-- Build an independent complete DSP56300 translator; follow OBJECTIVE.md and
-  doc/architecture.md. Only core.hpp and memory.hpp are public. Core owns state;
-  consumers own memory, devices, scheduling and firmware. One owner executes a core.
+- Build complete DSP56300 translation for blofeld-emu; follow OBJECTIVE.md and
+  doc/architecture.md. Keep APIs minimal and LLVM private. Choose ownership,
+  layouts and fusion for complete-instrument performance; repositories are
+  organizational boundaries. Each core has one execution owner.
 - Require complete known AOT/variants before execution. Use one semantic pipeline
   for startup installation and build-time IR/object export, with private LLVM
   handles, exact identities and validated relocations. No production interpreter,

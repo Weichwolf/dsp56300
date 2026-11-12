@@ -144,7 +144,7 @@ private:
                                scale_up,
                                rounding_mode | scale_down,
                                rounding_mode | scale_up};
-    for (auto operations : image_regions(plan_)) {
+    for (auto operations : image_regions(plan_, memory)) {
       for (const auto mode : modes) {
         Word cost = 0;
         for (auto &operation : operations) {
@@ -203,7 +203,7 @@ private:
       const auto end = (region.last_pc + region.last_words) & word_mask;
       auto *transfer = ir_.CreateSwitch(next, exits_.at(ImageExit::unprepared), 2);
       transfer->addCase(ir_.getInt32(pc), successor(pc));
-      transfer->addCase(ir_.getInt32(end), successor(end));
+      if (end != pc) { transfer->addCase(ir_.getInt32(end), successor(end)); }
       ir_.SetInsertPoint(precise);
     }
   }

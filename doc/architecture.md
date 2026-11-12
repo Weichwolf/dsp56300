@@ -1,7 +1,9 @@
 # Target architecture
 
-Core owns complete readable state; consumers own memory, firmware, device clocks
-and scheduling. Only core.hpp and memory.hpp are public. Each core has one
+Core repositories are organizational boundaries. Choose APIs, state ownership,
+layouts and LLVM composition for complete-instrument throughput and efficiency.
+Core owns complete readable state; consumers bind memory, firmware, device clocks
+and scheduling through minimal public APIs. Each core has one
 execution owner; independent cores communicate through consumer-owned contracts.
 Keep LLVM handles, native entry ABIs and implementation layouts private.
 

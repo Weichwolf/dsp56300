@@ -30,6 +30,7 @@ struct RegionPlan {
   struct Step {
     NativeMoves memory;
     NativeRegisterMove registers;
+    Word guards = 0;
   };
 
   struct Extent {
@@ -43,7 +44,9 @@ struct RegionPlan {
   std::array<bool, 2> windowed{};
   std::array<std::array<Extent, agu_registers>, 2> extents{};
   std::array<std::int64_t, agu_registers> deltas{};
-  std::array<bool, agu_registers> changed_r{}, changed_n{}, agu{};
+  std::array<bool, agu_registers> changed_n{}, agu{};
+  std::array<std::optional<std::size_t>, agu_registers> definitions{};
+  std::array<bool, agu_registers> guardable{}, deferred{};
   RegionControl control;
   Word cost = 0, count = 0;
   bool batch = false, computation = false;

@@ -81,7 +81,7 @@ bool stable_knowledge(const RegionPlan &plan) {
 }
 
 bool plain_register(const unsigned reg) {
-  return (reg >= x0_register && reg <= y1_register) || reg == a_register || reg == b_register ||
+  return (reg >= x0_register && reg <= b_register) ||
          (reg >= r_register_base && reg < m_register_base);
 }
 
@@ -90,7 +90,12 @@ bool destination(RegionPlan &plan, const unsigned reg) {
   if (reg >= n_register_base) {
     plan.changed_n[reg - n_register_base] = true;
   } else if (reg >= r_register_base) {
-    plan.changed_r[reg - r_register_base] = true;
+    const auto index = reg - r_register_base;
+    plan.definitions[index] = plan.steps.size();
+    plan.guardable[index] = std::ranges::none_of(plan.extents, [index](const auto &bank) {
+      return bank[index].accessed ||
+             std::ranges::any_of(bank, [](const auto &extent) { return extent.writing; });
+    });
   }
   if (reg >= r_register_base) { plan.batch = false; }
   return true;
@@ -100,9 +105,14 @@ bool append_move(RegionPlan &plan, const NativeMove &move, const bool advance) {
   const auto form = move.address;
   const auto mode = form.mode;
   plan.agu[form.index] = plan.agu[form.index] || mode != 4;
-  if (mode == 6 || plan.changed_r[form.index] ||
+  const auto definition = plan.definitions[form.index];
+  if (mode == 6 || (definition && !plan.guardable[form.index]) ||
       ((mode == 0 || mode == 1 || mode == 5) && plan.changed_n[form.index])) {
     return false;
+  }
+  if (definition && !plan.deferred[form.index]) {
+    plan.deferred[form.index] = true;
+    plan.steps[*definition].guards |= 1U << form.index;
   }
   if (mode == 0 || mode == 1 || mode == 5) { plan.batch = false; }
   const auto bank = move.space == Space::x ? 0U : 1U;
@@ -183,7 +193,7 @@ bool append(RegionPlan &plan, const BlockInstruction &operation) {
   }
   const auto moves = plan_moves(instruction);
   plan.computation = plan.computation || moves.long_pair || (instruction.opcode & byte_mask) != 0;
-  const auto registers = plan_register_move(instruction);
+  const auto registers = plan_register_move(instruction, true);
   if (!append_moves(plan, moves)) { return false; }
   if (registers.valid() &&
       (!plain_register(registers.source) || !destination(plan, registers.destination))) {

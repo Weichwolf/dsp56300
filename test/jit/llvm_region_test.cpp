@@ -550,13 +550,14 @@ void admission_failures() {
     require(cpu.reg == prior && fixture.data == data && cpu.instructions == 0 && cpu.cycles == 0,
             "Admission rejection has no register, memory or progress effects");
   }
-  // A newly loaded address cannot borrow its old range proof for a later access.
-  fixture.p[entry] = scalar_load(r2, 7);
-  fixture.p[entry + 1] = program({})[0];
+  // A computed guard after committed stores cannot restart the complete region.
+  fixture.p[entry] = long_move({}, false);
+  fixture.p[entry + 1] = scalar_load(r2, 7);
+  fixture.p[entry + 2] = program({})[0];
   const auto changed = detail::parse_block(fixture.p, seed, runtime);
   require(
       !detail::compile_region(compiler, changed, runtime, std::bit_cast<const void *>(&forbidden)),
-      "A cursor clobber before a later access cannot enter a hoisted memory region");
+      "A cursor clobber after a store cannot enter a replaying whole-region path");
 }
 
 void unknown_target_prefix() {

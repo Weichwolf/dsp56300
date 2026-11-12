@@ -24,8 +24,10 @@ enum AluCode : std::uint8_t {
   clear = 0x13,
   complement = 0x17,
   shift_right = 0x22,
+  word_right = 0x23,
   absolute = 0x26,
   shift_left = 0x32,
+  word_left = 0x33,
   negate = 0x36
 };
 
@@ -101,6 +103,8 @@ private:
   void rounding(Result &result);
   void flags(const Result &result);
   void logic(Word code, const Banks &before, Banks &after, unsigned destination);
+  void word_shift(Word code, const Banks &before, Banks &after, unsigned destination);
+  void word_result(V value, Banks &after, unsigned destination, V carried = nullptr);
 
   Builder &ir_;
   const Word mode_;
@@ -234,6 +238,10 @@ void Alu::logic(const Word code, const Banks &before, Banks &after, const unsign
   } else {
     value = ir_.CreateXor(left, right);
   }
+  word_result(value, after, destination);
+}
+
+void Alu::word_result(V value, Banks &after, const unsigned destination, V carried) {
   constexpr auto mask = std::uint64_t{word_mask} << bus_shift;
   after[destination] =
       ir_.CreateOr(ir_.CreateAnd(after[destination], ir_.getInt64(~mask)),
@@ -242,8 +250,28 @@ void Alu::logic(const Word code, const Banks &before, Banks &after, const unsign
       flag(ir_.CreateICmpEQ(value, ir_.getInt32(0)), zero),
       flag(ir_.CreateICmpNE(ir_.CreateAnd(value, ir_.getInt32(sign24_bit)), ir_.getInt32(0)),
            negative));
-  status_ =
-      ir_.CreateOr(ir_.CreateAnd(status_, ir_.getInt32(~Word{overflow | zero | negative})), bits);
+  Word changed = overflow | zero | negative;
+  if (carried != nullptr) {
+    changed |= carry;
+    bits = ir_.CreateOr(bits, flag(carried, carry));
+  }
+  status_ = ir_.CreateOr(ir_.CreateAnd(status_, ir_.getInt32(~changed)), bits);
+}
+
+void Alu::word_shift(const Word code,
+                     const Banks &before,
+                     Banks &after,
+                     const unsigned destination) {
+  auto *word =
+      ir_.CreateAnd(ir_.CreateTrunc(ir_.CreateLShr(before[destination], ir_.getInt64(bus_shift)),
+                                    ir_.getInt32Ty()),
+                    ir_.getInt32(word_mask));
+  const bool left = (code & alu_mask) == word_left;
+  auto *value = left ? ir_.CreateAnd(ir_.CreateShl(word, ir_.getInt32(1)), ir_.getInt32(word_mask))
+                     : ir_.CreateLShr(word, ir_.getInt32(1));
+  auto *carried =
+      ir_.CreateICmpNE(ir_.CreateAnd(word, ir_.getInt32(left ? sign24_bit : 1U)), ir_.getInt32(0));
+  word_result(value, after, destination, carried);
 }
 
 void Alu::shift(const Word opcode, Banks &banks) {
@@ -284,6 +312,10 @@ void Alu::lower(const Word code, const Banks &before, Banks &after) {
     logic(code, before, after, destination);
     return;
   }
+  if ((code & alu_mask) == word_left || (code & alu_mask) == word_right) {
+    word_shift(code, before, after, destination);
+    return;
+  }
   auto operation = unary(code, before[destination]);
   if (!operation) {
     operation = (code & product_bit) != 0 ? product(code, before, destination)
@@ -302,7 +334,7 @@ bool supported_alu(const Word opcode) {
   const auto form = code & alu_mask;
   if (code == 0 || (code & product_bit) != 0 || transfer(code) || logical(code)) { return true; }
   if (form == test || form == clear || form == rounded || form == absolute || form == negate ||
-      form == shift_right || form == shift_left) {
+      form == shift_right || form == shift_left || form == word_right || form == word_left) {
     return true;
   }
   const auto group = (code >> 4) & 7U;
