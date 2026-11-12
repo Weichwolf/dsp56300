@@ -136,7 +136,7 @@ struct CompileOptions {
   // Per variant: omitted means dynamic grants; an empty declared layout requires zero grants.
   std::span<const VariantLayout> memory;
   std::span<const InterruptRequest> interrupts;
-  // An absent resident target may yield only to this explicitly prepared version.
+  // An absent resident target yields only to explicitly declared prepared versions.
   std::span<const CodeTransition> transitions;
   std::span<const CallbackBinding> callbacks;
   std::span<const std::byte> bindings;

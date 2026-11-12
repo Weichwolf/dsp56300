@@ -119,9 +119,10 @@ void Core::install(const NativeImage &image, const std::uint64_t variant) {
   const detail::ExecutionGuard guard(self.executing);
   if (!image.impl_) { throw std::invalid_argument("Cannot install an empty DSP image"); }
   const auto &selected = image.impl_->variant(variant);
-  if (self.next_image != nullptr &&
-      (image.impl_ != self.image || selected.id != self.next_image->id)) {
-    throw std::invalid_argument("DSP transfer requires its declared target image variant");
+  if (self.next_images != nullptr &&
+      (image.impl_ != self.image ||
+       std::ranges::find(*self.next_images, selected.id) == self.next_images->end())) {
+    throw std::invalid_argument("DSP transfer requires a declared target image variant");
   }
   if (self.debug_ready() || self.instruction_cache_active()) {
     throw std::invalid_argument("DSP image does not prepare the current debug/cache fetch form");
@@ -156,7 +157,7 @@ void Core::install(const NativeImage &image, const std::uint64_t variant) {
   self.image_revision = revision;
   self.program_omr = self.cpu.reg.omr;
   self.image_ready = true;
-  self.next_image = nullptr;
+  self.next_images = nullptr;
 }
 
 void Core::Impl::unprepared(const Word address, const Word value) noexcept {
@@ -166,7 +167,7 @@ void Core::Impl::unprepared(const Word address, const Word value) noexcept {
 
 RunResult Core::Impl::run_image(const std::uint32_t quota) {
   RunResult result;
-  if (next_image != nullptr) { yield_requested = true; }
+  if (next_images != nullptr) { yield_requested = true; }
   while (result.retired < quota && cpu.cycles < cycle_deadline && fault.kind == FaultKind::none &&
          cpu.processing == ExecutionState::running && !yield_requested) {
     if (!image_ready || (external && program_omr != cpu.reg.omr) ||
@@ -203,21 +204,21 @@ Word Core::Impl::image_address(const bool vector_fetch) const noexcept {
 }
 
 bool Core::Impl::image_transition(const bool eligible) {
-  if (!eligible || next_image != nullptr || active_image->transitions.empty() ||
+  if (!eligible || next_images != nullptr || active_image->transitions.empty() ||
       fault.kind != FaultKind::none || cpu.processing == ExecutionState::debugging ||
       exception_ready() || debug_ready() || instruction_cache_active()) {
     return false;
   }
   const auto transfer = active_image->transitions.find(cpu.reg.pc);
   if (transfer == active_image->transitions.end()) { return false; }
-  next_image = &image->variant(transfer->second);
+  next_images = &transfer->second;
   image_ready = false;
   yield_requested = true;
   return true;
 }
 
 bool Core::Impl::image_interrupt(const Word address, const unsigned level) {
-  if (next_image != nullptr) {
+  if (next_images != nullptr) {
     throw std::logic_error("DSP interrupt admission requires the pending image installation");
   }
   if (!image_ready || (external && program_omr != cpu.reg.omr) ||

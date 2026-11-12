@@ -58,8 +58,13 @@ binding and pending source-version handoff. Fault recovery is an explicit
 register/reset boundary, not a side effect of installing code.
 
 Declared cross-version transfers return the completed prefix without replaying
-the jump. Retain registers, stacks, captured events and nominal progress; validate
-and install exactly the required prepared destination. Remaps or source changes
+the jump. One destination may declare several prepared target versions; only
+those versions in the same native bank are eligible, and installation still
+validates the actual complete source and layout. Reject duplicate declarations,
+unknown targets and non-entry destinations. Failed selection retains the pending
+transfer and cannot admit an undeclared version. Retain registers, stacks,
+captured events and nominal progress; validate and install a matching declared
+destination. Remaps or source changes
 revoke dependent callers/targets. Unrelated RAM must not force retranslation of
 independent code. Unknown entries and undeclared events fail before new decoding
 or emission; no production interpreter or ordinary-emitter coverage fallback.

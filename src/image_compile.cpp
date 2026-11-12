@@ -142,12 +142,12 @@ void validate(const CodeImage image, const CompileOptions options) {
       throw std::invalid_argument("Duplicate DSP code variant");
     }
   }
-  std::set<std::pair<std::uint64_t, Word>> transfers;
+  std::set<std::tuple<std::uint64_t, Word, std::uint64_t>> transfers;
   for (const auto transfer : options.transitions) {
     if (!ids.contains(transfer.from) || !ids.contains(transfer.to) ||
         transfer.from == transfer.to || transfer.entry > word_mask ||
-        !transfers.emplace(transfer.from, transfer.entry).second) {
-      throw std::invalid_argument("Invalid or ambiguous DSP code transition");
+        !transfers.emplace(transfer.from, transfer.entry, transfer.to).second) {
+      throw std::invalid_argument("Invalid or duplicate DSP code transition");
     }
     const auto target = std::ranges::find(image.variants, transfer.to, &CodeVariant::id);
     if (std::ranges::find(target->entries, transfer.entry) == target->entries.end()) {
@@ -235,7 +235,7 @@ SemanticImage Core::lower(const CodeImage image, const CompileOptions options) {
     external.reserve(options.transitions.size());
     for (const auto transfer : options.transitions) {
       if (transfer.from != source.id) { continue; }
-      variant.transitions.emplace(transfer.entry, transfer.to);
+      variant.transitions[transfer.entry].push_back(transfer.to);
       external.push_back(transfer.entry);
     }
     const auto plan = detail::plan_image(source, external);

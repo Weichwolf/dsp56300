@@ -25,13 +25,17 @@ constexpr std::array inserted{op<isa::Opcode::nop>, op<isa::Opcode::nop>};
 constexpr CodeTransition transfer{.from = 0, .to = 1, .entry = destination};
 
 NativeImage compile(const std::span<const CodeTransition> transitions,
-                    const bool indirect = false) {
+                    const bool indirect = false,
+                    const bool alternative = false) {
   auto code = loader;
   if (indirect) { code.back() = op<isa::Opcode::jmp_effective> | (4U << 11); }
   const std::array first{CodeSpan{.address = start, .words = code}};
   const std::array second{CodeSpan{.address = destination, .words = loaded},
                           CodeSpan{.address = vector, .words = inserted}};
-  const std::array alternate{CodeSpan{.address = destination, .words = loaded}};
+  constexpr std::array alternate_body{op<isa::Opcode::nop>, op<isa::Opcode::stop>};
+  const std::array alternate{CodeSpan{.address = destination,
+                                      .words = alternative ? std::span<const Word>(alternate_body)
+                                                           : std::span<const Word>(loaded)}};
   constexpr std::array boot_entry{start};
   constexpr std::array runtime_entry{destination};
   const std::array variants{
@@ -222,13 +226,63 @@ void initial_target(const NativeImage &image) {
           "An unbound initial PC cannot invent a completed code-version transfer");
 }
 
+void multiple_targets() {
+  constexpr std::uint64_t prefix_cycles = 9;
+  constexpr std::uint64_t stop_cycles = 10;
+  constexpr std::array targets{transfer, CodeTransition{.from = 0, .to = 2, .entry = destination}};
+  const auto image = compile(targets, false, true);
+  const auto other_bank = compile(targets, true, true);
+  for (const std::uint64_t target : {1U, 2U}) {
+    Machine machine(image);
+    const Word payload = target == 1 ? op<isa::Opcode::stop> : op<isa::Opcode::nop>;
+    machine.initial.x = (machine.initial.x & ~std::uint64_t{word_mask}) | payload;
+    machine.program[destination + 1] = op<isa::Opcode::stop>;
+    machine.core.set_registers(machine.initial);
+    const auto prefix = machine.core.run();
+    auto expected = machine.initial;
+    expected.pc = destination;
+    require(prefix.retired == 2 && prefix.yielded && prefix.fault == Fault{} &&
+                machine.core.registers() == expected && machine.program[destination] == payload &&
+                prefix.progress == Progress{.instructions = 2, .estimated_cycles = prefix_cycles},
+            "A real store/jump reaches one shared destination without selecting a code version");
+    const auto boundary = machine.core.state();
+    const std::uint64_t mismatched = target == 1 ? 2 : 1;
+    for (const auto wrong : {std::uint64_t{0}, mismatched}) {
+      bool rejected = false;
+      try {
+        machine.core.install(image, wrong);
+      } catch (const std::invalid_argument &) { rejected = true; }
+      const auto waiting = machine.core.run();
+      require(rejected && waiting.retired == 0 && waiting.yielded &&
+                  same(boundary, machine.core.state()),
+              "Undeclared or byte-mismatched targets preserve the pending native transfer");
+    }
+    bool foreign = false;
+    try {
+      machine.core.install(other_bank, target);
+    } catch (const std::invalid_argument &) { foreign = true; }
+    require(foreign && same(boundary, machine.core.state()),
+            "Equal destination bytes in another native bank cannot steal a pending transfer");
+    machine.core.install(image, target);
+    require(same(boundary, machine.core.state()), "Selecting a valid payload changes no ISA state");
+    const auto done = machine.core.run();
+    expected.pc = destination + static_cast<Word>(target);
+    require(done.retired == target && done.fault == Fault{} && !done.yielded &&
+                done.state == ExecutionState::stopped && machine.core.registers() == expected &&
+                done.progress ==
+                    Progress{.instructions = 2 + target,
+                             .estimated_cycles = prefix_cycles + stop_cycles + target - 1},
+            "Both prepared native payloads execute their distinct words once without replay");
+  }
+}
+
 void invalid_contracts() {
   const auto rejected = [](const std::span<const CodeTransition> declarations) {
     bool refused = false;
     try {
       static_cast<void>(compile(declarations));
     } catch (const std::invalid_argument &) { refused = true; }
-    require(refused, "Absent, unknown, ambiguous or non-entry transitions fail cold preparation");
+    require(refused, "Absent, unknown, duplicate or non-entry transitions fail cold preparation");
   };
   rejected({});
   for (const auto declaration : {CodeTransition{.from = 7, .to = 1, .entry = destination},
@@ -237,13 +291,14 @@ void invalid_contracts() {
                                  CodeTransition{.from = 0, .to = 1, .entry = destination + 1}}) {
     rejected(std::span(&declaration, 1));
   }
-  const std::array ambiguous{transfer, CodeTransition{.from = 0, .to = 2, .entry = destination}};
-  rejected(ambiguous);
+  const std::array duplicate{transfer, transfer};
+  rejected(duplicate);
 }
 }
 
 int main() {
   try {
+    multiple_targets();
     invalid_contracts();
     const auto image = compile(std::span(&transfer, 1));
     prefixes(image);

@@ -22,7 +22,7 @@ struct ImageContracts {
     std::uint64_t id = 0;
     std::map<Word, Word> words;
     std::map<Word, Instruction> instructions;
-    std::map<Word, std::uint64_t> transitions;
+    std::map<Word, std::vector<std::uint64_t>> transitions;
     std::set<Word> failed_fetches;
     std::vector<RegionLayout> memory;
     bool fixed_memory = false;

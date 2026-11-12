@@ -21,6 +21,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <vector>
 
 namespace dsp56300 {
 struct Core::Impl {
@@ -226,7 +227,7 @@ struct Core::Impl {
   std::unique_ptr<CodePages> code_pages;
   std::shared_ptr<const NativeImage::Impl> image;
   const NativeImage::Impl::Variant *active_image = nullptr;
-  const NativeImage::Impl::Variant *next_image = nullptr;
+  const std::vector<std::uint64_t> *next_images = nullptr;
   bool image_ready = false;
   std::uint64_t image_revision = 0;
   std::array<std::span<const MemoryWindow>, 2> image_windows{};

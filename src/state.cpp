@@ -44,7 +44,7 @@ Registers Core::registers() const {
 }
 
 void Core::set_registers(const Registers &state) {
-  if (impl_->next_image != nullptr) {
+  if (impl_->next_images != nullptr) {
     throw std::logic_error(
         "Register initialization requires reset before a pending image transfer");
   }
