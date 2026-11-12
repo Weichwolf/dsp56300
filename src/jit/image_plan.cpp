@@ -86,7 +86,10 @@ void validate_targets(const ImagePlan &plan,
                       const std::span<const Word> external_entries,
                       const std::span<const Word> failed_fetches) {
   for (const auto entry : plan.entries) {
-    if (plan.find(entry) == nullptr) { reject(entry, "entry is not a declared instruction start"); }
+    if (plan.find(entry) == nullptr &&
+        std::ranges::find(failed_fetches, entry) == failed_fetches.end()) {
+      reject(entry, "entry is not a declared instruction or failed-fetch boundary");
+    }
   }
   for (const auto &[address, instruction] : plan.instructions) {
     const auto target = encoded_target(address, instruction);

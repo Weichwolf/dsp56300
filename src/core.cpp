@@ -290,7 +290,8 @@ PreparationReport Core::prepare(const std::span<const Word> established_entries)
                              .native_bytes = impl_->image->report.native_bytes,
                              .failure = {}};
     for (const auto entry : established_entries) {
-      if (!impl_->image_ready || !impl_->active_image->instructions.contains(entry)) {
+      if (!impl_->image_ready || (!impl_->active_image->instructions.contains(entry) &&
+                                  !impl_->active_image->failed_fetches.contains(entry))) {
         ++report.unresolved_entries;
         report.failure = {.kind = FaultKind::unprepared_execution,
                           .space = Space::program,

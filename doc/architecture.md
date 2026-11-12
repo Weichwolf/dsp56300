@@ -54,7 +54,10 @@ region and enable direct-memory optimization without constraining generic loader
 variants in the same image.
 
 Install only on a stopped owner after validating actual source, complete layout
-and the relevant revision. Installation emits no guest/event code and changes no
+and the relevant revision. Explicit failed-fetch endpoints may be prepared entries
+or transfer destinations only while their actual source is unreadable. They do
+not count as translated instructions; execution performs the real refused fetch.
+Installation emits no guest/event code and changes no
 architectural state, memory or time. Rejected installation preserves the previous
 binding and pending source-version handoff. Fault recovery is an explicit
 register/reset boundary, not a side effect of installing code.
