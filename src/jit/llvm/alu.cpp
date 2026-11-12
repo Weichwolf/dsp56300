@@ -11,6 +11,7 @@
 #include <llvm-c/Core.h>
 #include <llvm-c/Types.h>
 #include <optional>
+#include <string_view>
 
 namespace dsp56300::detail::llvm19 {
 namespace {
@@ -77,6 +78,24 @@ private:
     return signed_compare(LLVMIntSLT, bits, ir_.getInt64(0));
   }
 
+  Result arithmetic(V left, V right, const bool subtract) {
+    const std::string_view name = subtract ? "llvm.ssub.with.overflow" : "llvm.sadd.with.overflow";
+    auto *function = LLVMGetBasicBlockParent(LLVMGetInsertBlock(ir_.get()));
+    auto *module = LLVMGetGlobalParent(function);
+    auto *type = LLVMTypeOf(left);
+    auto *intrinsic = LLVMGetIntrinsicDeclaration(
+        module, LLVMLookupIntrinsicID(name.data(), name.size()), &type, 1);
+    std::array inputs{left, right};
+    auto *operation = LLVMBuildCall2(ir_.get(),
+                                     LLVMGlobalGetValueType(intrinsic),
+                                     intrinsic,
+                                     inputs.data(),
+                                     static_cast<unsigned>(inputs.size()),
+                                     "");
+    return {.value = LLVMBuildExtractValue(ir_.get(), operation, 0, ""),
+            .overflowed = LLVMBuildExtractValue(ir_.get(), operation, 1, "")};
+  }
+
   V operand(const Banks &before, const unsigned selector, const bool destination_b) {
     if (selector < 2) { return before[destination_b ? 0U : 1U]; }
     auto *bank = before[selector == 2 || selector == 4 || selector == 6 ? 2U : 3U];
@@ -120,8 +139,7 @@ Result Alu::product(const Word code, const Banks &before, const unsigned destina
                     ir_.getInt64(padding_bits + 1));
   if ((code & 4U) != 0) { term = ir_.CreateSub(ir_.getInt64(0), term); }
   auto *initial = (code & 2U) != 0 ? before[destination] : ir_.getInt64(0);
-  auto *value = ir_.CreateAdd(initial, term);
-  return {.value = value, .overflowed = overflowed(initial, term, value, false)};
+  return arithmetic(initial, term, false);
 }
 
 Result Alu::sum(const Word code, const Banks &before, const unsigned destination) {
@@ -131,7 +149,8 @@ Result Alu::sum(const Word code, const Banks &before, const unsigned destination
   const bool subtract = kind == 4 || kind == 5;
   auto *left = before[destination];
   auto *right = operand(before, group, destination != 0);
-  auto *intermediate = subtract ? ir_.CreateSub(left, right) : ir_.CreateAdd(left, right);
+  auto first = arithmetic(left, right, subtract);
+  auto *intermediate = first.value;
   auto *input = carried ? ir_.CreateShl(ir_.CreateZExt(ir_.CreateAnd(status_, ir_.getInt32(carry)),
                                                        ir_.getInt64Ty()),
                                         ir_.getInt64(padding_bits))
@@ -142,7 +161,7 @@ Result Alu::sum(const Word code, const Banks &before, const unsigned destination
                              : ir_.CreateOr(ir_.CreateICmpULT(intermediate, left),
                                             ir_.CreateICmpULT(value, intermediate));
   return {.value = value,
-          .overflowed = overflowed(left, right, value, subtract),
+          .overflowed = carried ? overflowed(left, right, value, subtract) : first.overflowed,
           .carried = carry_out,
           .compare = kind == 5 && !carried};
 }
@@ -188,8 +207,9 @@ void Alu::rounding(Result &result) {
     bias = ir_.CreateAdd(ir_.getInt64(half - (1U << padding_bits)),
                          ir_.CreateShl(odd, ir_.getInt64(padding_bits)));
   }
-  auto *added = ir_.CreateAdd(result.value, bias);
-  auto *event = overflowed(result.value, bias, added, false);
+  const auto rounded = arithmetic(result.value, bias, false);
+  auto *added = rounded.value;
+  auto *event = rounded.overflowed;
   result.overflowed =
       ir_.CreateXor(result.overflowed == nullptr ? boolean(false) : result.overflowed, event);
   result.value = ir_.CreateAnd(added, ir_.getInt64(~((std::uint64_t{1} << cleared) - 1)));
