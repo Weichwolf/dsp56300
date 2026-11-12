@@ -29,12 +29,14 @@ void Core::Impl::execute_exception(const Instruction &decoded) {
       !condition({.status = cpu.reg.sr, .selector = decoded.opcode & 15U})) {
     return;
   }
-  // Repeated ILLEGAL raises one pending exception, admitted after REP finishes.
+  // REP defers and coalesces instruction exceptions until all attempts finish.
   if (vector.phase != VectorPhase::none) { return; }
   const bool illegal = decoded.operation == Operation::illegal;
+  const bool instruction_fault = illegal || decoded.operation == Operation::undefined;
 
   vector = {.resume = illegal ? address_add(current_pc, 2) : cpu.reg.pc,
-            .address = (cpu.reg.vba & vector_base_mask) | (illegal ? illegal_vector : trap_vector),
+            .address = (cpu.reg.vba & vector_base_mask) |
+                       (instruction_fault ? illegal_vector : trap_vector),
             .level = maximum_level,
             .phase = VectorPhase::pending};
 }

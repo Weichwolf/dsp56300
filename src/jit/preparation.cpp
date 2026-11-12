@@ -104,6 +104,7 @@ Successors successors(const BlockInstruction &operation) {
     case Operation::repeat_effective:
     case Operation::break_loop:
     case Operation::end_loop:
+    case Operation::undefined:
     case Operation::trap:
     case Operation::conditional_trap:
     case Operation::wait:

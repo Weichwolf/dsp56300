@@ -70,6 +70,7 @@ enum class InstructionKind : std::uint8_t {
   bit_memory,
   bit_jump,
   bit_branch,
+  undefined,
   illegal,
   trap,
   conditional_trap,

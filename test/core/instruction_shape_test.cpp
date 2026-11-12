@@ -3,6 +3,7 @@
 #include "instruction_decoder.hpp"
 #include "support.hpp"
 
+#include <algorithm>
 #include <array>
 #include <exception>
 #include <iostream>
@@ -69,6 +70,37 @@ constexpr std::array cases{
              .words = 2,
              .repeatable = false}};
 
+void reserved_domains() {
+  constexpr std::array legal{Word{0x0001b8},
+                             Word{0x0001b9},
+                             Word{0x0001ba},
+                             Word{0x0001bb},
+                             Word{0x0001f8},
+                             Word{0x0001f9},
+                             Word{0x0001fa},
+                             Word{0x0001fb}};
+  constexpr std::array domains{std::array{Word{0x000100}, Word{0x0001ff}},
+                               std::array{Word{0x0d2000}, Word{0x0d2fff}}};
+  for (const auto domain : domains) {
+    for (Word word = domain[0]; word <= domain[1]; ++word) {
+      const auto shape = inspect_instruction(word);
+      if (!shape) { throw std::runtime_error("Missing audited instruction shape"); }
+      require(shape->words == 1 && shape->repeatable,
+              "Every word in the audited bounded domains has its exact one-word shape");
+      const bool ordinary = std::ranges::find(legal, word) != legal.end();
+      const auto control =
+          word < legal[4] ? InstructionKind::and_control : InstructionKind::or_control;
+      const auto expected = ordinary ? control : InstructionKind::undefined;
+      require(shape->kind == expected,
+              "All eight genuine control operations remain distinct from undefined encodings");
+    }
+  }
+  for (const Word word : {Word{7}, Word{0x0000ff}, Word{0x0d3000}}) {
+    const auto shape = inspect_instruction(word);
+    require(!shape, "Unaudited neighboring encodings retain visible unsupported classification");
+  }
+}
+
 void shapes() {
   for (const auto expected : cases) {
     const auto value = inspect_instruction(expected.opcode);
@@ -89,6 +121,7 @@ void shapes() {
 int main() {
   try {
     dsp56300::test::shapes();
+    dsp56300::test::reserved_domains();
     std::cout << dsp56300::test::checks << " instruction shape assertions passed\n";
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';

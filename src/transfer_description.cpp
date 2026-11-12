@@ -81,6 +81,7 @@ std::optional<InstructionTransfers> inspect_transfers(const Word opcode) noexcep
     case InstructionKind::bit_memory:
     case InstructionKind::bit_jump:
     case InstructionKind::bit_branch:
+    case InstructionKind::undefined:
     case InstructionKind::illegal:
     case InstructionKind::trap:
     case InstructionKind::conditional_trap:

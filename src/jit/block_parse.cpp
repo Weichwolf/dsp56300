@@ -23,8 +23,8 @@ bool terminates(const Instruction &instruction) {
 #endif
   const auto operation = instruction.operation;
   return !repeatable(operation) || operation == Operation::conditional_transfer ||
-         operation == Operation::illegal || operation == Operation::debug ||
-         operation == Operation::conditional_debug;
+         operation == Operation::illegal || operation == Operation::undefined ||
+         operation == Operation::debug || operation == Operation::conditional_debug;
 }
 
 bool callback_boundary(const Instruction &instruction) {

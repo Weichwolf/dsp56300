@@ -74,6 +74,7 @@ void Emitter::exception_request(const BlockInstruction &operation) {
   Label pending;
   code_.branch_zero_far(Reg::x0, pending, Width::w32, true);
   const bool illegal = operation.instruction.operation == Operation::illegal;
+  const bool instruction_fault = illegal || operation.instruction.operation == Operation::undefined;
   code_.constant(Reg::x0, (operation.pc + (illegal ? 2U : 1U)) & word_mask);
   code_.store(Reg::x0, Reg::x2, offsetof(VectorState, resume));
   code_.load(Reg::x0, cpu, offsetof(Registers, vba));
@@ -81,7 +82,7 @@ void Emitter::exception_request(const BlockInstruction &operation) {
   constexpr Word illegal_offset = 4;
   constexpr Word trap_offset = 8;
   mask(Reg::x0, Reg::x0, bank, Width::w32);
-  code_.add(Reg::x0, Reg::x0, illegal ? illegal_offset : trap_offset);
+  code_.add(Reg::x0, Reg::x0, instruction_fault ? illegal_offset : trap_offset);
   code_.store(Reg::x0, Reg::x2, offsetof(VectorState, address));
   constexpr unsigned maximum_level = 3;
   code_.constant(Reg::x17, maximum_level);
@@ -100,8 +101,8 @@ bool Emitter::event(const BlockInstruction &operation) {
     return true;
   }
   const bool debug = kind == Operation::debug || kind == Operation::conditional_debug;
-  if (!debug && kind != Operation::illegal && kind != Operation::trap &&
-      kind != Operation::conditional_trap) {
+  if (!debug && kind != Operation::illegal && kind != Operation::undefined &&
+      kind != Operation::trap && kind != Operation::conditional_trap) {
     return false;
   }
   Label complete;

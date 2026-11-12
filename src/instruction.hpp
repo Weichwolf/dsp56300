@@ -13,6 +13,7 @@ using Operation = InstructionKind;
   switch (operation) {
     case Operation::parallel:
     case Operation::nop:
+    case Operation::undefined:
     case Operation::illegal:
     case Operation::debug:
     case Operation::conditional_debug:

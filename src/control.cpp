@@ -75,6 +75,7 @@ void Core::Impl::execute_operation(const Instruction &decoded) {
     case Operation::cache_unlock:
     case Operation::cache_lock_relative:
     case Operation::cache_unlock_relative: execute_cache(decoded); return;
+    case Operation::undefined:
     case Operation::illegal:
     case Operation::trap:
     case Operation::conditional_trap: execute_exception(decoded); return;
