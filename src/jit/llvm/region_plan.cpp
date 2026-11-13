@@ -2,6 +2,7 @@
 #include "jit/llvm/region_plan.hpp"
 
 #include "architecture.hpp"
+#include "bit_instruction.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "fields.hpp"
@@ -202,8 +203,28 @@ RegionControl control(const BlockInstruction &operation) {
           .valid = true};
 }
 
+bool append_bit(RegionPlan &plan, const Instruction &instruction) {
+  const auto operand = bit_operand(instruction);
+  Word at = operand.selector;
+  if (operand.location == BitLocation::effective && operand.selector == (6U << 3)) {
+    at = instruction.extension & word_mask;
+  } else if (operand.location != BitLocation::short_address) {
+    return false;
+  }
+  if ((instruction.opcode & five_bit_mask) >= word_bits) { return false; }
+  const auto action = bit_action(instruction.opcode);
+  const NativeMove move{.address = {.mode = 6, .extra = at},
+                        .space = operand.space,
+                        .load = action == BitAction::test};
+  if (!append_absolute(plan, move)) { return false; }
+  plan.computation = true;
+  plan.steps.push_back({.memory = {.transfers = {move}, .count = 1}, .registers = {}});
+  return true;
+}
+
 bool append(RegionPlan &plan, const BlockInstruction &operation) {
   const auto &instruction = operation.instruction;
+  if (instruction.operation == Operation::bit_memory) { return append_bit(plan, instruction); }
   if (instruction.operation == Operation::arithmetic_shift_immediate) {
     plan.computation = true;
     constexpr Word count_mask = 63;

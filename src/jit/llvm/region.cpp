@@ -2,6 +2,7 @@
 #include "jit/llvm/region.hpp"
 
 #include "architecture.hpp"
+#include "bit_instruction.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "fields.hpp"
@@ -715,6 +716,26 @@ private:
     LLVMBuildRet(ir_.get(), ir_.CreateTrunc(retired, ir_.getInt32Ty()));
   }
 
+  void bit_transfer(const NativeMove &move, const BitAction action, const Word opcode) {
+    auto *pointer = memory(move, effective(cursors_, move.address));
+    auto *original = ir_.CreateLoad(ir_.getInt32Ty(), pointer);
+    const auto bit = opcode & five_bit_mask;
+    auto *previous = ir_.CreateAnd(ir_.CreateLShr(original, ir_.getInt32(bit)), ir_.getInt32(1));
+    status_ = ir_.CreateOr(ir_.CreateAnd(status_, ir_.getInt32(~carry)), previous);
+    if (action == BitAction::test) { return; }
+    auto *word = ir_.CreateAnd(original, ir_.getInt32(word_mask));
+    auto *mask = ir_.getInt32(Word{1} << bit);
+    V value = nullptr;
+    switch (action) {
+      case BitAction::clear: value = ir_.CreateAnd(word, ir_.CreateNot(mask)); break;
+      case BitAction::set: value = ir_.CreateOr(word, mask); break;
+      case BitAction::change: value = ir_.CreateXor(word, mask); break;
+      case BitAction::test:
+      default: throw std::logic_error("Invalid modifying region bit action");
+    }
+    ir_.CreateStore(value, pointer);
+  }
+
   void body(LLVMBasicBlockRef miss) {
     for (std::size_t index = 0; index < plan_.steps.size(); ++index) {
       const auto before = banks_;
@@ -726,7 +747,9 @@ private:
         write_register(step.immediate.destination, ir_.getInt32(step.immediate.value));
       }
       const auto &instruction = plan_.operations[index].instruction;
-      if (instruction.operation == Operation::arithmetic_shift_immediate) {
+      if (instruction.operation == Operation::bit_memory) {
+        bit_transfer(step.memory.transfers[0], bit_action(instruction.opcode), instruction.opcode);
+      } else if (instruction.operation == Operation::arithmetic_shift_immediate) {
         llvm19::lower_arithmetic_shift(
             ir_, instruction.opcode, plan_.operations[index].mode, banks_, status_);
       } else if (!plan_.control.valid || index + 1 != plan_.steps.size()) {
