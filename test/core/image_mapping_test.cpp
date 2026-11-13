@@ -36,10 +36,11 @@ struct Bus final : Io {
     return address < program.size() ? std::optional<Word>{program[address]} : std::nullopt;
   }
 
-  std::span<const MemoryWindow> memory_windows(const Space space) noexcept override {
+  std::span<const MemoryWindow> memory_windows(const Space space,
+                                               const Word mode) noexcept override {
     ++grants;
     if (space != Space::x) { return {}; }
-    const bool selected = (owner->registers().omr & 1U) != 0;
+    const bool selected = (mode & 1U) != 0;
     window[0] = {.words = selected ? std::span(second) : std::span(first),
                  .known = tracked ? std::span(known) : std::span<std::uint8_t>{},
                  .writable = true};
@@ -69,7 +70,6 @@ struct Bus final : Io {
   std::array<MemoryWindow, 1> window{};
   std::array<std::uint8_t, 1> known{1};
   bool tracked = false;
-  Core *owner = nullptr;
   unsigned grants = 0, reads = 0;
 };
 
@@ -82,7 +82,6 @@ void guest_mapping(const NativeImage &image, const Word initial_mode, const bool
   Bus bus;
   bus.tracked = tracked;
   Core core(Memory::external(), &bus);
-  bus.owner = &core;
   auto initial = core.registers();
   initial.pc = start;
   initial.omr = initial_mode;
@@ -122,7 +121,6 @@ void host_mapping(const NativeImage &image, const bool interrupt, const bool tra
   Bus bus;
   bus.tracked = tracked;
   Core core(Memory::external(), &bus);
-  bus.owner = &core;
   auto initial = core.registers();
   initial.pc = start;
   core.set_registers(initial);
@@ -148,7 +146,6 @@ void unknown_word(const NativeImage &image) {
   bus.tracked = true;
   bus.known[0] = 0;
   Core core(Memory::external(), &bus);
-  bus.owner = &core;
   auto initial = core.registers();
   initial.pc = start + 1;
   initial.omr = 1;
@@ -182,7 +179,6 @@ void control_mapping(const ControlCase item) {
   Bus bus;
   bus.program[start] = item.operation;
   Core core(Memory::external(), &bus);
-  bus.owner = &core;
   auto expected = core.registers();
   expected.pc = start;
   expected.omr = item.initial_mode;

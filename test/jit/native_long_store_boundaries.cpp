@@ -50,7 +50,7 @@ public:
     return false;
   }
 
-  std::span<const MemoryWindow> memory_windows(const Space space) noexcept override {
+  std::span<const MemoryWindow> memory_windows(const Space space, Word /*mode*/) noexcept override {
     return mapped ? std::span<const MemoryWindow>(windows.at(space == Space::x ? 0 : 1))
                   : std::span<const MemoryWindow>{};
   }

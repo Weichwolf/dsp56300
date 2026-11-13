@@ -3,6 +3,7 @@
 #include "dsp56300/memory.hpp"
 #include "image_io_fixture.hpp"
 
+#include <cstddef>
 #include <cstdint>
 
 namespace {
@@ -57,4 +58,13 @@ extern "C" bool image_io_pending(const dsp56300::Io *io, dsp56300::Word status) 
 
 extern "C" std::uint64_t image_io_revision(const dsp56300::Io *io) noexcept {
   return device(io, dsp56300::test::IoEvent::revision).revision_body();
+}
+
+extern "C" const dsp56300::MemoryWindow *image_io_windows(dsp56300::Io *io,
+                                                          const dsp56300::Space space,
+                                                          const dsp56300::Word mode,
+                                                          std::size_t &count) noexcept {
+  const auto windows = device(io, dsp56300::test::IoEvent::windows).windows_body(space, mode);
+  count = windows.size();
+  return windows.data();
 }

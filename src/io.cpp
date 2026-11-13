@@ -4,6 +4,7 @@
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 
+#include <cstddef>
 #include <cstdint>
 
 #ifdef DSP56300_BINDING_IR
@@ -50,6 +51,16 @@ extern "C" DSP56300_IO_ENTRY bool dsp56300_io_pending(const dsp56300::Io &io,
 
 extern "C" DSP56300_IO_ENTRY std::uint64_t dsp56300_io_revision(const dsp56300::Io &io) noexcept {
   return io.program_revision();
+}
+
+extern "C" DSP56300_IO_ENTRY const dsp56300::MemoryWindow *
+dsp56300_io_windows(dsp56300::Io &io,
+                    const dsp56300::Space space,
+                    const dsp56300::Word mode,
+                    std::size_t &count) noexcept {
+  const auto windows = io.memory_windows(space, mode);
+  count = windows.size();
+  return windows.data();
 }
 
 #undef DSP56300_IO_ENTRY

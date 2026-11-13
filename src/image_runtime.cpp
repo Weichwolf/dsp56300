@@ -25,12 +25,12 @@ namespace dsp56300 {
 namespace {
 using Windows = std::array<std::span<const MemoryWindow>, 2>;
 
-Windows windows(Io *const io) {
+Windows windows(Io *const io, const Word mode) {
   Windows result;
   if (io == nullptr) { return result; }
   constexpr std::array spaces{Space::x, Space::y};
   for (std::size_t bank = 0; bank < result.size(); ++bank) {
-    result[bank] = io->memory_windows(spaces[bank]);
+    result[bank] = detail::io_windows(*io, spaces[bank], mode);
     Word end = 0;
     for (const auto &window : result[bank]) {
       if (window.words.empty() || window.address < end || window.address >= detail::io_begin ||
@@ -136,7 +136,7 @@ void Core::install(const NativeImage &image, const std::uint64_t variant) {
     throw std::invalid_argument("DSP image does not prepare the retained vector continuation");
   }
   const auto revision = self.io != nullptr ? dsp56300_io_revision(*self.io) : 0;
-  const auto granted = self.external ? windows(self.io) : Windows{};
+  const auto granted = self.external ? windows(self.io, self.cpu.reg.omr) : Windows{};
   if (selected.fixed_memory &&
       !std::ranges::equal(selected.memory,
                           layout(self.buffers, granted, self.external, self.aliases_program),
@@ -286,7 +286,7 @@ void Core::Impl::image_io_completed() noexcept {
   if (!external) { return; }
   constexpr std::array spaces{Space::x, Space::y};
   for (std::size_t bank = 0; bank < image_windows.size(); ++bank) {
-    image_windows[bank] = io->memory_windows(spaces[bank]);
+    image_windows[bank] = detail::io_windows(*io, spaces[bank], cpu.reg.omr);
     Word end = 0;
     for (const auto &window : image_windows[bank]) {
       if (window.words.empty() || window.address < end || window.address >= detail::io_begin ||

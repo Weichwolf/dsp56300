@@ -94,7 +94,7 @@ struct Fixture final : Io {
     return pending && (status & irq_mask) == 0;
   }
 
-  std::span<const MemoryWindow> memory_windows(const Space space) noexcept override {
+  std::span<const MemoryWindow> memory_windows(const Space space, Word /*mode*/) noexcept override {
     ++window_queries;
     return space == Space::x ? std::span(&window, 1) : std::span<const MemoryWindow>{};
   }

@@ -35,7 +35,8 @@ constexpr std::array names{"dsp56300_io_read",
                            "dsp56300_io_bit",
                            "dsp56300_io_reset",
                            "dsp56300_io_pending",
-                           "dsp56300_io_revision"};
+                           "dsp56300_io_revision",
+                           "dsp56300_io_windows"};
 constexpr std::array interfaces{"_ZNK8dsp563004Core9registersEv",
                                 "_ZNK8dsp563004Core8progressEv",
                                 "_ZN8dsp563004Core13request_yieldEv"};

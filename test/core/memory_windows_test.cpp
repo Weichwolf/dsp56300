@@ -61,7 +61,8 @@ public:
 
   [[nodiscard]] std::uint64_t program_revision() const noexcept override { return revision; }
 
-  [[nodiscard]] std::span<const MemoryWindow> memory_windows(const Space space) noexcept override {
+  [[nodiscard]] std::span<const MemoryWindow> memory_windows(const Space space,
+                                                             Word /*mode*/) noexcept override {
     return storage[space == Space::x ? 0 : 1].windows;
   }
 

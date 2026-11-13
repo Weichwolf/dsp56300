@@ -3,6 +3,7 @@
 #include "core_impl.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "io.hpp"
 #include "jit.hpp"
 
 #include <array>
@@ -14,7 +15,7 @@ Fault Core::Impl::bind_memory_windows() {
   constexpr std::array spaces{Space::x, Space::y};
   std::array<std::span<const MemoryWindow>, 2> windows;
   for (std::size_t bank = 0; bank < windows.size(); ++bank) {
-    windows[bank] = io->memory_windows(spaces[bank]);
+    windows[bank] = detail::io_windows(*io, spaces[bank], cpu.reg.omr);
     Word end = 0;
     for (const auto &window : windows[bank]) {
       if (window.address < end || window.address >= detail::io_begin || window.words.empty() ||

@@ -48,7 +48,8 @@ constexpr std::array roles{
     CallbackBinding{.role = CallbackRole::bit, .symbol = "image_io_bit"},
     CallbackBinding{.role = CallbackRole::reset, .symbol = "image_io_reset"},
     CallbackBinding{.role = CallbackRole::pending, .symbol = "image_io_pending"},
-    CallbackBinding{.role = CallbackRole::revision, .symbol = "image_io_revision"}};
+    CallbackBinding{.role = CallbackRole::revision, .symbol = "image_io_revision"},
+    CallbackBinding{.role = CallbackRole::windows, .symbol = "image_io_windows"}};
 
 std::vector<std::byte> read(const char *path) {
   std::ifstream file(path, std::ios::binary | std::ios::ate);
@@ -144,6 +145,7 @@ struct Result {
   std::array<IoObservation, io_observations> observed;
   std::size_t count;
   std::array<unsigned, io_roles> dynamic_calls, bound_calls;
+  unsigned cold_windows;
 };
 
 Result execute(const NativeImage &image, const Case &item) {
@@ -168,6 +170,7 @@ Result execute(const NativeImage &image, const Case &item) {
   io.bound_calls.fill(0);
   std::vector<Prefix> prefixes;
   std::uint64_t revision = 0;
+  unsigned cold_windows = 0;
   for (unsigned run = 0; run < program.size() + 2; ++run) {
     const auto result = core.run(item.quota);
     prefixes.push_back({.registers = core.registers(),
@@ -179,7 +182,9 @@ Result execute(const NativeImage &image, const Case &item) {
     if (result.fault != Fault{} || result.state != ExecutionState::running) { break; }
     if (io.revision != revision) {
       const auto before = core.state();
+      const auto grants = io.dynamic_calls[static_cast<unsigned>(IoEvent::windows)];
       core.install(image, 0);
+      cold_windows += io.dynamic_calls[static_cast<unsigned>(IoEvent::windows)] - grants;
       require(core.registers() == before.registers && core.progress() == before.progress &&
                   core.state().failure == before.failure,
               "Actual remapping rebinds the prepared code without replay or state restoration");
@@ -193,7 +198,8 @@ Result execute(const NativeImage &image, const Case &item) {
           .observed = io.observed,
           .count = io.count,
           .dynamic_calls = io.dynamic_calls,
-          .bound_calls = io.bound_calls};
+          .bound_calls = io.bound_calls,
+          .cold_windows = cold_windows};
 }
 
 void expected(const Result &result, const Case &item) {
@@ -251,6 +257,11 @@ void compare(const Result &reference, const Result &actual, const bool partial) 
             "Each role retains its exact number of real callback effects");
     if (role == static_cast<unsigned>(IoEvent::revision)) { continue; }
     const bool selected = !partial || role == static_cast<unsigned>(IoEvent::read);
+    if (selected && role == static_cast<unsigned>(IoEvent::windows)) {
+      require(actual.dynamic_calls[role] == actual.cold_windows,
+              "Selected memory grants use virtual dispatch only during stopped installation");
+      continue;
+    }
     require(selected ? actual.dynamic_calls[role] == 0 : actual.bound_calls[role] == 0,
             "Selected roles bypass virtual calls; unselected roles retain the original Io path");
   }
@@ -329,6 +340,69 @@ void code_quality(const std::span<const std::byte> host) {
   }
 }
 
+void window_grants(const std::span<const std::byte> host) {
+  constexpr Word mode = 0x600389;
+  constexpr std::array words{program[1],
+                             static_cast<Word>(isa::Opcode::move_x_absolute_short) | (1U << 15),
+                             static_cast<Word>(isa::Opcode::stop)};
+  const std::array code{CodeSpan{.address = io_entry, .words = words}};
+  constexpr std::array entries{io_entry};
+  const std::array versions{
+      CodeVariant{.id = 0, .code = code, .entries = entries, .failed_fetches = {}}};
+  for (const bool selected : {false, true}) {
+    const auto image = Core::compile(
+        {.variants = versions},
+        {.memory = {},
+         .interrupts = {},
+         .transitions = {},
+         .callbacks = selected ? std::span(roles).last(1) : std::span<const CallbackBinding>{},
+         .bindings = selected ? host : std::span<const std::byte>{}});
+    ImageIo io;
+    std::ranges::copy(words, io.program.begin() + io_entry);
+    io.mapped = io.remap = true;
+    Core core(Memory::external(), &io);
+    io.core = &core;
+    Registers expected;
+    expected.pc = io_entry;
+    expected.omr = mode;
+    expected.x = initial_x;
+    expected.m.fill(word_mask);
+    core.set_registers(expected);
+    core.install(image, 0);
+    io.dynamic_calls.fill(0);
+    io.bound_calls.fill(0);
+    const auto changed = core.run(1);
+    ++expected.pc;
+    require(changed.retired == 1 && changed.fault == Fault{} && changed.yielded &&
+                core.registers() == expected && io.revision == 1 && io.output == initial_x,
+            "A real callback mapping change retires once before the new grant is read");
+    constexpr auto windows = static_cast<unsigned>(IoEvent::windows);
+    require(io.dynamic_calls[windows] == (selected ? 0U : 2U) &&
+                io.bound_calls[windows] == (selected ? 2U : 0U),
+            "Only selected native grant queries bypass virtual dispatch for both spaces");
+    for (const auto &observation : std::span(io.observed).first(io.count)) {
+      if (observation.kind == IoEvent::windows) {
+        require(observation.value == mode,
+                "Grant callbacks receive the active native OMR without reconstructing state");
+      }
+    }
+    const auto before = core.state();
+    core.install(image, 0);
+    require(core.registers() == before.registers && core.progress() == before.progress &&
+                core.state().failure == before.failure,
+            "Cold reinstallation preserves the exact remapping continuation");
+    const auto completed = core.run();
+    expected.pc = io_entry + static_cast<Word>(words.size());
+    expected.x = io_new_word;
+    constexpr auto read = static_cast<unsigned>(IoEvent::read);
+    require(completed.retired == 2 && completed.fault == Fault{} && !completed.yielded &&
+                completed.state == ExecutionState::stopped && core.registers() == expected &&
+                core.progress().instructions == words.size() && io.dynamic_calls[read] == 0 &&
+                io.bound_calls[read] == 0 && io.ram[0] == io_old_word,
+            "The pointer/count grant supplies the new real RAM word without a read callback");
+  }
+}
+
 void rejected(const std::span<const std::byte> host) {
   const auto check = [&](const std::span<const std::byte> input,
                          const std::span<const CallbackBinding> bindings) {
@@ -345,6 +419,9 @@ void rejected(const std::span<const std::byte> host) {
   check(host, missing);
   const std::array wrong{CallbackBinding{.role = CallbackRole::read, .symbol = roles[1].symbol}};
   check(host, wrong);
+  const std::array wrong_windows{
+      CallbackBinding{.role = CallbackRole::windows, .symbol = roles[0].symbol}};
+  check(host, wrong_windows);
   LlvmModule changed("invalid_io_abi");
   changed.link_bitcode(host);
   auto *function = llvm::unwrap(changed.code())->getFunction("image_io_read");
@@ -369,6 +446,15 @@ void rejected(const std::span<const std::byte> host) {
                        llvm::Attribute::getWithDereferenceableBytes(
                            llvm::unwrap(extent.code())->getContext(), sizeof(Word) * 2));
   check(extent.bitcode(), roles);
+  LlvmModule window_extent("invalid_window_extent");
+  window_extent.link_bitcode(host);
+  auto *count = llvm::unwrap(window_extent.code())->getFunction("image_io_windows");
+  require(count != nullptr, "The grant callback exposes its count output before validation");
+  count->addParamAttr(
+      3,
+      llvm::Attribute::getWithDereferenceableBytes(llvm::unwrap(window_extent.code())->getContext(),
+                                                   sizeof(std::size_t) * 2));
+  check(window_extent.bitcode(), roles);
 }
 }
 
@@ -389,6 +475,7 @@ int main(const int argc, const char *const *const argv) {
     const auto neutral_ir = neutral.bitcode();
     const auto neutral_image = compile(roles, neutral_ir);
     const auto reference = compile({}, {});
+    window_grants(host);
     code_quality(host);
     const auto fused = compile(roles, host);
     const auto partial = compile(std::span(roles).first(1), host);

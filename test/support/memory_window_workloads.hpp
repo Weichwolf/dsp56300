@@ -40,7 +40,8 @@ public:
     return program[pc - start];
   }
 
-  [[nodiscard]] std::span<const MemoryWindow> memory_windows(const Space space) noexcept override {
+  [[nodiscard]] std::span<const MemoryWindow> memory_windows(const Space space,
+                                                             Word /*mode*/) noexcept override {
     return mapped && space == Space::x ? std::span<const MemoryWindow>(windows)
                                        : std::span<const MemoryWindow>{};
   }

@@ -177,7 +177,8 @@ public:
     seed_y_ = y_;
   }
 
-  [[nodiscard]] std::span<const MemoryWindow> memory_windows(const Space space) noexcept override {
+  [[nodiscard]] std::span<const MemoryWindow> memory_windows(const Space space,
+                                                             Word /*mode*/) noexcept override {
     if (space == Space::program) { return {}; }
     return std::span(&windows_[space == Space::x ? 0 : 1], 1);
   }

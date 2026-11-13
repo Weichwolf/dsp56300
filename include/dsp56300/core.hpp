@@ -125,7 +125,7 @@ struct CodeTransition {
   Word entry;
 };
 
-enum class CallbackRole : std::uint8_t { read, write, bit, reset, pending, revision };
+enum class CallbackRole : std::uint8_t { read, write, bit, reset, pending, revision, windows };
 
 struct CallbackBinding {
   CallbackRole role;
@@ -213,7 +213,9 @@ public:
   // Descriptors/storage remain valid until the owner changes its revision at an
   // execution boundary or in a synchronous callback. Sorted, disjoint X/Y grants
   // below the peripheral interval; executable aliases require explicit marking.
-  [[nodiscard]] virtual std::span<const MemoryWindow> memory_windows(Space /*space*/) noexcept {
+  // Mode is the active architectural OMR.
+  [[nodiscard]] virtual std::span<const MemoryWindow> memory_windows(Space /*space*/,
+                                                                     Word /*mode*/) noexcept {
     return {};
   }
 
