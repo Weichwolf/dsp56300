@@ -92,6 +92,12 @@ Admit complete straight-line spans against instruction and nominal-cycle grants.
 Use the same LLVM semantics for precise partial-grant prefixes. A failed span
 admission transfers current state without repeating committed work.
 
+Lower read-only admission from the same guard and SSA plan as execution. Prove
+computed addresses through local reads before any store, and certify only the
+proved complete prefix. Reuse validated guards during execution; relevant state,
+storage, code or binding changes revoke the certificate. Local cycle certificates
+remain inputs to the consumer's channel/IRQ horizons, not a scheduling guarantee.
+
 Represent exact integer/flag, memory and ordered device effects in IR. Apply
 constant/range propagation, CSE, dead-store elimination, forwarding, register
 propagation and legal loop/vector optimization. Arithmetic lowers inline to

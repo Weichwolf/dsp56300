@@ -31,6 +31,13 @@ struct PreparedRegion {
                                std::span<const RegionLayout> memory,
                                std::string_view entry = {});
 
+// Read-only uint64_t(const Cpu *, const NativeContext *) query: complete base
+// periods or zero. Relevant state/storage changes invalidate the certificate.
+[[nodiscard]] bool lift_region_admission(LlvmModule &module,
+                                         std::span<const BlockInstruction> operations,
+                                         std::span<const RegionLayout> memory,
+                                         std::string_view entry = {});
+
 // Complete arithmetic/RAM regions with non-call control; other effects retain ISA lowering.
 [[nodiscard]] std::optional<PreparedRegion>
 compile_region(std::unique_ptr<LlvmCompiler> &compiler,

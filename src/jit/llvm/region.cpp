@@ -42,19 +42,35 @@ constexpr std::array<std::size_t, 4> bank_fields{
 constexpr Word stack_mask = stack_entries - 1, pointer_mask = 63;
 constexpr unsigned bus_shift = word_bits + padding_bits;
 
+std::optional<std::size_t> admission_prefix(const RegionPlan &plan) {
+  std::size_t count = 0;
+  for (std::size_t index = 0; index < plan.steps.size(); ++index) {
+    if (plan.steps[index].guards != 0) { count = index + 1; }
+  }
+  for (const auto &step : std::span(plan.steps).first(count)) {
+    if (std::ranges::any_of(std::span(step.memory.transfers).first(step.memory.count),
+                            [](const auto &move) { return !move.load; })) {
+      return {};
+    }
+  }
+  return count;
+}
+
 class RegionLifter {
 public:
   RegionLifter(LlvmModule &module,
                const RegionPlan &plan,
                const void *fallback,
-               const std::string_view entry = {})
+               const std::string_view entry = {},
+               const bool admission_only = false,
+               const std::size_t admission_steps = 0)
       : context_(module.context()),
-        function_(make_function(module, entry)),
+        function_(make_function(module, entry, admission_only)),
         ir_(context_, LLVMAppendBasicBlockInContext(context_, function_, "entry")),
         plan_(plan),
         dynamic_(fallback == nullptr),
-        self_loop_(dynamic_ && !plan_.batch && region_independent(plan_.operations) &&
-                   plan_.control.valid &&
+        self_loop_(!admission_only && dynamic_ && !plan_.batch &&
+                   region_independent(plan_.operations) && plan_.control.valid &&
                    (plan_.control.reg < agu_registers ||
                     plan_.control.target == plan_.operations.front().pc)),
         cpu_(LLVMGetParam(function_, 0)),
@@ -62,7 +78,9 @@ public:
     for (unsigned bank = 0; bank < bindings_.size(); ++bank) {
       bindings_[bank].resize(plan_.windows[bank].size());
     }
-    if (self_loop_) {
+    if (admission_only) {
+      generate_admission(admission_steps);
+    } else if (self_loop_) {
       generate_self_loop();
     } else {
       generate(fallback);
@@ -76,11 +94,15 @@ private:
 
   V boolean(const bool value) { return LLVMConstInt(ir_.getIntNTy(1), value ? 1U : 0U, 0); }
 
-  static LLVMValueRef make_function(LlvmModule &module, const std::string_view entry) {
+  static LLVMValueRef
+  make_function(LlvmModule &module, const std::string_view entry, const bool admission_only) {
     auto *pointer = LLVMPointerTypeInContext(module.context(), 0);
     std::array arguments{pointer, pointer};
-    auto *type = LLVMFunctionType(
-        LLVMInt32TypeInContext(module.context()), arguments.data(), arguments.size(), 0);
+    auto *type = LLVMFunctionType((admission_only ? LLVMInt64TypeInContext(module.context())
+                                                  : LLVMInt32TypeInContext(module.context())),
+                                  arguments.data(),
+                                  arguments.size(),
+                                  0);
     auto *function = LLVMAddFunction(
         module.code(), entry.empty() ? module.name().c_str() : std::string(entry).c_str(), type);
     return function;
@@ -736,8 +758,10 @@ private:
     ir_.CreateStore(value, pointer);
   }
 
-  void body(LLVMBasicBlockRef miss) {
-    for (std::size_t index = 0; index < plan_.steps.size(); ++index) {
+  void body(LLVMBasicBlockRef miss) { body(miss, plan_.steps.size()); }
+
+  void body(LLVMBasicBlockRef miss, const std::size_t count) {
+    for (std::size_t index = 0; index < count; ++index) {
       const auto before = banks_;
       const auto &step = plan_.steps[index];
       if (step.registers.valid()) {
@@ -891,6 +915,27 @@ private:
     LLVMBuildRet(ir_.get(), ir_.getInt32(0));
   }
 
+  void generate_admission(const std::size_t prefix_steps) {
+    auto *windows = LLVMAppendBasicBlockInContext(context_, function_, "windows");
+    auto *start = LLVMAppendBasicBlockInContext(context_, function_, "admitted");
+    auto *miss = LLVMAppendBasicBlockInContext(context_, function_, "refused");
+    admission();
+    LLVMBuildCondBr(ir_.get(), eligible_, windows, miss);
+    ir_.SetInsertPoint(windows);
+    initial_memory_guards();
+    LLVMBuildCondBr(ir_.get(), eligible_, start, miss);
+    ir_.SetInsertPoint(start);
+    if (prefix_steps != 0) {
+      for (unsigned bank = 0; bank < banks_.size(); ++bank) {
+        banks_[bank] = reg(64, bank_fields[bank]);
+      }
+      body(miss, prefix_steps);
+    }
+    LLVMBuildRet(ir_.get(), ir_.CreateMul(turns_, ir_.getInt64(plan_.cost)));
+    ir_.SetInsertPoint(miss);
+    LLVMBuildRet(ir_.get(), ir_.getInt64(0));
+  }
+
   void generate(const void *fallback) {
     auto *windows = LLVMAppendBasicBlockInContext(context_, function_, "windows");
     auto *start = LLVMAppendBasicBlockInContext(context_, function_, "admitted");
@@ -1041,4 +1086,20 @@ bool lift_region(LlvmModule &module,
   return true;
 }
 
+bool lift_region_admission(LlvmModule &module,
+                           const std::span<const BlockInstruction> operations,
+                           const std::span<const RegionLayout> memory,
+                           const std::string_view entry) {
+  if (module.code() == nullptr) { throw std::logic_error("Region module was already transferred"); }
+  const auto name = entry.empty() ? module.name() : std::string(entry);
+  if (LLVMGetNamedFunction(module.code(), name.c_str()) != nullptr) {
+    throw std::invalid_argument("Region module already has its entry");
+  }
+  const auto plan = plan_region(operations, memory);
+  if (!plan) { return false; }
+  const auto prefix = admission_prefix(*plan);
+  if (!prefix) { return false; }
+  const RegionLifter generated(module, *plan, nullptr, name, true, *prefix);
+  return true;
+}
 }
