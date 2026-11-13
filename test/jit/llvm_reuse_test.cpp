@@ -80,7 +80,7 @@ struct Fixture final : Io {
 
   [[nodiscard]] std::uint64_t program_revision() const noexcept override { return revision; }
 
-  std::span<const MemoryWindow> memory_windows(const Space space, Word /*mode*/) noexcept override {
+  std::span<const MemoryWindow> memory_windows(const Space space) noexcept override {
     return space == Space::x ? std::span(&window, 1) : std::span<const MemoryWindow>{};
   }
 

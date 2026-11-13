@@ -161,8 +161,7 @@ struct External final : Io {
       : windows{MemoryWindow{.words = fixture.x, .known = {}, .writable = true},
                 MemoryWindow{.words = fixture.y, .known = {}, .writable = true}} {}
 
-  [[nodiscard]] std::span<const MemoryWindow> memory_windows(const Space space,
-                                                             Word /*mode*/) noexcept override {
+  [[nodiscard]] std::span<const MemoryWindow> memory_windows(const Space space) noexcept override {
     if (space == Space::program) { return {}; }
     return std::span(windows).subspan(space == Space::x ? 0U : 1U, 1);
   }

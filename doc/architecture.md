@@ -41,10 +41,6 @@ Callbacks use public Io roles and per-instance owners; they may observe public
 Core state or request synchronous yield. Do not assume callbacks cannot alias
 Core state. Missing selected definitions fail materialization, not lowering.
 Retain unselected roles' normal owned I/O semantics.
-Bind memory-window queries with the active OMR and a pointer/count ABI:
-`const MemoryWindow *(Io *, Space, Word omr, size_t &count) noexcept`.
-Preserve actual grants, revision changes and stopped reinstallation across
-native callback composition.
 
 Core::bind requires exact identity, every declared export once, nonnull addresses
 and shared executable ownership. Reject missing/extra/duplicate symbols. Copy

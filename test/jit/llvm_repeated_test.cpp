@@ -210,7 +210,7 @@ struct Fixture final : Io {
     return at < program.size() ? std::optional{program[at]} : std::nullopt;
   }
 
-  std::span<const MemoryWindow> memory_windows(const Space space, Word /*mode*/) noexcept override {
+  std::span<const MemoryWindow> memory_windows(const Space space) noexcept override {
     return space == Space::x ? std::span<const MemoryWindow>(views)
                              : std::span<const MemoryWindow>{};
   }

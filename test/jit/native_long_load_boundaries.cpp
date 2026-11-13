@@ -47,7 +47,7 @@ public:
     return false;
   }
 
-  std::span<const MemoryWindow> memory_windows(const Space space, Word /*mode*/) noexcept override {
+  std::span<const MemoryWindow> memory_windows(const Space space) noexcept override {
     if (!mapped || space == Space::program) { return {}; }
     return std::span<const MemoryWindow>(windows).subspan(space == Space::x ? 0U : 1U, 1);
   }

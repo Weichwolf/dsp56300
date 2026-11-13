@@ -147,7 +147,7 @@ struct Owner final : Io {
     return pc < program.size() ? std::optional{program[pc]} : std::nullopt;
   }
 
-  std::span<const MemoryWindow> memory_windows(const Space space, Word /*mode*/) noexcept override {
+  std::span<const MemoryWindow> memory_windows(const Space space) noexcept override {
     return windows[space == Space::x ? 0 : 1];
   }
 

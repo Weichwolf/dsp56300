@@ -40,7 +40,7 @@ public:
 
   [[nodiscard]] std::uint64_t program_revision() const noexcept override { return revision; }
 
-  std::span<const MemoryWindow> memory_windows(const Space space, Word /*mode*/) noexcept override {
+  std::span<const MemoryWindow> memory_windows(const Space space) noexcept override {
     return grant && space == Space::x ? std::span<const MemoryWindow>(windows)
                                       : std::span<const MemoryWindow>{};
   }

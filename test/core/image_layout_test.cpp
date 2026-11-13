@@ -50,7 +50,7 @@ struct Bus final : Io {
     return address < program.size() ? std::optional<Word>{program[address]} : std::nullopt;
   }
 
-  std::span<const MemoryWindow> memory_windows(const Space space, Word /*mode*/) noexcept override {
+  std::span<const MemoryWindow> memory_windows(const Space space) noexcept override {
     window = {.words = data,
               .known = tracked ? std::span(known) : std::span<std::uint8_t>{},
               .writable = true};

@@ -13,8 +13,7 @@ namespace dsp56300 {
 const MemoryWindow *Core::Impl::memory_window(const Space space,
                                               const Word address) const noexcept {
   if (io == nullptr || space == Space::program || address >= detail::io_begin) { return nullptr; }
-  const auto windows = image ? image_windows[space == Space::x ? 0 : 1]
-                             : detail::io_windows(*io, space, cpu.reg.omr);
+  const auto windows = image ? image_windows[space == Space::x ? 0 : 1] : io->memory_windows(space);
   for (const auto &window : windows) {
     if (address >= window.address && address - window.address < window.words.size()) {
       return &window;

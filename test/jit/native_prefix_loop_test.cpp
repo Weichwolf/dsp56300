@@ -45,8 +45,7 @@ struct MemoryIo final : Io {
     known.fill(1);
   }
 
-  [[nodiscard]] std::span<const MemoryWindow> memory_windows(const Space space,
-                                                             Word /*mode*/) noexcept override {
+  [[nodiscard]] std::span<const MemoryWindow> memory_windows(const Space space) noexcept override {
     if (space == Space::program) { return {}; }
     return std::span(windows_).subspan(space == Space::x ? 0U : 2U, 2);
   }

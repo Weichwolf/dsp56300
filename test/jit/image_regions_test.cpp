@@ -63,7 +63,7 @@ struct Fixture final : Io {
                : std::nullopt;
   }
 
-  std::span<const MemoryWindow> memory_windows(const Space space, Word /*mode*/) noexcept override {
+  std::span<const MemoryWindow> memory_windows(const Space space) noexcept override {
     if (space != Space::x) { return {}; }
     return views.empty() ? std::span(&window, 1) : views;
   }

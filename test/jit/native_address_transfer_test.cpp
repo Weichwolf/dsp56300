@@ -83,8 +83,7 @@ struct Image final : Io {
     return index < program.size() ? std::optional{program[index]} : std::nullopt;
   }
 
-  [[nodiscard]] std::span<const MemoryWindow> memory_windows(const Space space,
-                                                             Word /*mode*/) noexcept override {
+  [[nodiscard]] std::span<const MemoryWindow> memory_windows(const Space space) noexcept override {
     return std::span<const MemoryWindow>{windows}.subspan(space == Space::x ? 0U : 1U, 1);
   }
 

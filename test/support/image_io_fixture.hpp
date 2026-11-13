@@ -7,15 +7,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
-#include <span>
 
 namespace dsp56300::test {
 inline constexpr Word io_entry = 16, io_port = 0xffffc0, io_bit = 2;
-inline constexpr Word io_old_word = 0x123456, io_new_word = 0x765432;
-inline constexpr unsigned io_roles = 7;
-// One remap adds X/Y grants during native refresh and stopped installation.
-inline constexpr unsigned io_observations = 32 + (2 * 2);
-enum class IoEvent : std::uint8_t { read, write, bit, reset, pending, revision, windows };
+inline constexpr unsigned io_roles = 6, io_observations = 32;
+enum class IoEvent : std::uint8_t { read, write, bit, reset, pending, revision };
 
 struct IoObservation {
   IoEvent kind;
@@ -88,14 +84,6 @@ struct ImageIo final : Io {
     return revision;
   }
 
-  std::span<const MemoryWindow> windows_body(const Space space, const Word mode) noexcept {
-    observe(IoEvent::windows, space, 0, core != nullptr ? core->registers().pc : 0, mode);
-    if (!mapped || space != Space::x) { return {}; }
-    window = {
-        .words = std::span(ram).subspan(revision == 0 ? 0U : 1U, 1), .known = {}, .writable = true};
-    return {&window, 1};
-  }
-
   bool read(Space space, Word address, Word pc, Word &value) noexcept override {
     ++dynamic_calls[static_cast<unsigned>(IoEvent::read)];
     return read_body(space, address, pc, value);
@@ -127,12 +115,6 @@ struct ImageIo final : Io {
     return core == nullptr ? 0 : revision_body();
   }
 
-  std::span<const MemoryWindow> memory_windows(const Space space,
-                                               const Word mode) noexcept override {
-    ++dynamic_calls[static_cast<unsigned>(IoEvent::windows)];
-    return windows_body(space, mode);
-  }
-
   std::optional<Word> inspect_program(Word address) const noexcept override {
     return address < program.size() ? std::optional(program[address]) : std::nullopt;
   }
@@ -142,9 +124,7 @@ struct ImageIo final : Io {
   Word input = 0, output = 0;
   // pending/revision identify no read/write/reset fault or synchronous yield.
   IoEvent failure = IoEvent::revision, yield = IoEvent::revision;
-  bool pending = false, remap = false, mapped = false;
-  std::array<Word, 2> ram{io_old_word, io_new_word};
-  MemoryWindow window{};
+  bool pending = false, remap = false;
   std::uint64_t revision = 0;
   mutable std::array<unsigned, io_roles> dynamic_calls{}, bound_calls{};
   mutable std::array<IoObservation, io_observations> observed{};

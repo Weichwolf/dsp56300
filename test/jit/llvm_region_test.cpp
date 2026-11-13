@@ -184,7 +184,7 @@ struct Fixture final : Io {
     return false;
   }
 
-  std::span<const MemoryWindow> memory_windows(const Space space, Word /*mode*/) noexcept override {
+  std::span<const MemoryWindow> memory_windows(const Space space) noexcept override {
     if (space == Space::program) { return {}; }
     return std::span(&windows[space == Space::x ? 0U : 1U], 1);
   }

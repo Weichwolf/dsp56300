@@ -118,8 +118,7 @@ struct Machine final : public Io {
                                                         : std::nullopt;
   }
 
-  [[nodiscard]] std::span<const MemoryWindow> memory_windows(const Space space,
-                                                             Word /*mode*/) noexcept override {
+  [[nodiscard]] std::span<const MemoryWindow> memory_windows(const Space space) noexcept override {
     return space == Space::program ? std::span<const MemoryWindow>{}
                                    : std::span(&windows_[space == Space::x ? 0 : 1], 1);
   }
