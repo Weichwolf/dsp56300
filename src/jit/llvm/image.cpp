@@ -247,6 +247,7 @@ private:
                                           name,
                                           module_);
     attributes(result);
+    if (internal) { result->setCallingConv(llvm::CallingConv::PreserveNone); }
     return result;
   }
 
@@ -307,6 +308,7 @@ private:
             Value *window,
             Value *count) {
     auto *call = ir_.CreateCall(function, {owner, pc, grant, window, count});
+    call->setCallingConv(llvm::CallingConv::PreserveNone);
     call->setTailCallKind(llvm::CallInst::TCK_MustTail);
     ir_.CreateRet(call);
   }
@@ -351,6 +353,7 @@ private:
         dispatch_->getFunctionType(),
         target,
         {dispatch_->getArg(0), pc, dispatch_->getArg(2), dispatch_->getArg(3), count});
+    call->setCallingConv(llvm::CallingConv::PreserveNone);
     call->setTailCallKind(llvm::CallInst::TCK_MustTail);
     ir_.CreateRet(call);
     ir_.SetInsertPoint(budget);
@@ -368,6 +371,7 @@ private:
     auto *call = ir_.CreateCall(
         dispatch_,
         {entry->getArg(0), entry->getArg(1), entry->getArg(2), entry->getArg(3), ir_.getInt32(0)});
+    call->setCallingConv(dispatch_->getCallingConv());
     call->setTailCallKind(llvm::CallInst::TCK_Tail);
     ir_.CreateRet(call);
   }
