@@ -24,6 +24,7 @@
 #include <limits>
 #include <llvm-c/Core.h>
 #include <llvm-c/Types.h>
+#include <map>
 #include <memory>
 #include <optional>
 #include <span>
@@ -387,6 +388,7 @@ private:
   }
 
   V effective(std::array<V, agu_registers> &cursors, const AddressForm form) {
+    if (form.mode == 6) { return ir_.getInt32(form.extra & word_mask); }
     auto *prior = cursors[form.index];
     if (form.mode == 4) { return prior; }
     auto *next = advanced(prior, form);
@@ -400,7 +402,7 @@ private:
     for (const auto &step : steps) {
       V paired = nullptr;
       for (const auto &move : std::span(step.memory.transfers).first(step.memory.count)) {
-        if ((roots & (1U << move.address.index)) == 0) { continue; }
+        if (move.address.mode == 6 || (roots & (1U << move.address.index)) == 0) { continue; }
         auto *at =
             step.memory.long_pair && paired != nullptr ? paired : effective(proof, move.address);
         paired = at;
@@ -427,6 +429,12 @@ private:
   }
 
   void initial_memory_guards() {
+    for (unsigned bank = 0; bank < 2; ++bank) {
+      for (const auto &[at, writing] : plan_.absolute[bank]) {
+        auto *value = ir_.getInt64(at);
+        absolute_bases_[bank][at] = select_window(bank, {.first = value, .last = value}, writing);
+      }
+    }
     if (plan_.batch) {
       batch_memory_guards();
       return;
@@ -440,9 +448,9 @@ private:
 
   V memory(const NativeMove &move, V at) {
     const auto bank = move.space == Space::x ? 0U : 1U;
-    return ir_.CreateGEP(ir_.getInt32Ty(),
-                         memory_bases_[bank][move.address.index],
-                         ir_.CreateZExt(at, ir_.getInt64Ty()));
+    auto *base = move.address.mode == 6 ? absolute_bases_[bank].at(move.address.extra & word_mask)
+                                        : memory_bases_[bank][move.address.index];
+    return ir_.CreateGEP(ir_.getInt32Ty(), base, ir_.CreateZExt(at, ir_.getInt64Ty()));
   }
 
   V read_register(const std::array<V, 4> &values, const unsigned number) {
@@ -591,6 +599,10 @@ private:
     std::array<V, 2> pointers{};
     for (unsigned index = 0; index < moves.count; ++index) {
       const auto &move = moves.transfers[index];
+      if (move.immediate()) {
+        words[index] = ir_.getInt32(move.address.extra & word_mask);
+        continue;
+      }
       pointers[index] = memory(move, effective(cursors_, move.address));
       words[index] = move.load ? ir_.CreateAnd(ir_.CreateLoad(ir_.getInt32Ty(), pointers[index]),
                                                ir_.getInt32(word_mask))
@@ -710,6 +722,9 @@ private:
       if (step.registers.valid()) {
         write_register(step.registers.destination, read_register(before, step.registers.source));
       }
+      if (step.immediate.valid()) {
+        write_register(step.immediate.destination, ir_.getInt32(step.immediate.value));
+      }
       const auto &instruction = plan_.operations[index].instruction;
       if (instruction.operation == Operation::arithmetic_shift_immediate) {
         llvm19::lower_arithmetic_shift(
@@ -778,8 +793,12 @@ private:
   void self_loop_bindings() {
     for (unsigned bank = 0; bank < bindings_.size(); ++bank) {
       for (const bool writing : {false, true}) {
-        if (!std::ranges::any_of(plan_.extents[bank], [writing](const auto &extent) {
-              return extent.accessed && extent.writing == writing;
+        if (!std::ranges::any_of(plan_.extents[bank],
+                                 [writing](const auto &extent) {
+                                   return extent.accessed && extent.writing == writing;
+                                 }) &&
+            !std::ranges::any_of(plan_.absolute[bank], [writing](const auto &entry) {
+              return entry.second == writing;
             })) {
           continue;
         }
@@ -932,6 +951,7 @@ private:
   std::array<V, 4> banks_{};
   std::array<V, agu_registers> cursors_{}, strides_{}, masks_{}, origins_{};
   std::array<std::array<V, agu_registers>, 2> memory_bases_{};
+  std::array<std::map<Word, V>, 2> absolute_bases_;
   std::array<std::vector<std::array<Binding, 2>>, 2> bindings_;
 };
 }

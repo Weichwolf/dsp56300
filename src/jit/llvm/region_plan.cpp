@@ -92,21 +92,45 @@ bool destination(RegionPlan &plan, const unsigned reg) {
   } else if (reg >= r_register_base) {
     const auto index = reg - r_register_base;
     plan.definitions[index] = plan.steps.size();
-    plan.guardable[index] = std::ranges::none_of(plan.extents, [index](const auto &bank) {
-      return bank[index].accessed ||
-             std::ranges::any_of(bank, [](const auto &extent) { return extent.writing; });
-    });
+    plan.guardable[index] =
+        std::ranges::none_of(plan.absolute,
+                             [](const auto &bank) {
+                               return std::ranges::any_of(
+                                   bank, [](const auto &entry) { return entry.second; });
+                             }) &&
+        std::ranges::none_of(plan.extents, [index](const auto &bank) {
+          return bank[index].accessed ||
+                 std::ranges::any_of(bank, [](const auto &extent) { return extent.writing; });
+        });
   }
   if (reg >= r_register_base) { plan.batch = false; }
+  return true;
+}
+
+bool append_absolute(RegionPlan &plan, const NativeMove &move) {
+  const auto form = move.address;
+  if (move.immediate()) { return move.load; }
+  if (form.index != 0) { return false; }
+  const auto bank = move.space == Space::x ? 0U : 1U;
+  const auto at = form.extra & word_mask;
+  if (!std::ranges::any_of(plan.windows[bank], [&](const auto &window) {
+        return permitted(window, !move.load) && at >= window.address &&
+               at - window.address < window.size;
+      })) {
+    return false;
+  }
+  auto &writing = plan.absolute[bank][at];
+  writing = writing || !move.load;
   return true;
 }
 
 bool append_move(RegionPlan &plan, const NativeMove &move, const bool advance) {
   const auto form = move.address;
   const auto mode = form.mode;
+  if (mode == 6) { return append_absolute(plan, move); }
   plan.agu[form.index] = plan.agu[form.index] || mode != 4;
   const auto definition = plan.definitions[form.index];
-  if (mode == 6 || (definition && !plan.guardable[form.index]) ||
+  if ((definition && !plan.guardable[form.index]) ||
       ((mode == 0 || mode == 1 || mode == 5) && plan.changed_n[form.index])) {
     return false;
   }
@@ -147,7 +171,7 @@ bool append_moves(RegionPlan &plan, const NativeMoves &moves) {
   Word updated = 0;
   for (const auto &move : std::span(moves.transfers).first(moves.count)) {
     if (!plain_register(move.reg)) { return false; }
-    const auto bit = 1U << move.address.index;
+    const auto bit = move.address.mode == 6 ? 0U : 1U << move.address.index;
     const bool advance = (updated & bit) == 0;
     if (!advance) { return false; }
     if (!append_move(plan, move, advance)) { return false; }
@@ -191,6 +215,12 @@ bool append(RegionPlan &plan, const BlockInstruction &operation) {
       !llvm19::supported_alu(instruction.opcode)) {
     return false;
   }
+  const auto immediate = plan_address_immediate(instruction);
+  if (immediate.valid()) {
+    if (!destination(plan, immediate.destination)) { return false; }
+    plan.steps.push_back({.memory = {}, .registers = {}, .immediate = immediate});
+    return true;
+  }
   const auto moves = plan_moves(instruction);
   plan.computation = plan.computation || moves.long_pair || (instruction.opcode & byte_mask) != 0;
   const auto registers = plan_register_move(instruction, true);
@@ -233,7 +263,9 @@ std::optional<RegionPlan> make_plan(RegionPlan plan) {
     plan.cost += operation.instruction.cycles;
     ++plan.count;
   }
-  if (!plan.batch && !std::ranges::any_of(plan.extents, [](const auto &bank) {
+  if (!plan.batch &&
+      std::ranges::all_of(plan.absolute, [](const auto &bank) { return bank.empty(); }) &&
+      !std::ranges::any_of(plan.extents, [](const auto &bank) {
         return std::ranges::any_of(bank, [](const auto &extent) { return extent.accessed; });
       })) {
     return {};
