@@ -10,6 +10,7 @@
 #include "jit.hpp"
 #include "jit/llvm/alu.hpp"
 #include "jit/move.hpp"
+#include "jit/preparation.hpp"
 
 #include <algorithm>
 #include <array>
@@ -184,7 +185,21 @@ bool append_moves(RegionPlan &plan, const NativeMoves &moves) {
   return true;
 }
 
+RegionControl relative_control(const BlockInstruction &operation) {
+  const auto flow = successors(operation);
+  if (flow.call || flow.indirect || flow.count == 0) { return {}; }
+  const auto opcode = operation.instruction.opcode;
+  const bool short_form = (opcode & 0xff0000U) == 0x050000U;
+  return {.target = flow.direct[flow.count - 1],
+          .selector = flow.count == 1 ? 16U : (opcode >> (short_form ? 12U : 0U)) & 15U,
+          .reg = static_cast<unsigned>(agu_registers),
+          .valid = true};
+}
+
 RegionControl control(const BlockInstruction &operation) {
+  if (operation.instruction.operation == Operation::relative_branch) {
+    return relative_control(operation);
+  }
   const auto kind = operation.instruction.operation;
   const auto opcode = operation.instruction.opcode;
   constexpr Word short_address_mask = 0xfff;

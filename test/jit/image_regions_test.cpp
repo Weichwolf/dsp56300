@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "instruction.hpp"
 #include "isa.hpp"
+#include "jit.hpp"
 #include "jit/image_plan.hpp"
 #include "jit/llvm/image_regions.hpp"
+#include "jit/llvm/region_plan.hpp"
 #include "jit/llvm/runtime.hpp"
 #include "loop_frames.hpp"
 #include "saturated_shift_model.hpp"
+#include "selection_model.hpp"
 #include "support.hpp"
 
 #include <algorithm>
@@ -709,9 +713,156 @@ void raw_execution() {
     }
   }
 }
+
+void relative_planning() {
+  const std::array memory{
+      RegionLayout{.space = Space::x, .first = base, .size = 32, .tracked = true}};
+  for (const Word pc : {0U, 1U, 511U, word_mask}) {
+    for (Word selector = 0; selector <= 16; ++selector) {
+      for (Word raw = 0; raw < 512; ++raw) {
+        const Word opcode =
+            op(selector == 16 ? isa::Opcode::bra_relative_short : isa::Opcode::bcc_relative_short) |
+            (selector == 16 ? 0U : selector << 12) | ((raw & 480U) << 1) | (raw & 31U);
+        std::array operations{
+            detail::BlockInstruction{
+                .instruction =
+                    detail::decode(op(isa::Opcode::move_x_effective) | (1U << 15) | (4U << 11)),
+                .pc = (pc - 1) & word_mask},
+            detail::BlockInstruction{.instruction = detail::decode(opcode), .pc = pc}};
+        const auto plan = detail::plan_region(operations, memory);
+        const auto signed_offset =
+            raw < 256 ? static_cast<std::int64_t>(raw) : static_cast<std::int64_t>(raw) - 512;
+        const auto target =
+            static_cast<Word>(static_cast<std::int64_t>(pc) + signed_offset) & word_mask;
+        require(plan && plan->control.valid && plan->control.target == target &&
+                    plan->control.selector == selector && plan->control.reg == agu_registers,
+                "All short relative displacements and conditions preserve signed wrapping targets");
+      }
+    }
+  }
+  for (const auto opcode : {isa::Opcode::bscc_relative_short,
+                            isa::Opcode::bsr_relative_short,
+                            isa::Opcode::bscc_relative_long,
+                            isa::Opcode::bsr_relative_long,
+                            isa::Opcode::bcc_relative_register,
+                            isa::Opcode::bra_relative_register}) {
+    auto branch = detail::decode(op(opcode));
+    branch.extension = 1;
+    const std::array operations{
+        detail::BlockInstruction{.instruction = detail::decode(op(isa::Opcode::move_x_effective) |
+                                                               (1U << 15) | (4U << 11)),
+                                 .pc = body},
+        detail::BlockInstruction{.instruction = branch, .pc = body + 1}};
+    require(!detail::plan_region(operations, memory),
+            "Calls and register-relative branches retain their precise native lowering");
+  }
+}
+
+constexpr Word relative_stride = 8;
+constexpr Word relative_conditions = 16;
+constexpr Word relative_forms = 2;
+
+struct RelativeCase {
+  Word mode, flags, form, selector, limit;
+  bool timed;
+};
+
+void relative_prefix(Core &core, Fixture &fixture, const RelativeCase point) {
+  constexpr std::uint64_t bank_seed = 0x123456abcdef;
+  const auto [mode, flags, form, selector, limit, timed] = point;
+  const Word start = body + (relative_stride * ((form * relative_conditions) + selector));
+  auto seed = test::initial_state();
+  seed.pc = start;
+  seed.sr = mode | flags;
+  seed.r[0] = base;
+  seed.x = bank_seed;
+  auto expected = seed;
+  const Word retired = timed ? std::min(limit, 2U) : limit;
+  if (retired != 0) {
+    expected.x = (seed.x & ~std::uint64_t{word_mask}) | fixture.data[0];
+    ++expected.pc;
+  }
+  if (retired == 2) {
+    expected.pc = test::selection_model::test_condition({.status = seed.sr, .selector = selector})
+                      ? start + 5
+                      : start + 2 + form;
+  }
+  core.set_registers(seed);
+  const auto before = core.progress();
+  const auto data = fixture.data;
+  const auto known = fixture.known;
+  const auto result = timed ? core.run_until(before.estimated_cycles + limit) : core.run(limit);
+  require(
+      result.retired == retired && result.fault == Fault{} && core.registers() == expected &&
+          result.progress.instructions == before.instructions + retired &&
+          result.progress.estimated_cycles ==
+              before.estimated_cycles + (retired == 2 ? 5 + form : retired) &&
+          fixture.data == data && fixture.known == known && fixture.callbacks == 0,
+      "Relative regions preserve all flags, numeric modes, quota/cycle prefixes and known targets");
+}
+
+void relative_status(Core &core, Fixture &fixture, const Word mode, const Word flags) {
+  for (Word form = 0; form < relative_forms; ++form) {
+    for (Word selector = 0; selector < relative_conditions; ++selector) {
+      for (const bool timed : {false, true}) {
+        const Word last = timed ? 5 + form : 2U;
+        for (Word limit = 0; limit <= last; ++limit) {
+          relative_prefix(core,
+                          fixture,
+                          {.mode = mode,
+                           .flags = flags,
+                           .form = form,
+                           .selector = selector,
+                           .limit = limit,
+                           .timed = timed});
+        }
+      }
+    }
+  }
+}
+
+void relative_execution() {
+  Fixture fixture(relative_stride * relative_conditions * relative_forms);
+  std::ranges::fill(fixture.code, op(isa::Opcode::nop));
+  fixture.code.back() = op(isa::Opcode::stop);
+  std::vector<Word> entries;
+  for (Word routine = 0; routine < relative_conditions * relative_forms; ++routine) {
+    const Word form = routine / relative_conditions;
+    const Word selector = routine % relative_conditions;
+    const Word index = 2 + (relative_stride * routine);
+    entries.push_back(body + index - 2);
+    fixture.code[index] = op(isa::Opcode::move_x_effective) | (1U << 15) | (4U << 11);
+    fixture.code[index + 1] = form == 0
+                                  ? op(isa::Opcode::bcc_relative_short) | (selector << 12) | 4U
+                                  : op(isa::Opcode::bcc_relative_long) | selector;
+    if (form != 0) { fixture.code[index + 2] = 4; }
+    fixture.code[index + 2 + form] = op(isa::Opcode::stop);
+    fixture.code[index + 5] = op(isa::Opcode::stop);
+  }
+  const std::array spans{CodeSpan{.address = body, .words = std::span(fixture.code).subspan(2)}};
+  const std::array variants{
+      CodeVariant{.id = 0, .code = spans, .entries = entries, .failed_fetches = {}}};
+  const std::array memory{
+      RegionLayout{.space = Space::x, .first = base, .size = fixture.data.size(), .tracked = true}};
+  const std::array layouts{VariantLayout{.id = 0, .memory = memory}};
+  const auto semantic = Core::lower(
+      {.variants = variants},
+      {.memory = layouts, .interrupts = {}, .transitions = {}, .callbacks = {}, .bindings = {}});
+  const auto image = compile(semantic, false);
+  Core core(Memory::external(), &fixture);
+  core.install(image, 0);
+  for (const Word mode : modes) {
+    for (Word flags = 0; flags <= test::status_byte; ++flags) {
+      relative_status(core, fixture, mode, flags);
+    }
+  }
+}
+
 }
 
 int main() try {
+  relative_planning();
+  relative_execution();
   window_selection();
   mode_routing();
   ordinary_discovery();

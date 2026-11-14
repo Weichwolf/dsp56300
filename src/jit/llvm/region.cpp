@@ -1031,7 +1031,7 @@ bool region_independent(const std::span<const BlockInstruction> operations) {
   if (at_loop_end(last) || operations.front().pc > final_word) { return false; }
   const auto kind = last.instruction.operation;
   return kind == Operation::jump_short || kind == Operation::jump_effective ||
-         kind == Operation::conditional_jump;
+         kind == Operation::conditional_jump || kind == Operation::relative_branch;
 }
 
 bool region_candidate(const std::span<const BlockInstruction> operations,

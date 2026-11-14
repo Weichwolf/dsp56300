@@ -51,7 +51,11 @@ enum class Tail : std::uint8_t {
   conditional_short,
   jump_short,
   conditional_absolute,
-  jump_absolute
+  jump_absolute,
+  conditional_relative_short,
+  jump_relative_short,
+  conditional_relative_long,
+  jump_relative_long
 };
 
 struct Input {
@@ -69,16 +73,29 @@ unsigned transfer_destination(const Input input) {
   return input.test_load ? 14U + static_cast<unsigned>(input.source_b) : 5U;
 }
 
-bool absolute(const Input input) {
-  return input.tail == Tail::conditional_absolute || input.tail == Tail::jump_absolute;
+bool relative(const Input input) {
+  return input.tail == Tail::conditional_relative_short ||
+         input.tail == Tail::jump_relative_short || input.tail == Tail::conditional_relative_long ||
+         input.tail == Tail::jump_relative_long;
+}
+
+bool relative_long(const Input input) {
+  return input.tail == Tail::conditional_relative_long || input.tail == Tail::jump_relative_long;
+}
+
+bool extended(const Input input) {
+  return input.tail == Tail::conditional_absolute || input.tail == Tail::jump_absolute ||
+         relative_long(input);
 }
 
 bool unconditional(const Input input) {
   return input.tail == Tail::jump_register || input.tail == Tail::jump_short ||
-         input.tail == Tail::jump_absolute;
+         input.tail == Tail::jump_absolute || input.tail == Tail::jump_relative_short ||
+         input.tail == Tail::jump_relative_long;
 }
 
 Word tail_cost(const Input input) {
+  if (relative(input)) { return input.tail == Tail::conditional_relative_long ? 5U : 4U; }
   return input.tail == Tail::jump_register || input.tail == Tail::jump_short ? 3U : 4U;
 }
 
@@ -95,6 +112,19 @@ Word branch(const Input input) {
     case Tail::conditional_absolute:
       return named(Opcode::jcc_effective) | (6U << 11) | input.condition;
     case Tail::jump_absolute: return named(Opcode::jmp_effective) | (6U << 11);
+    case Tail::conditional_relative_short:
+    case Tail::jump_relative_short: {
+      constexpr Word displacement_mask = 511;
+      constexpr Word upper_displacement = 480;
+      constexpr Word lower_displacement = 31;
+      const Word displacement = input.target & displacement_mask;
+      return named(input.tail == Tail::jump_relative_short ? Opcode::bra_relative_short
+                                                           : Opcode::bcc_relative_short) |
+             (input.tail == Tail::jump_relative_short ? 0U : input.condition << 12) |
+             ((displacement & upper_displacement) << 1) | (displacement & lower_displacement);
+    }
+    case Tail::conditional_relative_long: return named(Opcode::bcc_relative_long) | input.condition;
+    case Tail::jump_relative_long: return named(Opcode::bra_relative_long);
     default: throw std::logic_error("Unknown independently authored branch form");
   }
 }
@@ -134,7 +164,7 @@ std::array<Word, length + 1> program(const Input input) {
           scalar_load(n1, 7, true),
           input.test_load ? scalar_load(transfer_destination(input), 7) | alu : moved,
           branch(input),
-          absolute(input) ? input.target : named(Opcode::rts)};
+          (extended(input)) ? input.target : named(Opcode::rts)};
 }
 
 struct Fixture final : Io {
@@ -204,7 +234,8 @@ Registers initial(const Input input, const Word mode) {
   auto state = register_model::seed(mode);
   state.pc = entry;
   state.sr = mode | (input.outer_loop ? lf : 0U) | input.flags;
-  state.la = input.at_tail ? entry + length - 1 + (absolute(input) ? 1U : 0U) : entry + outer_tail;
+  state.la =
+      input.at_tail ? entry + length - 1 + ((extended(input)) ? 1U : 0U) : entry + outer_tail;
   state.lc = input.loop_count;
   state.stack[state.sp % stack_entries] = std::uint64_t{entry} << word_bits;
   state.m.fill(input.modifier);
@@ -306,6 +337,24 @@ void finish_loop(Registers &state, const Input input) {
   }
 }
 
+Word branch_target(const Registers &state, const Input input) {
+  Word target = input.target;
+  constexpr Word target_mask = 0xfff;
+  if (relative(input)) {
+    const std::int64_t raw = input.target & (relative_long(input) ? word_mask : 511U);
+    const std::int64_t sign = relative_long(input) ? 8388608 : 256;
+    const auto displacement = raw >= sign ? raw - (sign * 2) : raw;
+    target =
+        static_cast<Word>(static_cast<std::int64_t>(entry + length - 1) + displacement) & word_mask;
+  }
+  if (input.tail == Tail::conditional_short || input.tail == Tail::jump_short) {
+    target &= target_mask;
+  } else if (input.tail == Tail::conditional_register || input.tail == Tail::jump_register) {
+    target = state.r[1];
+  }
+  return target;
+}
+
 void model_step(Registers &state, Data &data, const Input input) {
   const auto old = state;
   const auto step = state.pc - entry;
@@ -349,15 +398,9 @@ void model_step(Registers &state, Data &data, const Input input) {
           state, transfer_destination(input), input.test_load ? x.at(state.r[7] - base) : old.r[1]);
       break;
     case 8: {
-      if (absolute(input)) { ++state.pc; }
+      if (extended(input)) { ++state.pc; }
       if (unconditional(input) || selected(state, input.condition)) {
-        constexpr Word target_mask = 0xfff;
-        state.pc = input.target;
-        if (input.tail == Tail::conditional_short || input.tail == Tail::jump_short) {
-          state.pc &= target_mask;
-        } else if (input.tail == Tail::conditional_register || input.tail == Tail::jump_register) {
-          state.pc = state.r[1];
-        }
+        state.pc = branch_target(state, input);
       }
       finish_loop(state, input);
       return;
@@ -379,6 +422,9 @@ void direct(const Input input, const Word mode) {
   const auto seed = initial(input, mode);
   const auto runtime = fixture.runtime();
   const auto operations = detail::parse_block(fixture.p, seed, runtime);
+  require(operations.size() == length &&
+              operations.back().instruction.words == (extended(input) ? 2U : 1U),
+          "The authored tail width matches its decoded instruction extent");
   std::unique_ptr<detail::LlvmCompiler> compiler;
   const auto image = detail::compile_region(
       compiler, operations, runtime, std::bit_cast<const void *>(&forbidden));
@@ -621,6 +667,28 @@ int main() try {
     direct({.target = entry + length, .at_tail = true, .loop_count = count}, 0);
     direct({.flags = forever, .at_tail = true, .loop_count = count}, 0);
     prefixes({.at_tail = true, .loop_count = count}, 0);
+  }
+  for (const auto mode : modes) {
+    for (unsigned condition = 0; condition < 16; ++condition) {
+      for (const auto tail : {Tail::conditional_relative_short, Tail::conditional_relative_long}) {
+        direct({.condition = condition, .tail = tail}, mode);
+        direct({.condition = condition, .tail = tail, .test_flags = true}, mode);
+      }
+    }
+  }
+  for (const auto tail : {Tail::conditional_relative_short,
+                          Tail::conditional_relative_long,
+                          Tail::jump_relative_short,
+                          Tail::jump_relative_long}) {
+    for (const Word offset : {0U, 1U, 255U, 256U, 511U, 0x7fffffU, 0x800000U, word_mask}) {
+      direct({.target = offset, .condition = 10, .tail = tail}, 0);
+      direct({.target = offset, .condition = 10, .alias = true, .tail = tail}, 0);
+    }
+    for (const auto count : {0U, 1U, 2U}) {
+      direct({.target = 1, .tail = tail, .at_tail = true, .loop_count = count}, 0);
+      direct({.target = 1, .flags = forever, .tail = tail, .at_tail = true, .loop_count = count},
+             0);
+    }
   }
   resumed_do_body();
   ordinary_copy_region();

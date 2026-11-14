@@ -187,9 +187,15 @@ private:
     ir_.CreateStore(ir_.CreateSub(window, cost), window_);
     ir_.CreateStore(next, pc_);
     const auto end = (region.last_pc + region.last_words) & word_mask;
-    auto *transfer = ir_.CreateSwitch(next, exits_.at(ImageExit::unprepared), 2);
-    transfer->addCase(ir_.getInt32(pc), successor(pc));
-    if (end != pc) { transfer->addCase(ir_.getInt32(end), successor(end)); }
+    std::set<Word> targets{pc, end};
+    for (const auto target : edges_.at(region.last_pc)) {
+      if (targets_.contains(target)) { targets.insert(target); }
+    }
+    auto *transfer = ir_.CreateSwitch(
+        next, exits_.at(ImageExit::unprepared), static_cast<unsigned>(targets.size()));
+    for (const auto target : targets) {
+      transfer->addCase(ir_.getInt32(target), successor(target));
+    }
   }
 
   void emit_regions(const Word pc, Value *count, Value *window) {

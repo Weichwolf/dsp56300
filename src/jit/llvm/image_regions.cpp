@@ -27,7 +27,7 @@ bool ordinary(const Operation kind) {
 
 bool terminal(const Operation kind) {
   return kind == Operation::jump_short || kind == Operation::jump_effective ||
-         kind == Operation::conditional_jump;
+         kind == Operation::conditional_jump || kind == Operation::relative_branch;
 }
 
 auto body(const ImagePlan &plan, const Word first, const Word last) {
