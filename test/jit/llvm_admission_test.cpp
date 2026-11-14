@@ -29,6 +29,7 @@ using namespace dsp56300;
 using namespace dsp56300::detail;
 using Data = std::array<Word, 8>;
 constexpr Word entry = 2, loop_flag_bit = 1U << 15;
+constexpr Word ring_modifier = 0x8003, ring_size = 4;
 using Admission = std::uint64_t (*)(const Cpu *, const NativeContext *);
 
 void require(const bool ok, const char *message) {
@@ -78,8 +79,12 @@ bool exercise(const Frame &frame, const Input input) {
           "Admission changes no guest, owner or RAM byte");
   const std::array<std::uint64_t, 3> limits{count, credit / 2, 8};
   const auto turns = std::ranges::min(limits);
-  const bool fits = turns != 0 && modifier == word_mask && source < 8 && destination < 8 &&
-                    turns <= 8 - source && turns <= 8 - destination;
+  const auto ring_origin = std::uint64_t{destination / ring_size} * ring_size;
+  const bool destination_fits =
+      modifier == word_mask ? destination < data.size() && turns <= data.size() - destination
+                            : modifier == ring_modifier && ring_origin + ring_size <= data.size();
+  const bool fits =
+      turns != 0 && source < data.size() && turns <= data.size() - source && destination_fits;
   const auto expected = fits ? turns * 2 : 0;
   if (bound != expected) {
     std::cerr << "source=" << source << " destination=" << destination << " count=" << count
@@ -92,12 +97,15 @@ bool exercise(const Frame &frame, const Input input) {
     auto expected_data = before_data;
     auto expected_registers = cpu.reg;
     for (std::uint64_t turn = 0; turn < turns; ++turn) {
-      expected_registers.x = expected_data[static_cast<std::size_t>(source + turn)];
-      expected_data[static_cast<std::size_t>(destination + turn)] =
-          static_cast<Word>(expected_registers.x);
+      expected_registers.x = expected_data[expected_registers.r[0]++];
+      expected_data[expected_registers.r[1]] = static_cast<Word>(expected_registers.x);
+      if (modifier == ring_modifier) {
+        expected_registers.r[1] = static_cast<Word>(
+            ring_origin + ((expected_registers.r[1] - ring_origin + 1) % ring_size));
+      } else {
+        ++expected_registers.r[1];
+      }
     }
-    expected_registers.r[0] += static_cast<Word>(turns);
-    expected_registers.r[1] += static_cast<Word>(turns);
     if (turns == count) {
       expected_registers.pc = entry + 2;
       expected_registers.sr = expected_registers.sp = expected_registers.sc =
@@ -126,7 +134,7 @@ Counts matrix(const Frame &frame) {
     for (const Word destination : {0U, 1U, 3U, 4U, 6U, 7U, 8U, word_mask}) {
       for (const Word count : {1U, 2U, 3U, 4U, 8U}) {
         for (const std::uint64_t credit : {0U, 1U, 2U, 3U, 4U, 6U, 16U}) {
-          for (const Word modifier : {word_mask, 0x8003U, 0U}) {
+          for (const Word modifier : {word_mask, ring_modifier, 0U}) {
             result.accepted += static_cast<unsigned>(exercise(frame,
                                                               {.source = source,
                                                                .destination = destination,
@@ -458,7 +466,7 @@ int main() try {
   const auto pointers = pointer_cases::run();
   constexpr unsigned copy_count = 7 * 8 * 5 * 7 * 3;
   constexpr unsigned pointer_count = 3 * 7 * 7 * 3 * 7;
-  constexpr unsigned copy_admitted = 571;
+  constexpr unsigned copy_admitted = 571 + 630;
   constexpr unsigned pointer_admitted = 735;
   copy_cases::require(copies.cases == copy_count && copies.accepted == copy_admitted &&
                           pointers.cases == pointer_count && pointers.accepted == pointer_admitted,

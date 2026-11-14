@@ -32,6 +32,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace dsp56300::detail {
@@ -56,6 +57,8 @@ std::optional<std::size_t> admission_prefix(const RegionPlan &plan) {
   return count;
 }
 
+enum class BatchAddressing : std::uint8_t { automatic, linear, general };
+
 class RegionLifter {
 public:
   RegionLifter(LlvmModule &module,
@@ -63,11 +66,13 @@ public:
                const void *fallback,
                const std::string_view entry = {},
                const bool admission_only = false,
-               const std::size_t admission_steps = 0)
+               const std::size_t admission_steps = 0,
+               const BatchAddressing addressing = BatchAddressing::automatic)
       : context_(module.context()),
         function_(make_function(module, entry, admission_only)),
         ir_(context_, LLVMAppendBasicBlockInContext(context_, function_, "entry")),
         plan_(plan),
+        addressing_(addressing),
         dynamic_(fallback == nullptr),
         self_loop_(!admission_only && dynamic_ && !plan_.batch &&
                    region_independent(plan_.operations) && plan_.control.valid &&
@@ -78,7 +83,10 @@ public:
     for (unsigned bank = 0; bank < bindings_.size(); ++bank) {
       bindings_[bank].resize(plan_.windows[bank].size());
     }
-    if (admission_only) {
+    if (plan_.batch && addressing_ == BatchAddressing::automatic &&
+        std::ranges::any_of(plan_.agu, [](bool used) { return used; })) {
+      generate_versions(module, fallback, admission_only, admission_steps);
+    } else if (admission_only) {
       generate_admission(admission_steps);
     } else if (self_loop_) {
       generate_self_loop();
@@ -106,6 +114,56 @@ private:
     auto *function = LLVMAddFunction(
         module.code(), entry.empty() ? module.name().c_str() : std::string(entry).c_str(), type);
     return function;
+  }
+
+  void generate_versions(LlvmModule &module,
+                         const void *fallback,
+                         const bool admission_only,
+                         const std::size_t admission_steps) {
+    const std::string name = LLVMGetValueName(function_);
+    const RegionLifter linear(module,
+                              plan_,
+                              fallback,
+                              name + ".linear",
+                              admission_only,
+                              admission_steps,
+                              BatchAddressing::linear);
+    const RegionLifter general(module,
+                               plan_,
+                               fallback,
+                               name + ".general",
+                               admission_only,
+                               admission_steps,
+                               BatchAddressing::general);
+    auto *all_linear = boolean(true);
+    for (unsigned index = 0; index < agu_registers; ++index) {
+      if (!plan_.agu[index]) { continue; }
+      auto *modifier = ir_.CreateAnd(reg(32, offsetof(Registers, m) + (index * sizeof(Word))),
+                                     ir_.getInt32(modifier_mask));
+      all_linear =
+          ir_.CreateAnd(all_linear, ir_.CreateICmpEQ(modifier, ir_.getInt32(modifier_mask)));
+    }
+    auto *first = LLVMAppendBasicBlockInContext(context_, function_, "linear");
+    auto *second = LLVMAppendBasicBlockInContext(context_, function_, "general");
+    LLVMBuildCondBr(ir_.get(), all_linear, first, second);
+    for (const auto [block, target] :
+         {std::pair{first, linear.function_}, std::pair{second, general.function_}}) {
+      LLVMSetLinkage(target, LLVMInternalLinkage);
+      LLVMAddAttributeAtIndex(
+          target,
+          static_cast<LLVMAttributeIndex>(LLVMAttributeFunctionIndex),
+          LLVMCreateEnumAttribute(
+              context_, LLVMGetEnumAttributeKindForName("alwaysinline", 12), 0));
+      ir_.SetInsertPoint(block);
+      std::array arguments{cpu_, owner_};
+      LLVMBuildRet(ir_.get(),
+                   LLVMBuildCall2(ir_.get(),
+                                  LLVMGlobalGetValueType(target),
+                                  target,
+                                  arguments.data(),
+                                  arguments.size(),
+                                  ""));
+    }
   }
 
   V address(V base, const std::size_t offset) {
@@ -203,7 +261,7 @@ private:
       auto *modifier = ir_.CreateAnd(reg(32, offsetof(Registers, m) + (index * sizeof(Word))),
                                      ir_.getInt32(modifier_mask));
       auto *linear = ir_.CreateICmpEQ(modifier, ir_.getInt32(modifier_mask));
-      if (plan_.batch) { require(linear); }
+      if (plan_.batch && addressing_ == BatchAddressing::linear) { require(linear); }
       auto *mask = ir_.CreateAnd(modifier, ir_.getInt32(multiple_wrap_mask));
       auto *ring = ir_.CreateAnd(
           ir_.CreateICmpEQ(
@@ -396,6 +454,14 @@ private:
           first = ir_.CreateAdd(first, travel);
         } else {
           last = ir_.CreateAdd(last, travel);
+        }
+        if (plan_.agu[index] && addressing_ != BatchAddressing::linear) {
+          auto *linear = ir_.CreateICmpEQ(masks_[index], ir_.getInt32(word_mask));
+          auto *ring_begin = ir_.CreateZExt(origins_[index], ir_.getInt64Ty());
+          auto *ring_end =
+              ir_.CreateAdd(ring_begin, ir_.CreateZExt(masks_[index], ir_.getInt64Ty()));
+          first = ir_.CreateSelect(linear, first, ring_begin);
+          last = ir_.CreateSelect(linear, last, ring_end);
         }
         memory_bases_[bank][index] =
             select_window(bank, {.first = first, .last = last}, extent.writing);
@@ -1012,6 +1078,7 @@ private:
   LLVMValueRef function_;
   llvm19::Builder ir_;
   const RegionPlan &plan_;
+  BatchAddressing addressing_;
   bool dynamic_, self_loop_;
   V cpu_, owner_, initial_cycles_ = nullptr, initial_instructions_ = nullptr;
   V status_ = nullptr, lc_ = nullptr, sp_ = nullptr, sc_ = nullptr, saved_ = nullptr;

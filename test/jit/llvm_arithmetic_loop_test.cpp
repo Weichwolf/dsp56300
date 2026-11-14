@@ -22,6 +22,7 @@ constexpr Word entry = 8, setup = entry - 2;
 constexpr Word lf = 1U << 15, forever = 1U << 16;
 constexpr Word host_bits = 0xab000000, previous_la = 0x123, previous_lc = 0x456;
 constexpr Word pair = static_cast<Word>(move_xy), byte = 0xff;
+constexpr Word first_ring = 0x8003, second_ring = 0x8007, irq_vector = 2, ring_turns = 9;
 constexpr Word load = pair | (1U << 15) | (1U << 22);
 constexpr Word store = pair | (2U << 18) | (3U << 16) | (3U << 11) | (3U << 20);
 constexpr std::array body{load | (static_cast<Word>(mpy_register_a) & byte) | (5U << 4),
@@ -35,6 +36,7 @@ using Data = std::array<Word, extent>;
 
 struct Input {
   Word mode = 0, count = 3, flags = 0;
+  bool ring = false;
 };
 
 struct Banks {
@@ -43,6 +45,7 @@ struct Banks {
 
 struct Fixture {
   Fixture() {
+    p[irq_vector] = p[irq_vector + 1] = static_cast<Word>(nop);
     p[setup] = static_cast<Word>(do_immediate) | (3U << 8);
     p[setup + 1] = entry + body.size() - 1;
     for (std::size_t i = 0; i < body.size(); ++i) { p[entry + i] = body[i]; }
@@ -58,7 +61,7 @@ struct Fixture {
   }
 
   static Registers state(const Input input) {
-    const auto [mode, count, flags] = input;
+    const auto [mode, count, flags, ring] = input;
     auto result = register_model::seed(mode);
     result.pc = entry;
     result.m.fill(word_mask);
@@ -69,12 +72,26 @@ struct Fixture {
     result.stack[1] = (std::uint64_t{previous_la} << word_bits) | previous_lc;
     result.r[0] = 4;
     result.r[4] = 5;
+    if (ring) {
+      result.m[0] = first_ring;
+      result.m[4] = second_ring;
+    }
     return result;
   }
 
   std::array<Word, extent> p{};
   Data x{}, y{};
 };
+
+void advance(Word &cursor, const Word modifier) {
+  if (modifier == word_mask) {
+    ++cursor;
+    return;
+  }
+  const auto length = (modifier & 0x3fff) + 1;
+  const auto origin = (cursor / length) * length;
+  cursor = origin + ((cursor + 1) % length);
+}
 
 void step(Registers &current, const Banks data) {
   const auto &[x, y] = data;
@@ -88,8 +105,10 @@ void step(Registers &current, const Banks data) {
   } else if (offset == 3) {
     const auto left = register_model::bus_word(current, old.a);
     const auto right = register_model::bus_word(current, old.b);
-    x[current.r[0]++] = left;
-    y[current.r[4]++] = right;
+    x[current.r[0]] = left;
+    y[current.r[4]] = right;
+    advance(current.r[0], current.m[0]);
+    advance(current.r[4], current.m[4]);
   }
   sequence_model::alu(current, old, body[offset]);
   ++current.pc;
@@ -164,12 +183,85 @@ void prefixes(const Word mode, const bool alias) {
     }
   }
 }
+
+void ring_interrupts(const NativeImage &image,
+                     Fixture &fixture,
+                     const Input input,
+                     const bool alias) {
+  constexpr Word slots = 2;
+  constexpr Word limit = slots + (ring_turns * body.size());
+  for (Word prefix = 0; prefix <= limit; ++prefix) {
+    fixture.reset();
+    auto expected_x = fixture.x;
+    auto expected_y = fixture.y;
+    auto expected = Fixture::state(input);
+    Core core(Memory::separate({.program = fixture.p,
+                                .x = fixture.x,
+                                .y = alias ? std::span(fixture.x) : std::span(fixture.y)}));
+    core.set_registers(expected);
+    core.install(image, 0);
+    require(core.interrupt_ready(), "The ring context admits its prepared fast interrupt");
+    core.request_interrupt(irq_vector, 3);
+    for (Word step_index = slots; step_index < prefix; ++step_index) {
+      step(expected, {.x = expected_x, .y = alias ? expected_x : expected_y});
+    }
+    const auto result = prefix % 2 == 0 ? core.run(prefix) : core.run_until(prefix);
+    require(result.retired == prefix && result.fault == Fault{} &&
+                result.progress == Progress{.instructions = prefix, .estimated_cycles = prefix} &&
+                core.registers() == expected && fixture.x == expected_x && fixture.y == expected_y,
+            "A captured fast IRQ preserves every resumed arithmetic ring prefix and DO frame");
+  }
+}
+
+void ring_prefixes(const Word mode, const bool alias) {
+  Fixture fixture;
+  const std::array spans{
+      CodeSpan{.address = irq_vector, .words = std::span(fixture.p).subspan(irq_vector, 2)},
+      CodeSpan{.address = setup, .words = std::span(fixture.p).subspan(setup, body.size() + 3)}};
+  constexpr std::array entries{entry};
+  const std::array variants{
+      CodeVariant{.id = 0, .code = spans, .entries = entries, .failed_fetches = {}}};
+  const std::array memory{RegionLayout{.space = Space::program, .first = 0, .size = extent},
+                          RegionLayout{.space = Space::x, .first = 0, .size = extent},
+                          RegionLayout{.space = Space::y, .first = 0, .size = extent}};
+  const std::array layouts{VariantLayout{.id = 0, .memory = memory}};
+  constexpr std::array interrupts{InterruptRequest{.vector = irq_vector, .level = 3}};
+  const auto image = Core::compile({.variants = variants},
+                                   {.memory = layouts,
+                                    .interrupts = interrupts,
+                                    .transitions = {},
+                                    .callbacks = {},
+                                    .bindings = {}});
+  Core core(Memory::separate({.program = fixture.p,
+                              .x = fixture.x,
+                              .y = alias ? std::span(fixture.x) : std::span(fixture.y)}));
+  core.set_registers(Fixture::state({.mode = mode, .ring = true}));
+  core.install(image, 0);
+  for (const Word flags : {0U, byte, forever, forever | byte}) {
+    for (const Word count : {0U, 1U, ring_turns}) {
+      const auto total = (count == 0 || (flags & forever) != 0 ? ring_turns : count) * body.size();
+      for (Word prefix = 0; prefix <= total; ++prefix) {
+        check(core,
+              fixture,
+              {.mode = mode, .count = count, .flags = flags, .ring = true},
+              alias,
+              prefix);
+      }
+    }
+  }
+  for (const Word flags : {0U, byte}) {
+    ring_interrupts(
+        image, fixture, {.mode = mode, .count = ring_turns, .flags = flags, .ring = true}, alias);
+  }
+}
 }
 
 int main() try {
   for (const Word mode : modes) {
     prefixes(mode, false);
     prefixes(mode, true);
+    ring_prefixes(mode, false);
+    ring_prefixes(mode, true);
   }
 } catch (const std::exception &error) {
 

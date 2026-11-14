@@ -858,6 +858,171 @@ void relative_execution() {
   }
 }
 
+constexpr Word wrap_modifier = 0x8003, wrap_raw_modifier = 0x128003, wrap_modifier_bits = 0xffff;
+
+struct WrappedCase {
+  Word mode, source, output, limit;
+  bool timed = false, overlap = false, noncanonical = false, upper = false;
+  Word modifier = 0;
+};
+
+void wrapped(const NativeImage &image, const WrappedCase &scenario) {
+  const auto &[mode, source, output, limit, timed, overlap, noncanonical, upper, modifier] =
+      scenario;
+  constexpr Word length = 3;
+  Fixture fixture(length);
+  const Word target = overlap ? 0U : destination;
+  auto seed = initial(fixture, mode);
+  seed.r[0] = base + source;
+  seed.r[1] = base + target + output;
+  seed.m[0] = upper ? wrap_raw_modifier : wrap_modifier;
+  if (modifier != 0) { seed.m[0] = modifier; }
+  seed.m[1] = wrap_modifier;
+  if (noncanonical) { fixture.known[target + 2] = 2; }
+  auto expected = seed;
+  auto wanted = fixture.data;
+  auto known = fixture.known;
+  const auto retired = std::min(limit, length * turns);
+  const auto next = [](Word at) { return (at & ~Word{3}) | ((at + 1) & 3); };
+  for (Word step = 0; step < retired; ++step) {
+    const auto turn = step / length;
+    const auto slot = step % length;
+    if (slot == 0) {
+      expected.x = wanted[expected.r[0] - base];
+      expected.r[0] = next(expected.r[0]);
+    }
+    if (slot == length - 1) {
+      wanted[expected.r[1] - base] = static_cast<Word>(expected.x);
+      known[expected.r[1] - base] = 1;
+      expected.r[1] = next(expected.r[1]);
+      if (turn + 1 == turns) {
+        test::loop_frames::complete(expected);
+      } else {
+        --expected.lc;
+      }
+    }
+    expected.pc = slot == length - 1 && turn + 1 < turns ? body : body + slot + 1;
+  }
+  Core core(Memory::external(), &fixture);
+  core.set_registers(seed);
+  core.install(image, 0);
+  const auto result = timed ? core.run_until(limit) : core.run(limit);
+  require(result.retired == retired && result.fault == Fault{} &&
+              result.progress == Progress{.instructions = retired, .estimated_cycles = retired} &&
+              core.registers() == expected && fixture.data == wanted && fixture.known == known &&
+              fixture.callbacks == 0,
+          "Wrapped prepared batches preserve exact public quota/deadline prefixes and aliases");
+}
+
+void wrapped_unknown(const NativeImage &image, bool after_install) {
+  constexpr Word length = 3;
+  constexpr Word missing = 1;
+  Fixture fixture(length);
+  auto seed = initial(fixture, 0);
+  seed.r[0] = base + 3;
+  seed.m[0] = seed.m[1] = wrap_modifier;
+  auto expected = seed;
+  auto wanted = fixture.data;
+  if (!after_install) { fixture.known[missing] = 0; }
+  for (Word turn = 0; turn < 2; ++turn) {
+    const Word at = turn == 0 ? 3U : 0U;
+    expected.x = wanted[at];
+    wanted[destination + turn] = static_cast<Word>(expected.x);
+    ++expected.r[1];
+    --expected.lc;
+  }
+  expected.r[0] = base + 2;
+  expected.pc = body + 1;
+  Core core(Memory::external(), &fixture);
+  core.set_registers(seed);
+  core.install(image, 0);
+  if (after_install) { fixture.known[missing] = 0; }
+  const auto result = core.run(length * turns);
+  require(result.retired == 6 &&
+              result.progress == Progress{.instructions = 6, .estimated_cycles = 6} &&
+              result.fault == Fault{.kind = FaultKind::memory_read,
+                                    .space = Space::x,
+                                    .address = base + missing,
+                                    .pc = body} &&
+              core.registers() == expected && fixture.data == wanted &&
+              fixture.known[missing] == 0 && fixture.callbacks == 1,
+          "A whole-ring knowledge refusal retains exact wrapped prefix and fault state");
+}
+
+void wrapped_invalid_modifier(const NativeImage &image) {
+  for (const Word modifier : {0x8000U, 0x8002U, 0xc003U, 0x128002U}) {
+    Fixture fixture(3);
+    auto seed = initial(fixture, 0);
+    seed.m[0] = modifier;
+    auto expected = seed;
+    ++expected.pc;
+    const auto wanted = fixture.data;
+    Core core(Memory::external(), &fixture);
+    core.set_registers(seed);
+    core.install(image, 0);
+    const auto result = core.run(12);
+    require(result.retired == 0 && result.progress == Progress{} &&
+                result.fault == Fault{.kind = FaultKind::unsupported_mode,
+                                      .space = Space::program,
+                                      .address = body,
+                                      .value = modifier & wrap_modifier_bits,
+                                      .pc = body} &&
+                core.registers() == expected && fixture.data == wanted && fixture.callbacks == 0,
+            "Invalid ring modes retain the original first-instruction fault before RAM effects");
+  }
+}
+
+void wrapped_aliases(const NativeImage &image, WrappedCase scenario) {
+  for (const bool overlap : {false, true}) {
+    for (const bool noncanonical : {false, true}) {
+      for (const bool upper : {false, true}) {
+        scenario.overlap = overlap;
+        scenario.noncanonical = noncanonical;
+        scenario.upper = upper;
+        wrapped(image, scenario);
+      }
+    }
+  }
+}
+
+void wrapped_conventional(const NativeImage &image) {
+  for (const Word mode : modes) {
+    for (Word offset = 0; offset < 4; ++offset) {
+      for (Word limit = 0; limit <= 3 * turns; ++limit) {
+        for (const bool timed : {false, true}) {
+          wrapped(image,
+                  {.mode = mode,
+                   .source = offset,
+                   .output = (offset + 1) & 3,
+                   .limit = limit,
+                   .timed = timed,
+                   .modifier = 3});
+        }
+      }
+    }
+  }
+}
+
+void wrapped_execution(const NativeImage &image) {
+  for (const Word mode : modes) {
+    for (Word source = 0; source < 4; ++source) {
+      for (Word output = 0; output < 4; ++output) {
+        for (Word limit = 0; limit <= 3 * turns; ++limit) {
+          for (const bool timed : {false, true}) {
+            wrapped_aliases(
+                image,
+                {.mode = mode, .source = source, .output = output, .limit = limit, .timed = timed});
+          }
+        }
+      }
+    }
+  }
+  wrapped_conventional(image);
+  wrapped_invalid_modifier(image);
+  wrapped_unknown(image, false);
+  wrapped_unknown(image, true);
+}
+
 }
 
 int main() try {
@@ -872,6 +1037,7 @@ int main() try {
   constexpr Word long_length = 70;
   Fixture fixture(short_length);
   const auto image = compile(lower(fixture));
+  wrapped_execution(image);
   unknown(image);
   unknown(image, true);
   metadata_alias(image);
