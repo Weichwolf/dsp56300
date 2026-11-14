@@ -88,10 +88,12 @@ struct Bus final : Io {
   Progress observed{};
   Write access;
   bool called = false;
+  std::uint64_t prefix = infinite;
 
   bool observe(const Write value) noexcept {
     called = true;
     observed = core->progress();
+    prefix = core->foreground_prefix();
     access = value;
     return false;
   }
@@ -151,14 +153,63 @@ void foreground() {
   detail::Cpu cpu;
   cpu.reg = machine.core.registers();
   require(detail::native_prefix(source.instructions, {}, prepared, cpu) == 2 &&
-              unchanged(machine.core.state(), before) && !machine.bus.called,
+              machine.core.foreground_prefix() == 2 && unchanged(machine.core.state(), before) &&
+              !machine.bus.called,
           "Ordinary prefix inspection executes no guest, owner call or clock change");
   const auto result = machine.core.run(16);
   require(result.fault.kind == FaultKind::io_write && machine.bus.observed.estimated_cycles == 2 &&
               machine.bus.observed.instructions == 2 && machine.bus.access.space == Space::x &&
               machine.bus.access.address == port && machine.bus.access.pc == entry + 2 &&
-              machine.bus.access.value == datum,
+              machine.bus.access.value == datum && machine.bus.prefix == 0,
           "The real public native image first calls its owner after exactly two NOPs");
+  require(machine.core.foreground_prefix() == 0 && machine.core.state().failure == result.fault,
+          "A faulted native owner has no guarantee and retains its exact failure");
+}
+
+void public_contexts() {
+  constexpr std::array addresses{entry + 1, entry + 2, pure, Word{0x1f0}};
+  constexpr std::array<std::uint64_t, 4> expected{1, 0, infinite, 0};
+  std::array<Word, 32> scratch{};
+  const Core empty(Memory::unified(scratch));
+  require(empty.foreground_prefix() == 0,
+          "An uninstalled DSP has no native event-prefix guarantee");
+  for (std::size_t index = 0; index < addresses.size(); ++index) {
+    Machine machine;
+    auto registers = machine.core.registers();
+    registers.pc = addresses[index];
+    machine.core.set_registers(registers);
+    const auto before = machine.core.state();
+    require(machine.core.foreground_prefix() == expected[index] &&
+                unchanged(machine.core.state(), before) && !machine.bus.called,
+            "Public native queries preserve exact state and honor prepared control boundaries");
+  }
+  Machine pending;
+  pending.core.request_interrupt(vector, 0);
+  const auto before = pending.core.state();
+  require(pending.core.foreground_prefix() == 0 && unchanged(pending.core.state(), before) &&
+              !pending.bus.called,
+          "A captured vector cannot borrow its suspended foreground guarantee");
+}
+
+void fixed_layout() {
+  Machine machine;
+  const auto spans = streams();
+  constexpr std::array entries{entry, pure, output, repeated};
+  const std::array variants{
+      CodeVariant{.id = 0, .code = spans, .entries = entries, .failed_fetches = {}}};
+  const std::array memory{
+      RegionLayout{.space = Space::program, .first = 0, .size = machine.program.size()},
+      RegionLayout{.space = Space::x, .first = 0, .size = machine.x.size()},
+      RegionLayout{.space = Space::y, .first = 0, .size = machine.y.size()}};
+  const std::array layouts{VariantLayout{.id = 0, .memory = memory}};
+  const auto native = Core::compile(
+      {.variants = variants},
+      {.memory = layouts, .interrupts = {}, .transitions = {}, .callbacks = {}, .bindings = {}});
+  machine.core.install(native, 0);
+  const auto before = machine.core.state();
+  require(machine.core.foreground_prefix() == 2 && unchanged(machine.core.state(), before) &&
+              !machine.bus.called,
+          "A validated fixed memory binding retains its read-only native prefix");
 }
 
 void inserted_vectors() {
@@ -222,6 +273,7 @@ void retained_control() {
   inherited.sp = inherited.sc = 2;
   inherited.stack[2] = std::uint64_t{output} << word_bits;
   loop.core.set_registers(inherited);
+  require(loop.core.foreground_prefix() == 0, "A retained DO rejects an ordinary native guarantee");
   require(loop.core.run(16).fault.kind == FaultKind::io_write && loop.bus.access.pc == output &&
               loop.bus.observed.estimated_cycles == 1,
           "Real inherited DO state reaches an earlier owner call than the ordinary two-NOP path");
@@ -229,7 +281,8 @@ void retained_control() {
   auto initial = rep.core.registers();
   initial.pc = repeated;
   rep.core.set_registers(initial);
-  require(rep.core.run(1).retired == 1 && !rep.core.interrupt_ready(),
+  require(rep.core.run(1).retired == 1 && !rep.core.interrupt_ready() &&
+              rep.core.foreground_prefix() == repeat_count,
           "A real prepared REP suppresses IRQ admission throughout its repeated body");
   cpu.reg.sr = 0;
   cpu.reg.pc = repeated + 1;
@@ -282,6 +335,8 @@ void memory_grants() {
 
 int main() try {
   foreground();
+  public_contexts();
+  fixed_layout();
   inserted_vectors();
   stack_fault();
   retained_control();

@@ -254,6 +254,10 @@ public:
   [[nodiscard]] State state() const;
   // Completed nominal work; does not materialize a register snapshot.
   [[nodiscard]] Progress progress() const noexcept;
+  // Stopped-owner foreground guarantee in nominal cycles, excluding asynchronous IRQs.
+  // State/code/binding changes invalidate it; zero is uncertified, UINT64_MAX is unbounded.
+  // Executes no guest or bus I/O.
+  [[nodiscard]] std::uint64_t foreground_prefix() const;
   // Explicit host programming; ordinary data may be accessed through borrowed memory.
   void load(Space space, Word address, std::span<const Word> words);
   // Compile established immutable code without executing instructions or device I/O.

@@ -10,6 +10,7 @@
 #include "jit.hpp"
 #include "jit/llvm/image.hpp"
 #include "jit/llvm/region_memory.hpp"
+#include "jit/prefixes.hpp"
 #include "program_cache.hpp"
 
 #include <algorithm>
@@ -111,6 +112,22 @@ void handle_image_miss(auto &core,
   }
 }
 
+}
+
+std::uint64_t Core::foreground_prefix() const {
+  const auto &self = *impl_;
+  if (self.executing || self.fault != Fault{} || !self.image_ready || self.next_images != nullptr ||
+      self.active_image == nullptr ||
+      (self.active_image->fixed_memory && !self.image_storage_admitted) ||
+      self.vector.phase != Impl::VectorPhase::none || self.instruction_cache_active() ||
+      (self.external && self.program_omr != self.cpu.reg.omr) ||
+      (self.io != nullptr && self.image_revision != dsp56300_io_revision(*self.io))) {
+    return 0;
+  }
+  return detail::native_prefix(self.active_image->instructions,
+                               self.active_image->memory,
+                               self.active_image->prefixes,
+                               self.cpu);
 }
 
 void Core::install(const NativeImage &image, const std::uint64_t variant) {

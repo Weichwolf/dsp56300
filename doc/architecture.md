@@ -81,6 +81,11 @@ or emission; no production interpreter or ordinary-emitter coverage fallback.
 
 ## Native code and validation
 
+Expose `Core::foreground_prefix()` as a stopped-owner guarantee in nominal
+cycles before a possible owner access or context boundary. Zero certifies nothing;
+an unbounded pure cycle is not an incoming-IRQ horizon. Relevant state, code or
+binding changes invalidate the result. Admission changes no guest state or time.
+
 Build natural connected CFG/SSA regions, functions and loops, independent of
 quotas and catalogue entry density. Preserve all declared starts without turning
 each into a function boundary. Link known successors directly, use prepared
