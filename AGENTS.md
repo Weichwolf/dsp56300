@@ -27,9 +27,12 @@ the complete original Blofeld instrument in blofeld-emu at >=10x offline
 ## Freedom
 
 APIs, state layouts, LLVM composition, tools, test strategy, caching of validated
-code in development, and the order of work are your choice. Repository
-boundaries are organizational. Change an interface when it obstructs the
-instrument.
+code in development, and the order of work are your choice. Change an interface
+when it obstructs the instrument, but keep the core generic: it must stay usable
+for other audio hardware built on a DSP56300. No Blofeld addresses, firmware
+hashes, device models or instrument-specific special cases in this repository.
+The consumer supplies all knowledge about the executed code (code inventory,
+entries, variants, memory layout, devices, timing) through the public interface.
 
 ## Working together
 
