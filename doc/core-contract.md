@@ -1,4 +1,4 @@
-# Common core contract, version 1
+# Common core contract, version 2
 
 Every processor core in this family (cpu12, dsp56300, armv5, sharc and later
 ones) follows this contract. The file is identical in all core repositories; a
@@ -79,13 +79,65 @@ could a second device on this processor use the core without a core change?
   on the owner and must not re-enter execution. `CallbackBinding` lets the
   consumer replace a role by a symbol in its linked IR.
 
-## 7. Verification layout
+## 7. Verification
 
-`test/isa` (independently authored instruction-set programs and expectations),
-`test/core` (interface and lifecycle), `test/jit` (lowering through LLVM),
-`test/bench`. No manufacturer firmware or sequences extracted from it in a core.
+Keep the suite small enough to read. Three layers, nothing else:
 
-## 8. Outside the contract
+- `test/isa`: independently authored instruction-set programs with independently
+  computed expectations, organized by operation class, addressing mode and
+  numeric mode. This is where coverage lives.
+- `test/core`: the public interface and lifecycle of sections 3 to 6, including
+  exact run bounds, faults, interrupts, code change and save/restore.
+- `test/bench`: the common benchmarks of section 8, which also run as
+  correctness tests because every kernel checks its complete output.
+
+No tests of internal data structures, of one lowering strategy, or of a path
+that production does not execute. No manufacturer firmware or sequences
+extracted from it in a core; firmware-level tests belong to the consumer.
+
+## 8. Common benchmarks
+
+Every core carries the same six kernels in `test/bench`, written in that core's
+assembly from one shared definition. Fixed inputs, complete bit-exact expected
+output computed by an independent reference, sizes chosen so one run retires at
+least ten million guest instructions.
+
+| Id | Kernel | Exercises |
+|---|---|---|
+| K1 | Block FIR, 64 taps over 1024 samples | multiply-accumulate in a hardware or counted loop |
+| K2 | Cascade of 4 biquads over 1024 samples | feedback state, rounding, saturation |
+| K3 | 256-point radix-2 complex FFT | address arithmetic, tables, nested loops |
+| K4 | Control: table-driven state machine with calls | branches, subroutine calls, stack, indirect transfers |
+| K5 | Block copy with running checksum, 4096 words | loads, stores, loop overhead |
+| K6 | K1 under event load | a run bound every 256 base cycles and one interrupt per 4096, handler increments a counter |
+
+A core whose instruction set lacks a concept uses its natural equivalent
+(fixed-point or floating-point as the processor provides) and documents it in
+`test/bench/README.md`. K6 measures the cost of bounds and events, which
+dominates a real multi-processor emulator and appears in no hardware benchmark.
+
+Reported for every kernel, on each host, warm, from the public interface only:
+
+- host instructions and host cycles per guest instruction (hardware counters);
+- guest instructions per second;
+- ratio to the same algorithm in portable C++ compiled with Clang O3 for the host,
+  under the same numeric contract;
+- preparation seconds and native code bytes.
+
+External reference points, reported next to the kernels and not replacing them:
+
+- Microcontroller cores: CoreMark 1.0, built with a stated compiler and flags and
+  reported by its run rules (Apache 2.0 with EEMBC's acceptable-use terms; do
+  not publish a modified version under the CoreMark name). Sources stay untracked.
+- DSP cores: two or three programs from the manufacturer's own benchmark
+  material (DSP56300 Family Manual, Appendix B "Benchmark Programs"; the
+  processor benchmark table of the SHARC data sheet), run as published. They
+  also check the core's base-cycle accounting against the documented counts.
+
+These numbers are core results. They never stand in for a consumer's
+whole-instrument throughput.
+
+## 9. Outside the contract
 
 Anything a single consumer needs for its scheduler or devices stays in that
 consumer. A capability that every co-simulation needs is proposed as a contract
