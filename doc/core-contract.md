@@ -1,4 +1,4 @@
-# Common core contract, version 3
+# Common core contract, version 4
 
 Every processor core in this family (cpu12, dsp56300, armv5, sharc and later
 ones) follows this contract. The file is identical in all core repositories; a
@@ -39,6 +39,16 @@ could a second device on this processor use the core without a core change?
   owns final optimization and native code. `Core::bind(SemanticImage,
   NativeSymbols) -> NativeImage` binds addresses; `Core::compile` is the
   stand-alone shortcut through the same path.
+- Preparation is cacheable without lowering. `Core::compiler_identity()` is a
+  cheap constant that changes whenever lowering output could change (lowering
+  source revision, LLVM version). `SemanticImage::artifact()` returns the
+  complete serialized image: bitcode, exports, identity and every decoded
+  contract `bind` needs. `Core::load(CodeImage, CompileOptions, artifact) ->
+  SemanticImage` reconstructs the image without lowering and rejects an artifact
+  whose compiler identity or input digest does not match the given image and
+  options. The consumer owns the cache: its key, storage, the optimized bitcode
+  and the relocatable native objects. No instance pointer, memory content or
+  device state enters an artifact.
 - `Core::install(NativeImage, variant)` runs on a stopped owner, validates the
   actual code words and memory layout, and changes no guest state or time.
 - One code generator: LLVM. No interpreter and no hand-written per-host emitter
