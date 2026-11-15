@@ -1,4 +1,4 @@
-# Common core contract, version 2
+# Common core contract, version 3
 
 Every processor core in this family (cpu12, dsp56300, armv5, sharc and later
 ones) follows this contract. The file is identical in all core repositories; a
@@ -57,6 +57,12 @@ could a second device on this processor use the core without a core change?
 - The consumer arbitrates and acknowledges interrupt sources. The core owns
   eligibility (masks, priorities, shadows) and native vector entry:
   `interrupt_ready(...)`, `interrupt(InterruptRequest)`, `reset(...)`.
+  Wake-up without vector entry, where the instruction set has it, is the
+  ISA-specific `resume_from_stop()`; it is never modelled as reset or as an
+  interrupt.
+- There is no `step`, `prepare`, captured-instruction or statistics entry point:
+  `run(1)` steps, `install` validates and reports, and translation counters are
+  not part of the interface.
 
 ## 5. State
 
@@ -74,6 +80,9 @@ could a second device on this processor use the core without a core change?
   initialized layouts permit direct native loads and stores; everything else
   keeps exact dynamic semantics. Optional per-word knowledge tracking is the
   consumer's choice.
+- `set_memory(Memory)` rebinds storage on a stopped owner, for devices whose
+  memory map changes at run time. It revokes dependent bindings; a matching
+  `install` follows before execution continues. The core learns no device map.
 - `Io` is a plain struct of `noexcept` function pointers plus an owner pointer.
   A callback returning false is an explicit fault. Callbacks run synchronously
   on the owner and must not re-enter execution. `CallbackBinding` lets the
