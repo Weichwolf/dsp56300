@@ -1,9 +1,19 @@
 # Target architecture
 
-Core repositories are organizational boundaries. Choose APIs, state ownership,
-layouts and LLVM composition for complete-instrument throughput and efficiency.
-Core owns complete readable state; consumers bind memory, firmware, device clocks
-and scheduling through minimal public APIs. Each core has one
+This core translates the DSP56300 instruction set and nothing else. It is generic:
+any device built on this processor family must be able to use it unchanged. It
+contains no instrument addresses, firmware hashes, device or peripheral models,
+board wiring or special cases for one firmware's code patterns. Performance
+comes from general mechanisms that every consumer can drive: a declared code
+inventory with entries and variants, declared memory layouts, host IR linked
+before optimization, and event and time bounds. A missing capability is a gap in
+the general translator and is closed there, not by a special case.
+
+The consumer owns everything about the device: chip peripherals, board, firmware
+knowledge, clocks, scheduling and the coupling of several cores. Core owns
+complete readable processor state; consumers bind memory, firmware, device clocks
+and scheduling through minimal public APIs. Test for every interface decision:
+could a second device on this processor use the core without a core change? Each core has one
 execution owner; independent cores communicate through consumer-owned contracts.
 Keep LLVM handles, native entry ABIs and implementation layouts private.
 
