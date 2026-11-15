@@ -53,9 +53,12 @@ void request(State &state, const Word opcode, const Word pc) {
   const bool debugging = opcode >= debug;
   state.boundary = detail::NativeBoundary::owner;
   if (!debugging) {
-    if (state.vector.phase == Phase::none) {
-      state.vector = {.resume =
-                          static_cast<Word>((pc + (opcode == illegal ? 2U : 1U)) % address_words),
+    if (state.vector.phase != Phase::pending) {
+      const auto resume =
+          state.vector.phase == Phase::none
+              ? static_cast<Word>((pc + (opcode == illegal ? 2U : 1U)) % address_words)
+              : state.vector.resume;
+      state.vector = {.resume = resume,
                       .address = ((state.reg.vba / 256) * 256) + (opcode == illegal ? 4U : 8U),
                       .level = 3,
                       .phase = Phase::pending};

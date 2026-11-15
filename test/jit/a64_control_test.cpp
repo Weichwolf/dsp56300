@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "a64_loop_state.hpp"
 #include "a64_native.hpp"
 #include "address_model.hpp"
 #include "architecture.hpp"
@@ -10,6 +11,7 @@
 #include "register_model.hpp"
 #include "return_model.hpp"
 #include "support.hpp"
+#include "vector_state.hpp"
 
 #include <array>
 #include <cstdint>
@@ -492,6 +494,28 @@ void context_boundaries() {
       return_steps.front().opcode);
 }
 
+void undefined_opcode() {
+  constexpr Word undefined = 0xff;
+  constexpr Word vector_mask = 0xffff00;
+  loop_model::State initial;
+  initial.reg = seed(status_byte);
+  auto expected = initial;
+  ++expected.reg.pc;
+  expected.inhibited = expected.completed = false;
+  expected.boundary = detail::NativeBoundary::owner;
+  expected.vector = {.resume = expected.reg.pc,
+                     .address = (initial.reg.vba & vector_mask) + 4,
+                     .level = 3,
+                     .phase = detail::VectorPhase::pending};
+  loop_model::retire(expected, 1);
+  const a64::Program program(a64::Instruction{.opcode = undefined});
+  loop_model::Runner runner(initial);
+  require(
+      runner.run(program, 1) == 1,
+      "An audited undefined word retires once and requests its real Illegal Instruction vector");
+  runner.expect(expected);
+}
+
 void boundaries() {
   constexpr Word clear = 0x200013;
   for (Word flags = 0; flags <= status_byte; ++flags) {
@@ -532,7 +556,7 @@ void boundaries() {
                        .boundary = detail::NativeBoundary::owner},
                       steps.front().opcode);
   }
-  constexpr Word unknown = 0xff;
+  constexpr Word unknown = 0x94;
   const a64::Program program(a64::Instruction{.opcode = unknown});
   const auto initial = seed(status_byte);
   auto expected = initial;
@@ -562,6 +586,7 @@ int main() {
     returns();
     control_bytes();
     boundaries();
+    undefined_opcode();
     effective_jumps();
     context_boundaries();
     std::cout << "A64 control-flow, stack, byte logic and boundaries passed: " << checks

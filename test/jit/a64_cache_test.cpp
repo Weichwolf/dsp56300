@@ -72,8 +72,11 @@ void apply(cache_model::Model &cache, const Form form, const Word target) {
 }
 
 void disabled(State &state, const Word pc) {
-  if (state.vector.phase == detail::VectorPhase::none) {
-    state.vector = {.resume = static_cast<Word>((pc + 2) % address_words),
+  if (state.vector.phase != detail::VectorPhase::pending) {
+    const auto resume = state.vector.phase == detail::VectorPhase::none
+                            ? static_cast<Word>((pc + 2) % address_words)
+                            : state.vector.resume;
+    state.vector = {.resume = resume,
                     .address = ((state.reg.vba / 256) * 256) + 4,
                     .level = 3,
                     .phase = detail::VectorPhase::pending};
