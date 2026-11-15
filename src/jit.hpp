@@ -11,7 +11,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
-#include <memory>
 #include <optional>
 #include <span>
 
@@ -107,35 +106,4 @@ struct NativeContext {
   std::uint64_t cycle_deadline = std::numeric_limits<std::uint64_t>::max();
 };
 
-class Jit {
-public:
-  Jit(Cpu &cpu,
-      std::span<const Word> program,
-      JitRuntime runtime,
-      NativeBus bus = {},
-      NativeEvents events = {});
-  ~Jit();
-  Jit(const Jit &) = delete;
-  Jit &operator=(const Jit &) = delete;
-  [[nodiscard]] static bool available() noexcept;
-  [[nodiscard]] PreparationReport prepare(std::span<const Word> established_entries,
-                                          const Registers &state,
-                                          std::optional<std::uint64_t> revision = std::nullopt);
-  [[nodiscard]] std::uint32_t run(std::uint32_t budget);
-  [[nodiscard]] std::uint32_t run_repeat(BlockInstruction operation, std::uint32_t budget);
-  [[nodiscard]] std::uint32_t run_captured(BlockInstruction operation);
-#if defined(__aarch64__)
-  [[nodiscard]] std::uint32_t run_vector(BlockInstruction operation);
-#endif
-  [[nodiscard]] bool exit_requested() const noexcept;
-  void request_yield() noexcept;
-  void set_cycle_deadline(std::uint64_t deadline) noexcept;
-  void invalidate() noexcept;
-  [[nodiscard]] bool bind_windows(std::array<std::span<const MemoryWindow>, 2> windows) noexcept;
-  void reset();
-
-private:
-  struct Impl;
-  std::unique_ptr<Impl> impl_;
-};
 } // namespace dsp56300::detail

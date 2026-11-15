@@ -3,14 +3,8 @@
 #include "core_impl.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
-#include "execution_guard.hpp"
 #include "instruction.hpp"
-#include "jit.hpp"
-#include "translation.hpp"
 
-#if defined(__aarch64__)
-#include <cassert>
-#endif
 #include <optional>
 #include <stdexcept>
 
@@ -74,45 +68,8 @@ RunResult Core::run_instruction(const InstructionWords words) {
     }
     return run(1);
   }
-  const auto decoded = Impl::decode_words(words);
-  const auto fetch = instruction_fetch();
-  if (fetch.exception_vector || impl_->debug_ready() || impl_->instruction_cache_active() ||
-      words.address != fetch.address ||
-      (fetch.latched_opcode && *fetch.latched_opcode != words.opcode)) {
-    throw std::invalid_argument("Captured execution differs from ordinary CPU fetch ownership");
-  }
-  const detail::ExecutionGuard guard(impl_->executing);
-  const auto previous_status = impl_->cpu.reg.sr;
-  impl_->synchronize_program_view();
-  impl_->yield_requested = false;
-  RunResult result;
-  const bool repeating = impl_->cpu.repeat_remaining != 0;
-  if (impl_->jit) {
-    result.retired =
-        impl_->jit->run_captured({.instruction = decoded,
-                                  .pc = words.address,
-                                  .mode = impl_->cpu.reg.sr & detail::numeric_mode_mask,
-                                  .loop_address = detail::active_loop_address(impl_->cpu.reg)});
-    if (result.retired != 0 && repeating) { impl_->repeated = decoded; }
-  }
-#if defined(__aarch64__)
-  assert(result.retired == 1 || impl_->fault.kind != FaultKind::none);
-  impl_->synchronize_cache_mode();
-  impl_->synchronize_program_view();
-  impl_->check_interrupt_window(previous_status);
-#else
-  if (result.retired == 0 && impl_->fault.kind == FaultKind::none) {
-    impl_->step_decoded(decoded);
-    impl_->synchronize_program_view();
-    impl_->check_interrupt_window(previous_status);
-    if (impl_->fault.kind == FaultKind::none) { result.retired = 1; }
-  }
-#endif
-  result.progress = progress();
-  result.fault = fault();
-  result.state = processing_state();
-  result.yielded = impl_->yield_requested;
-  return result;
+  impl_->unprepared(words.address, words.opcode);
+  return {.state = processing_state(), .progress = progress(), .fault = fault()};
 }
 
 bool Core::interrupt_ready(const InstructionWords words) const {

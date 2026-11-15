@@ -33,47 +33,13 @@ option(DSP56300_BUILD_TESTING "Build DSP library tests" ${PROJECT_IS_TOP_LEVEL})
 
 set(CMAKE_CXX_CLANG_TIDY "${DSP56300_CLANG_TIDY};--warnings-as-errors=*")
 
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
-  set(dsp56300_native_sources
-    src/native_owner.cpp src/jit/a64/emitter.cpp src/jit/a64/guarded.cpp src/jit/a64/guarded_control.cpp
-    src/jit/a64/guarded_guards.cpp src/jit/a64/guarded_memory.cpp src/jit/a64/batch.cpp
-    src/jit/a64/flags.cpp src/jit/a64/arithmetic.cpp src/jit/a64/unary.cpp
-    src/jit/a64/shifts.cpp src/jit/a64/fault.cpp src/jit/a64/conditions.cpp
-    src/jit/a64/control.cpp src/jit/a64/branch.cpp src/jit/a64/stack.cpp
-    src/jit/a64/agu.cpp src/jit/a64/selection.cpp src/jit/a64/conditional.cpp
-    src/jit/a64/registers.cpp src/jit/a64/data_registers.cpp src/jit/a64/transfer.cpp
-    src/jit/a64/move.cpp src/jit/a64/address.cpp src/jit/a64/memory.cpp
-    src/jit/a64/memory_windows.cpp src/jit/a64/bus.cpp src/jit/a64/memory_move.cpp
-    src/jit/a64/peripheral.cpp src/jit/a64/long_move.cpp src/jit/a64/paired_move.cpp
-    src/jit/a64/mixed_move.cpp src/jit/a64/integer.cpp src/jit/a64/iteration.cpp
-    src/jit/a64/products.cpp src/jit/a64/bit_fields.cpp src/jit/a64/viterbi.cpp
-    src/jit/a64/bits.cpp src/jit/a64/bit_memory.cpp src/jit/a64/loop.cpp
-    src/jit/a64/repeat.cpp src/jit/a64/events.cpp src/jit/a64/cache.cpp
-    src/jit/a64/vector.cpp src/jit/a64/resident_region_emit.cpp src/jit/a64/resident_values.cpp
-    src/jit/a64/resident_memory.cpp src/jit/a64/resident_compact.cpp src/jit/a64/resident_compact_memory.cpp
-    src/jit/a64/resident_compact_word.cpp src/jit/a64/resident_fusion.cpp src/jit/a64/resident_saturation.cpp
-    src/jit/a64/resident_interleaved.cpp src/jit/a64/code.cpp src/jit/a64/neon.cpp
-    src/jit/a64/run.cpp src/jit/a64/mac_batch_neon.cpp)
-else()
-  set(dsp56300_native_sources
-    src/jit/x64/emitter.cpp src/jit/x64/addition.cpp src/jit/x64/logic.cpp
-    src/jit/x64/saturation.cpp src/jit/x64/loop.cpp src/jit/x64/control.cpp
-    src/jit/x64/bits.cpp src/jit/x64/io.cpp src/jit/x64/peripheral.cpp
-    src/jit/x64/flags.cpp src/jit/x64/move.cpp src/jit/x64/memory_windows.cpp
-    src/jit/x64/resident_emit.cpp src/jit/x64/window_reuse.cpp src/jit/x64/region_guards.cpp
-    src/jit/x64/loop_window.cpp src/jit/x64/values.cpp src/jit/x64/address.cpp
-    src/jit/x64/registers.cpp src/jit/x64/long_move.cpp src/jit/x64/retirement.cpp
-    src/jit/x64/status.cpp src/jit/x64/shifts.cpp src/jit/x64/inputs.cpp
-    src/jit/x64/batch.cpp src/jit/x64/vector.cpp src/jit/code.cpp
-    src/jit/run.cpp src/jit/x64/mac_batch_avx2.cpp src/jit/x64/resident_region_emit.cpp)
-endif()
 set(dsp56300_semantic_sources
   src/agu.cpp src/arithmetic.cpp src/bit_fields.cpp src/bits.cpp
   src/cache_control.cpp src/captured.cpp src/conditional.cpp src/control.cpp
   src/core.cpp src/debugging.cpp src/decode.cpp src/exceptions.cpp
   src/external_memory.cpp src/fetch.cpp src/immediate.cpp src/instruction_shape.cpp
-  src/integer.cpp src/iteration.cpp src/jit.cpp src/loop.cpp
-  src/memory_windows.cpp src/move.cpp src/processing.cpp src/products.cpp
+  src/integer.cpp src/iteration.cpp src/loop.cpp
+  src/move.cpp src/processing.cpp src/products.cpp
   src/program_cache.cpp src/registers.cpp src/repeat.cpp src/runtime.cpp
   src/saturation.cpp src/semantic_region.cpp src/semantic.cpp src/image_runtime.cpp src/shifts.cpp src/state.cpp
   src/jit/llvm/region_memory.cpp
@@ -86,12 +52,7 @@ add_library(dsp56300_core STATIC
   src/jit/llvm/lifecycle.cpp src/jit/llvm/bindings.cpp
   src/jit/llvm/image.cpp src/jit/llvm/image_regions.cpp src/jit/llvm/image_specialize.cpp
   src/jit/llvm/region.cpp src/jit/llvm/region_plan.cpp src/jit/llvm/alu.cpp
-  src/jit/arena.cpp src/jit/block_parse.cpp src/jit/block_emit.cpp
-  src/jit/index.cpp src/jit/move.cpp src/jit/resident_plan.cpp
-  src/jit/dataflow.cpp src/jit/value_ranges.cpp src/jit/word_reuse.cpp
-  src/jit/registers.cpp src/jit/mac_batch.cpp src/jit/value_graph.cpp
-  src/jit/resident_region_run.cpp src/jit/resident_region_plan.cpp
-  ${dsp56300_native_sources})
+  src/jit/move.cpp src/jit/registers.cpp)
 add_library(dsp56300::core ALIAS dsp56300_core)
 target_include_directories(dsp56300_core PUBLIC include)
 target_compile_features(dsp56300_core PUBLIC cxx_std_23)
@@ -1417,11 +1378,6 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   get_directory_property(core_test_targets BUILDSYSTEM_TARGETS)
   foreach(core_test_target IN LISTS core_test_targets)
     get_target_property(core_test_sources ${core_test_target} SOURCES)
-    get_target_property(core_test_libraries ${core_test_target} LINK_LIBRARIES)
-    if(core_test_libraries MATCHES "dsp56300::core" AND
-       NOT core_test_libraries MATCHES "dsp56300_codegen_observer")
-      target_link_libraries(${core_test_target} PRIVATE dsp56300_codegen_observer)
-    endif()
     if(core_test_sources MATCHES "test/")
       target_include_directories(${core_test_target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/test/support")
       if(NOT core_test_target STREQUAL "dsp56300_image_io_bindings")

@@ -7,13 +7,6 @@
 #include "instruction.hpp"
 #include "vector_instruction.hpp"
 
-#include <array>
-#if defined(__aarch64__)
-#include "jit.hpp"
-
-#include <cassert>
-#endif
-
 namespace dsp56300 {
 using namespace detail;
 
@@ -58,46 +51,6 @@ void Core::Impl::call_vector(const Instruction &decoded) {
   cpu.reg.pc = target;
 
   vector.phase = VectorPhase::none;
-}
-
-Instruction Core::Impl::vector_instruction() {
-
-  if (vector.phase == VectorPhase::first && !vector.loaded) {
-    const auto first = fetch_program(vector.address);
-    if (fault.kind != FaultKind::none) { return {}; }
-    const auto second = fetch_program((vector.address + 1) & word_mask);
-    if (fault.kind != FaultKind::none) { return {}; }
-    vector.words = std::array{first, second};
-    vector.loaded = true;
-  }
-  if (!vector.loaded) { return instruction(current_pc); }
-  auto decoded = decode(vector.words.at(vector.phase == VectorPhase::second ? 1U : 0U));
-  if (decoded.words == 2 && vector.phase == VectorPhase::first) {
-    decoded.extension = vector.words.at(1);
-  }
-  return decoded;
-}
-
-void Core::Impl::step_vector() {
-  if (vector.phase == VectorPhase::pending) {
-
-    cpu.reg.pc = vector.resume;
-    cpu.repeat_completed = false;
-    vector.phase = VectorPhase::first;
-  }
-  current_pc = (vector.address + (vector.phase == VectorPhase::second ? 1U : 0U)) & word_mask;
-  const auto decoded = vector_instruction();
-  if (fault.kind != FaultKind::none) { return; }
-  current_words = decoded.words;
-#if defined(__aarch64__)
-  const auto retired = jit->run_vector(
-      {.instruction = decoded, .pc = current_pc, .mode = cpu.reg.sr & numeric_mode_mask});
-  assert(retired == 1 || fault.kind != FaultKind::none);
-  if (retired != 0) { synchronize_cache_mode(); }
-  synchronize_program_view();
-#else
-  step_vector_semantic(decoded);
-#endif
 }
 
 void Core::Impl::step_vector_semantic(const Instruction &decoded) {

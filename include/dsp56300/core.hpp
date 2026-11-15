@@ -308,7 +308,6 @@ public:
 private:
   [[nodiscard]] Fault fault() const noexcept;
   [[nodiscard]] ExecutionState processing_state() const noexcept;
-  void clear_code_cache();
   [[nodiscard]] bool interrupt_ready_captured(InstructionWords words, bool complete) const;
   struct Impl;
   std::unique_ptr<Impl> impl_;

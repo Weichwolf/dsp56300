@@ -13,7 +13,6 @@
 #include "vector_state.hpp"
 
 #include <array>
-#include <bitset>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -37,7 +36,6 @@ struct Core::Impl {
            vector.phase == VectorPhase::none;
   }
 
-  [[nodiscard]] static detail::CacheState *jit_cache(void *owner) noexcept;
   void request_debug(bool software);
   void execute_debug(const detail::Instruction &decoded);
   void admit_debug();
@@ -57,18 +55,14 @@ struct Core::Impl {
     if ((cpu.reg.sr & detail::cache_enable) == 0) { icache.reset(); }
   }
 
-  [[nodiscard]] std::uint32_t run_repeat_native(std::uint32_t instructions);
   [[nodiscard]] Word fetch_program(Word address);
-  void observe_program_word(Word address) const noexcept;
   void check_interrupt_window(Word previous_status) noexcept;
   [[nodiscard]] Word read_external(Space space, Word address);
   void write_external(Space space, Word address, Word value);
   void execute_processing(const detail::Instruction &decoded);
   void execute_cache(const detail::Instruction &decoded);
   void execute_exception(const detail::Instruction &decoded);
-  void step_vector();
   void step_vector_semantic(const detail::Instruction &decoded);
-  [[nodiscard]] detail::Instruction vector_instruction();
   void call_vector(const detail::Instruction &decoded);
 
   explicit Impl(Buffers supplied, Io *io, bool external_memory = false);
@@ -85,10 +79,7 @@ struct Core::Impl {
   [[nodiscard]] Word read_memory(Space space, Word address);
   void write_memory(Space space, Word address, Word value);
   [[nodiscard]] bool overlaps_program(std::span<const Word> memory) const;
-  void invalidate_program_word(const Word *location, bool installed);
-  [[nodiscard]] detail::Instruction instruction(Word pc);
-  void step();
-  void step_decoded(const detail::Instruction &decoded);
+  void invalidate_program_word(const Word *location);
   void step_semantic(const detail::Instruction &decoded);
   void assume_image_admission() const noexcept;
   [[nodiscard]] static Word semantic_numeric_mode(void *owner) noexcept
@@ -109,15 +100,7 @@ struct Core::Impl {
   [[nodiscard]] static std::uint64_t
   semantic_vector_entry(void *owner, const detail::Instruction &decoded) noexcept
       asm("dsp56300_semantic_vector_execute");
-#if defined(__aarch64__)
-  void step_native(const detail::Instruction &decoded);
-#endif
-  [[nodiscard]] std::optional<detail::Instruction> repeat_instruction() const;
   [[nodiscard]] std::optional<Word> known_program_word(Word address) const;
-  [[nodiscard]] static std::uint32_t
-  jit_execute(void *owner, const detail::BlockInstruction *operation) noexcept;
-  static void jit_access(void *owner, detail::NativeAccess &access) noexcept;
-  void synchronize_program_view();
   [[nodiscard]] RunResult run_image(std::uint32_t quota);
   [[nodiscard]] detail::ImageEntry image_vector();
   [[nodiscard]] bool image_interrupt(Word address, unsigned level);
@@ -126,11 +109,8 @@ struct Core::Impl {
   void image_word_written(detail::ProgramCache::Write transfer) noexcept;
   void image_io_completed() noexcept;
   void unprepared(Word address, Word value = 0) noexcept;
-  [[nodiscard]] Fault bind_memory_windows();
   [[nodiscard]] const MemoryWindow *memory_window(Space space, Word address) const noexcept;
   [[nodiscard]] static std::optional<Word> jit_program(void *owner, Word address) noexcept;
-  [[nodiscard]] static std::uint32_t jit_moves(void *owner,
-                                               const detail::BlockInstruction *operation) noexcept;
   void execute_operation(const detail::Instruction &decoded);
   void execute_return(const detail::Instruction &decoded);
   void execute_immediate(const detail::Instruction &decoded);
@@ -205,7 +185,6 @@ struct Core::Impl {
   [[nodiscard]] Word loop_count(const detail::Instruction &decoded);
   detail::Cpu cpu;
   Io *io;
-  std::unique_ptr<detail::Jit> jit;
   std::unique_ptr<detail::ProgramCache> icache;
   std::array<std::uint64_t, 4> latched{};
   Buffers buffers;
@@ -219,14 +198,8 @@ struct Core::Impl {
   Word debug_vector = 0;
   bool external = false;
   bool yield_requested = false;
-  bool windows_bound = false;
   std::uint64_t cycle_deadline = std::numeric_limits<std::uint64_t>::max();
-  std::uint64_t program_revision = 0;
   Word program_omr = 0;
-  // Translation dependencies in 256-word source pages, independent of chip banks.
-  static constexpr unsigned code_page_shift = 8;
-  using CodePages = std::bitset<(address_words >> code_page_shift)>;
-  std::unique_ptr<CodePages> code_pages;
   std::shared_ptr<const NativeImage::Impl> image;
   const NativeImage::Impl::Variant *active_image = nullptr;
   const std::vector<std::uint64_t> *next_images = nullptr;

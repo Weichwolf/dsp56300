@@ -6,7 +6,6 @@
 #include "io.hpp"
 #include "program_cache.hpp"
 
-#include <bitset>
 #include <optional>
 
 namespace dsp56300 {
@@ -25,7 +24,6 @@ const MemoryWindow *Core::Impl::memory_window(const Space space,
 void Core::request_yield() noexcept {
   if (!impl_->executing) { return; }
   impl_->yield_requested = true;
-  if (!impl_->image && impl_->jit) { impl_->jit->request_yield(); }
 }
 
 std::optional<Word> Core::Impl::jit_program(void *owner, const Word address) noexcept {
@@ -33,31 +31,7 @@ std::optional<Word> Core::Impl::jit_program(void *owner, const Word address) noe
   if (self.io == nullptr || address > word_mask) { return std::nullopt; }
   const auto value = self.io->inspect_program(address);
   if (!value || *value > word_mask) { return std::nullopt; }
-  self.observe_program_word(address);
   return value;
-}
-
-void Core::Impl::observe_program_word(const Word address) const noexcept {
-  if (code_pages && address <= word_mask) { (*code_pages)[address >> code_page_shift] = true; }
-}
-
-void Core::Impl::synchronize_program_view() {
-  if (!external || !jit || io == nullptr) { return; }
-  const auto next = dsp56300_io_revision(*io);
-  if (!windows_bound || next != program_revision || program_omr != cpu.reg.omr) {
-    if (const auto error = bind_memory_windows(); error.kind != FaultKind::none) {
-      current_pc = cpu.reg.pc;
-      fail(error.kind, error.space, error.address, error.value);
-      return;
-    }
-    if (program_omr != cpu.reg.omr) {
-      yield_requested = true;
-      jit->request_yield();
-    }
-    jit->invalidate();
-    program_revision = next;
-    program_omr = cpu.reg.omr;
-  }
 }
 
 Word Core::Impl::read_external(const Space space, const Word address) {
@@ -83,7 +57,6 @@ Word Core::Impl::read_external(const Space space, const Word address) {
 
 void Core::Impl::write_external(const Space space, const Word address, const Word value) {
   if (fault.kind != FaultKind::none) { return; }
-  const bool installed = image != nullptr;
   if (const auto *window = memory_window(space, address);
       window != nullptr && window->writable && !window->aliases_program) {
     const auto offset = address - window->address;
@@ -103,12 +76,6 @@ void Core::Impl::write_external(const Space space, const Word address, const Wor
     image_word_written({.address = address, .value = value & word_mask});
   }
   image_io_completed();
-  // A low loader and a high ROM do not make the uninspected gap executable.
-  // Dependencies include extensions and code inspected for fused regions.
-  if (!installed && space == Space::program && jit &&
-      code_pages->test(address >> code_page_shift)) {
-    jit->invalidate();
-  }
   if (space == Space::program && cacheable(address) && icache) {
     icache->write({.address = address, .value = value});
   }
