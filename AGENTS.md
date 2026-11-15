@@ -6,6 +6,8 @@ the complete original Blofeld instrument in blofeld-emu at >=10x offline
 
 ## Fixed limits
 
+- Follow doc/core-contract.md, the contract shared by all cores. It wins over
+  this file and doc/architecture.md; change it only together with the other cores.
 - Preserve DSP56300 semantics exactly: P/X/Y spaces and aliases, 24-bit words, 56-bit accumulators, rounding/saturation/flags, AGU, REP/DO and IRQs.
 - Unsupported or unprepared input fails explicitly with identity, address and
   reason. Never change a correct test to hide a defect.
