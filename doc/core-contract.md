@@ -1,4 +1,4 @@
-# Common core contract, version 4
+# Common core contract, version 5
 
 Every processor core in this family (cpu12, dsp56300, armv5, sharc and later
 ones) follows this contract. The file is identical in all core repositories; a
@@ -83,6 +83,11 @@ could a second device on this processor use the core without a core change?
   (repeat and loop state, pending vector, interrupt delay, latched fault).
   They do not touch prepared code or consumer memory. A consumer uses them for
   checkpoints, speculation with rollback and state files.
+- After `restore` the core holds exactly the execution state of the snapshot and
+  no residue of anything executed after it. A pending declared code transfer is
+  part of that state: `save` records whether one is pending and to which
+  variants, and `restore` reinstates or clears it accordingly. Which image is
+  installed remains binding state owned by the consumer.
 
 ## 6. Memory and I/O
 
