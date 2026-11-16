@@ -156,7 +156,7 @@ public:
 private:
   struct FastRegion {
     llvm::GlobalVariable *site;
-    Word count, cost, last_pc, last_words, mode;
+    Word count, cost, last_pc, last_words, mode, properties;
   };
 
   void prepare_regions(LlvmModule &module,
@@ -181,7 +181,8 @@ private:
         const auto name = name_ + ".region." + llvm::utohexstr(first, true) + "." +
                           llvm::utohexstr(last.loop_address, true) + "." +
                           llvm::utohexstr(mode, true);
-        if (!lift_region(module, operations, memory, name)) { continue; }
+        Word properties = 0;
+        if (!lift_region(module, operations, memory, name, &properties)) { continue; }
         auto *function = module_.getFunction(name);
         function->setLinkage(llvm::GlobalValue::InternalLinkage);
         function->addFnAttr(llvm::Attribute::AlwaysInline);
@@ -196,7 +197,8 @@ private:
                                     .cost = cost,
                                     .last_pc = last.pc,
                                     .last_words = last.instruction.words,
-                                    .mode = mode});
+                                    .mode = mode,
+                                    .properties = properties});
       }
     }
   }
@@ -211,7 +213,8 @@ private:
     ir_.CreateStore(ir_.CreateAdd(count, retired), count_);
     ir_.CreateStore(ir_.CreateSub(window, cost), window_);
     ir_.CreateStore(next, pc_);
-    emit_retirement(*ir_.GetInsertBlock(), active_->getArg(0), retired, true);
+    const auto site = pc | (std::uint64_t{region.properties} << word_bits);
+    emit_retirement(*ir_.GetInsertBlock(), active_->getArg(0), retired, true, site);
     const auto end = (region.last_pc + region.last_words) & word_mask;
     std::set<Word> targets{pc, end};
     for (const auto target : edges_.at(region.last_pc)) {

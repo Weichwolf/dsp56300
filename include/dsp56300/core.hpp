@@ -127,7 +127,8 @@ struct CodeTransition {
 
 // retired: void(Io*, uint32_t count, bool region, uint64_t site) noexcept.
 // Precise site packs PC/opcode/kind at bits0/24/48; kind IDs follow compiler identity.
-// Region site is zero; an absent binding emits no observation.
+// Region site packs entry PC at bits0, native batch at24 and deferred flags at25.
+// An absent binding emits no observation.
 enum class CallbackRole : std::uint8_t { read, write, bit, reset, pending, revision, retired };
 
 struct CallbackBinding {

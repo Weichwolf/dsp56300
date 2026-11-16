@@ -16,7 +16,7 @@
 namespace dsp56300::test {
 struct RetirementIo final : Io {
   std::array<std::uint64_t, 2> counts{};
-  std::uint64_t last_site = 0;
+  std::uint64_t last_site = 0, batched = 0, deferred = 0;
 
   bool read(Space /*space*/, Word /*address*/, Word /*pc*/, Word & /*value*/) noexcept override {
     return false;
@@ -92,6 +92,33 @@ inline std::vector<std::byte> retirement_binding() {
                                LLVMGetParam(function, 3),
                                "precise.site");
   LLVMBuildStore(ir.get(), site, site_address);
+  constexpr unsigned batch_shift = 24;
+  constexpr unsigned deferred_shift = 25;
+  for (const auto [counter, shift] :
+       {std::pair{&probe.batched, batch_shift}, std::pair{&probe.deferred, deferred_shift}}) {
+    auto *bit = LLVMBuildAnd(ir.get(),
+                             LLVMGetParam(function, 3),
+                             LLVMConstInt(wide, std::uint64_t{1} << shift, 0),
+                             "property.bit");
+    auto *selected = LLVMBuildAnd(
+        ir.get(),
+        LLVMGetParam(function, 2),
+        LLVMBuildICmp(ir.get(), LLVMIntNE, bit, LLVMConstInt(wide, 0, 0), "is.property"),
+        "property");
+    auto *property_offset =
+        LLVMConstInt(wide,
+                     reinterpret_cast<std::uintptr_t>(counter) -
+                         reinterpret_cast<std::uintptr_t>(static_cast<Io *>(&probe)),
+                     0);
+    auto *property_address =
+        LLVMBuildGEP2(ir.get(), byte, owner, &property_offset, 1, "property.counter");
+    auto *property_previous = LLVMBuildLoad2(ir.get(), wide, property_address, "previous.property");
+    auto *increment =
+        LLVMBuildSelect(ir.get(), selected, count, LLVMConstInt(wide, 0, 0), "property.increment");
+    LLVMBuildStore(ir.get(),
+                   LLVMBuildAdd(ir.get(), property_previous, increment, "retired.property"),
+                   property_address);
+  }
   LLVMBuildBr(ir.get(), done);
   LLVMPositionBuilderAtEnd(ir.get(), done);
   LLVMBuildRetVoid(ir.get());

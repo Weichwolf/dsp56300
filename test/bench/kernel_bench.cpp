@@ -262,13 +262,15 @@ void observe(const Workload &workload, const bool regions, const RunMode mode) {
   const auto stats = execute(machine.core, mode);
   machine.verify(workload, stats.interrupts);
   const auto instructions = machine.core.progress().instructions;
-  require(io.counts[0] + io.counts[1] == instructions,
+  require(io.deferred <= io.batched && io.batched <= io.counts[0] &&
+              io.counts[0] + io.counts[1] == instructions,
           "The separate observer accounts for every retired guest instruction");
   std::cout << R"({"observation":true,"kernel":")" << kernel_name(workload, mode)
             << R"(","regions_enabled":)" << (regions ? "true" : "false") << R"(,"bounded":)"
             << (mode == RunMode::continuous ? "false" : "true") << R"(,"interrupts":)"
             << stats.interrupts << R"(,"region_instructions":)" << io.counts[0]
-            << R"(,"precise_instructions":)" << io.counts[1] << "}\n"
+            << R"(,"precise_instructions":)" << io.counts[1] << R"(,"batched_instructions":)"
+            << io.batched << R"(,"deferred_instructions":)" << io.deferred << "}\n"
             << std::flush;
 }
 

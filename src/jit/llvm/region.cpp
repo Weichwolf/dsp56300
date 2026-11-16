@@ -25,6 +25,11 @@
 #include <limits>
 #include <llvm-c/Core.h>
 #include <llvm-c/Types.h>
+#include <llvm/IR/Constant.h>
+#include <llvm/IR/Instruction.h>
+#include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/Metadata.h>
+#include <llvm/IR/Value.h>
 #include <map>
 #include <memory>
 #include <optional>
@@ -58,6 +63,18 @@ std::optional<std::size_t> admission_prefix(const RegionPlan &plan) {
 }
 
 enum class BatchAddressing : std::uint8_t { automatic, linear, general };
+
+[[nodiscard]] bool deferred_mac(const RegionPlan &plan) {
+  if (!plan.batch || plan.count != 1) { return false; }
+  const auto &instruction = plan.operations.front().instruction;
+  constexpr Word conditional_mask = 0xffe000;
+  constexpr Word conditional_group = 0x202000;
+  constexpr Word mac_mask = 0x83;
+  constexpr Word mac_code = 0x82;
+  return instruction.operation == Operation::parallel &&
+         (instruction.opcode & conditional_mask) != conditional_group &&
+         (instruction.opcode & mac_mask) == mac_code;
+}
 
 class RegionLifter {
 public:
@@ -473,6 +490,13 @@ private:
     auto *step = form.mode < 2 || form.mode == 5 ? strides_[form.index] : ir_.getInt32(1);
     auto *next = form.mode == 0 || form.mode == 2 || form.mode == 7 ? ir_.CreateSub(cursor, step)
                                                                     : ir_.CreateAdd(cursor, step);
+    // The single-operation batch has already proved every accessed address in range.
+    // Its final post-update may wrap; finish() masks the committed register.
+    if (deferred_ && addressing_ == BatchAddressing::linear) {
+      LLVMSetNSW(next, 1);
+      if (form.mode == 3) { LLVMSetNUW(next, 1); }
+      return next;
+    }
     return ir_.CreateOr(origins_[form.index], ir_.CreateAnd(next, masks_[form.index]));
   }
 
@@ -844,8 +868,13 @@ private:
             ir_, instruction.opcode, plan_.operations[index].mode, banks_, status_);
       } else if (!plan_.control.valid || index + 1 != plan_.steps.size()) {
         transfers(step.memory, instruction.opcode);
-        llvm19::lower_alu(
-            ir_, instruction.opcode, plan_.operations[index].mode, before, banks_, status_);
+        llvm19::lower_alu(ir_,
+                          instruction.opcode,
+                          plan_.operations[index].mode,
+                          before,
+                          banks_,
+                          status_,
+                          deferred_ ? &flags_ : nullptr);
       }
       if (step.guards == 0) { continue; }
       memory_guards(step.guards, std::span(plan_.steps).subspan(index + 1));
@@ -858,11 +887,18 @@ private:
   struct Live {
     std::array<V, 4> banks;
     std::array<V, agu_registers> cursors, strides;
-    V status;
+    V status, limited = nullptr, grown = nullptr;
   };
 
-  [[nodiscard]] Live live() const {
-    return {.banks = banks_, .cursors = cursors_, .strides = strides_, .status = status_};
+  [[nodiscard]] Live live() {
+    Live state{.banks = banks_, .cursors = cursors_, .strides = strides_, .status = status_};
+    if (deferred_) {
+      state.limited =
+          ir_.CreateICmpNE(ir_.CreateAnd(status_, ir_.getInt32(limit)), ir_.getInt32(0));
+      state.grown = ir_.CreateICmpNE(ir_.CreateAnd(status_, ir_.getInt32(growth)), ir_.getInt32(0));
+      state.status = ir_.CreateAnd(status_, ir_.getInt32(~(limit | growth)));
+    }
+    return state;
   }
 
   void restore_live(const Live &state) {
@@ -870,6 +906,12 @@ private:
     cursors_ = state.cursors;
     strides_ = state.strides;
     status_ = state.status;
+    if (state.limited != nullptr) {
+      status_ = ir_.CreateOr(
+          status_,
+          ir_.CreateOr(ir_.CreateSelect(state.limited, ir_.getInt32(limit), ir_.getInt32(0)),
+                       ir_.CreateSelect(state.grown, ir_.getInt32(growth), ir_.getInt32(0))));
+    }
   }
 
   Live live_phis(const Live &initial, LLVMBasicBlockRef predecessor) {
@@ -886,12 +928,15 @@ private:
       result.cursors[index] = phi(initial.cursors[index], "cursor");
       result.strides[index] = phi(initial.strides[index], "stride");
     }
-    result.status = phi(initial.status, "status");
+    result.status = deferred_ ? initial.status : phi(initial.status, "status");
+    if (initial.limited != nullptr) {
+      result.limited = phi(initial.limited, "limited");
+      result.grown = phi(initial.grown, "grown");
+    }
     return result;
   }
 
-  static void
-  self_loop_backedge(const Live &phis, const Live &after, LLVMBasicBlockRef predecessor) {
+  static void live_backedge(const Live &phis, const Live &after, LLVMBasicBlockRef predecessor) {
     const auto incoming = [&](V phi, V value) { LLVMAddIncoming(phi, &value, &predecessor, 1); };
     for (unsigned index = 0; index < phis.banks.size(); ++index) {
       incoming(phis.banks[index], after.banks[index]);
@@ -900,7 +945,12 @@ private:
       incoming(phis.cursors[index], after.cursors[index]);
       incoming(phis.strides[index], after.strides[index]);
     }
-    incoming(phis.status, after.status);
+    if (phis.limited != nullptr) {
+      incoming(phis.limited, after.limited);
+      incoming(phis.grown, after.grown);
+    } else {
+      incoming(phis.status, after.status);
+    }
   }
 
   void self_loop_bindings() {
@@ -968,7 +1018,7 @@ private:
         ir_.CreateAnd(ir_.CreateICmpULT(next, limit),
                       ir_.CreateICmpEQ(next_pc(), ir_.getInt32(plan_.operations.front().pc)));
     auto *backedge = LLVMGetInsertBlock(ir_.get());
-    self_loop_backedge(phis, after, backedge);
+    live_backedge(phis, after, backedge);
     LLVMAddIncoming(completed, &next, &backedge, 1);
     LLVMBuildCondBr(ir_.get(), again, loop, complete);
     ir_.SetInsertPoint(complete);
@@ -1002,6 +1052,18 @@ private:
     LLVMBuildRet(ir_.get(), ir_.getInt64(0));
   }
 
+  void unroll_mac(V branch) {
+    if (!deferred_) { return; }
+    auto &context = *llvm::unwrap(context_);
+    auto *option = llvm::MDNode::get(
+        context,
+        {llvm::MDString::get(context, "llvm.loop.unroll.count"),
+         llvm::ConstantAsMetadata::get(llvm::unwrap<llvm::Constant>(ir_.getInt32(4)))});
+    auto *loop = llvm::MDNode::getDistinct(context, {nullptr, option});
+    loop->replaceOperandWith(0, loop);
+    llvm::unwrap<llvm::Instruction>(branch)->setMetadata(llvm::LLVMContext::MD_loop, loop);
+  }
+
   void generate(const void *fallback) {
     auto *windows = LLVMAppendBasicBlockInContext(context_, function_, "windows");
     auto *start = LLVMAppendBasicBlockInContext(context_, function_, "admitted");
@@ -1030,47 +1092,29 @@ private:
           LLVMBuildCall2(ir_.get(), helper_type, helper, arguments.data(), arguments.size(), ""));
     }
     ir_.SetInsertPoint(start);
-    std::array<V, 4> initial{};
-    for (unsigned bank = 0; bank < initial.size(); ++bank) {
-      initial[bank] = reg(64, bank_fields[bank]);
+    deferred_ = deferred_mac(plan_);
+    for (unsigned bank = 0; bank < banks_.size(); ++bank) {
+      banks_[bank] = reg(64, bank_fields[bank]);
     }
+    const auto initial = live();
     LLVMBuildBr(ir_.get(), loop);
     ir_.SetInsertPoint(loop);
-    std::array<V, 4> values{};
-    for (unsigned bank = 0; bank < values.size(); ++bank) {
-      values[bank] = LLVMBuildPhi(ir_.get(), ir_.getInt64Ty(), "bank");
-      LLVMAddIncoming(values[bank], &initial[bank], &start, 1);
-    }
-    auto *status = LLVMBuildPhi(ir_.get(), ir_.getInt32Ty(), "status");
-    LLVMAddIncoming(status, &status_, &start, 1);
-    std::array<V, agu_registers> addresses{};
-    std::array<V, agu_registers> strides{};
-    for (unsigned index = 0; index < agu_registers; ++index) {
-      addresses[index] = LLVMBuildPhi(ir_.get(), ir_.getInt32Ty(), "cursor");
-      LLVMAddIncoming(addresses[index], &cursors_[index], &start, 1);
-      strides[index] = LLVMBuildPhi(ir_.get(), ir_.getInt32Ty(), "stride");
-      LLVMAddIncoming(strides[index], &strides_[index], &start, 1);
-    }
+    const auto phis = live_phis(initial, start);
     auto *remaining = LLVMBuildPhi(ir_.get(), ir_.getInt64Ty(), "remaining");
     LLVMAddIncoming(remaining, &turns_, &start, 1);
-    banks_ = values;
-    cursors_ = addresses;
-    strides_ = strides;
-    status_ = status;
+    restore_live(phis);
+    if (deferred_) { flags_.limited = phis.limited; }
     body(miss);
+    auto after = live();
+    if (deferred_) { after.limited = ir_.CreateOr(after.limited, flags_.limited); }
     auto *backedge = LLVMGetInsertBlock(ir_.get());
-    for (unsigned bank = 0; bank < values.size(); ++bank) {
-      LLVMAddIncoming(values[bank], &banks_[bank], &backedge, 1);
-    }
-    for (unsigned index = 0; index < agu_registers; ++index) {
-      LLVMAddIncoming(addresses[index], &cursors_[index], &backedge, 1);
-      LLVMAddIncoming(strides[index], &strides_[index], &backedge, 1);
-    }
-    LLVMAddIncoming(status, &status_, &backedge, 1);
+    live_backedge(phis, after, backedge);
     auto *left = ir_.CreateSub(remaining, ir_.getInt64(1));
     LLVMAddIncoming(remaining, &left, &backedge, 1);
-    LLVMBuildCondBr(ir_.get(), ir_.CreateICmpEQ(left, ir_.getInt64(0)), complete, loop);
+    unroll_mac(LLVMBuildCondBr(ir_.get(), ir_.CreateICmpEQ(left, ir_.getInt64(0)), complete, loop));
     ir_.SetInsertPoint(complete);
+    restore_live(after);
+    if (deferred_) { llvm19::finish_flags(ir_, plan_.operations.front().mode, flags_, status_); }
     finish();
   }
 
@@ -1079,7 +1123,8 @@ private:
   llvm19::Builder ir_;
   const RegionPlan &plan_;
   BatchAddressing addressing_;
-  bool dynamic_, self_loop_;
+  bool dynamic_, self_loop_, deferred_ = false;
+  llvm19::DeferredMac flags_{};
   V cpu_, owner_, initial_cycles_ = nullptr, initial_instructions_ = nullptr;
   V status_ = nullptr, lc_ = nullptr, sp_ = nullptr, sc_ = nullptr, saved_ = nullptr;
   V turns_ = nullptr, forever_ = nullptr, finite_count_ = nullptr, eligible_ = nullptr;
@@ -1141,7 +1186,8 @@ bool lift_region(LlvmModule &module,
 bool lift_region(LlvmModule &module,
                  const std::span<const BlockInstruction> operations,
                  const std::span<const RegionLayout> memory,
-                 const std::string_view entry) {
+                 const std::string_view entry,
+                 Word *properties) {
   if (module.code() == nullptr) { throw std::logic_error("Region module was already transferred"); }
   const auto name = entry.empty() ? module.name() : std::string(entry);
   if (LLVMGetNamedFunction(module.code(), name.c_str()) != nullptr) {
@@ -1149,6 +1195,9 @@ bool lift_region(LlvmModule &module,
   }
   const auto plan = plan_region(operations, memory);
   if (!plan) { return false; }
+  if (properties != nullptr) {
+    *properties = (plan->batch ? 1U : 0U) | (deferred_mac(*plan) ? 2U : 0U);
+  }
   const RegionLifter lift(module, *plan, nullptr, name);
   return true;
 }

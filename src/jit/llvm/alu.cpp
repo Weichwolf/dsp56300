@@ -51,10 +51,12 @@ struct Result {
 
 class Alu {
 public:
-  Alu(Builder &ir, const Word mode, V &status) : ir_(ir), mode_(mode), status_(status) {}
+  Alu(Builder &ir, const Word mode, V &status, DeferredMac *deferred = nullptr)
+      : ir_(ir), mode_(mode), status_(status), deferred_(deferred) {}
 
   void lower(Word code, const Banks &before, Banks &after);
   void shift(Word opcode, Banks &banks);
+  void flags(const Result &result);
 
 private:
   V boolean(const bool value) { return LLVMConstInt(ir_.getIntNTy(1), value ? 1U : 0U, 0); }
@@ -120,7 +122,6 @@ private:
   Result sum(Word code, const Banks &before, unsigned destination);
   std::optional<Result> unary(Word code, V value);
   void rounding(Result &result);
-  void flags(const Result &result);
   void logic(Word code, const Banks &before, Banks &after, unsigned destination);
   void word_shift(Word code, const Banks &before, Banks &after, unsigned destination);
   void word_result(V value, Banks &after, unsigned destination, V carried = nullptr);
@@ -128,6 +129,7 @@ private:
   Builder &ir_;
   const Word mode_;
   V &status_;
+  DeferredMac *deferred_;
 };
 
 Result Alu::product(const Word code, const Banks &before, const unsigned destination) {
@@ -216,6 +218,12 @@ void Alu::rounding(Result &result) {
 }
 
 void Alu::flags(const Result &result) {
+  if (deferred_ != nullptr) {
+    deferred_->value = result.value;
+    deferred_->overflowed = result.overflowed;
+    deferred_->limited = ir_.CreateOr(deferred_->limited, result.overflowed);
+    return;
+  }
   const unsigned shift =
       integer_shift + ((mode_ & scale_down) != 0 ? 1U : 0U) - ((mode_ & scale_up) != 0 ? 1U : 0U);
   auto *integer = ir_.CreateLShr(result.value, ir_.getInt64(shift));
@@ -363,9 +371,18 @@ bool supported_alu(const Word opcode) {
          ((group == 2 || group == 3) && (kind == 1 || kind == 5));
 }
 
-void lower_alu(
-    Builder &ir, const Word opcode, const Word mode, const Banks &before, Banks &after, V &status) {
-  Alu(ir, mode, status).lower(opcode & byte_mask, before, after);
+void lower_alu(Builder &ir,
+               const Word opcode,
+               const Word mode,
+               const Banks &before,
+               Banks &after,
+               V &status,
+               DeferredMac *deferred) {
+  Alu(ir, mode, status, deferred).lower(opcode & byte_mask, before, after);
+}
+
+void finish_flags(Builder &ir, const Word mode, const DeferredMac &flags, V &status) {
+  Alu(ir, mode, status).flags({.value = flags.value, .overflowed = flags.overflowed});
 }
 
 void lower_arithmetic_shift(

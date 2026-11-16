@@ -269,7 +269,9 @@ void retirement_case(const std::array<NativeImage, 2> &images,
               first.yielded == second.yielded && before.program == after.program &&
               before.x == after.x && before.y == after.y,
           "Retirement observation preserves every register, memory word, fault and boundary");
-  require(before.io.counts == std::array<std::uint64_t, 2>{} &&
+  require(before.io.batched == 0 && after.io.deferred <= after.io.batched &&
+              after.io.batched <= after.io.counts[0] &&
+              before.io.counts == std::array<std::uint64_t, 2>{} &&
               (no_io || after.io.counts[0] + after.io.counts[1] == b.progress.instructions),
           "Only an explicit binding observes successful retirement, including partial runs");
   constexpr unsigned complete = 32;
@@ -277,6 +279,8 @@ void retirement_case(const std::array<NativeImage, 2> &images,
     require(after.io.counts ==
                 (fault ? std::array<std::uint64_t, 2>{0, 1} : std::array<std::uint64_t, 2>{6, 2}),
             "The DO region counts six instructions; setup/STOP count precisely, faults do not");
+    require(after.io.batched == (fault ? 0U : 6U) && after.io.deferred == 0,
+            "The optional region token distinguishes actual batched retirement");
     constexpr unsigned opcode_shift = 24;
     constexpr unsigned kind_shift = 48;
     const auto last_pc = fault ? start : start + 4;

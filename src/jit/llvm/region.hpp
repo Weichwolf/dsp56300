@@ -29,7 +29,8 @@ struct PreparedRegion {
 [[nodiscard]] bool lift_region(LlvmModule &module,
                                std::span<const BlockInstruction> operations,
                                std::span<const RegionLayout> memory,
-                               std::string_view entry = {});
+                               std::string_view entry = {},
+                               Word *properties = nullptr);
 
 // Read-only uint64_t(const Cpu *, const NativeContext *) query: complete base
 // periods or zero. Relevant state/storage changes invalidate the certificate.
