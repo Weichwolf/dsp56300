@@ -3,6 +3,7 @@
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "isa.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
 #include "support.hpp"
@@ -23,10 +24,15 @@ enum class Kind : std::uint8_t { extract, extract_unsigned, insert, merge, leadi
 enum class Part : std::uint8_t { main, low };
 using Bits = std::array<bool, accumulator_bits>;
 constexpr Word saturation = Word{1} << 20, loop_flag = Word{1} << 15;
-constexpr Word ignored_control_bits = 0xfc0fc0, repeat_base = 0x0600a0;
-constexpr Word extract_register = 0x0c1a00, extract_immediate = 0x0c1800;
-constexpr Word insert_register = 0x0c1b00, insert_immediate = 0x0c1900;
-constexpr Word merge_base = 0x0c1b80, leading_base = 0x0c1e00;
+constexpr Word ignored_control_bits = 0xfc0fc0;
+template <isa::Opcode operation> constexpr Word op = static_cast<Word>(operation);
+constexpr Word repeat_base = op<isa::Opcode::rep_immediate>;
+constexpr Word extract_register = op<isa::Opcode::extract_register>;
+constexpr Word extract_immediate = op<isa::Opcode::extract_immediate>;
+constexpr Word insert_register = op<isa::Opcode::insert_register>;
+constexpr Word insert_immediate = op<isa::Opcode::insert_immediate>;
+constexpr Word merge_base = op<isa::Opcode::merge_register>;
+constexpr Word leading_base = op<isa::Opcode::clb_register>;
 constexpr unsigned field_shift = 12, fractional_bit = 47;
 constexpr std::uint64_t pattern = 0xa572e19c46b38d;
 constexpr std::array modes{0U, mode_down, mode_up, mode_rm, mode_rm | mode_down, mode_rm | mode_up};
@@ -494,8 +500,8 @@ void loop_cases(std::vector<BinaryCase> &cases) {
 }
 
 void mixed_sequences(std::vector<BinaryCase> &cases) {
-  constexpr Word add_b_a = 0x200010;
-  constexpr Word mac_a = 0x2000d2;
+  constexpr Word add_b_a = op<isa::Opcode::add_b_a>;
+  constexpr Word mac_a = op<isa::Opcode::mac_register_a> | (5U << 4);
   const std::array inputs{
       Input{.kind = Kind::merge, .controller = 4},
       Input{.kind = Kind::extract, .width = 24, .offset = 24, .immediate = true},

@@ -92,7 +92,6 @@ void check(const BinaryCase &item, const NativeImage &image, const std::uint64_t
 struct Recipe {
   bool resident_successor = false;
   bool wrapped_entry = false;
-  bool runtime_errors = false;
 };
 
 FixtureSource declared_source(const BinaryCase &item, const Recipe recipe) {
@@ -197,12 +196,6 @@ void refuse_sources(const std::span<const BinaryCase> cases) {
 
 void run(const std::filesystem::path &path, const Recipe recipe) {
   auto input = read_fixture(path);
-  if (recipe.runtime_errors) {
-    std::erase_if(input, [](const BinaryCase &item) {
-      return item.fault.kind != FaultKind::invalid_instruction || !cold_reason(item).empty();
-    });
-    std::cout << path.filename().string() << ": native runtime-error subset\n";
-  }
   require(!input.empty(), "Fixture contains cases");
   const auto refused = std::ranges::stable_partition(
       input, [](const BinaryCase &item) { return cold_reason(item).empty(); });
@@ -247,8 +240,6 @@ int main(const int argc, const char *const *const argv) {
       const std::string_view argument(argv[first]);
       if (argument == "--declare-end-nop") {
         recipe.resident_successor = true;
-      } else if (argument == "--runtime-errors") {
-        recipe.runtime_errors = true;
       } else if (argument == "--wrap-entry") {
         recipe.wrapped_entry = true;
       } else {
@@ -256,8 +247,8 @@ int main(const int argc, const char *const *const argv) {
       }
     }
     if (argc <= first) {
-      throw std::runtime_error("Usage: dsp56300_fixture_test [--declare-end-nop] [--wrap-entry] "
-                               "[--runtime-errors] FILE.d56 [...]");
+      throw std::runtime_error(
+          "Usage: dsp56300_fixture_test [--declare-end-nop] [--wrap-entry] FILE.d56 [...]");
     }
     for (int index = first; index < argc; ++index) { dsp56300::test::run(argv[index], recipe); }
     std::cout << dsp56300::test::checks << " binary fixture checks passed\n";
