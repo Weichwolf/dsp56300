@@ -66,8 +66,6 @@ struct Core::Impl {
   void call_vector(const detail::Instruction &decoded);
 
   explicit Impl(Buffers supplied, Io *io, bool external_memory = false);
-  [[nodiscard]] static detail::Instruction decode_words(InstructionWords words,
-                                                        bool complete = true);
 
   void retire_instruction(const unsigned cycles) {
     ++cpu.instructions;

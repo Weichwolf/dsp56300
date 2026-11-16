@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "isa.hpp"
@@ -17,11 +16,8 @@
 namespace dsp56300::test {
 namespace {
 enum class Kind : std::uint8_t { fused, mac, round };
-enum class Method : std::uint8_t { ordinary, captured };
 constexpr Word down = 0x400, rm = 0x200000, changed = 0x3e;
 constexpr std::uint64_t wrapped = 0x7fffffff000000, other = 0x123456789abcde;
-
-constexpr std::array backends{Backend::jit};
 
 struct Input {
   Kind kind;
@@ -36,18 +32,17 @@ Word opcode(const Input input) {
   return code | (input.destination_b ? 8U : 0U);
 }
 
-void captured(TestCore &cpu, const Input input) {
-  const auto result = cpu.run_instruction({.address = start, .opcode = opcode(input)});
-  require(result.retired == 1 && result.fault.kind == FaultKind::none,
-          "The captured arithmetic retires its real complete fixed-point operation");
+NativeImage compile(const std::span<const Word> words, const Word address) {
+  const std::array code{CodeSpan{.address = address, .words = words}};
+  const std::array entries{address};
+  const std::array variants{
+      CodeVariant{.id = 0, .code = code, .entries = entries, .failed_fetches = {}}};
+  return Core::compile(
+      {.variants = variants},
+      {.memory = {}, .interrupts = {}, .transitions = {}, .callbacks = {}, .bindings = {}});
 }
 
-void check(const Input input, const Backend backend, const Method method) {
-  std::array<Word, memory_words> p{};
-  std::array<Word, 1> x{};
-  std::array<Word, 1> y{};
-  p[start] = opcode(input);
-  TestCore cpu({.program = p, .x = x, .y = y}, nullptr, {.backend = backend});
+void check(Core &cpu, const Input input) {
   auto before = initial_state();
   before.sr = down | input.incoming | (input.biased ? rm : 0U);
   before.x = 1;
@@ -56,6 +51,7 @@ void check(const Input input, const Backend backend, const Method method) {
   before.a = input.destination_b ? other : value;
   before.b = input.destination_b ? value : other;
   cpu.set_registers(before);
+  const auto progress = cpu.progress();
   auto wanted = before;
   ++wanted.pc;
   const auto output = input.kind == Kind::mac ? wrapped : sign56;
@@ -67,29 +63,31 @@ void check(const Input input, const Backend backend, const Method method) {
   if (input.kind == Kind::mac) { flags = mac_flags; }
   if (input.kind == Kind::round) { flags = round_flags; }
   wanted.sr = (before.sr & ~changed) | flags;
-  if (method == Method::captured) {
-    captured(cpu, input);
-  } else {
-    const auto run = cpu.run(1);
-    require(run.retired == 1 && run.fault.kind == FaultKind::none,
-            "The actual authored instruction retires without a synthetic result");
-  }
+  const auto run = cpu.run(1);
+  require(run.retired == 1 && run.fault.kind == FaultKind::none,
+          "The actual authored instruction retires without a synthetic result");
   require(cpu.registers() == wanted &&
-              cpu.progress() == Progress{.instructions = 1, .estimated_cycles = 1},
+              cpu.progress() == Progress{.instructions = progress.instructions + 1,
+                                         .estimated_cycles = progress.estimated_cycles + 1},
           "Literal fused cancellation and independent MAC/RND controls preserve complete state");
 }
 
 void cases() {
   for (const auto kind : {Kind::fused, Kind::mac, Kind::round}) {
-    for (const Word incoming : {0U, flag_c | flag_v, status_byte}) {
-      for (const bool biased : {false, true}) {
-        for (const bool destination_b : {false, true}) {
+    for (const bool destination_b : {false, true}) {
+      std::array<Word, memory_words> p{};
+      std::array<Word, 1> x{};
+      std::array<Word, 1> y{};
+      p[start] =
+          opcode({.kind = kind, .incoming = 0, .biased = false, .destination_b = destination_b});
+      p[start + 1] = isa::opcode<isa::Opcode::stop>()[0];
+      Core cpu(Memory::separate({.program = p, .x = x, .y = y}));
+      cpu.install(compile(std::span<const Word>(p).subspan(start, 2), start), 0);
+      for (const Word incoming : {0U, flag_c | flag_v, status_byte}) {
+        for (const bool biased : {false, true}) {
           const Input input{
               .kind = kind, .incoming = incoming, .biased = biased, .destination_b = destination_b};
-          for (const auto backend : backends) {
-            check(input, backend, Method::ordinary);
-            check(input, backend, Method::captured);
-          }
+          check(cpu, input);
         }
       }
     }
@@ -103,7 +101,9 @@ struct Boundary {
 };
 
 struct RoundingMachine {
-  RoundingMachine() : core(Memory::separate({.program = p, .x = x, .y = y})) {}
+  RoundingMachine() : core(Memory::separate({.program = p, .x = x, .y = y})) {
+    core.install(compile(p, 0), 0);
+  }
 
   void check(const Boundary input) {
     const auto mode = input.mode;
@@ -132,12 +132,15 @@ struct RoundingMachine {
                                          .estimated_cycles = before.estimated_cycles + count},
             "Public RND boundaries retain ties, signed wrapping, saturation and complete status");
     require(p == std::array{isa::opcode<isa::Opcode::rnd_a>()[0],
-                            isa::opcode<isa::Opcode::rnd_b>()[0]} &&
+                            isa::opcode<isa::Opcode::rnd_b>()[0],
+                            isa::opcode<isa::Opcode::stop>()[0]} &&
                 x == std::array<Word, 1>{} && y == x,
             "Rounding leaves all P/X/Y memory intact");
   }
 
-  std::array<Word, 2> p{isa::opcode<isa::Opcode::rnd_a>()[0], isa::opcode<isa::Opcode::rnd_b>()[0]};
+  std::array<Word, 3> p{isa::opcode<isa::Opcode::rnd_a>()[0],
+                        isa::opcode<isa::Opcode::rnd_b>()[0],
+                        isa::opcode<isa::Opcode::stop>()[0]};
   std::array<Word, 1> x{}, y{};
   Core core;
 };

@@ -175,8 +175,7 @@ void interrupts(const NativeImage &image) {
   Machine machine(image);
   static_cast<void>(machine.core.run());
   const auto boundary = machine.core.state();
-  require(!machine.core.interrupt_ready() &&
-              !machine.core.interrupt_ready({.address = destination, .opcode = loaded[0]}),
+  require(!machine.core.interrupt_ready(),
           "Unbound transfer targets cannot acknowledge an interrupt");
   bool rejected = false;
   try {
@@ -189,12 +188,6 @@ void interrupts(const NativeImage &image) {
   } catch (const std::logic_error &) { rejected = true; }
   require(rejected && same(boundary, machine.core.state()),
           "Register initialization cannot clear a transfer");
-  rejected = false;
-  try {
-    static_cast<void>(machine.core.run_instruction({.address = destination, .opcode = loaded[0]}));
-  } catch (const std::logic_error &) { rejected = true; }
-  require(rejected && same(boundary, machine.core.state()),
-          "Captured execution cannot bypass a pending image installation");
   machine.core.install(image, 1);
   machine.core.request_interrupt(vector, 0);
   const auto entered = machine.core.run(2);
@@ -334,12 +327,6 @@ void prepared_boundaries() {
   ram[target] = op<isa::Opcode::stop>;
   core.install(image, 1);
   require(same(pending, core.state()), "Binding changes no completed instruction or state");
-  const std::array resume{target};
-  const auto prepared = core.prepare(resume);
-  require(prepared.failure == Fault{} && prepared.prepared_entries == 3 &&
-              prepared.unresolved_entries == 0 &&
-              prepared.native_bytes == image.report().native_bytes && same(pending, core.state()),
-          "The interior start was fully prepared without another entry hint");
   const auto result = core.run();
   expected.pc = target + 1;
   require(result.retired == 1 && result.state == ExecutionState::stopped &&

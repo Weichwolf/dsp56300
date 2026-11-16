@@ -15,7 +15,7 @@ add_custom_command(OUTPUT "${dsp56300_semantic_data}"
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/embed_semantic.py"
     "${DSP56300_SEMANTIC_IR}" "${dsp56300_source_list}" "${CMAKE_CURRENT_SOURCE_DIR}"
     "${dsp56300_semantic_data}" "${CMAKE_CURRENT_BINARY_DIR}/semantic/manifest.json"
-    "${DSP56300_CLANG_FORMAT}"
+    "${DSP56300_CLANG_FORMAT}" "${LLVM_PACKAGE_VERSION}"
   DEPENDS "${DSP56300_SEMANTIC_IR}" "${dsp56300_source_list}" ${dsp56300_compiler_inputs}
   VERBATIM)
 target_sources(dsp56300_core PRIVATE "${dsp56300_semantic_data}")

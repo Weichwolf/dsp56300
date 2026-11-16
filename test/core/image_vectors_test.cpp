@@ -146,7 +146,6 @@ struct Expected {
   Registers registers;
   Progress progress;
   Fault fault;
-  bool vector = true;
   Word fetch = 0;
 };
 
@@ -174,8 +173,7 @@ void push(Registers &state, const Entry entry) {
 }
 
 Expected expected(const Registers &initial, const Input input, const unsigned quota) {
-  Expected result{
-      .registers = initial, .progress = {}, .fault = {}, .vector = true, .fetch = input.vector};
+  Expected result{.registers = initial, .progress = {}, .fault = {}, .fetch = input.vector};
   if (quota == 0) { return result; }
   const bool fast = input.vector == base;
   const unsigned before_call = input.vector == base + 4 ? 1 : 0;
@@ -193,7 +191,6 @@ Expected expected(const Registers &initial, const Input input, const unsigned qu
         return result;
       }
       result.registers.r[2] = 7;
-      result.vector = false;
       result.fetch = initial.pc;
     } else {
       ++result.fetch;
@@ -214,7 +211,6 @@ Expected expected(const Registers &initial, const Input input, const unsigned qu
   push(result.registers, {.level = input.level, .resume = initial.pc});
   result.progress = {.instructions = before_call + 1,
                      .estimated_cycles = before_call + (input.vector == base + 10 ? 4U : 3U)};
-  result.vector = false;
   result.fetch = service;
   return result;
 }
@@ -238,9 +234,6 @@ void compare(const Core &core, const Expected &value) {
       actual.registers == value.registers && actual.progress == value.progress &&
           actual.failure == value.fault && actual.execution == ExecutionState::running,
       "Prepared vector prefixes match independent complete registers, frames, progress and faults");
-  const auto fetch = core.instruction_fetch();
-  require(fetch.exception_vector == value.vector && fetch.address == value.fetch,
-          "Prepared entry selection follows vector fetch ownership instead of the foreground PC");
 }
 
 void prefix(Machine &machine, const Input input) {
@@ -250,10 +243,8 @@ void prefix(Machine &machine, const Input input) {
   for (unsigned quota = 0; quota <= slots(input.vector); ++quota) {
     machine.reset(initial);
     machine.core.request_interrupt(input.vector, input.level);
-    require(
-        machine.core.registers() == initial && machine.core.progress() == Progress{} &&
-            !machine.core.instruction_fetch().latched_opcode,
-        "Admission changes no foreground state, retires nothing and does not fetch vector words");
+    require(machine.core.registers() == initial && machine.core.progress() == Progress{},
+            "Admission preserves foreground registers and completed instruction/cycle counts");
     const auto result = machine.core.run(quota);
     const auto model = expected(initial, input, quota);
     compare(machine.core, model);
@@ -330,12 +321,9 @@ void latched_variant() {
   machine.reset(initial);
   machine.core.request_interrupt(self_vector, 0);
   const auto written = machine.core.run();
-  const auto fetch = machine.core.instruction_fetch();
   require(written.retired == 1 && written.yielded && written.fault == Fault{} &&
-              machine.program[self_vector + 1] == move_nine && fetch.exception_vector &&
-              fetch.address == self_vector + 1 && fetch.latched_opcode == move_seven,
-          "The original first vector operation changes RAM while the accepted second word stays "
-          "latched");
+              machine.program[self_vector + 1] == move_nine,
+          "The original first vector operation changes the actual second word in RAM");
   const auto before = machine.core.state();
   machine.core.install(image(), 1);
   require(machine.core.state().registers == before.registers &&
@@ -373,7 +361,7 @@ void internal_and_wait() {
   auto initial = seed();
   initial.pc = wait_pc;
   machine.reset(initial);
-  require(machine.core.step().state == ExecutionState::waiting,
+  require(machine.core.run(1).state == ExecutionState::waiting,
           "The original WAIT enters sleep through ordinary prepared code");
   machine.core.request_interrupt(base, 0);
   const auto woke = machine.core.run(2);
@@ -459,8 +447,7 @@ void io_boundary(const bool synchronous, const bool accept, const bool yield) {
                                           .estimated_cycles = partial ? 7U : 8U},
           "Accepted reset follows the actual synchronous or yielded vector prefix");
   if (partial) {
-    require(result.yielded && machine.core.instruction_fetch().address == reset_vector + 1 &&
-                machine.core.run(1).retired == 1 && bus.calls == 1,
+    require(result.yielded && machine.core.run(1).retired == 1 && bus.calls == 1,
             "A real I/O yield resumes the captured second slot without repeating the first action");
   }
   require(!machine.core.interrupt_ready(),
@@ -479,18 +466,6 @@ void admission_guards() {
     require(refused && machine.core.registers() == initial && machine.core.progress() == Progress{},
             "Masked prepared vectors cannot mutate architectural state or fetch their code");
   }
-  auto initial = seed();
-  initial.pc = base;
-  machine.reset(initial);
-  machine.core.request_interrupt(base, 0);
-  bool refused = false;
-  try {
-    static_cast<void>(
-        machine.core.run_instruction({.address = base, .opcode = op<isa::Opcode::nop>}));
-  } catch (const std::invalid_argument &) { refused = true; }
-  require(refused && machine.core.progress() == Progress{} && machine.core.registers() == initial,
-          "Coincident foreground/vector addresses cannot turn captured ordinary execution into "
-          "vector execution");
 }
 }
 

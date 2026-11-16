@@ -97,6 +97,7 @@ std::string symbol(const CodeImage image, const CompileOptions options) {
     hash_word(hash, binding.symbol.size());
     hash.update(llvm::StringRef(binding.symbol));
   }
+  hash_bytes(hash, options.bindings);
   return "dsp56300_image_" + llvm::toHex(hash.final(), true);
 }
 
@@ -228,6 +229,13 @@ detail::ImageContracts::plan_vectors(const std::vector<detail::ImagePlan> &plans
   return result;
 }
 
+SemanticImage Core::load(const CodeImage image,
+                         const CompileOptions options,
+                         const std::span<const std::byte> artifact) {
+  validate(image, options);
+  return SemanticImage(SemanticImage::Impl::deserialize(artifact, symbol(image, options)));
+}
+
 SemanticImage Core::lower(const CodeImage image, const CompileOptions options) {
   validate(image, options);
   auto result = std::make_shared<SemanticImage::Impl>();
@@ -309,6 +317,7 @@ SemanticImage Core::lower(const CodeImage image, const CompileOptions options) {
   hash.update(llvm::StringRef(image_name));
   hash_bytes(hash, result->bitcode);
   result->identity = "dsp56300_component_" + llvm::toHex(hash.final(), true);
+  result->serialize(image_name);
   return SemanticImage(std::move(result));
 }
 

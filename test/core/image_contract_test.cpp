@@ -97,12 +97,9 @@ void transactional_install() {
     require(rejected && same(core.state(), before),
             "Empty images and source-byte mismatches cannot replace the live binding");
   }
-  const auto first = core.step();
+  const auto first = core.run(1);
   require(first.retired == 1 && first.fault == Fault{} && core.registers().pc == start + 1,
           "The previous live image still executes after failed installations");
-  const auto established = core.prepare(std::array<Word, 1>{start});
-  require(established.failure == Fault{} && established.unresolved_entries == 0,
-          "Already installed entries need no ordinary decoder or emitter");
 }
 
 void code_transition() {
@@ -115,7 +112,7 @@ void code_transition() {
   const auto before = core.state();
   core.install(image(), 1);
   require(same(core.state(), before), "A code-version change preserves registers and progress");
-  const auto shifted = core.step();
+  const auto shifted = core.run(1);
   require(shifted.retired == 1 && shifted.fault == Fault{} &&
               core.registers().a == accumulator / 2 && core.registers().pc == start + 1,
           "Selection executes the prepared new version without changing its original RAM words");
@@ -132,13 +129,6 @@ void strict_binding() {
   require(core.run().fault.kind == FaultKind::unprepared_execution && core.registers() == before &&
               core.progress() == Progress{},
           "Changed executable words cannot silently continue through stale code or a fallback");
-  core.reset();
-  core.set_registers(registers());
-  core.install(image(), 1);
-  const auto mismatch = core.run_instruction({.address = start, .opcode = code0[0]});
-  require(mismatch.fault.kind == FaultKind::unprepared_execution && core.registers() == before &&
-              core.progress() == Progress{},
-          "Explicit instruction execution also refuses unprepared captured words");
 }
 
 void owner_retention() {
@@ -158,7 +148,7 @@ void owner_retention() {
     a.install(local, 1);
     b.install(local, 1);
   }
-  require(a.step().fault == Fault{} && b.step().fault == Fault{} && a.registers().a == left.a / 2 &&
+  require(a.run(1).fault == Fault{} && b.run(1).fault == Fault{} && a.registers().a == left.a / 2 &&
               b.registers().a == right.a / 2,
           "Independent owners retain shared code after the public image handle is released");
 }

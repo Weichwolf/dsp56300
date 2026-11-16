@@ -178,10 +178,6 @@ void Core::load(const Space space, const Word address, const std::span<const Wor
   }
 }
 
-RunResult Core::step() {
-  return run(1);
-}
-
 Core::~Core() = default;
 
 void Core::reset() {
@@ -199,36 +195,6 @@ void Core::reset() {
 
 Progress Core::progress() const noexcept {
   return {.instructions = impl_->cpu.instructions, .estimated_cycles = impl_->cpu.cycles};
-}
-
-PreparationReport Core::prepare(const std::span<const Word> established_entries) {
-  const auto pc = impl_->cpu.reg.pc;
-  if (impl_->executing) {
-    return {.failure = {
-                .kind = FaultKind::host_event, .space = Space::program, .address = pc, .pc = pc}};
-  }
-  const detail::ExecutionGuard guard(impl_->executing);
-  if (impl_->image) {
-    PreparationReport report{.prepared_entries = impl_->active_image->instructions.size(),
-                             .native_bytes = impl_->image->report.native_bytes,
-                             .failure = {}};
-    for (const auto entry : established_entries) {
-      if (!impl_->image_ready || (!impl_->active_image->instructions.contains(entry) &&
-                                  !impl_->active_image->failed_fetches.contains(entry))) {
-        ++report.unresolved_entries;
-        report.failure = {.kind = FaultKind::unprepared_execution,
-                          .space = Space::program,
-                          .address = entry,
-                          .pc = pc};
-      }
-    }
-    return report;
-  }
-  return {.unresolved_entries = established_entries.size(),
-          .failure = {.kind = FaultKind::unprepared_execution,
-                      .space = Space::program,
-                      .address = established_entries.empty() ? pc : established_entries.front(),
-                      .pc = pc}};
 }
 
 Fault Core::fault() const noexcept {

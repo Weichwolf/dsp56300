@@ -107,10 +107,6 @@ void failed_destination(const NativeImage &image) {
   core.install(image, 1);
   require(same(boundary, core.state()) && bus.reads == 0,
           "Binding a genuine unknown source executes no guest instruction or program read");
-  const auto prepared = core.prepare(after);
-  require(prepared.failure == Fault{} && prepared.unresolved_entries == 0 &&
-              prepared.prepared_entries == 1 && same(boundary, core.state()) && bus.reads == 0,
-          "Known failure endpoints are prepared without becoming translated instructions");
   const auto empty = core.run(0);
   require(empty.retired == 0 && empty.fault == Fault{} && same(boundary, core.state()) &&
               bus.reads == 0,

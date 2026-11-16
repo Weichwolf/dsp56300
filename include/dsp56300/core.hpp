@@ -163,6 +163,7 @@ class SemanticImage {
 public:
   SemanticImage() = default;
   [[nodiscard]] std::span<const std::byte> bitcode() const noexcept;
+  [[nodiscard]] std::span<const std::byte> artifact() const noexcept;
   [[nodiscard]] std::span<const SemanticExport> exports() const noexcept;
   [[nodiscard]] std::string_view identity() const noexcept;
 
@@ -223,28 +224,17 @@ public:
   bit(Space space, Word address, Word pc, Word bit, BitAction action, bool &previous) noexcept = 0;
 };
 
-struct InstructionWords {
-  Word address = 0, opcode = 0;
-  std::optional<Word> extension = std::nullopt;
-};
-
-struct InstructionFetch {
-  Word address = 0;
-  std::optional<Word> latched_opcode;
-  // True only while native exception/interrupt entry owns this fetch.
-  bool exception_vector = false;
-};
-
-// Single-thread-owned CPU. Construction, cold compilation and loading may allocate.
-// The public header deliberately exposes no native dependency types.
 class Core {
 public:
   explicit Core(Memory memory = Memory::external(), Io *io = nullptr);
   ~Core();
   Core(const Core &) = delete;
   Core &operator=(const Core &) = delete;
+  [[nodiscard]] static std::string_view compiler_identity() noexcept;
   // Cold translation only; all source/layout/entry/IRQ/transition contracts are owned.
   [[nodiscard]] static SemanticImage lower(CodeImage image, CompileOptions options);
+  [[nodiscard]] static SemanticImage
+  load(CodeImage image, CompileOptions options, std::span<const std::byte> artifact);
   // Cold native address binding; the shared owner retains code, never device state.
   [[nodiscard]] static NativeImage bind(const SemanticImage &image, const NativeSymbols &symbols);
   [[nodiscard]] static NativeImage compile(CodeImage image, CompileOptions options);
@@ -260,20 +250,10 @@ public:
   [[nodiscard]] std::uint64_t foreground_prefix() const;
   // Explicit host programming; ordinary data may be accessed through borrowed memory.
   void load(Space space, Word address, std::span<const Word> words);
-  // Compile established immutable code without executing instructions or device I/O.
-  // Call on a stopped owner; preparation failures do not latch into state/progress.
-  [[nodiscard]] PreparationReport prepare(std::span<const Word> established_entries);
-  [[nodiscard]] RunResult step();
   [[nodiscard]] Registers registers() const;
   // Changes visible registers, not hidden execution continuation. Use after reset
   // for initialization; hidden continuation remains owned by Core.
   void set_registers(const Registers &state);
-  [[nodiscard]] InstructionFetch instruction_fetch() const;
-  [[nodiscard]] bool interrupt_ready(InstructionWords words) const;
-  // Eligibility needs only the captured opcode; this query performs no fetch.
-  [[nodiscard]] bool interrupt_ready_opcode(InstructionWords words) const;
-  // Capture an admitted request without fetching a vector or acknowledging a device.
-  void request_interrupt(Word vector, unsigned level, InstructionWords foreground);
   // Admit from actual CPU state without requiring a foreground snapshot. No
   // fetch/vector execution occurs; unresolved completed-REP eligibility stays explicit.
   void request_interrupt(Word vector, unsigned level);
@@ -288,11 +268,6 @@ public:
   // This is nominal ISA progress, not a derivative peripheral/bus clock.
   // Translation and retained code never depend on the supplied deadline.
   [[nodiscard]] RunResult run_until(std::uint64_t base_cycle_deadline);
-  // Execute exactly the captured ordinary instruction through this CPU/JIT,
-  // including synchronous real Io. The caller owns its external clock delay.
-  // Refuses pending vector/debug/cache fetch ownership and mismatched PC/latch.
-  // Backing code may have changed since capture; the supplied words own this execution.
-  [[nodiscard]] RunResult run_instruction(InstructionWords words);
   // A synchronous Io callback can return this run after actual instruction
   // retirement. Guest state and compiled code survive; no cross-thread mutation.
   void request_yield() noexcept;
@@ -308,7 +283,6 @@ public:
 private:
   [[nodiscard]] Fault fault() const noexcept;
   [[nodiscard]] ExecutionState processing_state() const noexcept;
-  [[nodiscard]] bool interrupt_ready_captured(InstructionWords words, bool complete) const;
   struct Impl;
   std::unique_ptr<Impl> impl_;
 };

@@ -20,6 +20,7 @@ def main():
     data = bitcode.read_bytes()
     identity = source_hash.hexdigest()
     bitcode_hash = hashlib.sha256(data).hexdigest()
+    identity += ";" + bitcode_hash + ";" + sys.argv[7]
     # The assembler includes the immutable blob without constructing millions of
     # C++ literal expressions. Its digest keeps compiler caches content-aware.
     include = '.incbin ' + json.dumps(str(bitcode.resolve())) + '\n'
@@ -41,7 +42,7 @@ def main():
         '#include "semantic_ir.hpp"',
         '#include <cstddef>', '#include <span>', '#include <string_view>',
         'namespace dsp56300::detail {', 'namespace {',
-        f'constexpr std::string_view identity = "{identity}";', '}',
+        f'constexpr std::string_view identity = {json.dumps(identity)};', '}',
         f'extern "C" const unsigned char {name}[{len(data)}];',
         '#if defined(__APPLE__)', assembly(True), '#else', assembly(False), '#endif',
         'std::span<const std::byte> semantic_ir() noexcept {',

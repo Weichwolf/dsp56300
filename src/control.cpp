@@ -156,6 +156,22 @@ void Core::Impl::execute_operation(const Instruction &decoded) {
   }
 }
 
+void Core::request_interrupt(const Word vector, const unsigned level) {
+  if (impl_->executing) { throw std::logic_error("Interrupt requests require stopped execution"); }
+  if (impl_->image && !impl_->image_interrupt(vector, level)) { return; }
+  const auto mask = (impl_->cpu.reg.sr >> interrupt_level_shift) & interrupt_level_mask;
+  if (vector > word_mask || (vector & 1U) != 0 || level > maximum_level || level < mask ||
+      !interrupt_ready()) {
+    throw std::invalid_argument("Deferred interrupt request is not admissible");
+  }
+  impl_->cpu.processing = ExecutionState::running;
+  impl_->vector = {.resume = impl_->cpu.reg.pc,
+                   .address = vector,
+                   .level = level,
+                   .phase = Impl::VectorPhase::first};
+  impl_->cpu.repeat_completed = false;
+}
+
 void Core::interrupt(const Word vector, const unsigned level) {
 
   const ExecutionGuard guard(impl_->executing);

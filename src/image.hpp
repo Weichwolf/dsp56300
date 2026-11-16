@@ -7,11 +7,14 @@
 #include "jit/llvm/image.hpp"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <memory>
 #include <set>
+#include <span>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -41,8 +44,11 @@ struct ImageContracts {
 
 namespace dsp56300 {
 struct SemanticImage::Impl : detail::ImageContracts {
+  void serialize(std::string_view input_identity);
+  [[nodiscard]] static std::shared_ptr<Impl> deserialize(std::span<const std::byte> artifact,
+                                                         std::string_view input_identity);
   std::string identity;
-  std::vector<std::byte> bitcode;
+  std::vector<std::byte> bitcode, artifact;
   std::vector<std::string> names, abis;
   std::vector<SemanticExport> exports;
   std::vector<std::string> variant_names;
