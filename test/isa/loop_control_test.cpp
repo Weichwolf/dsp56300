@@ -3,9 +3,11 @@
 #include "dsp56300/memory.hpp"
 #include "installed_program.hpp"
 #include "isa.hpp"
+#include "loop_frames.hpp"
 #include "register_model.hpp"
 #include "support.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -261,6 +263,98 @@ void warm_endings(const NativeImage &image) {
     }
   }
 }
+
+constexpr Word suffix_first = start + 1, suffix_last = suffix_first + 3, suffix_literal = 0x654321;
+constexpr Word suffix_linear = 0xffff;
+constexpr std::array suffix_program{
+    isa::opcode<isa::Opcode::jmp_absolute_short>()[0] | suffix_first,
+    isa::opcode<isa::Opcode::move_x_effective>()[0] | (3U << 11),
+    isa::nop[0],
+    isa::opcode<isa::Opcode::move_x_effective>()[0] | (6U << 11) | (4U << 8) | (1U << 15),
+    suffix_literal,
+    isa::stop[0]};
+
+void suffix_case(const NativeImage &image,
+                 const Registers &initial,
+                 Word quota,
+                 const bool deadline) {
+  Machine machine;
+  machine.core.load(Space::program, start, suffix_program);
+  machine.core.set_registers(initial);
+  machine.core.install(image, 0);
+  auto expected = initial;
+  std::array<Word, memory_words> x{};
+  auto available = suffix_first + 3 - initial.pc;
+  if ((initial.sr & lf) != 0 && initial.la >= initial.pc && initial.la < suffix_first + 2) {
+    available = std::min(available, initial.la - initial.pc + 1);
+  }
+  quota = std::min(quota, available);
+  const bool stored = initial.pc == suffix_first && quota != 0;
+  const bool extended = initial.pc + quota > suffix_first + 2;
+  if (stored) {
+    x.at(initial.r[0]) = static_cast<Word>(initial.x) & word_mask;
+    ++expected.r[0];
+  }
+  if (extended) { expected.x = (initial.x & (long_mask ^ word_mask)) | suffix_literal; }
+  expected.pc += quota + (extended ? 1U : 0U);
+  const Progress progress{.instructions = quota, .estimated_cycles = quota + (extended ? 1U : 0U)};
+  if ((initial.sr & lf) != 0 && quota != 0 && expected.pc - 1 == initial.la) {
+    if (initial.lc != 1 || (initial.sr & fv) != 0) {
+      expected.lc = (initial.lc - 1) & word_mask;
+      expected.pc = start;
+    } else {
+      loop_frames::complete(expected);
+    }
+  }
+  const auto result =
+      deadline ? machine.core.run_until(progress.estimated_cycles) : machine.core.run(quota);
+  require(
+      result.retired == progress.instructions && result.progress == progress &&
+          result.fault == Fault{} && !result.yielded && machine.core.registers() == expected &&
+          machine.x == x && machine.y == std::array<Word, memory_words>{},
+      "DO suffix preserves registers, RAM, frames and exact instruction/deadline/cycle boundary");
+}
+
+void suffix_endings() {
+  constexpr std::array<std::array<Word, 7>, 13> points{{{0, 0, 0, suffix_last, 0, 0, 2},
+                                                        {fv, 1, 2, suffix_last, 0, 1, 2},
+                                                        {lf, 0, 63, suffix_last, lf, 0, 4},
+                                                        {lf, 1, 0, suffix_last, lf | fv, 0, 4},
+                                                        {lf, 2, 2, suffix_last, 0, 0, 2},
+                                                        {lf | fv, 1, 63, suffix_last, 0, 1, 2},
+                                                        {lf, word_mask, 2, suffix_last, fv, 1, 4},
+                                                        {lf, 1, 63, suffix_first, lf, 0, 4},
+                                                        {lf, 2, 0, suffix_first + 1, 0, 0, 2},
+                                                        {lf, 1, 2, suffix_first + 2, 0, 0, 2},
+                                                        {lf, 1, 63, outer_la, 0, 0, 2},
+                                                        {lf | fv, 0, 0, suffix_last, lf, 0, 4},
+                                                        {lf, 1, 0, suffix_first + 1, fv, 1, 4}}};
+  Machine arena;
+  const auto image =
+      compile_program(suffix_program, start, {.program = arena.p, .x = arena.x, .y = arena.y});
+  for (const Word mode :
+       {0U, mode_down, mode_up, mode_rm, mode_rm | mode_down, mode_rm | mode_up}) {
+    for (const auto &[flags, count, pointer, last, outer, offset, depth] : points) {
+      auto state = register_model::seed(mode);
+      state.sr = mode | flags | flag_c;
+      state.omr = 0;
+      state.pc = suffix_first + offset;
+      state.la = last;
+      state.lc = count;
+      state.sp = pointer;
+      state.sc = depth;
+      state.r[0] = 1;
+      state.m.fill(suffix_linear);
+      state.stack[state.sp % stack_entries] = (std::uint64_t{start} << word_bits) | outer;
+      state.stack[((state.sp + loop_frames::pointer_mask) & loop_frames::pointer_mask) %
+                  stack_entries] = (std::uint64_t{outer_la} << word_bits) | outer_lc;
+      for (const Word quota : {0U, 1U, 2U, 3U}) {
+        for (const bool deadline : {false, true}) { suffix_case(image, state, quota, deadline); }
+      }
+    }
+  }
+}
+
 } // namespace
 } // namespace dsp56300::test
 
@@ -270,6 +364,7 @@ int main() {
     dsp56300::test::ports(image);
     dsp56300::test::sequential_repeats(image);
     dsp56300::test::warm_endings(image);
+    dsp56300::test::suffix_endings();
     std::cout << dsp56300::test::checks << " loop host-boundary checks passed\n";
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';

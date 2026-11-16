@@ -256,9 +256,15 @@ private:
     const auto final_word = (last.pc + last.instruction.words - 1) & word_mask;
     const bool uncaptured =
         last.loop_address == inactive_loop && plan_.operations.front().pc <= final_word;
-    if (uncaptured || region_independent(plan_.operations)) {
-      require(ir_.CreateOr(ir_.CreateICmpULT(active_la, ir_.getInt32(plan_.operations.front().pc)),
-                           ir_.CreateICmpUGT(active_la, ir_.getInt32(final_word))));
+    auto *outside =
+        ir_.CreateOr(ir_.CreateICmpULT(active_la, ir_.getInt32(plan_.operations.front().pc)),
+                     ir_.CreateICmpUGT(active_la, ir_.getInt32(final_word)));
+    if (uncaptured && !region_independent(plan_.operations)) {
+      endpoint_ = ir_.CreateICmpEQ(active_la, ir_.getInt32(final_word));
+      require(ir_.CreateOr(outside, endpoint_));
+      require(ir_.CreateOr(ir_.CreateNot(endpoint_), ir_.CreateICmpUGE(sc_, ir_.getInt32(2))));
+    } else if (uncaptured || region_independent(plan_.operations)) {
+      require(outside);
     } else {
       require(ir_.CreateICmpEQ(active_la, ir_.getInt32(plan_.operations.front().loop_address)));
     }
@@ -783,17 +789,17 @@ private:
     store(ir_.getInt8(0), offsetof(Cpu, interrupt_inhibited));
     auto *pc = next_pc();
     put(pc, offsetof(Registers, pc));
-    if (!at_loop_end(plan_.operations.back())) {
+    if (!at_loop_end(plan_.operations.back()) && endpoint_ == nullptr) {
       LLVMBuildRet(ir_.get(), ir_.CreateTrunc(retired, ir_.getInt32Ty()));
       return;
     }
     auto *loop_finish = LLVMAppendBasicBlockInContext(context_, function_, "loop_finish");
     auto *done = LLVMAppendBasicBlockInContext(context_, function_, "done");
-    LLVMBuildCondBr(
-        ir_.get(),
-        ir_.CreateICmpEQ(pc, ir_.getInt32((plan_.operations.back().loop_address + 1) & word_mask)),
-        loop_finish,
-        done);
+    const auto &last = plan_.operations.back();
+    auto *following = ir_.getInt32((last.pc + last.instruction.words) & word_mask);
+    auto *closing = ir_.CreateICmpEQ(pc, following);
+    if (endpoint_ != nullptr) { closing = ir_.CreateAnd(closing, endpoint_); }
+    LLVMBuildCondBr(ir_.get(), closing, loop_finish, done);
     ir_.SetInsertPoint(loop_finish);
     auto *restore = LLVMAppendBasicBlockInContext(context_, function_, "restore_loop");
     put(ir_.CreateTrunc(ir_.CreateLShr(saved_, ir_.getInt64(word_bits)), ir_.getInt32Ty()),
@@ -818,8 +824,7 @@ private:
             ir_.CreateAnd(status_, ir_.getInt32(word_mask ^ loop_bits)),
             ir_.CreateAnd(ir_.CreateTrunc(saved_, ir_.getInt32Ty()), ir_.getInt32(loop_bits))),
         offsetof(Registers, sr));
-    put(ir_.getInt32((plan_.operations.back().loop_address + 1) & word_mask),
-        offsetof(Registers, pc));
+    put(following, offsetof(Registers, pc));
     store(ir_.getInt8(static_cast<unsigned>(NativeBoundary::context)),
           offsetof(NativeContext, boundary),
           owner_);
@@ -1128,6 +1133,7 @@ private:
   V cpu_, owner_, initial_cycles_ = nullptr, initial_instructions_ = nullptr;
   V status_ = nullptr, lc_ = nullptr, sp_ = nullptr, sc_ = nullptr, saved_ = nullptr;
   V turns_ = nullptr, forever_ = nullptr, finite_count_ = nullptr, eligible_ = nullptr;
+  V endpoint_ = nullptr;
   std::array<V, 4> banks_{};
   std::array<V, agu_registers> cursors_{}, strides_{}, masks_{}, origins_{};
   std::array<std::array<V, agu_registers>, 2> memory_bases_{};
