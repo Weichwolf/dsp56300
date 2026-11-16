@@ -3,6 +3,7 @@
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "isa.hpp"
 #include "register_model.hpp"
 #include "saturated_shift_model.hpp"
 #include "saturation_model.hpp"
@@ -49,8 +50,8 @@ void append(Cases &cases, const Registers &state, const shift_model::Control inp
 }
 
 Word register_opcode(const shift_model::Control input, const unsigned selector) {
-  constexpr Word left_op = 0x0c1e40;
-  constexpr Word right_op = 0x0c1e60;
+  constexpr Word left_op = isa::opcode<isa::Opcode::asl_register>()[0];
+  constexpr Word right_op = isa::opcode<isa::Opcode::asr_register>()[0];
   return (input.left ? left_op : right_op) | (selector * 2) | (input.source_b ? 16U : 0U) |
          (input.destination_b ? 1U : 0U);
 }
@@ -156,7 +157,7 @@ void bits(Cases &cases, const Word mode) {
 }
 
 void repetitions(Cases &cases, const Word mode) {
-  constexpr Word repeat_three = 0x0603a0;
+  constexpr Word repeat_three = isa::opcode<isa::Opcode::rep_immediate>()[0] | (3U << 8);
   constexpr std::uint64_t main_one = std::uint64_t{1} << word_bits;
   for (const unsigned selector : {2U, 4U}) {
     for (const bool left : {false, true}) {

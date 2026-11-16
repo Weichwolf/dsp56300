@@ -19,6 +19,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace dsp56300::test {
 namespace {
@@ -100,15 +101,16 @@ void declare_end_nop(BinaryCase &item) {
   throw std::runtime_error("Missing authored program for the declared resident successor");
 }
 
+bool cold_candidate(const BinaryCase &item) {
+  if (item.fault.kind != FaultKind::invalid_instruction) { return false; }
+  const auto source = executable_source(item);
+  return item.budget == 1 && item.retired == 0 && item.progress == Progress{} &&
+         source.second.size() == 1 && item.fault.space == Space::program &&
+         item.fault.pc == source.first && item.fault.address == source.first &&
+         item.fault.value == source.second.front();
+}
+
 void refuse_sources(const std::span<const BinaryCase> cases) {
-  for (const auto &item : cases) {
-    const auto source = executable_source(item);
-    require(item.budget == 1 && item.retired == 0 && item.progress == Progress{} &&
-                source.second.size() == 1 && item.fault.space == Space::program &&
-                item.fault.pc == source.first && item.fault.address == source.first &&
-                item.fault.value == source.second.front(),
-            "Only a wholly invalid first encoding can move to a cold preparation refusal");
-  }
   const auto sources = fixture_catalogue(cases);
   for (const auto &[source, id] : sources) {
     const std::array spans{CodeSpan{.address = source.first, .words = source.second}};
@@ -133,12 +135,22 @@ void refuse_sources(const std::span<const BinaryCase> cases) {
             << " distinct cold source refusals\n";
 }
 
-void run(const std::filesystem::path &path, const bool resident_successor) {
+void run(const std::filesystem::path &path,
+         const bool resident_successor,
+         const bool runtime_errors) {
   auto input = read_fixture(path);
+  if (runtime_errors) {
+    std::erase_if(input, [](const BinaryCase &item) {
+      if (item.fault.kind != FaultKind::invalid_instruction) { return true; }
+      const auto source = executable_source(item);
+      return item.retired == 0 &&
+             (source.second.empty() || item.fault.value == source.second.front());
+    });
+    std::cout << path.filename().string() << ": native runtime-error subset\n";
+  }
   require(!input.empty(), "Fixture contains cases");
-  const auto refused = std::ranges::stable_partition(input, [](const BinaryCase &item) {
-    return item.fault.kind != FaultKind::invalid_instruction;
-  });
+  const auto refused = std::ranges::stable_partition(
+      input, [](const BinaryCase &item) { return !cold_candidate(item); });
   const std::span cases(input.begin(), refused.begin());
   if (!refused.empty()) { refuse_sources(refused); }
   require(!cases.empty(), "Fixture retains executable cases after cold source refusals");
@@ -173,12 +185,26 @@ void run(const std::filesystem::path &path, const bool resident_successor) {
 
 int main(const int argc, const char *const *const argv) {
   try {
-    const bool successor = argc > 1 && std::string_view(argv[1]) == "--declare-end-nop";
-    const int first = successor ? 2 : 1;
-    if (argc <= first) {
-      throw std::runtime_error("Usage: dsp56300_fixture_test [--declare-end-nop] FILE.d56 [...]");
+    bool successor = false;
+    bool runtime_errors = false;
+    int first = 1;
+    for (; first < argc; ++first) {
+      const std::string_view argument(argv[first]);
+      if (argument == "--declare-end-nop") {
+        successor = true;
+      } else if (argument == "--runtime-errors") {
+        runtime_errors = true;
+      } else {
+        break;
+      }
     }
-    for (int index = first; index < argc; ++index) { dsp56300::test::run(argv[index], successor); }
+    if (argc <= first) {
+      throw std::runtime_error(
+          "Usage: dsp56300_fixture_test [--declare-end-nop] [--runtime-errors] FILE.d56 [...]");
+    }
+    for (int index = first; index < argc; ++index) {
+      dsp56300::test::run(argv[index], successor, runtime_errors);
+    }
     std::cout << dsp56300::test::checks << " binary fixture checks passed\n";
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';

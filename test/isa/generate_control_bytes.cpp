@@ -4,6 +4,7 @@
 #include "control_byte_model.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "isa.hpp"
 #include "native_sequence_model.hpp"
 #include "support.hpp"
 
@@ -24,8 +25,11 @@ using byte_model::Field;
 constexpr std::array fields{Field::mr, Field::ccr, Field::com, Field::eom};
 constexpr std::array bytes{0U,  255U, 85U,  170U, 1U,   2U,   4U,   8U,   16U,  32U,
                            64U, 128U, 254U, 253U, 251U, 247U, 239U, 223U, 191U, 127U};
-constexpr Word mac_a = 0x2000d2, mac_b = 0x2000da, adc_x_a = 0x200021, round_a = 0x200011;
-constexpr Word repeat_base = 0x0600a0;
+constexpr Word mac_a = isa::opcode<isa::Opcode::mac_register_a>()[0] | (5U << 4);
+constexpr Word mac_b = isa::opcode<isa::Opcode::mac_register_b>()[0] | (5U << 4);
+constexpr Word adc_x_a = isa::opcode<isa::Opcode::adc_x_a>()[0];
+constexpr Word round_a = isa::opcode<isa::Opcode::rnd_a>()[0];
+constexpr Word repeat_base = isa::opcode<isa::Opcode::rep_immediate>()[0];
 constexpr Word repeat_old_byte = 85;
 constexpr Word lf = Word{1} << 15, fv = Word{1} << 16, pointer_range = 64, saved_la = 0x70;
 
