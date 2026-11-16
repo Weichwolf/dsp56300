@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -111,9 +112,17 @@ void run(const std::filesystem::path &path) {
                         .entries = std::span(&code.first, 1),
                         .failed_fetches = {}});
   }
+  std::cout << path.filename().string() << ": preparing " << catalogue.size()
+            << " authored program variants\n"
+            << std::flush;
+  const auto started = std::chrono::steady_clock::now();
   const auto image = Core::compile(
       {.variants = variants},
       {.memory = {}, .interrupts = {}, .transitions = {}, .callbacks = {}, .bindings = {}});
+  const auto elapsed = std::chrono::steady_clock::now() - started;
+  std::cout << path.filename().string()
+            << ": preparation=" << std::chrono::duration<double>(elapsed).count() << "s\n"
+            << std::flush;
   for (std::size_t index = 0; index < cases.size(); ++index) {
     try {
       check(cases[index], image, catalogue.at(source(cases[index])));
