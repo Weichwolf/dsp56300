@@ -101,13 +101,44 @@ void declare_end_nop(BinaryCase &item) {
   throw std::runtime_error("Missing authored program for the declared resident successor");
 }
 
+template <isa::Opcode operation> constexpr Word op = static_cast<Word>(operation);
+
+// Authored reserved source words, not a classifier of arithmetic input values.
+constexpr auto cold_encodings = [] {
+  std::array<Word, 28> words{};
+  std::size_t next = 0;
+  for (const auto prefix : {op<isa::Opcode::asl_register>,
+                            op<isa::Opcode::asr_register>,
+                            op<isa::Opcode::lsl_register>,
+                            op<isa::Opcode::lsr_register>,
+                            op<isa::Opcode::extract_register>,
+                            op<isa::Opcode::extractu_register>,
+                            op<isa::Opcode::insert_register> | (4U << 4),
+                            op<isa::Opcode::merge_register>}) {
+    for (const Word selector : {0U, 1U}) { words[next++] = prefix | (selector << 1); }
+  }
+  for (const Word selector : {0U, 1U}) {
+    for (const Word destination : {0U, 1U}) {
+      words[next++] = op<isa::Opcode::normf_register> | (selector << 1) | destination;
+    }
+    words[next++] = op<isa::Opcode::insert_immediate> | (selector << 4);
+  }
+  for (const Word selector : {1U, 2U, 3U}) {
+    for (const Word destination : {0U, 1U}) {
+      words[next++] = op<isa::Opcode::cmpu_register> | (selector << 1) | destination;
+    }
+  }
+  return words;
+}();
+
 bool cold_candidate(const BinaryCase &item) {
   if (item.fault.kind != FaultKind::invalid_instruction) { return false; }
   const auto source = executable_source(item);
   return item.budget == 1 && item.retired == 0 && item.progress == Progress{} &&
-         source.second.size() == 1 && item.fault.space == Space::program &&
+         !source.second.empty() && item.fault.space == Space::program &&
          item.fault.pc == source.first && item.fault.address == source.first &&
-         item.fault.value == source.second.front();
+         item.fault.value == source.second.front() &&
+         std::ranges::find(cold_encodings, source.second.front()) != cold_encodings.end();
 }
 
 void refuse_sources(const std::span<const BinaryCase> cases) {
@@ -141,10 +172,7 @@ void run(const std::filesystem::path &path,
   auto input = read_fixture(path);
   if (runtime_errors) {
     std::erase_if(input, [](const BinaryCase &item) {
-      if (item.fault.kind != FaultKind::invalid_instruction) { return true; }
-      const auto source = executable_source(item);
-      return item.retired == 0 &&
-             (source.second.empty() || item.fault.value == source.second.front());
+      return item.fault.kind != FaultKind::invalid_instruction || cold_candidate(item);
     });
     std::cout << path.filename().string() << ": native runtime-error subset\n";
   }

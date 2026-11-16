@@ -4,6 +4,7 @@
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "isa.hpp"
 #include "saturated_shift_model.hpp"
 #include "saturation_model.hpp"
 #include "support.hpp"
@@ -21,6 +22,7 @@
 namespace dsp56300::test {
 namespace {
 using Cases = std::vector<BinaryCase>;
+template <isa::Opcode operation> constexpr Word encoded = static_cast<Word>(operation);
 constexpr unsigned main_shift = 24;
 constexpr std::uint64_t main_mask = std::uint64_t{word_mask} << main_shift;
 constexpr std::array<std::uint64_t, 9> values{0,
@@ -36,8 +38,10 @@ constexpr std::array<unsigned, 9> arithmetic_counts{0, 1, 2, 7, 17, 24, 40, 54, 
 constexpr std::array<unsigned, 7> logical_counts{0, 1, 2, 7, 16, 23, 24};
 constexpr std::array<Word, 3> modes{0, mode_down, mode_up};
 constexpr Word sticky = flag_s;
-constexpr Word register_asl = 0x0c1e40, register_asr = 0x0c1e60;
-constexpr Word register_lsl = 0x0c1e10, register_lsr = 0x0c1e30;
+constexpr Word register_asl = encoded<isa::Opcode::asl_register>,
+               register_asr = encoded<isa::Opcode::asr_register>;
+constexpr Word register_lsl = encoded<isa::Opcode::lsl_register>,
+               register_lsr = encoded<isa::Opcode::lsr_register>;
 constexpr std::int64_t minimum56 = -static_cast<std::int64_t>(sign56);
 constexpr std::int64_t maximum56 = static_cast<std::int64_t>(sign56 - 1);
 
@@ -176,8 +180,8 @@ void shift_case(Cases &cases, const ShiftCase input, const unsigned selector = 0
 }
 
 void arithmetic_variants(Cases &cases, const ShiftCase base) {
-  constexpr Word right = 0x0c1c00;
-  constexpr Word left = 0x0c1d00;
+  constexpr Word right = encoded<isa::Opcode::asr_immediate>;
+  constexpr Word left = encoded<isa::Opcode::asl_immediate>;
   for (const auto source : {false, true}) {
     for (const auto destination : {false, true}) {
       for (const auto prefix : {right, left}) {
@@ -203,8 +207,8 @@ void immediate_arithmetic(Cases &cases) {
 }
 
 void logical_shifts(Cases &cases) {
-  constexpr Word immediate_right = 0x0c1ec0;
-  constexpr Word immediate_left = 0x0c1e80;
+  constexpr Word immediate_right = encoded<isa::Opcode::lsr_immediate>;
+  constexpr Word immediate_left = encoded<isa::Opcode::lsl_immediate>;
   for (const auto destination : {false, true}) {
     for (const auto count : logical_counts) {
       for (const auto value : values) {
@@ -265,7 +269,12 @@ void register_shifts(Cases &cases) {
 }
 
 void parallel_shifts(Cases &cases) {
-  constexpr std::array<Word, 6> opcodes{0x22, 0x32, 0x23, 0x33, 0x27, 0x37};
+  constexpr std::array<Word, 6> opcodes{encoded<isa::Opcode::asr_a> & status_byte,
+                                        encoded<isa::Opcode::asl_a> & status_byte,
+                                        encoded<isa::Opcode::lsr_a> & status_byte,
+                                        encoded<isa::Opcode::lsl_a> & status_byte,
+                                        encoded<isa::Opcode::ror_a> & status_byte,
+                                        encoded<isa::Opcode::rol_a> & status_byte};
   for (const auto opcode : opcodes) {
     for (const bool destination : {false, true}) {
       for (const auto value : values) {
@@ -323,7 +332,10 @@ void scaled_sums(Cases &cases) {
   for (const auto destination : values) {
     for (const auto source : values) {
       for (const bool destination_b : {false, true}) {
-        for (const Word opcode : {0x02U, 0x06U, 0x12U, 0x16U}) {
+        for (const Word opcode : {encoded<isa::Opcode::addr_b_a> & status_byte,
+                                  encoded<isa::Opcode::subr_b_a> & status_byte,
+                                  encoded<isa::Opcode::addl_b_a> & status_byte,
+                                  encoded<isa::Opcode::subl_b_a> & status_byte}) {
           scaled_sum(cases,
                      {.destination = destination,
                       .source = source,
@@ -353,7 +365,7 @@ void compare_magnitude(Cases &cases, const SumCase input) {
   item.expected.sr =
       input.mode | sticky | arithmetic_status({.value = signed56(raw), .mode = input.mode}) |
       (out_of_range(full) ? flag_v | flag_l : 0) | (left_magnitude < right_magnitude ? flag_c : 0);
-  constexpr Word compare_magnitude = 0x07;
+  constexpr Word compare_magnitude = encoded<isa::Opcode::cmpm_b_a> & status_byte;
   append(
       cases, std::move(item), parallel_none | compare_magnitude | (input.destination_b ? 8U : 0U));
 }
@@ -390,10 +402,10 @@ void rejected_case(Cases &cases, const Rejected input) {
 }
 
 void rejected_counts(Cases &cases) {
-  constexpr Word immediate_asr = 0x0c1c00;
-  constexpr Word immediate_asl = 0x0c1d00;
-  constexpr Word immediate_lsl = 0x0c1e80;
-  constexpr Word immediate_lsr = 0x0c1ec0;
+  constexpr Word immediate_asr = encoded<isa::Opcode::asr_immediate>;
+  constexpr Word immediate_asl = encoded<isa::Opcode::asl_immediate>;
+  constexpr Word immediate_lsl = encoded<isa::Opcode::lsl_immediate>;
+  constexpr Word immediate_lsr = encoded<isa::Opcode::lsr_immediate>;
   constexpr Word maximum_arithmetic_count = 63;
   constexpr Word maximum_logical_count = 31;
   for (const auto prefix : {immediate_asr, immediate_asl}) {
@@ -415,7 +427,7 @@ void rejected_counts(Cases &cases) {
 }
 
 void logical_sm_case(Cases &cases, const Word opcode) {
-  constexpr Word immediate_left = 0x0c1e80;
+  constexpr Word immediate_left = encoded<isa::Opcode::lsl_immediate>;
   const bool immediate = opcode == immediate_left;
   const auto count = immediate ? 0U : static_cast<Word>(seed().x % 32);
   if (count > word_bits) {
@@ -447,9 +459,12 @@ void rejected_modes(Cases &cases) {
                                                   Word{1} << 20,
                                                   mode_down | mode_up,
                                                   (Word{1} << 21) | mode_down | mode_up};
-  constexpr Word immediate_asl = 0x0c1d02;
-  constexpr Word x0_asl = 0x0c1e48;
-  constexpr std::array<Word, 4> instructions{immediate_asl, 0x0c1e80, x0_asl, 0x0c1e38};
+  constexpr Word immediate_asl = (encoded<isa::Opcode::asl_immediate> | (1U << 1));
+  constexpr Word x0_asl = (encoded<isa::Opcode::asl_register> | (4U << 1));
+  constexpr std::array<Word, 4> instructions{immediate_asl,
+                                             encoded<isa::Opcode::lsl_immediate>,
+                                             x0_asl,
+                                             (encoded<isa::Opcode::lsr_register> | (4U << 1))};
   for (const auto mode : unsupported_modes) {
     for (const auto opcode : instructions) {
       if (mode == saturation_model::mode && (opcode == immediate_asl || opcode == x0_asl)) {
@@ -490,7 +505,7 @@ void repeat_case(Cases &cases, const RepeatCase input) {
   item.expected.a = input.after;
   item.expected.pc = start + 2;
   item.expected.sr = sticky | arithmetic_status({.value = signed56(input.after)});
-  constexpr Word repeat_three = 0x0603a0;
+  constexpr Word repeat_three = (encoded<isa::Opcode::rep_immediate> | (3U << 8));
   item.before.push_back({.words = {repeat_three, input.opcode}, .address = start});
   item.budget = 4;
   item.retired = 4;
@@ -499,8 +514,8 @@ void repeat_case(Cases &cases, const RepeatCase input) {
 }
 
 void repeat_cases(Cases &cases) {
-  constexpr Word immediate_asl_one = 0x0c1d02;
-  constexpr Word register_asr_a1 = 0x0c1e64;
+  constexpr Word immediate_asl_one = (encoded<isa::Opcode::asl_immediate> | (1U << 1));
+  constexpr Word register_asr_a1 = (encoded<isa::Opcode::asr_register> | (2U << 1));
   constexpr std::uint64_t main_one = std::uint64_t{1} << word_bits;
   repeat_case(cases, {.before = 3, .after = std::uint64_t{3} * 8, .opcode = immediate_asl_one});
   repeat_case(cases, {.before = main_one, .after = main_one / 2, .opcode = register_asr_a1});
@@ -516,7 +531,7 @@ void parallel_latch(Cases &cases) {
   item.expected.x = (item.initial.x & main_mask) | old_main;
   constexpr Word source_a1 = 12;
   constexpr Word target_x0 = 4;
-  constexpr Word logical_left = 0x33;
+  constexpr Word logical_left = encoded<isa::Opcode::lsl_a> & status_byte;
   append(
       cases, std::move(item), parallel_none | (source_a1 << 13) | (target_x0 << 8) | logical_left);
 }

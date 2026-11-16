@@ -105,10 +105,6 @@ void Core::Impl::execute_shift(const Instruction &decoded) {
   unsigned count = opcode >> 1;
   if (!immediate) {
     const auto selector = (opcode >> 1) & 7;
-    if (selector < 2) {
-      fail(FaultKind::invalid_instruction, Space::program, current_pc, opcode);
-      return;
-    }
     count = read_register(controls[selector - 2]);
   }
   bool left = (opcode & (1U << 5)) == 0;

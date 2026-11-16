@@ -470,8 +470,12 @@ void admission_guards() {
 }
 
 void reserved_sources() {
-  for (const auto opcode :
-       {op<isa::Opcode::normf_register>, op<isa::Opcode::cmpu_register> | (1U << 1)}) {
+  for (const auto opcode : {op<isa::Opcode::normf_register>,
+                            op<isa::Opcode::cmpu_register> | (1U << 1),
+                            op<isa::Opcode::asr_register>,
+                            op<isa::Opcode::extract_register>,
+                            op<isa::Opcode::insert_register>,
+                            op<isa::Opcode::insert_immediate>}) {
     const std::array vector{opcode, op<isa::Opcode::nop>};
     const std::array code{CodeSpan{.address = base, .words = vector},
                           CodeSpan{.address = foreground, .words = continuation}};

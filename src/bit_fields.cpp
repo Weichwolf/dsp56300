@@ -25,10 +25,6 @@ constexpr std::array sources{
 Word Core::Impl::bit_field_control(const Instruction &decoded) {
   if (decoded.words == 2) { return decoded.extension; }
   const auto selector = (decoded.opcode >> 1) & 7U;
-  if (selector < 2) {
-    fail(FaultKind::invalid_instruction, Space::program, current_pc, decoded.opcode);
-    return 0;
-  }
   return read_register(controls.at(selector - 2));
 }
 
@@ -62,7 +58,7 @@ void Core::Impl::insert_field(const Instruction &decoded, const Word control) {
   const auto selector = (decoded.opcode >> 4) & 7U;
   const unsigned offset = control & six_bit_mask;
   const unsigned width = (control >> width_shift) & six_bit_mask;
-  if (selector < 2 || width > word_bits || offset + width > accumulator_bits) {
+  if (width > word_bits || offset + width > accumulator_bits) {
     fail(FaultKind::invalid_instruction, Space::program, current_pc, decoded.opcode);
     return;
   }
@@ -107,7 +103,6 @@ void Core::Impl::execute_bit_field(const Instruction &decoded) {
     return;
   }
   const auto control = bit_field_control(decoded);
-  if (fault.kind != FaultKind::none) { return; }
   if (decoded.operation == Operation::bit_field_extract) {
     extract_field(decoded, control);
   } else if (decoded.operation == Operation::bit_field_insert) {
