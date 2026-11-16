@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <exception>
 #include <iostream>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -31,6 +32,16 @@ void execution() {
   ram[1] = isa::stop.front();
   Core core(Memory::unified(ram));
   const auto initial = core.state();
+  const std::array spans{CodeSpan{.address = 0, .words = std::span(ram).first(2)}};
+  constexpr std::array entries{Word{0}};
+  const std::array variants{
+      CodeVariant{.id = 0, .code = spans, .entries = entries, .failed_fetches = {}}};
+  const auto image = Core::compile({.variants = variants}, {});
+  core.install(image, 0);
+  const auto installed = core.state();
+  require(installed.registers == initial.registers && installed.failure == initial.failure &&
+              installed.execution == initial.execution && installed.progress == initial.progress,
+          "Preparing and installing code leaves the reset state intact");
   require(initial.execution == ExecutionState::running && initial.failure.kind == FaultKind::none &&
               initial.progress == Progress{} && core.progress() == Progress{} &&
               initial.registers.pc == 0,
@@ -38,7 +49,7 @@ void execution() {
   for (const auto modifier : initial.registers.m) {
     require(modifier == word_mask, "Reset initializes every linear AGU modifier");
   }
-  const auto first = core.step();
+  const auto first = core.run(1);
   require(first.retired == 1 && first.fault.kind == FaultKind::none &&
               first.state == ExecutionState::running && core.state().registers.pc == 1 &&
               core.progress() == Progress{.instructions = 1, .estimated_cycles = 1},
@@ -47,7 +58,7 @@ void execution() {
   require(last.retired == 1 && last.state == ExecutionState::stopped &&
               last.fault.kind == FaultKind::none && core.state().registers.pc == 2,
           "Run reaches the actual STOP without a consumer quantum");
-  require(core.run().retired == 0 && core.step().retired == 0, "Stopped execution retires nothing");
+  require(core.run().retired == 0 && core.run(1).retired == 0, "Stopped execution retires nothing");
   require(initial.registers.pc == 0 && initial.progress == Progress{},
           "A state snapshot remains an independent read-only observation");
   require(core.state().registers == core.registers() &&
@@ -66,7 +77,7 @@ void execution() {
   core.set_registers(seed);
   require(core.state().registers == seed,
           "Inspection exposes unpadded 56-bit accumulators in canonical DSP coordinates");
-  require(core.step().retired == 1 && core.state().registers.a == positive &&
+  require(core.run(1).retired == 1 && core.state().registers.a == positive &&
               core.state().registers.b == negative,
           "Native execution preserves initialized canonical accumulator values");
 }
