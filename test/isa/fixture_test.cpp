@@ -5,20 +5,15 @@
 #include "fixture_memory.hpp"
 #include "support.hpp"
 
-#include <algorithm>
-#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
 #include <iostream>
-#include <map>
 #include <span>
 #include <stdexcept>
 #include <string>
-#include <utility>
-#include <vector>
 
 namespace dsp56300::test {
 namespace {
@@ -87,45 +82,22 @@ void check(const BinaryCase &item, const NativeImage &image, const std::uint64_t
   }
 }
 
-using Source = std::pair<Word, std::vector<Word>>;
-
-Source source(const BinaryCase &item) {
-  const auto found = std::ranges::find_if(item.before, [&](const MemoryBlock &block) {
-    return block.space == Space::program && block.address == item.initial.pc;
-  });
-  require(found != item.before.end(), "Fixture must declare its executable entry stream");
-  return {found->address, found->words};
-}
-
 void run(const std::filesystem::path &path) {
   const auto cases = read_fixture(path);
   require(!cases.empty(), "Fixture contains cases");
-  std::map<Source, std::uint64_t> catalogue;
-  for (const auto &item : cases) { catalogue.try_emplace(source(item), catalogue.size()); }
-  std::vector<CodeSpan> spans;
-  spans.reserve(catalogue.size());
-  std::vector<CodeVariant> variants;
-  for (const auto &[code, id] : catalogue) {
-    spans.push_back({.address = code.first, .words = code.second});
-    variants.push_back({.id = id,
-                        .code = std::span(&spans.back(), 1),
-                        .entries = std::span(&code.first, 1),
-                        .failed_fetches = {}});
-  }
+  const auto catalogue = fixture_catalogue(cases);
   std::cout << path.filename().string() << ": preparing " << catalogue.size()
             << " authored program variants\n"
             << std::flush;
   const auto started = std::chrono::steady_clock::now();
-  const auto image = Core::compile(
-      {.variants = variants},
-      {.memory = {}, .interrupts = {}, .transitions = {}, .callbacks = {}, .bindings = {}});
+  const auto image = compile_fixture(catalogue);
   const auto elapsed = std::chrono::steady_clock::now() - started;
   std::cout << path.filename().string()
             << ": preparation=" << std::chrono::duration<double>(elapsed).count() << "s\n"
             << std::flush;
   for (std::size_t index = 0; index < cases.size(); ++index) {
     try {
-      check(cases[index], image, catalogue.at(source(cases[index])));
+      check(cases[index], image, catalogue.at(executable_source(cases[index])));
     } catch (const std::exception &error) {
       throw std::runtime_error(path.string() + ": case " + std::to_string(index) + " (" +
                                cases[index].name + "): " + error.what());
