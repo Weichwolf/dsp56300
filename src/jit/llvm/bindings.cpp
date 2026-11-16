@@ -35,7 +35,8 @@ constexpr std::array names{"dsp56300_io_read",
                            "dsp56300_io_bit",
                            "dsp56300_io_reset",
                            "dsp56300_io_pending",
-                           "dsp56300_io_revision"};
+                           "dsp56300_io_revision",
+                           "dsp56300_io_retired"};
 constexpr std::array interfaces{"_ZNK8dsp563004Core9registersEv",
                                 "_ZNK8dsp563004Core8progressEv",
                                 "_ZN8dsp563004Core13request_yieldEv"};
@@ -117,7 +118,29 @@ void wrap_callback(const CallbackTarget binding) {
   for (auto &argument : source.args()) { arguments.push_back(&argument); }
   auto *call = body.CreateCall(&target, arguments);
   call->setAttributes(target.getAttributes());
-  body.CreateRet(call);
+  if (source.getReturnType()->isVoidTy()) {
+    body.CreateRetVoid();
+  } else {
+    body.CreateRet(call);
+  }
+}
+
+void retirement_attributes(llvm::Function &source) {
+  std::vector<llvm::AttributeSet> parameters;
+  for (auto &argument : source.args()) {
+    auto attributes = source.getAttributes().getParamAttrs(argument.getArgNo());
+    for (const auto kind : {llvm::Attribute::NoCapture,
+                            llvm::Attribute::ReadOnly,
+                            llvm::Attribute::ReadNone,
+                            llvm::Attribute::WriteOnly}) {
+      attributes = attributes.removeAttribute(source.getContext(), kind);
+    }
+    parameters.push_back(attributes);
+  }
+  source.setAttributes(llvm::AttributeList::get(
+      source.getContext(), {}, source.getAttributes().getRetAttrs(), parameters));
+  source.addFnAttr(llvm::Attribute::NoUnwind);
+  source.addFnAttr("dsp56300-retirement");
 }
 
 llvm::Function *declaration(llvm::Function &source, const llvm::StringRef symbol) {
@@ -181,6 +204,7 @@ void declare_callbacks(LlvmModule &module, const std::span<const CallbackBinding
     if (source == nullptr || source->isDeclaration()) {
       throw std::invalid_argument("DSP callback requires its core-owned public Io adapter");
     }
+    if (binding.role == CallbackRole::retired) { retirement_attributes(*source); }
     auto *target = declaration(*source, name);
     targets.push_back({.source = source, .target = target});
     imports.push_back(target);
@@ -245,5 +269,24 @@ void finalize_io(LlvmModule &module) {
       function.setLinkage(llvm::GlobalValue::InternalLinkage);
     }
   }
+}
+
+void emit_retirement(llvm::BasicBlock &block,
+                     llvm::Value *const owner,
+                     llvm::Value *const count,
+                     const bool region) {
+  auto &module = *block.getModule();
+  const auto *observer = module.getFunction("dsp56300_io_retired");
+  if (observer == nullptr || !observer->hasFnAttribute("dsp56300-retirement")) { return; }
+  auto *helper = module.getFunction("dsp56300_semantic_retired");
+  if (helper == nullptr || helper->isDeclaration() || !helper->getReturnType()->isVoidTy() ||
+      helper->arg_size() != 3 || !helper->getFunctionType()->getParamType(0)->isPointerTy() ||
+      !helper->getFunctionType()->getParamType(1)->isIntegerTy(32) ||
+      !helper->getFunctionType()->getParamType(2)->isIntegerTy(1)) {
+    throw std::invalid_argument("DSP image lacks its retirement observer ABI");
+  }
+  llvm::IRBuilder<> ir(&block);
+  auto *call = ir.CreateCall(helper, {owner, count, ir.getInt1(region)});
+  call->setAttributes(helper->getAttributes());
 }
 }

@@ -125,7 +125,7 @@ struct CodeTransition {
   Word entry;
 };
 
-enum class CallbackRole : std::uint8_t { read, write, bit, reset, pending, revision };
+enum class CallbackRole : std::uint8_t { read, write, bit, reset, pending, revision, retired };
 
 struct CallbackBinding {
   CallbackRole role;

@@ -6,6 +6,7 @@
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
+#include "io.hpp"
 
 #include <array>
 #include <cstddef>
@@ -27,6 +28,12 @@ extern "C" const std::array<Word, semantic_abi_fields> dsp56300_semantic_abi{
 }
 
 namespace dsp56300 {
+void Core::Impl::semantic_retired(void *const owner,
+                                  const std::uint32_t count,
+                                  const bool region) noexcept {
+  dsp56300_io_retired(static_cast<Impl *>(owner)->io, count, region);
+}
+
 Word Core::Impl::semantic_numeric_mode(void *const owner) noexcept {
   return static_cast<const Impl *>(owner)->cpu.reg.sr & detail::numeric_mode_mask;
 }

@@ -5,6 +5,11 @@
 #include <cstddef>
 #include <span>
 
+namespace llvm {
+class BasicBlock;
+class Value;
+}
+
 namespace dsp56300::detail {
 class LlvmModule;
 void declare_callbacks(LlvmModule &module, std::span<const CallbackBinding> bindings);
@@ -14,4 +19,5 @@ void link_callbacks(LlvmModule &module,
 void mark_io(LlvmModule &module);
 void inline_io(LlvmModule &module);
 void finalize_io(LlvmModule &module);
+void emit_retirement(llvm::BasicBlock &block, llvm::Value *owner, llvm::Value *count, bool region);
 }

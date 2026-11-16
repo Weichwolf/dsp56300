@@ -52,4 +52,10 @@ extern "C" DSP56300_IO_ENTRY std::uint64_t dsp56300_io_revision(const dsp56300::
   return io.program_revision();
 }
 
+extern "C" DSP56300_IO_ENTRY void
+dsp56300_io_retired(dsp56300::Io *io, std::uint32_t count, bool region) noexcept {
+  // Retain the replaceable call until the consumer supplies its observer IR.
+  asm volatile("" : : "r"(io), "r"(count), "r"(region) : "memory");
+}
+
 #undef DSP56300_IO_ENTRY

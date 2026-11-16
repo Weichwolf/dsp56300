@@ -186,6 +186,7 @@ private:
     ir_.CreateStore(ir_.CreateAdd(count, retired), count_);
     ir_.CreateStore(ir_.CreateSub(window, cost), window_);
     ir_.CreateStore(next, pc_);
+    emit_retirement(*ir_.GetInsertBlock(), active_->getArg(0), retired, true);
     const auto end = (region.last_pc + region.last_words) & word_mask;
     std::set<Word> targets{pc, end};
     for (const auto target : edges_.at(region.last_pc)) {
@@ -483,6 +484,7 @@ private:
                                      ir_.CreateSub(window, cost),
                                      ir_.getInt64(0)),
                     window_);
+    emit_retirement(*ir_.GetInsertBlock(), active_->getArg(0), ir_.getInt32(1), false);
     ir_.CreateCondBr(
         ir_.CreateICmpEQ(flow, ir_.getInt8(static_cast<unsigned>(SemanticFlow::owner))),
         exits_.at(ImageExit::owner),

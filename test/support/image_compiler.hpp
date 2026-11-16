@@ -6,6 +6,7 @@
 #include "llvm-c/Core.h"
 #include "llvm-c/Error.h"
 #include "llvm-c/LLJIT.h"
+#include "llvm-c/Linker.h"
 #include "llvm-c/Orc.h"
 #include "llvm-c/Support.h"
 #include "llvm-c/Target.h"
@@ -16,8 +17,10 @@
 #include "llvm/Support/Error.h"
 
 #include <bit>
+#include <cstddef>
 #include <exception>
 #include <memory>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -47,7 +50,7 @@ inline void dispose(LLVMOrcLLJITRef engine) noexcept {
 
 class Code {
 public:
-  explicit Code(const SemanticImage &image) {
+  explicit Code(const SemanticImage &image, const std::span<const std::byte> bindings = {}) {
     if (LLVMInitializeNativeTarget() != 0 || LLVMInitializeNativeAsmPrinter() != 0 ||
         LLVMLoadLibraryPermanently(nullptr) != 0) {
       throw std::runtime_error("Cannot initialize the native test consumer");
@@ -63,6 +66,19 @@ public:
         LLVMOrcThreadSafeContextGetContext(context.get()), buffer.get(), &raw_module);
     Owner<LLVMModuleRef, LLVMDisposeModule> module(raw_module);
     if (parsed != 0 || !module) { throw std::runtime_error("Cannot parse public semantic code"); }
+    if (!bindings.empty()) {
+      const Owner<LLVMMemoryBufferRef, LLVMDisposeMemoryBuffer> host(
+          LLVMCreateMemoryBufferWithMemoryRangeCopy(
+              reinterpret_cast<const char *>(bindings.data()), bindings.size(), "bindings"));
+      LLVMModuleRef linked = nullptr;
+      if (LLVMParseBitcodeInContext2(
+              LLVMOrcThreadSafeContextGetContext(context.get()), host.get(), &linked) != 0) {
+        throw std::runtime_error("Cannot parse consumer bindings");
+      }
+      if (LLVMLinkModules2(module.get(), linked) != 0) {
+        throw std::runtime_error("Cannot link consumer bindings");
+      }
+    }
     char *raw_error = nullptr;
     LLVMTargetRef architecture = nullptr;
     const auto found =
@@ -122,8 +138,9 @@ private:
 };
 }
 
-inline NativeImage compile_image(const SemanticImage &image) {
-  const auto owner = std::make_shared<image_compiler::Code>(image);
+inline NativeImage compile_image(const SemanticImage &image,
+                                 const std::span<const std::byte> bindings = {}) {
+  const auto owner = std::make_shared<image_compiler::Code>(image, bindings);
   std::vector<NativeSymbol> symbols;
   for (const auto entry : image.exports()) {
     symbols.push_back({.name = entry.name, .address = owner->address(std::string(entry.name))});

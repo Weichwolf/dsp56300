@@ -52,6 +52,11 @@ Core state or request synchronous yield. Do not assume callbacks cannot alias
 Core state. Missing selected definitions fail materialization, not lowering.
 Retain unselected roles' normal owned I/O semantics.
 
+An optional `retired` binding receives `(Io*, uint32_t count, bool region)` after
+successful retirement. The Io pointer may be null. The consumer owns diagnostic
+counters; region and precise counts sum to completed instructions. Unconfigured
+images emit no observer operations. Observers preserve guest state and never reenter execution.
+
 Core::bind requires exact identity, every declared export once, nonnull addresses
 and shared executable ownership. Reject missing/extra/duplicate symbols. Copy
 typed maps; borrowed symbol names/compiler inputs may expire after binding.

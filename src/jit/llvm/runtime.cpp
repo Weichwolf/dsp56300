@@ -82,6 +82,7 @@ void canonicalize_semantic_entry(LLVMModuleRef module) {
   for (const auto *name : {"dsp56300_semantic_execute",
                            "dsp56300_semantic_vector_execute",
                            "dsp56300_semantic_memory",
+                           "dsp56300_semantic_retired",
                            "dsp56300_semantic_region",
                            "dsp56300_semantic_numeric_mode"}) {
     const auto alias = std::string(1, '\001') + name;

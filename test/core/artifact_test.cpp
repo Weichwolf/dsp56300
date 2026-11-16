@@ -5,6 +5,8 @@
 #include "isa.hpp"
 #include "support.hpp"
 
+#include "llvm-c/BitWriter.h"
+#include "llvm-c/Core.h"
 #include "llvm-c/Error.h"
 #include "llvm-c/TargetMachine.h"
 #include "llvm-c/Transforms/PassBuilder.h"
@@ -20,6 +22,7 @@
 #include <dlfcn.h>
 #include <exception>
 #include <iostream>
+#include <memory>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -221,6 +224,212 @@ void roundtrip() {
   refused_installs(native, source);
   execution(native, source);
 }
+
+struct RetirementIo final : Io {
+  std::array<std::uint64_t, 2> counts{};
+
+  bool read(Space /*space*/, Word /*address*/, Word /*pc*/, Word & /*value*/) noexcept override {
+    return false;
+  }
+
+  bool write(Space /*space*/, Word /*address*/, Word /*pc*/, Word /*value*/) noexcept override {
+    return false;
+  }
+
+  bool bit(Space /*space*/,
+           Word /*address*/,
+           Word /*pc*/,
+           Word /*bit*/,
+           BitAction /*action*/,
+           bool & /*previous*/) noexcept override {
+    return false;
+  }
+};
+
+std::vector<std::byte> retirement_binding() {
+  using test::image_compiler::Owner;
+  const Owner<LLVMContextRef, LLVMContextDispose> context(LLVMContextCreate());
+  const Owner<LLVMModuleRef, LLVMDisposeModule> module(
+      LLVMModuleCreateWithNameInContext("retirement-consumer", context.get()));
+  const Owner<LLVMBuilderRef, LLVMDisposeBuilder> ir(LLVMCreateBuilderInContext(context.get()));
+  auto *byte = LLVMInt8TypeInContext(context.get());
+  auto *wide = LLVMInt64TypeInContext(context.get());
+  std::array parameters{LLVMPointerTypeInContext(context.get(), 0),
+                        LLVMInt32TypeInContext(context.get()),
+                        LLVMInt1TypeInContext(context.get())};
+  auto *type = LLVMFunctionType(
+      LLVMVoidTypeInContext(context.get()), parameters.data(), parameters.size(), 0);
+  auto *function = LLVMAddFunction(module.get(), "record_retired", type);
+  for (const auto [name, index] :
+       {std::pair{"nounwind", static_cast<LLVMAttributeIndex>(LLVMAttributeFunctionIndex)},
+        std::pair{"zeroext", 3U}}) {
+    LLVMAddAttributeAtIndex(function,
+                            index,
+                            LLVMCreateEnumAttribute(context.get(),
+                                                    LLVMGetEnumAttributeKindForName(
+                                                        name, std::string_view(name).size()),
+                                                    0));
+  }
+  auto *entry = LLVMAppendBasicBlockInContext(context.get(), function, "entry");
+  auto *update = LLVMAppendBasicBlockInContext(context.get(), function, "update");
+  auto *done = LLVMAppendBasicBlockInContext(context.get(), function, "done");
+  LLVMPositionBuilderAtEnd(ir.get(), entry);
+  auto *owner = LLVMGetParam(function, 0);
+  LLVMBuildCondBr(ir.get(), LLVMBuildIsNull(ir.get(), owner, "absent"), done, update);
+  LLVMPositionBuilderAtEnd(ir.get(), update);
+  RetirementIo probe;
+  const auto offset = reinterpret_cast<std::uintptr_t>(&probe.counts) -
+                      reinterpret_cast<std::uintptr_t>(static_cast<Io *>(&probe));
+  auto *index = LLVMBuildSelect(ir.get(),
+                                LLVMGetParam(function, 2),
+                                LLVMConstInt(wide, offset, 0),
+                                LLVMConstInt(wide, offset + sizeof(std::uint64_t), 0),
+                                "counter.offset");
+  auto *address = LLVMBuildGEP2(ir.get(), byte, owner, &index, 1, "counter");
+  auto *value = LLVMBuildLoad2(ir.get(), wide, address, "previous");
+  auto *count = LLVMBuildZExt(ir.get(), LLVMGetParam(function, 1), wide, "count");
+  LLVMBuildStore(ir.get(), LLVMBuildAdd(ir.get(), value, count, "retired"), address);
+  LLVMBuildBr(ir.get(), done);
+  LLVMPositionBuilderAtEnd(ir.get(), done);
+  LLVMBuildRetVoid(ir.get());
+  const Owner<LLVMMemoryBufferRef, LLVMDisposeMemoryBuffer> bytes(
+      LLVMWriteBitcodeToMemoryBuffer(module.get()));
+  const auto *first = reinterpret_cast<const std::byte *>(LLVMGetBufferStart(bytes.get()));
+  return {first, first + LLVMGetBufferSize(bytes.get())};
+}
+
+struct RetirementMachine {
+  RetirementMachine(const NativeImage &image,
+                    const std::span<const Word> code,
+                    const bool fault,
+                    const bool no_io = false) {
+    std::ranges::copy(code, program.begin() + start);
+    for (std::size_t index = 0; index < x.size(); ++index) {
+      x[index] = static_cast<Word>(index + 1);
+    }
+    core = std::make_unique<Core>(Memory::separate({.program = program, .x = x, .y = y}),
+                                  no_io ? nullptr : &io);
+    auto registers = core->registers();
+    registers.pc = start;
+    registers.omr = 0;
+    registers.r[0] = fault ? data_words + 1 : 0;
+    core->set_registers(registers);
+    core->install(image, 0);
+  }
+
+  std::array<Word, program_words> program{};
+  std::array<Word, data_words> x{}, y{};
+  RetirementIo io;
+  std::unique_ptr<Core> core;
+};
+
+void retirement_case(const std::array<NativeImage, 2> &images,
+                     const std::span<const Word> code,
+                     const bool fault,
+                     const unsigned limit,
+                     const bool deadline,
+                     const bool no_io) {
+  RetirementMachine before(images[0], code, fault, no_io);
+  RetirementMachine after(images[1], code, fault, no_io);
+  const auto first = deadline ? before.core->run_until(limit) : before.core->run(limit);
+  const auto second = deadline ? after.core->run_until(limit) : after.core->run(limit);
+  const auto a = before.core->state();
+  const auto b = after.core->state();
+  require(a.registers == b.registers && a.failure == b.failure && a.execution == b.execution &&
+              a.progress == b.progress && first.retired == second.retired &&
+              first.yielded == second.yielded && before.program == after.program &&
+              before.x == after.x && before.y == after.y,
+          "Retirement observation preserves every register, memory word, fault and boundary");
+  require(before.io.counts == std::array<std::uint64_t, 2>{} &&
+              (no_io || after.io.counts[0] + after.io.counts[1] == b.progress.instructions),
+          "Only an explicit binding observes successful retirement, including partial runs");
+  constexpr unsigned complete = 32;
+  if (limit == complete && !no_io) {
+    require(after.io.counts ==
+                (fault ? std::array<std::uint64_t, 2>{0, 1} : std::array<std::uint64_t, 2>{6, 2}),
+            "The DO region counts six instructions; setup/STOP count precisely, faults do not");
+  }
+}
+
+void retirement_vectors(const std::span<const std::byte> binding) {
+  const Source source;
+  const std::array callbacks{
+      CallbackBinding{.role = CallbackRole::retired, .symbol = "record_retired"}};
+  auto options = source.options();
+  options.callbacks = callbacks;
+  options.bindings = binding;
+  const auto image = Core::compile(source.image(), options);
+  std::array<Word, program_words> program{};
+  std::array<Word, data_words> x{};
+  std::array<Word, data_words> y{};
+  program[start] = source.jump[0];
+  std::ranges::copy(source.first_vector, program.begin() + vector);
+  RetirementIo io;
+  Core core(Memory::separate({.program = program, .x = x, .y = y}), &io);
+  auto registers = core.registers();
+  registers.pc = start;
+  core.set_registers(registers);
+  core.install(image, 0);
+  core.interrupt(vector, 0);
+  require(io.counts == std::array<std::uint64_t, 2>{0, 2} && core.progress().instructions == 2,
+          "Both inserted IRQ instructions retire through the precise observer");
+  require(core.run().retired == 1 && io.counts[0] + io.counts[1] == 3,
+          "An owner transfer counts its completed instruction before returning");
+  core.load(Space::program, destination, source.target);
+  core.load(Space::program, vector, source.second_vector);
+  core.install(image, 1);
+  core.interrupt(vector, 0);
+  const auto result = core.run();
+  require(result.retired == 2 && result.state == ExecutionState::stopped &&
+              core.progress().instructions == 7 && io.counts[0] + io.counts[1] == 7,
+          "Variant changes and repeated IRQ admission preserve exact cumulative retirement");
+}
+
+void retirement_observation() {
+  constexpr std::array code{static_cast<Word>(isa::Opcode::do_immediate) | (3U << 8),
+                            start + 3,
+                            static_cast<Word>(isa::Opcode::move_x_effective) | (1U << 15) |
+                                (3U << 11),
+                            nop,
+                            static_cast<Word>(isa::Opcode::stop)};
+  const std::array spans{CodeSpan{.address = start, .words = code}};
+  const std::array variants{
+      CodeVariant{.id = 0, .code = spans, .entries = initial_entries, .failed_fetches = {}}};
+  const Source source;
+  const std::array layouts{VariantLayout{.id = 0, .memory = source.memory}};
+  const std::array callbacks{
+      CallbackBinding{.role = CallbackRole::retired, .symbol = "record_retired"}};
+  const auto binding = retirement_binding();
+  retirement_vectors(binding);
+  const CompileOptions off{
+      .memory = layouts, .interrupts = {}, .transitions = {}, .callbacks = {}, .bindings = {}};
+  auto on = off;
+  on.callbacks = callbacks;
+  on.bindings = binding;
+  const auto unobserved = Core::lower({.variants = variants}, off);
+  const auto observed = Core::lower({.variants = variants}, on);
+  require(unobserved.identity() != observed.identity(),
+          "The optional observer participates in immutable compilation identity");
+  bool refused = false;
+  try {
+    static_cast<void>(Core::load({.variants = variants}, off, observed.artifact()));
+  } catch (const std::invalid_argument &) { refused = true; }
+  require(refused, "An observed artifact cannot restore under an unobserved contract");
+  const auto plain = test::compile_image(unobserved);
+  const auto traced =
+      test::compile_image(Core::load({.variants = variants}, on, observed.artifact()), binding);
+  const std::array images{plain, traced};
+  for (const bool fault : {false, true}) {
+    for (const bool deadline : {false, true}) {
+      for (unsigned limit = 0; limit <= 12; ++limit) {
+        retirement_case(images, code, fault, limit, deadline, false);
+      }
+      retirement_case(images, code, fault, 32, deadline, false);
+      retirement_case(images, code, fault, 32, deadline, true);
+    }
+  }
+}
+
 }
 
 extern "C" LLVMErrorRef LLVMRunPasses(LLVMModuleRef M,
@@ -235,6 +444,7 @@ extern "C" LLVMErrorRef LLVMRunPasses(LLVMModuleRef M,
 
 int main() try {
   roundtrip();
+  retirement_observation();
   std::cout << "Semantic artifacts restore native execution without lowering\n";
 } catch (const std::exception &error) {
 
