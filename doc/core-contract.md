@@ -1,4 +1,4 @@
-# Common core contract, version 5
+# Common core contract, version 6
 
 Every processor core in this family (cpu12, dsp56300, armv5, sharc and later
 ones) follows this contract. The file is identical in all core repositories; a
@@ -128,16 +128,41 @@ least ten million guest instructions.
 
 | Id | Kernel | Exercises |
 |---|---|---|
-| K1 | Block FIR, 64 taps over 1024 samples | multiply-accumulate in a hardware or counted loop |
-| K2 | Cascade of 4 biquads over 1024 samples | feedback state, rounding, saturation |
+| K1 | Block FIR, 64 taps, 256 blocks of 1024 samples | multiply-accumulate in a hardware or counted loop |
+| K2 | Cascade of 4 biquads, 256 blocks of 1024 samples | feedback state, rounding, saturation |
 | K3 | 256-point radix-2 complex FFT | address arithmetic, tables, nested loops |
 | K4 | Control: table-driven state machine with calls | branches, subroutine calls, stack, indirect transfers |
 | K5 | Block copy with running checksum, 4096 words | loads, stores, loop overhead |
 | K6 | K1 under event load | a run bound every 256 base cycles and one interrupt per 4096, handler increments a counter |
 
-A core whose instruction set lacks a concept uses its natural equivalent
-(fixed-point or floating-point as the processor provides) and documents it in
-`test/bench/README.md`. K6 measures the cost of bounds and events, which
+K1, K2 and K6 share one numerical definition. Samples are signed Q1.n; every
+quantized node rounds to nearest, ties to even, then saturates. The input is
+the 32-bit generator `x = x * 1664525 + 1013904223` from seed `0x243f6a88`,
+taken at half amplitude, with the positive rail at every sample index divisible
+by 97 and the negative rail at the next one. K1 is causal with history
+continuous across blocks and zero at start. K2 is transposed direct form II
+with the output and both updated states quantized. Each core uses its native
+precision: cpu12 and armv5 Q1.15, dsp56300 Q1.23, sharc Q1.31. The generator of
+coefficients, initial state and expected output exists once, in dsp56300
+`test/bench/kernel_reference.hpp`; the other cores bind only to these SHA-256
+values of the complete result, taken over signed 32-bit little-endian words:
+
+| Precision | Result | SHA-256 |
+|---|---|---|
+| Q1.15 | K1 output | `01e342abb432c2b44339220d04d3376c55ec4ae30cb71ca783c7db9d3639c81b` |
+| Q1.15 | K2 output | `b598303fc1e7736b8ee0bc5175afe8baf38d6d9ef81f833f79724ab5a0a785ba` |
+| Q1.15 | K2 final state | `c013f34a4563d1948b54c15f1d7ebc48337af2792c24968c43f1a98e1e063c35` |
+| Q1.23 | K1 output | `e4cee01f3826c7629135ecb224a4f8fcd18a225d6c248d1505dd7b15e6f54489` |
+| Q1.23 | K2 output | `fc87b101ab8b0be1ddb5aa13db865b2c6a44f059450432ea5c872f3849351381` |
+| Q1.23 | K2 final state | `d3fb6119d7cc9de2918f841f54772c88902132bb8d19357c0fae8522f8866439` |
+| Q1.31 | K1 output | `e0dd28045a3afa7150f68203e73f97539933139b0823efd64705cc1c63ea7462` |
+| Q1.31 | K2 output | `ab87d136a23ea837637b11274be389f0f31473c1d447d4f6fc752e823b20fe3a` |
+| Q1.31 | K2 final state | `7fa60e5ab99a82116e669d32aec3e3af0cba013e494fd3b2af331d553c27e94f` |
+
+K6 produces the K1 output. Guest kernels are written as firmware for that
+processor would be, each in under 100 source lines. For K3 to K5 a core uses
+the natural equivalent of a concept its instruction set lacks and documents it
+in `test/bench/README.md`. K6 measures the cost of bounds and events, which
 dominates a real multi-processor emulator and appears in no hardware benchmark.
 
 Reported for every kernel, on each host, warm, from the public interface only:
