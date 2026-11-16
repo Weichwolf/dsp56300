@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "installed_program.hpp"
 #include "isa.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
@@ -72,31 +73,21 @@ public:
 
 NativeImage prepare() {
   std::array<std::array<Word, 4>, operations.size()> programs{};
-  std::array<std::array<CodeSpan, 1>, operations.size() * 2> spans{};
-  const std::array first{start};
-  const std::array second{start + 3};
-  std::vector<CodeVariant> variants;
+  std::array<CodeSpan, operations.size() * 2> spans{};
+  std::array<Word, operations.size() * 2> entries{};
   std::vector<CodeTransition> transitions;
-  variants.reserve(spans.size());
   transitions.reserve(programs.size());
   for (std::size_t index = 0; index < programs.size(); ++index) {
     auto &words = programs[index];
     words = {mac_a, mac_b, load_x0_increment | selection_model::code(operations[index]), adc_x_a};
     const auto initial = index * 2;
-    spans[initial][0] = {.address = start, .words = std::span(words).first(3)};
-    spans[initial + 1][0] = {.address = start, .words = words};
-    variants.push_back(
-        {.id = initial, .code = spans[initial], .entries = first, .failed_fetches = {}});
-    variants.push_back(
-        {.id = initial + 1, .code = spans[initial + 1], .entries = second, .failed_fetches = {}});
-    transitions.push_back({.from = initial, .to = initial + 1, .entry = second[0]});
+    spans[initial] = {.address = start, .words = std::span(words).first(3)};
+    spans[initial + 1] = {.address = start, .words = words};
+    entries[initial] = start;
+    entries[initial + 1] = start + 3;
+    transitions.push_back({.from = initial, .to = initial + 1, .entry = start + 3});
   }
-  return Core::compile({.variants = variants},
-                       {.memory = {},
-                        .interrupts = {},
-                        .transitions = transitions,
-                        .callbacks = {},
-                        .bindings = {}});
+  return compile_programs(spans, entries, transitions);
 }
 
 void boundary(const NativeImage &image, const std::size_t index, const bool accept) {

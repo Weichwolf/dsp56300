@@ -3,6 +3,7 @@
 #pragma once
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "isa.hpp"
 #include "native_sequence_model.hpp"
 #include "saturated_shift_model.hpp"
 #include "support.hpp"
@@ -23,7 +24,8 @@ struct Input {
 inline constexpr std::array sources{12U, 13U, 4U, 5U, 6U, 7U};
 inline constexpr std::array codes{2U, 3U, 4U, 6U, 5U, 7U};
 inline constexpr int minimum_count = -55, maximum_count = 56;
-inline constexpr Word iteration_base = 0x01d815, fast_base = 0x0c1e20;
+inline constexpr Word iteration_base = static_cast<Word>(isa::Opcode::norm_register);
+inline constexpr Word fast_base = static_cast<Word>(isa::Opcode::normf_register);
 
 inline Word opcode(const Input input) {
   if (input.kind == Kind::iteration) {

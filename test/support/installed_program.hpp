@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <span>
+#include <stdexcept>
 #include <vector>
 
 namespace dsp56300::test {
@@ -27,18 +28,27 @@ compile_program(const std::span<const Word> words, const Word entry, const Buffe
 }
 
 // Every declared stream is a real program variant with its own entry address.
-inline NativeImage compile_programs(const std::span<const CodeSpan> programs) {
+inline NativeImage compile_programs(const std::span<const CodeSpan> programs,
+                                    const std::span<const Word> entries = {},
+                                    const std::span<const CodeTransition> transitions = {}) {
+  if (!entries.empty() && entries.size() != programs.size()) {
+    throw std::invalid_argument("Every authored program requires one declared entry");
+  }
   std::vector<CodeVariant> variants;
   variants.reserve(programs.size());
   for (std::size_t index = 0; index < programs.size(); ++index) {
     variants.push_back({.id = index,
                         .code = programs.subspan(index, 1),
-                        .entries = std::span(&programs[index].address, 1),
+                        .entries = entries.empty() ? std::span(&programs[index].address, 1)
+                                                   : entries.subspan(index, 1),
                         .failed_fetches = {}});
   }
-  return Core::compile(
-      {.variants = variants},
-      {.memory = {}, .interrupts = {}, .transitions = {}, .callbacks = {}, .bindings = {}});
+  return Core::compile({.variants = variants},
+                       {.memory = {},
+                        .interrupts = {},
+                        .transitions = transitions,
+                        .callbacks = {},
+                        .bindings = {}});
 }
 
 inline NativeImage compile_operations(const std::span<const Word> operations, const Word entry) {

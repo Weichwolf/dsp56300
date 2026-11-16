@@ -3,6 +3,7 @@
 #pragma once
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "isa.hpp"
 #include "native_sequence_model.hpp"
 #include "saturation_model.hpp"
 #include "support.hpp"
@@ -53,15 +54,15 @@ inline void apply(Registers &state, const Registers &old, const Control input) {
 }
 
 inline Word immediate(const Control input) {
-  constexpr Word right = 0x0c1c00;
-  constexpr Word left = 0x0c1d00;
+  constexpr Word right = static_cast<Word>(isa::Opcode::asr_immediate);
+  constexpr Word left = static_cast<Word>(isa::Opcode::asl_immediate);
   return (input.left ? left : right) | (input.source_b ? 0x80U : 0U) | (input.count * 2) |
          (input.destination_b ? 1U : 0U);
 }
 
 inline Word parallel(const Control input) {
-  constexpr Word left = 0x32;
-  constexpr Word right = 0x22;
+  constexpr Word left = static_cast<Word>(isa::Opcode::asl_a) & status_byte;
+  constexpr Word right = static_cast<Word>(isa::Opcode::asr_a) & status_byte;
   return parallel_none | (input.left ? left : right) | (input.destination_b ? 8U : 0U);
 }
 } // namespace dsp56300::test::shift_model
