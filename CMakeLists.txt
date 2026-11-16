@@ -130,7 +130,7 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   add_test(NAME isa-iir-resume COMMAND dsp56300_iir_resume_test
     "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/iir.d56")
   set_tests_properties(isa-iir-resume PROPERTIES TIMEOUT 120)
-  foreach(fixture IN ITEMS arithmetic addition fir fft iir flags loops fused_rounding)
+  foreach(fixture IN ITEMS arithmetic addition fir fft iir flags loops fused_rounding iteration addressing)
     string(REPLACE "_" "-" fixture_name "${fixture}")
     add_executable(dsp56300_generate_${fixture} test/isa/generate_${fixture}.cpp)
     target_link_libraries(dsp56300_generate_${fixture} PRIVATE dsp56300_binary_fixtures dsp56300_quality)
@@ -144,7 +144,11 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
     add_test(NAME isa-reproduce-${fixture_name} COMMAND "${CMAKE_COMMAND}" -E compare_files
       "${generated_fixture}" "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/${fixture_name}.d56")
     set_tests_properties(isa-reproduce-${fixture_name} PROPERTIES FIXTURES_REQUIRED isa-${fixture_name} TIMEOUT 30)
-    add_test(NAME isa-execute-${fixture_name} COMMAND dsp56300_fixture_test
+    set(fixture_arguments "")
+    if(fixture STREQUAL "iteration" OR fixture STREQUAL "addressing")
+      list(APPEND fixture_arguments --declare-end-nop)
+    endif()
+    add_test(NAME isa-execute-${fixture_name} COMMAND dsp56300_fixture_test ${fixture_arguments}
       "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/${fixture_name}.d56")
     set_tests_properties(isa-execute-${fixture_name} PROPERTIES TIMEOUT 120)
   endforeach()

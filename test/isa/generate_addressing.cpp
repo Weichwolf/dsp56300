@@ -4,6 +4,7 @@
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "isa.hpp"
 #include "register_model.hpp"
 #include "support.hpp"
 
@@ -19,9 +20,17 @@
 namespace dsp56300::test {
 namespace {
 using Cases = std::vector<BinaryCase>;
-constexpr Word linear = 0xffff, update_opcode = 0x204000, datum = 0xfedcba;
-constexpr Word load_x0 = 0x44c000, load_y0 = 0x4ec000, immediate_move = 0x40f400;
-constexpr Word immediate_modifier = 0x05f420, register_high_mask = 0x18;
+constexpr Word linear = 0xffff, datum = 0xfedcba;
+constexpr Word update_opcode = isa::opcode<isa::Opcode::move_address_update>()[0];
+constexpr Word read = Word{1} << 15, effective = Word{1} << 14;
+constexpr Word immediate_address = (6U << 11) | (4U << 8);
+constexpr Word load_x0 = isa::opcode<isa::Opcode::move_x_effective>()[0] | read;
+constexpr Word load_y0 = isa::opcode<isa::Opcode::move_y_effective>()[0] | read | (2U << 16);
+constexpr Word immediate_move =
+    isa::opcode<isa::Opcode::move_long>()[0] | read | effective | immediate_address;
+constexpr Word immediate_modifier =
+    isa::opcode<isa::Opcode::movec_effective>()[0] | read | immediate_address;
+constexpr Word register_high_mask = 0x18;
 constexpr Word ignored_high = 0xab0000, fault_high = 0x120000, short_stride = 63;
 constexpr unsigned register_high_shift = 17, offset_register_base = 24;
 constexpr std::array replacements{15U, 16U, linear, 0U, 0x800fU, 24575U, 1U, 15U, 0xab000fU};
@@ -187,7 +196,7 @@ void modifier_sequences(Cases &cases) {
 
 void repeat_sequences(Cases &cases) {
   constexpr Word repeat_count = 33;
-  constexpr Word repeat_opcode = 0x0621a0;
+  constexpr Word repeat_opcode = isa::opcode<isa::Opcode::rep_immediate>()[0] | (repeat_count << 8);
   for (const Word modifier : {0U, 1U, 2U, 15U, 16U, 24575U, 0x800fU, linear}) {
     for (unsigned index = 0; index < agu_registers; ++index) {
       BinaryCase item;
@@ -216,7 +225,7 @@ void repeat_sequences(Cases &cases) {
 
 void reverse_loops(Cases &cases) {
   constexpr Word count = 1024;
-  constexpr Word do_count = 0x060084;
+  constexpr Word do_count = isa::opcode<isa::Opcode::do_immediate>()[0] | (count >> 8);
   constexpr Word cursor = 0x40000f;
   for (const Word operand : {1U, 512U, sign24, 0x13579bU}) {
     for (const bool subtract : {false, true}) {

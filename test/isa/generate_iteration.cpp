@@ -3,6 +3,7 @@
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "isa.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
 #include "saturation_model.hpp"
@@ -23,7 +24,9 @@ namespace {
 using Cases = std::vector<BinaryCase>;
 using Bits = std::array<bool, accumulator_bits>;
 enum class Kind : std::uint8_t { divide, normalize };
-constexpr Word div_base = 0x018040, norm_base = 0x01d815, repeat_base = 0x0600a0;
+constexpr Word div_base = isa::opcode<isa::Opcode::div_register>()[0];
+constexpr Word norm_base = isa::opcode<isa::Opcode::norm_register>()[0];
+constexpr Word repeat_base = isa::opcode<isa::Opcode::rep_immediate>()[0];
 constexpr Word lf = Word{1} << 15, fv = Word{1} << 16, pointer_range = 64;
 constexpr Word ignored_modifier = 0xab8000;
 constexpr Word arithmetic_flags = flag_n | flag_z | flag_e | flag_u | flag_v;
@@ -406,10 +409,10 @@ struct Step {
 };
 
 void sequence_prefixes(Cases &cases) {
-  constexpr Word mpy_a = 0x2000d0;
-  constexpr Word adc_x_a = 0x200021;
-  constexpr Word adc_y_b = 0x200039;
-  constexpr Word mac_a = 0x2000d2;
+  constexpr Word mpy_a = isa::opcode<isa::Opcode::mpy_register_a>()[0] | (5U << 4);
+  constexpr Word adc_x_a = isa::opcode<isa::Opcode::adc_x_a>()[0];
+  constexpr Word adc_y_b = isa::opcode<isa::Opcode::adc_y_b>()[0];
+  constexpr Word mac_a = isa::opcode<isa::Opcode::mac_register_a>()[0] | (5U << 4);
   const std::array steps{
       Step{.instruction = mpy_a},
       Step{.input = {.kind = Kind::normalize}, .iterative = true},

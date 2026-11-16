@@ -3,6 +3,7 @@
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "fixture_memory.hpp"
+#include "isa.hpp"
 #include "support.hpp"
 
 #include <chrono>
@@ -14,6 +15,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 namespace dsp56300::test {
 namespace {
@@ -82,9 +84,27 @@ void check(const BinaryCase &item, const NativeImage &image, const std::uint64_t
   }
 }
 
-void run(const std::filesystem::path &path) {
-  const auto cases = read_fixture(path);
+void declare_end_nop(BinaryCase &item) {
+  const auto memory = initial_memory(item);
+  for (auto &block : item.before) {
+    if (block.space != Space::program || block.address != item.initial.pc) { continue; }
+    const auto following = std::size_t{block.address} + block.words.size();
+    require(following < memory[0].size() && memory[0][following] == isa::nop[0],
+            "The declared successor must be an actual resident NOP, not invented padding");
+    block.words.push_back(memory[0][following]);
+    return;
+  }
+  throw std::runtime_error("Missing authored program for the declared resident successor");
+}
+
+void run(const std::filesystem::path &path, const bool resident_successor) {
+  auto cases = read_fixture(path);
   require(!cases.empty(), "Fixture contains cases");
+  // These counted-loop fixtures end at a real zero-initialized P word. Declare
+  // that specific NOP so completed REP admission has prepared next-op metadata.
+  if (resident_successor) {
+    for (auto &item : cases) { declare_end_nop(item); }
+  }
   const auto catalogue = fixture_catalogue(cases);
   std::cout << path.filename().string() << ": preparing " << catalogue.size()
             << " authored program variants\n"
@@ -111,8 +131,12 @@ void run(const std::filesystem::path &path) {
 
 int main(const int argc, const char *const *const argv) {
   try {
-    if (argc < 2) { throw std::runtime_error("Usage: dsp56300_fixture_test FILE.d56 [...]"); }
-    for (int index = 1; index < argc; ++index) { dsp56300::test::run(argv[index]); }
+    const bool successor = argc > 1 && std::string_view(argv[1]) == "--declare-end-nop";
+    const int first = successor ? 2 : 1;
+    if (argc <= first) {
+      throw std::runtime_error("Usage: dsp56300_fixture_test [--declare-end-nop] FILE.d56 [...]");
+    }
+    for (int index = first; index < argc; ++index) { dsp56300::test::run(argv[index], successor); }
     std::cout << dsp56300::test::checks << " binary fixture checks passed\n";
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';
