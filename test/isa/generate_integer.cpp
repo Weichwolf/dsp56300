@@ -3,6 +3,7 @@
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "isa.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
 #include "saturation_model.hpp"
@@ -20,8 +21,11 @@
 
 namespace dsp56300::test {
 namespace {
-constexpr Word inc_base = 0x000008, dec_base = 0x00000a, cmpu_base = 0x0c1ff0;
-constexpr Word repeat_base = 0x0600a0, loop_flag = Word{1} << 15;
+constexpr Word inc_base = isa::opcode<isa::Opcode::inc_a>()[0];
+constexpr Word dec_base = isa::opcode<isa::Opcode::dec_a>()[0];
+constexpr Word cmpu_base = isa::opcode<isa::Opcode::cmpu_register>()[0];
+constexpr Word repeat_base = isa::opcode<isa::Opcode::rep_immediate>()[0];
+constexpr Word loop_flag = Word{1} << 15;
 constexpr Word saturation_mode = Word{1} << 20;
 constexpr Word changed = flag_c | flag_v | flag_n | flag_z | flag_e | flag_u;
 constexpr unsigned fractional_bits = 47;
@@ -299,9 +303,9 @@ void model_cmpu_other(Registers &state) {
 }
 
 void mixed_sequences(std::vector<BinaryCase> &cases) {
-  constexpr Word add_b_a = 0x200010;
-  constexpr Word adc_x_a = 0x200021;
-  constexpr Word mac_a = 0x2000d2;
+  constexpr Word add_b_a = isa::opcode<isa::Opcode::add_b_a>()[0];
+  constexpr Word adc_x_a = isa::opcode<isa::Opcode::adc_x_a>()[0];
+  constexpr Word mac_a = isa::opcode<isa::Opcode::mac_register_a>()[0] | (5U << 4);
   const std::vector program{add_b_a, inc_base, adc_x_a, dec_base | 1U, cmpu_base, mac_a};
   for (const auto mode : modes) {
     for (const auto value : values) {

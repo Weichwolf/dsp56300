@@ -6,11 +6,14 @@
 #include "isa.hpp"
 #include "support.hpp"
 
+#include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
+#include <format>
 #include <iostream>
 #include <span>
 #include <stdexcept>
@@ -97,9 +100,48 @@ void declare_end_nop(BinaryCase &item) {
   throw std::runtime_error("Missing authored program for the declared resident successor");
 }
 
+void refuse_sources(const std::span<const BinaryCase> cases) {
+  for (const auto &item : cases) {
+    const auto source = executable_source(item);
+    require(item.budget == 1 && item.retired == 0 && item.progress == Progress{} &&
+                source.second.size() == 1 && item.fault.space == Space::program &&
+                item.fault.pc == source.first && item.fault.address == source.first &&
+                item.fault.value == source.second.front(),
+            "Only a wholly invalid first encoding can move to a cold preparation refusal");
+  }
+  const auto sources = fixture_catalogue(cases);
+  for (const auto &[source, id] : sources) {
+    const std::array spans{CodeSpan{.address = source.first, .words = source.second}};
+    const std::array entries{source.first};
+    const std::array variants{
+        CodeVariant{.id = id, .code = spans, .entries = entries, .failed_fetches = {}}};
+    bool rejected = false;
+    try {
+      static_cast<void>(Core::lower(
+          {.variants = variants},
+          {.memory = {}, .interrupts = {}, .transitions = {}, .callbacks = {}, .bindings = {}}));
+    } catch (const std::invalid_argument &error) {
+      const std::string_view reason(error.what());
+      require(reason.contains(std::format("P:${:06x}", source.first)) &&
+                  reason.contains("unsupported instruction encoding"),
+              "Cold source refusal identifies the actual address and unsupported encoding");
+      rejected = true;
+    }
+    require(rejected, "Invalid source cannot form a partially executable prepared image");
+  }
+  std::cout << cases.size() << " invalid-encoding inputs represented by " << sources.size()
+            << " distinct cold source refusals\n";
+}
+
 void run(const std::filesystem::path &path, const bool resident_successor) {
-  auto cases = read_fixture(path);
-  require(!cases.empty(), "Fixture contains cases");
+  auto input = read_fixture(path);
+  require(!input.empty(), "Fixture contains cases");
+  const auto refused = std::ranges::stable_partition(input, [](const BinaryCase &item) {
+    return item.fault.kind != FaultKind::invalid_instruction;
+  });
+  const std::span cases(input.begin(), refused.begin());
+  if (!refused.empty()) { refuse_sources(refused); }
+  require(!cases.empty(), "Fixture retains executable cases after cold source refusals");
   // These counted-loop fixtures end at a real zero-initialized P word. Declare
   // that specific NOP so completed REP admission has prepared next-op metadata.
   if (resident_successor) {

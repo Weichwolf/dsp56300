@@ -166,7 +166,11 @@ ImagePlan plan_image(const CodeVariant &source, const std::span<const Word> exte
     while (index < span.words.size()) {
       const auto pc = (span.address + static_cast<Word>(index)) & word_mask;
       auto instruction = decode(span.words[index]);
-      if (instruction.operation == Operation::unsupported) {
+      const auto selector = (instruction.opcode >> 1) & 7U;
+      const bool reserved =
+          (instruction.operation == Operation::normalize_fast && selector < 2) ||
+          (instruction.operation == Operation::compare_unsigned && selector >= 1 && selector <= 3);
+      if (instruction.operation == Operation::unsupported || reserved) {
         reject(pc, "unsupported instruction encoding");
       }
       if (instruction.words > span.words.size() - index) {

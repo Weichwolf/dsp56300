@@ -12,6 +12,7 @@
 #include <iostream>
 #include <span>
 #include <stdexcept>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -467,10 +468,37 @@ void admission_guards() {
             "Masked prepared vectors cannot mutate architectural state or fetch their code");
   }
 }
+
+void reserved_sources() {
+  for (const auto opcode :
+       {op<isa::Opcode::normf_register>, op<isa::Opcode::cmpu_register> | (1U << 1)}) {
+    const std::array vector{opcode, op<isa::Opcode::nop>};
+    const std::array code{CodeSpan{.address = base, .words = vector},
+                          CodeSpan{.address = foreground, .words = continuation}};
+    constexpr std::array entries{foreground};
+    const std::array variants{
+        CodeVariant{.id = 0, .code = code, .entries = entries, .failed_fetches = {}}};
+    constexpr std::array interrupts{InterruptRequest{.vector = base, .level = 0}};
+    bool refused = false;
+    try {
+      static_cast<void>(Core::lower({.variants = variants},
+                                    {.memory = {},
+                                     .interrupts = interrupts,
+                                     .transitions = {},
+                                     .callbacks = {},
+                                     .bindings = {}}));
+    } catch (const std::invalid_argument &error) {
+      const std::string_view reason(error.what());
+      refused = reason.contains("P:$000020") && reason.contains("unsupported instruction encoding");
+    }
+    require(refused, "Reserved operand fields cannot enter a prepared vector image");
+  }
+}
 }
 
 int main() {
   try {
+    reserved_sources();
     prefixes();
     return_and_deadlines();
     latched_variant();

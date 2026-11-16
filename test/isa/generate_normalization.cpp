@@ -3,6 +3,7 @@
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "isa.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
 #include "support.hpp"
@@ -21,10 +22,12 @@ namespace dsp56300::test {
 namespace {
 using Cases = std::vector<BinaryCase>;
 using Bits = std::array<bool, accumulator_bits>;
-constexpr Word normf_base = 0x0c1e20, clb_base = 0x0c1e00;
+constexpr Word normf_base = isa::opcode<isa::Opcode::normf_register>()[0];
+constexpr Word clb_base = isa::opcode<isa::Opcode::clb_register>()[0];
 constexpr int minimum_count = -55, maximum_count = 56;
 constexpr Word pointer_range = 64, saved_la = 0x70, native_x1 = 0x123456;
-constexpr Word repeat_base = 0x0600a0, lf = Word{1} << 15, fv = Word{1} << 16;
+constexpr Word repeat_base = isa::opcode<isa::Opcode::rep_immediate>()[0];
+constexpr Word lf = Word{1} << 15, fv = Word{1} << 16;
 constexpr std::array source_code{2U, 3U, 4U, 6U, 5U, 7U};
 constexpr std::array source_registers{12U, 13U, 4U, 5U, 6U, 7U};
 constexpr std::array modes{0U, mode_down, mode_up, mode_rm, mode_rm | mode_down, mode_rm | mode_up};
@@ -320,14 +323,15 @@ struct Step {
 };
 
 void native_sequences(Cases &cases) {
-  const std::array steps{Step{.instruction = 0x2000d0},
-                         Step{.selector = 2, .normalization = true},
-                         Step{.instruction = 0x200021},
-                         Step{.selector = 4, .normalization = true, .destination_b = true},
-                         Step{.instruction = 0x200039},
-                         Step{.instruction = 0x200041},
-                         Step{.selector = 0, .normalization = true},
-                         Step{.instruction = 0x2000d2}};
+  const std::array steps{
+      Step{.instruction = isa::opcode<isa::Opcode::mpy_register_a>()[0] | (5U << 4)},
+      Step{.selector = 2, .normalization = true},
+      Step{.instruction = isa::opcode<isa::Opcode::adc_x_a>()[0]},
+      Step{.selector = 4, .normalization = true, .destination_b = true},
+      Step{.instruction = isa::opcode<isa::Opcode::adc_y_b>()[0]},
+      Step{.instruction = isa::opcode<isa::Opcode::tfr_x0_a>()[0]},
+      Step{.selector = 0, .normalization = true},
+      Step{.instruction = isa::opcode<isa::Opcode::mac_register_a>()[0] | (5U << 4)}};
   for (const auto mode : modes) {
     for (const Word flags : {0U, status_byte}) {
       BinaryCase item;

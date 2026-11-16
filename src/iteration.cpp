@@ -21,10 +21,6 @@ constexpr std::array shift_sources{
 void Core::Impl::normalize_fast(const Word opcode) {
   if (!numeric_mode_supported(arithmetic_saturation)) { return; }
   const auto selector = (opcode >> 1) & 7U;
-  if (selector < 2) {
-    fail(FaultKind::invalid_instruction, Space::program, current_pc, opcode);
-    return;
-  }
   const auto shift = signed_word(read_register(shift_sources[selector - 2]));
   if (shift < -static_cast<int>(accumulator_bits - 1) ||
       shift > static_cast<int>(accumulator_bits)) {

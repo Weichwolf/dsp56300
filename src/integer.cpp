@@ -24,10 +24,6 @@ void Core::Impl::compare_unsigned(const Word opcode) {
   // modes remain rejected rather than silently applying 24-bit semantics.
   if (!numeric_mode_supported(arithmetic_saturation)) { return; }
   const auto selector = (opcode >> 1) & 7U;
-  if (selector >= 1 && selector <= 3) {
-    fail(FaultKind::invalid_instruction, Space::program, current_pc, opcode);
-    return;
-  }
   const bool destination_b = (opcode & 1U) != 0;
   const auto left = ((destination_b ? cpu.reg.b : cpu.reg.a) >> padding_bits) & long_mask;
   auto right = ((destination_b ? cpu.reg.a : cpu.reg.b) >> padding_bits) & long_mask;
