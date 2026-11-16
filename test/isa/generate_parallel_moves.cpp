@@ -3,6 +3,7 @@
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "isa.hpp"
 #include "register_model.hpp"
 #include "support.hpp"
 
@@ -18,13 +19,16 @@
 namespace dsp56300::test {
 namespace {
 using Cases = std::vector<BinaryCase>;
-constexpr Word single_base = 0x400000, paired_base = 0x800000;
+template <isa::Opcode operation> constexpr Word op = static_cast<Word>(operation);
+constexpr Word single_base = op<isa::Opcode::move_long>;
+constexpr Word paired_base = op<isa::Opcode::move_xy>;
 constexpr unsigned high_reg_shift = 17, xreg_shift = 18, ymode_shift = 20;
 constexpr Word load_x = 0x8000, load_y = 0x400000, y_space = 0x080000;
 constexpr Word effective_bit = 0x4000, linear_high = 0xabffff;
 constexpr Word location = 0x180, xdatum = 0x923456, ydatum = 0x765432;
 constexpr Word short_address = 31, ignored_modifier = 0xab4000, high_reg_mask = 0x18;
-constexpr Word tfr_x0_a = 0x41, tfr_y0_b = 0x59;
+constexpr Word tfr_x0_a = op<isa::Opcode::tfr_x0_a> & 0xffU;
+constexpr Word tfr_y0_b = op<isa::Opcode::tfr_y0_b> & 0xffU;
 constexpr std::array data_regs{4U, 5U, 6U, 7U, 14U, 15U};
 constexpr std::array xregs{4U, 5U, 14U, 15U}, yregs{6U, 7U, 14U, 15U};
 constexpr std::array modes{0U,

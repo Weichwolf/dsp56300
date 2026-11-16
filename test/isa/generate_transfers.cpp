@@ -3,6 +3,7 @@
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "isa.hpp"
 #include "register_model.hpp"
 #include "support.hpp"
 
@@ -20,8 +21,11 @@ namespace {
 using Cases = std::vector<BinaryCase>;
 using namespace register_model;
 
-constexpr Word program_base = 0x070000, control_memory_base = 0x050020;
-constexpr Word control_immediate_base = 0x0500a0, class_two_postincrement = 0x081f00;
+template <isa::Opcode operation> constexpr Word op = static_cast<Word>(operation);
+constexpr Word program_base = op<isa::Opcode::movem_absolute_short>;
+constexpr Word control_memory_base = op<isa::Opcode::movec_absolute_short>;
+constexpr Word control_immediate_base = op<isa::Opcode::movec_immediate>;
+constexpr Word class_two_postincrement = op<isa::Opcode::move_x_register> | (3U << 11) | (7U << 8);
 constexpr std::array<unsigned, 19> controls{32,
                                             33,
                                             34,
@@ -67,7 +71,7 @@ void register_move(Cases &cases, const RegisterMove input) {
   item.expected = item.initial;
   const auto value = read(item.expected, input.load ? input.other : input.control);
   write(item.expected, input.load ? input.control : input.other, value);
-  const Word opcode = 0x0440a0 | (input.load ? 0x8000U : 0U) |
+  const Word opcode = op<isa::Opcode::movec_register> | (input.load ? 0x8000U : 0U) |
                       (static_cast<Word>(input.other) << 8) | (input.control - 32);
   append(cases, std::move(item), {opcode});
 }
@@ -246,14 +250,22 @@ void fault_case(Cases &cases, FaultCase input) {
 }
 
 void fault_cases(Cases &cases) {
-  constexpr std::array<Word, 8> invalid{
-      0x0500a8, 0x04c0a0, 0x05f120, 0x07f484, 0x07f184, 0x078000, 0x08b005, 0x08b445};
+  constexpr Word load = 0x8000;
+  constexpr std::array invalid{
+      op<isa::Opcode::movec_immediate> | 8U,
+      op<isa::Opcode::movec_register> | load,
+      op<isa::Opcode::movec_effective> | load | (6U << 11) | (1U << 8),
+      op<isa::Opcode::movem_effective> | load | (6U << 11) | (4U << 8) | 4U,
+      op<isa::Opcode::movem_effective> | load | (6U << 11) | (1U << 8) | 4U,
+      op<isa::Opcode::movem_absolute_short> | load,
+      op<isa::Opcode::move_x_register> | load | (6U << 11) | 5U,
+      op<isa::Opcode::move_x_register> | load | (6U << 11) | (4U << 8) | 0x40U | 5U};
   for (const auto opcode : invalid) {
     fault_case(cases,
                {.program = {opcode, cursor}, .fault = {.kind = FaultKind::invalid_instruction}});
   }
-  constexpr Word read_program = 0x07e084;
-  constexpr Word write_program = 0x076084;
+  constexpr Word read_program = op<isa::Opcode::movem_effective> | load | (4U << 11) | 4U;
+  constexpr Word write_program = op<isa::Opcode::movem_effective> | (4U << 11) | 4U;
   fault_case(cases,
              {.program = {read_program},
               .fault = {.kind = FaultKind::memory_read, .address = memory_words},
@@ -262,11 +274,20 @@ void fault_cases(Cases &cases) {
              {.program = {write_program},
               .fault = {.kind = FaultKind::memory_write, .address = memory_words, .value = datum},
               .cursor_value = memory_words});
-  constexpr Word pop_to_x0 = 0x0444bc;
+  constexpr Word pop_to_x0 = op<isa::Opcode::movec_register> | (4U << 8) | (reg_ssh - 32);
   fault_case(cases,
              {.program = {pop_to_x0}, .fault = {.kind = FaultKind::stack, .address = start}});
-  constexpr std::array<Word, 8> io{
-      0x084405, 0x08c405, 0x094405, 0x09c405, 0x044485, 0x04c485, 0x044425, 0x04c425};
+  constexpr Word high_x = op<isa::Opcode::movep_register_high> | (4U << 8) | 5U;
+  constexpr Word low_x = op<isa::Opcode::movep_register_low> | (4U << 8) | 5U;
+  constexpr Word low_extended = op<isa::Opcode::movep_register_low_extended> | (4U << 8) | 5U;
+  constexpr std::array io{high_x,
+                          high_x | load,
+                          high_x | 0x10000U,
+                          high_x | 0x10000U | load,
+                          low_x,
+                          low_x | load,
+                          low_extended,
+                          low_extended | load};
   for (std::size_t index = 0; index < io.size(); ++index) {
     const bool y = (index & 2U) != 0;
     const bool write = (index & 1U) != 0;
