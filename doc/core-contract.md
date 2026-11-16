@@ -1,4 +1,4 @@
-# Common core contract, version 6
+# Common core contract, version 7
 
 Every processor core in this family (cpu12, dsp56300, armv5, sharc and later
 ones) follows this contract. The file is identical in all core repositories; a
@@ -95,6 +95,12 @@ could a second device on this processor use the core without a core change?
   initialized layouts permit direct native loads and stores; everything else
   keeps exact dynamic semantics. Optional per-word knowledge tracking is the
   consumer's choice.
+- Storage is lent as regions in the address spaces the processor defines
+  (program, X and Y; program and data memory; the bus and tightly coupled
+  memories). A storage interface private to the processor is such an address
+  space with its own regions, addressed from zero. It is never a buffer hidden
+  in the core and never a second naming scheme beside regions. Which space
+  serves an access is architectural state of the guest.
 - `set_memory(Memory)` rebinds storage on a stopped owner, for devices whose
   memory map changes at run time. It revokes dependent bindings; a matching
   `install` follows before execution continues. The core learns no device map.
