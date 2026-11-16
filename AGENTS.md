@@ -1,8 +1,9 @@
 # dsp56300
 
 Goal: OBJECTIVE.md. Target design: doc/architecture.md. Both serve one outcome:
-the complete original Blofeld instrument in blofeld-emu at >=10x offline
-(>=4x intermediate) and 2-5 ms live latency. Decide everything else yourself.
+the complete original Blofeld instrument in blofeld-emu at >=4x offline in every
+situation on the i5 reference hosts (>=10x as direction on faster hosts) and
+2-5 ms live latency. Decide everything else yourself.
 
 ## Fixed limits
 
