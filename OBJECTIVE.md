@@ -48,7 +48,8 @@ TSan qualification at the goal; run earlier for concrete risks. Use packaged
 foreign dependencies, never foreign source builds or sanitizer instrumentation.
 No GitHub workflows. Validate each native host without damaging the other.
 
-The Blofeld consumer targets >=10x sustained original offline audio, >=4x
-intermediate, and physical key-to-analog latency 2-5 ms/max 10 ms. Microbenchmarks
+The Blofeld consumer targets >=4x sustained original offline audio in every
+situation on the i5 reference hosts, >=10x as direction on faster hosts, and
+physical key-to-analog latency 2-5 ms/max 10 ms. Microbenchmarks
 do not establish that outcome. See [doc/architecture.md](doc/architecture.md);
 retain necessary primary references and provenance, not development narratives.
