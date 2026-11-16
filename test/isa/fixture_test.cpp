@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <format>
 #include <iostream>
+#include <map>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -88,17 +89,30 @@ void check(const BinaryCase &item, const NativeImage &image, const std::uint64_t
   }
 }
 
-void declare_end_nop(BinaryCase &item) {
-  const auto memory = initial_memory(item);
-  for (auto &block : item.before) {
-    if (block.space != Space::program || block.address != item.initial.pc) { continue; }
-    const auto following = std::size_t{block.address} + block.words.size();
+struct Recipe {
+  bool resident_successor = false;
+  bool wrapped_entry = false;
+  bool runtime_errors = false;
+};
+
+FixtureSource declared_source(const BinaryCase &item, const Recipe recipe) {
+  auto source = executable_source(item);
+  if (recipe.wrapped_entry && source.first == word_mask) {
+    const auto suffix = std::ranges::find_if(item.before, [](const MemoryBlock &block) {
+      return block.space == Space::program && block.address == 0;
+    });
+    require(source.second.size() == 1 && suffix != item.before.end() && suffix->words.size() == 1,
+            "The wrapped entry declares its actual one-word extension at P:0");
+    source.second.push_back(suffix->words.front());
+  }
+  if (recipe.resident_successor) {
+    const auto memory = initial_memory(item);
+    const auto following = (source.first + static_cast<Word>(source.second.size())) & word_mask;
     require(following < memory[0].size() && memory[0][following] == isa::nop[0],
             "The declared successor must be an actual resident NOP, not invented padding");
-    block.words.push_back(memory[0][following]);
-    return;
+    source.second.push_back(memory[0][following]);
   }
-  throw std::runtime_error("Missing authored program for the declared resident successor");
+  return source;
 }
 
 template <isa::Opcode operation> constexpr Word op = static_cast<Word>(operation);
@@ -131,23 +145,39 @@ constexpr auto cold_encodings = [] {
   return words;
 }();
 
-bool cold_candidate(const BinaryCase &item) {
-  if (item.fault.kind != FaultKind::invalid_instruction) { return false; }
+std::string_view cold_reason(const BinaryCase &item) {
+  if (item.budget != 1 || item.retired != 0 || item.progress != Progress{} ||
+      item.fault.space != Space::program || item.fault.pc != item.initial.pc) {
+    return {};
+  }
   const auto source = executable_source(item);
-  return item.budget == 1 && item.retired == 0 && item.progress == Progress{} &&
-         !source.second.empty() && item.fault.space == Space::program &&
-         item.fault.pc == source.first && item.fault.address == source.first &&
-         item.fault.value == source.second.front() &&
-         std::ranges::find(cold_encodings, source.second.front()) != cold_encodings.end();
+  if (item.fault.kind == FaultKind::invalid_instruction && !source.second.empty() &&
+      item.fault.address == source.first && item.fault.value == source.second.front() &&
+      std::ranges::find(cold_encodings, source.second.front()) != cold_encodings.end()) {
+    return "unsupported instruction encoding";
+  }
+  if (item.fault.kind == FaultKind::memory_read && source.second.size() == 1 &&
+      source.first < item.memory_words[0] &&
+      item.fault.address == ((source.first + 1) & word_mask) &&
+      item.fault.address >= item.memory_words[0]) {
+    return "instruction extension is outside its declared stream";
+  }
+  return {};
 }
 
 void refuse_sources(const std::span<const BinaryCase> cases) {
-  const auto sources = fixture_catalogue(cases);
-  for (const auto &[source, id] : sources) {
+  std::map<FixtureSource, std::string_view> requirements;
+  for (const auto &item : cases) {
+    const auto reason = cold_reason(item);
+    const auto [found, inserted] = requirements.emplace(executable_source(item), reason);
+    require(!reason.empty() && (inserted || found->second == reason),
+            "One actual source has one explicit preparation-refusal expectation");
+  }
+  for (const auto &[source, expected] : requirements) {
     const std::array spans{CodeSpan{.address = source.first, .words = source.second}};
     const std::array entries{source.first};
     const std::array variants{
-        CodeVariant{.id = id, .code = spans, .entries = entries, .failed_fetches = {}}};
+        CodeVariant{.id = 0, .code = spans, .entries = entries, .failed_fetches = {}}};
     bool rejected = false;
     try {
       static_cast<void>(Core::lower(
@@ -155,39 +185,37 @@ void refuse_sources(const std::span<const BinaryCase> cases) {
           {.memory = {}, .interrupts = {}, .transitions = {}, .callbacks = {}, .bindings = {}}));
     } catch (const std::invalid_argument &error) {
       const std::string_view reason(error.what());
-      require(reason.contains(std::format("P:${:06x}", source.first)) &&
-                  reason.contains("unsupported instruction encoding"),
-              "Cold source refusal identifies the actual address and unsupported encoding");
+      require(reason.contains(std::format("P:${:06x}", source.first)) && reason.contains(expected),
+              "Cold source refusal identifies the actual address and declared reason");
       rejected = true;
     }
     require(rejected, "Invalid source cannot form a partially executable prepared image");
   }
-  std::cout << cases.size() << " invalid-encoding inputs represented by " << sources.size()
+  std::cout << cases.size() << " preparation-boundary inputs represented by " << requirements.size()
             << " distinct cold source refusals\n";
 }
 
-void run(const std::filesystem::path &path,
-         const bool resident_successor,
-         const bool runtime_errors) {
+void run(const std::filesystem::path &path, const Recipe recipe) {
   auto input = read_fixture(path);
-  if (runtime_errors) {
+  if (recipe.runtime_errors) {
     std::erase_if(input, [](const BinaryCase &item) {
-      return item.fault.kind != FaultKind::invalid_instruction || cold_candidate(item);
+      return item.fault.kind != FaultKind::invalid_instruction || !cold_reason(item).empty();
     });
     std::cout << path.filename().string() << ": native runtime-error subset\n";
   }
   require(!input.empty(), "Fixture contains cases");
   const auto refused = std::ranges::stable_partition(
-      input, [](const BinaryCase &item) { return !cold_candidate(item); });
+      input, [](const BinaryCase &item) { return cold_reason(item).empty(); });
   const std::span cases(input.begin(), refused.begin());
   if (!refused.empty()) { refuse_sources(refused); }
   require(!cases.empty(), "Fixture retains executable cases after cold source refusals");
-  // These counted-loop fixtures end at a real zero-initialized P word. Declare
-  // that specific NOP so completed REP admission has prepared next-op metadata.
-  if (resident_successor) {
-    for (auto &item : cases) { declare_end_nop(item); }
+  FixtureCatalogue catalogue;
+  std::vector<std::uint64_t> variants;
+  variants.reserve(cases.size());
+  for (const auto &item : cases) {
+    variants.push_back(
+        catalogue.try_emplace(declared_source(item, recipe), catalogue.size()).first->second);
   }
-  const auto catalogue = fixture_catalogue(cases);
   std::cout << path.filename().string() << ": preparing " << catalogue.size()
             << " authored program variants\n"
             << std::flush;
@@ -199,7 +227,7 @@ void run(const std::filesystem::path &path,
             << std::flush;
   for (std::size_t index = 0; index < cases.size(); ++index) {
     try {
-      check(cases[index], image, catalogue.at(executable_source(cases[index])));
+      check(cases[index], image, variants[index]);
     } catch (const std::exception &error) {
       throw std::runtime_error(path.string() + ": case " + std::to_string(index) + " (" +
                                cases[index].name + "): " + error.what());
@@ -213,26 +241,25 @@ void run(const std::filesystem::path &path,
 
 int main(const int argc, const char *const *const argv) {
   try {
-    bool successor = false;
-    bool runtime_errors = false;
+    dsp56300::test::Recipe recipe;
     int first = 1;
     for (; first < argc; ++first) {
       const std::string_view argument(argv[first]);
       if (argument == "--declare-end-nop") {
-        successor = true;
+        recipe.resident_successor = true;
       } else if (argument == "--runtime-errors") {
-        runtime_errors = true;
+        recipe.runtime_errors = true;
+      } else if (argument == "--wrap-entry") {
+        recipe.wrapped_entry = true;
       } else {
         break;
       }
     }
     if (argc <= first) {
-      throw std::runtime_error(
-          "Usage: dsp56300_fixture_test [--declare-end-nop] [--runtime-errors] FILE.d56 [...]");
+      throw std::runtime_error("Usage: dsp56300_fixture_test [--declare-end-nop] [--wrap-entry] "
+                               "[--runtime-errors] FILE.d56 [...]");
     }
-    for (int index = first; index < argc; ++index) {
-      dsp56300::test::run(argv[index], successor, runtime_errors);
-    }
+    for (int index = first; index < argc; ++index) { dsp56300::test::run(argv[index], recipe); }
     std::cout << dsp56300::test::checks << " binary fixture checks passed\n";
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';

@@ -4,6 +4,7 @@
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "isa.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
 #include "support.hpp"
@@ -22,7 +23,9 @@ namespace dsp56300::test {
 namespace {
 using Cases = std::vector<BinaryCase>;
 constexpr Word saturation_mode = Word{1} << 20;
-constexpr Word vsl_base = 0x0ac0c0, address = 384, repeat_base = 0x0600a0;
+constexpr Word vsl_base = isa::opcode<isa::Opcode::vsl_effective>()[0];
+constexpr Word address = 384;
+constexpr Word repeat_base = isa::opcode<isa::Opcode::rep_immediate>()[0];
 constexpr Word lf = Word{1} << 15, fv = Word{1} << 16, pointer_range = 64;
 constexpr Word saved_la = 0x70, sentinel_x = 0xabcdef, sentinel_y = 0x654321;
 constexpr Word ignored_high = 0xab0000, negative_offset = 0xfffffd;
@@ -299,12 +302,15 @@ void loops(Cases &cases) {
 }
 
 void sequence(Cases &cases, const Input input) {
-  constexpr Word multiply = 0x2000d0;
-  constexpr Word load_x0 = 0x44e000;
-  constexpr Word load_y0 = 0x4ee000;
-  constexpr Word adc_x_a = 0x200021;
-  constexpr Word mac_b = 0x2000da;
-  constexpr Word negate_b = 0x20003e;
+  constexpr Word multiply = isa::opcode<isa::Opcode::mpy_register_a>()[0] | (5U << 4);
+  constexpr Word read = Word{1} << 15;
+  constexpr Word indirect = 4U << 11;
+  constexpr Word load_x0 = isa::opcode<isa::Opcode::move_x_effective>()[0] | read | indirect;
+  constexpr Word load_y0 =
+      isa::opcode<isa::Opcode::move_y_effective>()[0] | read | indirect | (2U << 16);
+  constexpr Word adc_x_a = isa::opcode<isa::Opcode::adc_x_a>()[0];
+  constexpr Word mac_b = isa::opcode<isa::Opcode::mac_register_b>()[0] | (5U << 4);
+  constexpr Word negate_b = isa::opcode<isa::Opcode::neg_b>()[0];
   const std::array program{
       multiply, opcode(input), load_x0, load_y0, adc_x_a, mac_b, opcode(input), negate_b};
   auto item = single(input);
