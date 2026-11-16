@@ -27,5 +27,8 @@ bool dsp56300_io_bit(dsp56300::Io &io,
 bool dsp56300_io_reset(dsp56300::Io &io, dsp56300::Word pc) noexcept;
 bool dsp56300_io_pending(const dsp56300::Io &io, dsp56300::Word status) noexcept;
 std::uint64_t dsp56300_io_revision(const dsp56300::Io &io) noexcept;
-void dsp56300_io_retired(dsp56300::Io *io, std::uint32_t count, bool region) noexcept;
+void dsp56300_io_retired(dsp56300::Io *io,
+                         std::uint32_t count,
+                         bool region,
+                         std::uint64_t site) noexcept;
 }

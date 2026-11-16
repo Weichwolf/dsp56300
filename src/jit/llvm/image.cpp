@@ -512,7 +512,12 @@ private:
                                      ir_.CreateSub(window, cost),
                                      ir_.getInt64(0)),
                     window_);
-    emit_retirement(*ir_.GetInsertBlock(), active_->getArg(0), ir_.getInt32(1), false);
+    constexpr unsigned opcode_shift = 24;
+    constexpr unsigned kind_shift = 48;
+    const auto site = static_cast<std::uint64_t>(pc) |
+                      (static_cast<std::uint64_t>(operation.opcode) << opcode_shift) |
+                      (static_cast<std::uint64_t>(operation.operation) << kind_shift);
+    emit_retirement(*ir_.GetInsertBlock(), active_->getArg(0), ir_.getInt32(1), false, site);
     ir_.CreateCondBr(
         ir_.CreateICmpEQ(flow, ir_.getInt8(static_cast<unsigned>(SemanticFlow::owner))),
         exits_.at(ImageExit::owner),

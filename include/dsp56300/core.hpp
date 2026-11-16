@@ -125,6 +125,9 @@ struct CodeTransition {
   Word entry;
 };
 
+// retired: void(Io*, uint32_t count, bool region, uint64_t site) noexcept.
+// Precise site packs PC/opcode/kind at bits0/24/48; kind IDs follow compiler identity.
+// Region site is zero; an absent binding emits no observation.
 enum class CallbackRole : std::uint8_t { read, write, bit, reset, pending, revision, retired };
 
 struct CallbackBinding {

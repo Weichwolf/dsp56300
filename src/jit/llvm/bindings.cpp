@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <llvm-c/Core.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/IR/Attributes.h>
@@ -274,19 +275,21 @@ void finalize_io(LlvmModule &module) {
 void emit_retirement(llvm::BasicBlock &block,
                      llvm::Value *const owner,
                      llvm::Value *const count,
-                     const bool region) {
+                     const bool region,
+                     const std::uint64_t site) {
   auto &module = *block.getModule();
   const auto *observer = module.getFunction("dsp56300_io_retired");
   if (observer == nullptr || !observer->hasFnAttribute("dsp56300-retirement")) { return; }
   auto *helper = module.getFunction("dsp56300_semantic_retired");
   if (helper == nullptr || helper->isDeclaration() || !helper->getReturnType()->isVoidTy() ||
-      helper->arg_size() != 3 || !helper->getFunctionType()->getParamType(0)->isPointerTy() ||
+      helper->arg_size() != 4 || !helper->getFunctionType()->getParamType(0)->isPointerTy() ||
       !helper->getFunctionType()->getParamType(1)->isIntegerTy(32) ||
-      !helper->getFunctionType()->getParamType(2)->isIntegerTy(1)) {
+      !helper->getFunctionType()->getParamType(2)->isIntegerTy(1) ||
+      !helper->getFunctionType()->getParamType(3)->isIntegerTy(64)) {
     throw std::invalid_argument("DSP image lacks its retirement observer ABI");
   }
   llvm::IRBuilder<> ir(&block);
-  auto *call = ir.CreateCall(helper, {owner, count, ir.getInt1(region)});
+  auto *call = ir.CreateCall(helper, {owner, count, ir.getInt1(region), ir.getInt64(site)});
   call->setAttributes(helper->getAttributes());
 }
 }

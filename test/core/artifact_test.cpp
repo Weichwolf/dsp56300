@@ -227,6 +227,7 @@ void roundtrip() {
 
 struct RetirementIo final : Io {
   std::array<std::uint64_t, 2> counts{};
+  std::uint64_t last_site = 0;
 
   bool read(Space /*space*/, Word /*address*/, Word /*pc*/, Word & /*value*/) noexcept override {
     return false;
@@ -256,7 +257,8 @@ std::vector<std::byte> retirement_binding() {
   auto *wide = LLVMInt64TypeInContext(context.get());
   std::array parameters{LLVMPointerTypeInContext(context.get(), 0),
                         LLVMInt32TypeInContext(context.get()),
-                        LLVMInt1TypeInContext(context.get())};
+                        LLVMInt1TypeInContext(context.get()),
+                        LLVMInt64TypeInContext(context.get())};
   auto *type = LLVMFunctionType(
       LLVMVoidTypeInContext(context.get()), parameters.data(), parameters.size(), 0);
   auto *function = LLVMAddFunction(module.get(), "record_retired", type);
@@ -289,6 +291,18 @@ std::vector<std::byte> retirement_binding() {
   auto *value = LLVMBuildLoad2(ir.get(), wide, address, "previous");
   auto *count = LLVMBuildZExt(ir.get(), LLVMGetParam(function, 1), wide, "count");
   LLVMBuildStore(ir.get(), LLVMBuildAdd(ir.get(), value, count, "retired"), address);
+  auto *site_offset = LLVMConstInt(wide,
+                                   reinterpret_cast<std::uintptr_t>(&probe.last_site) -
+                                       reinterpret_cast<std::uintptr_t>(static_cast<Io *>(&probe)),
+                                   0);
+  auto *site_address = LLVMBuildGEP2(ir.get(), byte, owner, &site_offset, 1, "last.site");
+  auto *previous_site = LLVMBuildLoad2(ir.get(), wide, site_address, "previous.site");
+  auto *site = LLVMBuildSelect(ir.get(),
+                               LLVMGetParam(function, 2),
+                               previous_site,
+                               LLVMGetParam(function, 3),
+                               "precise.site");
+  LLVMBuildStore(ir.get(), site, site_address);
   LLVMBuildBr(ir.get(), done);
   LLVMPositionBuilderAtEnd(ir.get(), done);
   LLVMBuildRetVoid(ir.get());
@@ -348,6 +362,14 @@ void retirement_case(const std::array<NativeImage, 2> &images,
     require(after.io.counts ==
                 (fault ? std::array<std::uint64_t, 2>{0, 1} : std::array<std::uint64_t, 2>{6, 2}),
             "The DO region counts six instructions; setup/STOP count precisely, faults do not");
+    constexpr unsigned opcode_shift = 24;
+    constexpr unsigned kind_shift = 48;
+    const auto last_pc = fault ? start : start + 4;
+    const auto last_opcode = fault ? code.front() : code.back();
+    require((after.io.last_site & word_mask) == last_pc &&
+                ((after.io.last_site >> opcode_shift) & word_mask) == last_opcode &&
+                (after.io.last_site >> kind_shift) != 0,
+            "Successful precise retirement carries its original instruction site and kind");
   }
 }
 
