@@ -90,7 +90,8 @@ struct Core::Impl {
   [[nodiscard]] static std::uint64_t semantic_region(void *owner,
                                                      std::uint32_t budget,
                                                      const detail::SemanticRegion &region,
-                                                     std::uint64_t window) noexcept
+                                                     std::uint64_t window,
+                                                     std::uint64_t &cycles) noexcept
       asm("dsp56300_semantic_region");
   [[nodiscard]] static detail::SemanticResult
   semantic_execute(void *owner, const detail::Instruction &decoded) noexcept;

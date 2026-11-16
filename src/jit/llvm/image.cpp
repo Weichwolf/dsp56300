@@ -156,7 +156,7 @@ public:
 private:
   struct FastRegion {
     llvm::GlobalVariable *site;
-    Word count, cost, last_pc, last_words, mode, properties;
+    Word last_pc, last_words, mode, properties;
   };
 
   void prepare_regions(LlvmModule &module,
@@ -171,11 +171,7 @@ private:
     for (auto operations : image_regions(plan_, memory)) {
       for (const auto mode : modes) {
         if (selected && std::ranges::find(*selected, mode) == selected->end()) { continue; }
-        Word cost = 0;
-        for (auto &operation : operations) {
-          operation.mode = mode;
-          cost += operation.instruction.cycles;
-        }
+        for (auto &operation : operations) { operation.mode = mode; }
         const auto first = operations.front().pc;
         const auto &last = operations.back();
         const auto name = name_ + ".region." + llvm::utohexstr(first, true) + "." +
@@ -193,8 +189,6 @@ private:
         site->setAlignment(llvm::Align(alignof(SemanticRegion)));
         regions_.emplace(first,
                          FastRegion{.site = site,
-                                    .count = static_cast<Word>(operations.size()),
-                                    .cost = cost,
                                     .last_pc = last.pc,
                                     .last_words = last.instruction.words,
                                     .mode = mode,
@@ -208,8 +202,7 @@ private:
     auto *window = ir_.CreateLoad(ir_.getInt64Ty(), window_);
     auto *retired = ir_.CreateTrunc(outcome, ir_.getInt32Ty());
     auto *next = ir_.CreateTrunc(ir_.CreateLShr(outcome, flow_shift), ir_.getInt32Ty());
-    auto *turns = ir_.CreateUDiv(retired, ir_.getInt32(region.count));
-    auto *cost = ir_.CreateMul(ir_.CreateZExt(turns, ir_.getInt64Ty()), ir_.getInt64(region.cost));
+    auto *cost = ir_.CreateLoad(ir_.getInt64Ty(), region_cost_);
     ir_.CreateStore(ir_.CreateAdd(count, retired), count_);
     ir_.CreateStore(ir_.CreateSub(window, cost), window_);
     ir_.CreateStore(next, pc_);
@@ -231,7 +224,7 @@ private:
     const auto [first, last] = regions_.equal_range(pc);
     if (first == last) { return; }
     auto *adapter = module_.getFunction("dsp56300_semantic_region");
-    if (adapter == nullptr || adapter->isDeclaration() || adapter->arg_size() != 4 ||
+    if (adapter == nullptr || adapter->isDeclaration() || adapter->arg_size() != 5 ||
         !adapter->getReturnType()->isIntegerTy(64)) {
       throw std::invalid_argument("DSP image lacks its private region admission ABI");
     }
@@ -257,9 +250,12 @@ private:
         auto *continued = block(active_, "region.complete");
         auto *miss = region == regions.back() ? precise : block(active_, "region.next");
         cold_.insert(miss);
-        auto *outcome = ir_.CreateCall(
-            adapter,
-            {active_->getArg(0), ir_.CreateSub(active_->getArg(2), count), region->site, window});
+        auto *outcome = ir_.CreateCall(adapter,
+                                       {active_->getArg(0),
+                                        ir_.CreateSub(active_->getArg(2), count),
+                                        region->site,
+                                        window,
+                                        region_cost_});
         ir_.CreateCondBr(
             ir_.CreateICmpNE(ir_.CreateTrunc(outcome, ir_.getInt32Ty()), ir_.getInt32(0)),
             continued,
@@ -614,6 +610,7 @@ private:
     count_ = ir_.CreateAlloca(ir_.getInt32Ty());
     window_ = ir_.CreateAlloca(ir_.getInt64Ty());
     pc_ = ir_.CreateAlloca(ir_.getInt32Ty());
+    region_cost_ = ir_.CreateAlloca(ir_.getInt64Ty());
     ir_.CreateStore(unit->getArg(4), count_);
     ir_.CreateStore(unit->getArg(3), window_);
     ir_.CreateStore(unit->getArg(1), pc_);
@@ -670,7 +667,7 @@ private:
   std::map<ImageExit, Block *> exits_;
   std::set<Block *> cold_;
   Block *local_dispatch_ = nullptr;
-  Value *count_ = nullptr, *window_ = nullptr, *pc_ = nullptr;
+  Value *count_ = nullptr, *window_ = nullptr, *pc_ = nullptr, *region_cost_ = nullptr;
 };
 }
 
