@@ -3,6 +3,7 @@
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "isa.hpp"
 #include "support.hpp"
 
 #include <array>
@@ -19,9 +20,12 @@ namespace {
 enum class Family : std::uint8_t { parallel, immediate, power, mac, round };
 constexpr Word sm = 0x100000, power = 22;
 constexpr std::int64_t coefficient = 2;
-constexpr Word round_code = 0x11, x_marker = 0x654321, y_marker = 0xabcdef;
+constexpr Word round_code = isa::opcode<isa::Opcode::rnd_a>()[0] & status_byte;
+constexpr Word x_marker = 0x654321, y_marker = 0xabcdef;
 constexpr std::uint64_t wrapped = 0x7fffffff000000;
-constexpr Word immediate_base = 0x0141c0, power_base = 0x0100c0, parallel_mac = 0x2000d2;
+constexpr Word immediate_base = isa::opcode<isa::Opcode::macri_immediate>()[0] & ~Word{3};
+constexpr Word power_base = isa::opcode<isa::Opcode::mpy_power>()[0];
+constexpr Word parallel_mac = isa::opcode<isa::Opcode::mac_register_a>()[0] | (5U << 4);
 constexpr Word changed = flag_n | flag_z | flag_e | flag_u | flag_v;
 constexpr std::uint64_t positive_limit = 0x007fffffffffff, negative_limit = 0xff800000000000;
 constexpr std::uint64_t rounded_positive = 0x007fffff000000, other = 0x123456789abcde;

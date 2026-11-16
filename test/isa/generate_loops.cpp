@@ -3,6 +3,7 @@
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "isa.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
 #include "support.hpp"
@@ -19,8 +20,12 @@
 namespace dsp56300::test {
 namespace {
 constexpr Word loop_flag = Word{1} << 15;
-constexpr Word mac_a = 0x2000d3, mac_b = 0x2000fb, add_immediate = 0x0140c0;
-constexpr Word immediate = 0xff1234, add_x0_a = 0x40, do_base = 0x060080;
+constexpr Word mac_a = isa::opcode<isa::Opcode::macr_register_a>()[0] | (5U << 4);
+constexpr Word mac_b = isa::opcode<isa::Opcode::macr_register_b>()[0] | (7U << 4);
+constexpr Word add_immediate = isa::opcode<isa::Opcode::add_immediate_long>()[0];
+constexpr Word immediate = 0xff1234;
+constexpr Word add_x0_a = isa::opcode<isa::Opcode::add_x0_a>()[0] & status_byte;
+constexpr Word do_base = isa::opcode<isa::Opcode::do_immediate>()[0];
 constexpr std::array counts{1U, 2U, 3U, 4U, 7U, 16U, 64U, 255U};
 constexpr std::array pointers{0U, 15U, 31U, 63U};
 
@@ -33,7 +38,7 @@ std::vector<Step> body(const unsigned kind) {
   switch (kind) {
     case 0: return {{.opcode = mac_a}};
     case 1: return {{.opcode = mac_a}, {.opcode = mac_b}};
-    case 2: return {{.opcode = mac_a}, {.opcode = 0}};
+    case 2: return {{.opcode = mac_a}, {.opcode = isa::opcode<isa::Opcode::nop>()[0]}};
     case 3: return {{.opcode = mac_b}, {.opcode = add_immediate, .immediate = true}};
     default: throw std::invalid_argument("Unknown loop body kind");
   }
