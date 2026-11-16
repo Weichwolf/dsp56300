@@ -97,6 +97,15 @@ void validate_program(const auto &core, const detail::ImageContracts::Variant &s
   }
 }
 
+bool retained_repeat(const auto &core) {
+  if (!core.cpu.repeat_loaded || core.cpu.repeat_remaining == 0 ||
+      core.cpu.repeat_pc != core.cpu.reg.pc || core.active_image == nullptr) {
+    return false;
+  }
+  const auto captured = core.active_image->instructions.find(core.cpu.reg.pc);
+  return captured != core.active_image->instructions.end() && captured->second == core.repeated;
+}
+
 void handle_image_miss(auto &core,
                        const bool vector_fetch,
                        const Word address,
@@ -200,7 +209,7 @@ RunResult Core::Impl::run_image(const std::uint32_t quota) {
   if (next_images != nullptr) { yield_requested = true; }
   while (result.retired < quota && cpu.cycles < cycle_deadline && fault.kind == FaultKind::none &&
          cpu.processing == ExecutionState::running && !yield_requested) {
-    if (!image_ready || (external && program_omr != cpu.reg.omr) ||
+    if ((!image_ready && !retained_repeat(*this)) || (external && program_omr != cpu.reg.omr) ||
         (io != nullptr && image_revision != dsp56300_io_revision(*io)) || debug_ready() ||
         instruction_cache_active()) {
       unprepared(cpu.reg.pc);
@@ -210,14 +219,19 @@ RunResult Core::Impl::run_image(const std::uint32_t quota) {
     const auto entry = vector_fetch ? image_vector() : active_image->entry;
     if (entry == nullptr) { break; }
     const auto address = image_address(vector_fetch);
-    const auto outcome = detail::dsp56300_image_enter(
-        entry, this, address, quota - result.retired, cycle_deadline - cpu.cycles);
+    // A captured REP opcode survives P writes, but no fresh instruction may use
+    // the invalidated binding after that exact architectural continuation ends.
+    const auto allowance = image_ready ? quota - result.retired
+                                       : std::min(quota - result.retired, cpu.repeat_remaining);
+    const auto outcome =
+        detail::dsp56300_image_enter(entry, this, address, allowance, cycle_deadline - cpu.cycles);
     constexpr unsigned reason_shift = 32;
     const auto retired = static_cast<std::uint32_t>(outcome);
     result.retired += retired;
     if ((outcome >> reason_shift) == static_cast<unsigned>(detail::ImageExit::unprepared)) {
       handle_image_miss(*this, vector_fetch, address, result.retired != 0);
     }
+    if (!image_ready) { static_cast<void>(image_transition(result.retired != 0)); }
     if (retired == 0) { break; }
   }
   static_cast<void>(image_transition(result.retired != 0));

@@ -3,6 +3,7 @@
 #pragma once
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "isa.hpp"
 #include "support.hpp"
 
 #include <array>
@@ -40,8 +41,14 @@ struct Input {
 inline constexpr std::array controls{12U, 13U, 4U, 5U, 6U, 7U};
 inline constexpr std::array control_codes{2U, 3U, 4U, 6U, 5U, 7U};
 inline constexpr std::array source_codes{4U, 6U, 5U, 7U};
-inline constexpr std::array<Word, 4> logic_codes{6, 2, 3, 0x17};
-inline constexpr std::array<Word, 4> shift_codes{0x33, 0x23, 0x37, 0x27};
+inline constexpr std::array logic_codes{static_cast<Word>(isa::Opcode::and_x0_a) & 0x3f,
+                                        static_cast<Word>(isa::Opcode::or_x0_a) & 0x3f,
+                                        static_cast<Word>(isa::Opcode::eor_x0_a) & 0x3f,
+                                        static_cast<Word>(isa::Opcode::not_a) & status_byte};
+inline constexpr std::array shift_codes{static_cast<Word>(isa::Opcode::lsl_a) & status_byte,
+                                        static_cast<Word>(isa::Opcode::lsr_a) & status_byte,
+                                        static_cast<Word>(isa::Opcode::rol_a) & status_byte,
+                                        static_cast<Word>(isa::Opcode::ror_a) & status_byte};
 
 inline bool logical(const Function function) {
   return function <= Function::complement;
@@ -70,16 +77,16 @@ inline Word opcode(const Input input) {
     if (input.function >= Function::complement) {
       throw std::logic_error("No immediate unary form");
     }
-    constexpr Word short_code = 0x014080;
-    constexpr Word long_code = 0x0140c0;
+    constexpr Word short_code = static_cast<Word>(isa::Opcode::and_immediate_short) & ~Word{0x0f};
+    constexpr Word long_code = static_cast<Word>(isa::Opcode::and_immediate_long) & ~Word{0x0f};
     const Word fields = logic_codes.at(function) | (input.destination_b ? 8U : 0U);
     return input.form == Form::long_immediate ? long_code | fields
                                               : short_code | (input.value * 256) | fields;
   }
-  constexpr Word left_immediate = 0x0c1e80;
-  constexpr Word right_immediate = 0x0c1ec0;
-  constexpr Word left_register = 0x0c1e10;
-  constexpr Word right_register = 0x0c1e30;
+  constexpr Word left_immediate = static_cast<Word>(isa::Opcode::lsl_immediate);
+  constexpr Word right_immediate = static_cast<Word>(isa::Opcode::lsr_immediate);
+  constexpr Word left_register = static_cast<Word>(isa::Opcode::lsl_register);
+  constexpr Word right_register = static_cast<Word>(isa::Opcode::lsr_register);
   const Word destination = input.destination_b ? 1U : 0U;
   if (input.form == Form::shift_immediate) {
     return (left(input.function) ? left_immediate : right_immediate) | (input.count * 2) |
