@@ -163,7 +163,7 @@ and independently checked outputs. Prevent dead-code elimination. Report coverag
 cold compilation, warm throughput, code size, API costs and every slow case.
 Retain ASM/SIMD comparisons separately; >=70% matched host-ASM is an additional
 reference. Model clock ratios do not establish measured silicon speed.
-The consumer's >=10x instrument target requires actual original audio;
+The consumer's >=4x instrument target requires actual original audio;
 microbenchmarks do not qualify it.
 
 ## DSP56300 contracts
