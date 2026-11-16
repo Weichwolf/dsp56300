@@ -30,6 +30,7 @@
 #include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Intrinsics.h>
+#include <llvm/IR/MDBuilder.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Type.h>
 #include <llvm/IR/Value.h>
@@ -50,8 +51,28 @@ namespace dsp56300::detail {
 namespace {
 constexpr unsigned flow_shift = 32, page_shift = 12;
 constexpr Word page_words = Word{1} << page_shift, page_mask = page_words - 1;
+constexpr std::uint32_t hot_edge_weight = 2000;
 using Value = llvm::Value;
 using Block = llvm::BasicBlock;
+
+void cold_edges(llvm::Function &function, const std::set<Block *> &cold) {
+  llvm::MDBuilder metadata(function.getContext());
+  for (auto &block : function) {
+    auto *terminator = block.getTerminator();
+    if ((!llvm::isa<llvm::BranchInst>(terminator) && !llvm::isa<llvm::SwitchInst>(terminator)) ||
+        terminator->getNumSuccessors() < 2) {
+      continue;
+    }
+    std::vector<std::uint32_t> weights;
+    weights.reserve(terminator->getNumSuccessors());
+    for (unsigned index = 0; index < terminator->getNumSuccessors(); ++index) {
+      weights.push_back(cold.contains(terminator->getSuccessor(index)) ? 1U : hot_edge_weight);
+    }
+    if (std::ranges::find(weights, 1U) != weights.end()) {
+      terminator->setMetadata(llvm::LLVMContext::MD_prof, metadata.createBranchWeights(weights));
+    }
+  }
+}
 
 Word memory_flags(const RegionLayout &region) {
   return (region.writable ? memory_writable : 0U) | (region.tracked ? memory_tracked : 0U) |
@@ -217,6 +238,7 @@ private:
       candidates[found->second.mode].push_back(&found->second);
     }
     auto *precise = block(active_, "region.precise");
+    cold_.insert(precise);
     auto *selection = ir_.CreateSwitch(ir_.CreateCall(mode, {active_->getArg(0)}),
                                        precise,
                                        static_cast<unsigned>(candidates.size()));
@@ -227,6 +249,7 @@ private:
       for (const auto *region : regions) {
         auto *continued = block(active_, "region.complete");
         auto *miss = region == regions.back() ? precise : block(active_, "region.next");
+        cold_.insert(miss);
         auto *outcome = ir_.CreateCall(
             adapter,
             {active_->getArg(0), ir_.CreateSub(active_->getArg(2), count), region->site, window});
@@ -369,6 +392,7 @@ private:
     result(count, ImageExit::deadline);
     ir_.SetInsertPoint(missing);
     result(count, ImageExit::unprepared);
+    cold_edges(*dispatch_, {budget, deadline, missing});
   }
 
   void emit_entry() {
@@ -571,6 +595,7 @@ private:
     sites_.clear();
     links_.clear();
     exits_.clear();
+    cold_.clear();
     auto *entry = block(unit, "entry");
     local_dispatch_ = block(unit, "dispatch");
     ir_.SetInsertPoint(entry);
@@ -586,7 +611,9 @@ private:
                               ImageExit::budget,
                               ImageExit::deadline,
                               ImageExit::unprepared}) {
-      exits_.emplace(reason, block(unit, "exit"));
+      auto *exit = block(unit, "exit");
+      exits_.emplace(reason, exit);
+      cold_.insert(exit);
     }
     for (const auto &[pc, target] : targets_) {
       if (target == unit) { sites_.emplace(pc, block(unit, "pc." + llvm::utohexstr(pc, true))); }
@@ -613,6 +640,7 @@ private:
         result(count, reason);
       }
     }
+    cold_edges(*unit, cold_);
   }
 
   llvm::Module &module_;
@@ -628,6 +656,7 @@ private:
   std::multimap<Word, FastRegion> regions_;
   std::map<Word, Block *> sites_, links_;
   std::map<ImageExit, Block *> exits_;
+  std::set<Block *> cold_;
   Block *local_dispatch_ = nullptr;
   Value *count_ = nullptr, *window_ = nullptr, *pc_ = nullptr;
 };

@@ -73,7 +73,7 @@ struct Core::Impl {
   }
 
   [[nodiscard]] std::span<Word> area(Space space) const;
-  void fail(FaultKind kind, Space space, Word address, Word value = 0);
+  [[gnu::cold]] void fail(FaultKind kind, Space space, Word address, Word value = 0);
   [[nodiscard]] Word read_memory(Space space, Word address);
   void write_memory(Space space, Word address, Word value);
   [[nodiscard]] bool overlaps_program(std::span<const Word> memory) const;
