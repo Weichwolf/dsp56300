@@ -46,3 +46,41 @@ The host algorithm receives runtime input and coefficient spans through an
 opaque translation-unit boundary, so known fixture coefficients do not become
 constant-folded host instructions. Report flags and timing scope. Kernel
 results do not qualify whole-instrument throughput.
+
+Build and run the public-API DSP controls with:
+
+```sh
+cmake --preset release
+cmake --build build/release --target dsp56300_kernel_bench
+timeout 120s build/release/dsp56300_kernel_bench
+```
+
+The command emits JSON lines for ordinary native code and mode-zero regions.
+Each timed guest run follows a complete untimed warm run. All 262144 outputs,
+all final biquad states, exact instruction totals and guest IRQ counts are checked.
+The native Q1.23 reference is compiled at O3 for the local host in a separate
+translation unit without LTO. Its reported time is the median of three warmed
+runs adjacent to each guest measurement; setup and checks are outside timing.
+`guest_over_host_time` is guest elapsed time divided by reference elapsed time;
+one is equal speed. Repeat the command to report variation.
+
+K1 also runs with bounds alone, using the identical prepared image. K6 adds the
+two-instruction counter vector. The two differences isolate the incremental cost
+of bounded calls and delivered interrupts; do not divide total K6 time by either
+count. Interrupt admission waits for actual architectural eligibility; the maximum
+requested-to-admitted delay is in nominal guest cycles. Bounds are absolute and
+retain phase. Preparation is reported on first use; zero on the following rows
+means the same prepared image is reused.
+
+Linux PMCs cover the calling thread's user code from immediately before to
+immediately after the timed guest call, including the benchmark's bounded-call
+driver. Only unscaled groups with equal enabled/running time are accepted; raw
+counts and times are emitted. Unavailable counters are null. Other hosts report
+null until a native counter provider exists. Observed runs have separate records
+and code, so retirement counting never contributes to the timing controls.
+
+Native bytes cover the complete prepared module, including the unused IRQ code
+in K1/K2. `foreground_guest_sites` counts unique foreground instructions, while
+`prepared_guest_sites` also counts ordinary and inserted-vector preparation of
+the two IRQ instructions. Static bytes per site are not dynamic host instructions
+per guest retirement.
