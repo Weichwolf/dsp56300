@@ -385,6 +385,64 @@ void retirement_vectors(const std::span<const std::byte> binding) {
           "Variant changes and repeated IRQ admission preserve exact cumulative retirement");
 }
 
+void region_mode_hints() {
+  constexpr Word mode_up = Word{1} << 11;
+  constexpr std::array code{static_cast<Word>(isa::Opcode::ori_control) | (8U << 8),
+                            static_cast<Word>(isa::Opcode::do_immediate) | (3U << 8),
+                            start + 4,
+                            static_cast<Word>(isa::Opcode::move_x_effective) | (1U << 15) |
+                                (3U << 11),
+                            nop,
+                            static_cast<Word>(isa::Opcode::stop)};
+  const std::array spans{CodeSpan{.address = start, .words = code}};
+  const std::array variants{
+      CodeVariant{.id = 0, .code = spans, .entries = initial_entries, .failed_fetches = {}}};
+  const Source source;
+  const std::array layouts{VariantLayout{.id = 0, .memory = source.memory}};
+  const std::array callbacks{
+      CallbackBinding{.role = CallbackRole::retired, .symbol = "record_retired"}};
+  const auto binding = retirement_binding();
+  CompileOptions options{.memory = layouts,
+                         .interrupts = {},
+                         .transitions = {},
+                         .callbacks = callbacks,
+                         .bindings = binding};
+  const auto baseline = Core::lower({.variants = variants}, options);
+  const auto reference = test::compile_image(baseline, binding);
+  RetirementMachine original(reference, code, false);
+  require(original.core->run().retired == 9 &&
+              original.io.counts == std::array<std::uint64_t, 2>{6, 3},
+          "Default preparation admits the six loop instructions after a guest mode change");
+  constexpr std::array hinted{Word{0}};
+  constexpr std::array admitted{mode_up};
+  for (const auto hint :
+       {std::span<const Word>{hinted}, std::span<const Word>{admitted}, std::span<const Word>{}}) {
+    options.region_modes = hint;
+    const auto prepared = Core::lower({.variants = variants}, options);
+    bool rejected = false;
+    try {
+      static_cast<void>(Core::load({.variants = variants}, options, baseline.artifact()));
+    } catch (const std::invalid_argument &) { rejected = true; }
+    require(rejected && baseline.identity() != prepared.identity(),
+            "Fast-mode hints participate in semantic artifact identity and restoration checks");
+    const auto restored = Core::load({.variants = variants}, options, prepared.artifact());
+    const auto native = test::compile_image(restored, binding);
+    RetirementMachine machine(native, code, false);
+    const auto result = machine.core->run();
+    const auto expected_counts = !hint.empty() && hint.front() == mode_up
+                                     ? std::array<std::uint64_t, 2>{6, 3}
+                                     : std::array<std::uint64_t, 2>{0, 9};
+    const auto state = machine.core->state();
+    const auto expected = original.core->state();
+    require(result.retired == 9 && result.state == ExecutionState::stopped &&
+                state.registers == expected.registers && state.progress == expected.progress &&
+                state.failure == expected.failure && machine.program == original.program &&
+                machine.x == original.x && machine.y == original.y &&
+                machine.io.counts == expected_counts,
+            "Unhinted modes stay exact through general native code; only hinted regions retire");
+  }
+}
+
 void retirement_observation() {
   constexpr std::array code{static_cast<Word>(isa::Opcode::do_immediate) | (3U << 8),
                             start + 3,
@@ -445,6 +503,7 @@ extern "C" LLVMErrorRef LLVMRunPasses(LLVMModuleRef M,
 int main() try {
   roundtrip();
   retirement_observation();
+  region_mode_hints();
   std::cout << "Semantic artifacts restore native execution without lowering\n";
 } catch (const std::exception &error) {
 

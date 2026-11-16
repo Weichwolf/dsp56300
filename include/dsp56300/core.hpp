@@ -140,6 +140,9 @@ struct CompileOptions {
   std::span<const CodeTransition> transitions;
   std::span<const CallbackBinding> callbacks;
   std::span<const std::byte> bindings;
+  // Absent prepares all supported numeric modes; an empty set prepares none.
+  // Every unselected mode retains general native execution.
+  std::optional<std::span<const Word>> region_modes = std::nullopt;
 };
 
 struct SemanticExport {

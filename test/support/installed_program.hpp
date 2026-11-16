@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstddef>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <vector>
@@ -12,7 +13,10 @@
 namespace dsp56300::test {
 // Compile the authored instruction stream against the actual borrowed P/X/Y map.
 inline NativeImage
-compile_program(const std::span<const Word> words, const Word entry, const Buffers memory) {
+compile_program(const std::span<const Word> words,
+                const Word entry,
+                const Buffers memory,
+                const std::optional<std::span<const Word>> region_modes = std::nullopt) {
   const std::array spans{CodeSpan{.address = entry, .words = words}};
   const std::array entries{entry};
   const std::array variants{
@@ -22,9 +26,13 @@ compile_program(const std::span<const Word> words, const Word entry, const Buffe
       RegionLayout{.space = Space::x, .first = 0, .size = memory.x.size()},
       RegionLayout{.space = Space::y, .first = 0, .size = memory.y.size()}};
   const std::array layouts{VariantLayout{.id = 0, .memory = regions}};
-  return Core::compile(
-      {.variants = variants},
-      {.memory = layouts, .interrupts = {}, .transitions = {}, .callbacks = {}, .bindings = {}});
+  return Core::compile({.variants = variants},
+                       {.memory = layouts,
+                        .interrupts = {},
+                        .transitions = {},
+                        .callbacks = {},
+                        .bindings = {},
+                        .region_modes = region_modes});
 }
 
 // Every declared stream is a real program variant with its own entry address.

@@ -123,7 +123,8 @@ public:
               const ImagePlan &plan,
               const std::string_view entry,
               const bool vector = false,
-              const std::optional<std::span<const RegionLayout>> memory = std::nullopt)
+              const std::optional<std::span<const RegionLayout>> memory = std::nullopt,
+              const std::optional<std::span<const Word>> region_modes = std::nullopt)
       : module_(*llvm::unwrap(module.code())),
         ir_(module_.getContext()),
         name_(entry.empty() ? module.name() : std::string(entry)),
@@ -134,7 +135,7 @@ public:
     if (module_.getNamedValue(name_) != nullptr) {
       throw std::invalid_argument("DSP image entry already exists");
     }
-    if (!vector && memory_) { prepare_regions(module, *memory_); }
+    if (!vector && memory_) { prepare_regions(module, *memory_, region_modes); }
     for (const auto head : plan_.units()) {
       units_.emplace(head, function(name_ + ".unit." + llvm::utohexstr(head, true), true));
     }
@@ -158,7 +159,9 @@ private:
     Word count, cost, last_pc, last_words, mode;
   };
 
-  void prepare_regions(LlvmModule &module, const std::span<const RegionLayout> memory) {
+  void prepare_regions(LlvmModule &module,
+                       const std::span<const RegionLayout> memory,
+                       const std::optional<std::span<const Word>> selected) {
     constexpr std::array modes{0U,
                                rounding_mode,
                                scale_down,
@@ -167,6 +170,7 @@ private:
                                rounding_mode | scale_up};
     for (auto operations : image_regions(plan_, memory)) {
       for (const auto mode : modes) {
+        if (selected && std::ranges::find(*selected, mode) == selected->end()) { continue; }
         Word cost = 0;
         for (auto &operation : operations) {
           operation.mode = mode;
@@ -673,10 +677,11 @@ void lift_image(LlvmModule &module,
 void lift_image(LlvmModule &module,
                 const ImagePlan &plan,
                 const std::string_view entry,
-                const std::optional<std::span<const RegionLayout>> memory) {
+                const std::optional<std::span<const RegionLayout>> memory,
+                const std::optional<std::span<const Word>> region_modes) {
   if (module.code() == nullptr) { throw std::logic_error("Image module was already transferred"); }
   if (plan.instructions.empty()) { throw std::invalid_argument("Image has no instructions"); }
-  const ImageLifter lifter(module, plan, entry, false, memory);
+  const ImageLifter lifter(module, plan, entry, false, memory, region_modes);
 }
 
 void lift_vector(LlvmModule &module, const ImagePlan &plan, const std::string_view entry) {
@@ -712,7 +717,8 @@ ImageArtifact lower_images(const std::string_view name,
     if (translation.vector) {
       lift_vector(module, translation.plan, translation.name);
     } else {
-      lift_image(module, translation.plan, translation.name, translation.memory);
+      lift_image(
+          module, translation.plan, translation.name, translation.memory, translation.region_modes);
     }
   }
   specialize_image(module, result.entries);

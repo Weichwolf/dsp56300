@@ -13,6 +13,8 @@
 #include <cstdint>
 #include <exception>
 #include <iostream>
+#include <optional>
+#include <span>
 
 namespace {
 using namespace dsp56300;
@@ -117,10 +119,14 @@ void execute(const NativeImage &image, const Input input) {
 
 int main() try {
   Storage storage;
-  const auto image = test::compile_program(source, entry, storage.buffers());
-  for (const auto mode : modes) {
-    for (Word prefix = 0; prefix <= total; ++prefix) {
-      execute(image, {.mode = mode, .prefix = prefix});
+  constexpr std::array selected{Word{0}};
+  using Hint = std::optional<std::span<const Word>>;
+  for (const auto hint : {Hint{}, Hint{selected}}) {
+    const auto image = test::compile_program(source, entry, storage.buffers(), hint);
+    for (const auto mode : modes) {
+      for (Word prefix = 0; prefix <= total; ++prefix) {
+        execute(image, {.mode = mode, .prefix = prefix});
+      }
     }
   }
   std::cout << test::checks << " fixed-layout loop boundary checks passed\n";

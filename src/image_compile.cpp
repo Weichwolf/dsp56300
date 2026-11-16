@@ -98,6 +98,11 @@ std::string symbol(const CodeImage image, const CompileOptions options) {
     hash.update(llvm::StringRef(binding.symbol));
   }
   hash_bytes(hash, options.bindings);
+  hash_word(hash, static_cast<std::uint64_t>(options.region_modes.has_value()));
+  if (options.region_modes) {
+    hash_word(hash, options.region_modes->size());
+    for (const auto mode : *options.region_modes) { hash_word(hash, mode); }
+  }
   return "dsp56300_image_" + llvm::toHex(hash.final(), true);
 }
 
@@ -290,8 +295,10 @@ SemanticImage Core::lower(const CodeImage image, const CompileOptions options) {
     const auto &variant = result->variants[index];
     names.push_back(index == 0 ? image_name
                                : image_name + ".variant." + llvm::utohexstr(variant.id, true));
-    translations.push_back(
-        {.name = names.back(), .plan = plans[index], .memory = memory_view(variant)});
+    translations.push_back({.name = names.back(),
+                            .plan = plans[index],
+                            .memory = memory_view(variant),
+                            .region_modes = options.region_modes});
     result->report.prepared_entries += variant.instructions.size();
   }
   for (const auto &[key, plan] : vector_plans) {
