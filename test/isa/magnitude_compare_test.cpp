@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
-#include "scripted_io.hpp"
+#include "installed_program.hpp"
+#include "isa.hpp"
 #include "support.hpp"
 
 #include <array>
@@ -13,10 +13,11 @@
 
 namespace dsp56300::test {
 namespace {
-constexpr Word cmpm_a = 0x200007, cmp_a = 0x200005, destination_b = 8;
+std::uint64_t cases = 0;
+constexpr Word cmpm_a = static_cast<Word>(isa::Opcode::cmpm_b_a);
+constexpr Word cmp_a = static_cast<Word>(isa::Opcode::cmp_b_a), destination_b = 8;
 constexpr std::uint64_t fraction = std::uint64_t{1} << 47;
 constexpr std::array modes{Word{0}, mode_down, mode_up};
-enum class Path : std::uint8_t { dispatched, owned, captured };
 
 struct Boundary {
   std::uint64_t destination = 0, source = 0;
@@ -47,8 +48,6 @@ constexpr std::array boundaries{
 
 struct Input {
   Boundary boundary;
-  Backend backend = Backend::jit;
-  Path path = Path::dispatched;
   std::size_t mode = 0;
   Word ccr = 0;
   bool accumulator_b = false;
@@ -85,38 +84,25 @@ bool qualified_carry(const Boundary boundary) {
   return !boundary.magnitude || (destination >= -limit && destination < limit);
 }
 
-void execute(TestCore &core, const Path path, const Word opcode) {
-  const auto result = path == Path::captured
-                          ? core.run_instruction({.address = start, .opcode = opcode})
-                          : core.run(1);
-  require(result.retired == 1 && result.fault.kind == FaultKind::none,
-          "Dispatched, externally fetched and captured execution retire the real instruction");
-}
-
-void one(const Input &input) {
+void one(const Input &input, const NativeImage &image) {
   std::array<Word, memory_words> program{};
   std::array<Word, memory_words> x{};
   std::array<Word, memory_words> y{};
   const auto opcode =
       (input.boundary.magnitude ? cmpm_a : cmp_a) | (input.accumulator_b ? destination_b : 0);
   program[start] = opcode;
-  scripted_io::Bus bus;
-  bus.pc = start;
-  if (input.path == Path::owned) {
-    bus.events = {{.space = Space::program, .address = start, .value = opcode}};
-  }
-  TestCore core(input.path == Path::owned ? Memory::external()
-                                          : Memory::separate({.program = program, .x = x, .y = y}),
-                &bus,
-                {.backend = input.backend});
+  Core core(Memory::separate({.program = program, .x = x, .y = y}));
+  const auto variant = (input.boundary.magnitude ? 0U : 2U) + (input.accumulator_b ? 1U : 0U);
+  core.install(image, variant);
   auto expected = initial(input);
   core.set_registers(expected);
   ++expected.pc;
   expected.sr = (expected.sr & ~status_byte) | (input.ccr & (flag_s | flag_l)) |
                 input.boundary.flags.at(input.mode);
-  execute(core, input.path, opcode);
-  require(bus.exact && bus.calls == (input.path == Path::owned ? 1U : 0U),
-          "Owned fetch consumes its one real opcode; captured/dispatched paths add no I/O");
+  const auto result = core.run(1);
+  ++cases;
+  require(result.retired == 1 && result.fault.kind == FaultKind::none,
+          "Installed comparison retires the real instruction");
   auto observed = core.registers();
   if (!qualified_carry(input.boundary)) {
     // FM13-47 explicitly excludes improperly sign-extended CMPM destinations.
@@ -135,25 +121,19 @@ int main() {
   try {
     using namespace dsp56300;
     using namespace dsp56300::test;
+    const std::array opcodes{cmpm_a, cmpm_a | destination_b, cmp_a, cmp_a | destination_b};
+    const auto image = compile_operations(opcodes, start);
     for (const auto boundary : boundaries) {
-      for (const auto backend : {Backend::jit}) {
-        for (const auto path : {Path::dispatched, Path::owned, Path::captured}) {
-          for (std::size_t mode = 0; mode < modes.size(); ++mode) {
-            for (const auto ccr : {Word{0}, flag_c | flag_v, flag_s | flag_l, status_byte}) {
-              for (const bool accumulator_b : {false, true}) {
-                one({.boundary = boundary,
-                     .backend = backend,
-                     .path = path,
-                     .mode = mode,
-                     .ccr = ccr,
-                     .accumulator_b = accumulator_b});
-              }
-            }
+      for (std::size_t mode = 0; mode < modes.size(); ++mode) {
+        for (const auto ccr : {Word{0}, flag_c | flag_v, flag_s | flag_l, status_byte}) {
+          for (const bool accumulator_b : {false, true}) {
+            one({.boundary = boundary, .mode = mode, .ccr = ccr, .accumulator_b = accumulator_b},
+                image);
           }
         }
       }
     }
-    std::cout << checks << " literal magnitude/signed comparison boundary checks passed\n";
+    std::cout << checks << " literal comparison assertions across " << cases << " cases passed\n";
     return 0;
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';

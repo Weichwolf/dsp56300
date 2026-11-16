@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Exhaustive eight-bit subdomains and full-width chains against a serial circuit.
 #include "address_model.hpp"
-#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "installed_program.hpp"
+#include "isa.hpp"
 #include "register_model.hpp"
 #include "support.hpp"
 
@@ -11,10 +12,12 @@
 #include <cstdint>
 #include <exception>
 #include <iostream>
+#include <span>
 
 namespace dsp56300::test {
 namespace {
-constexpr Word update = 0x204000, positive = 0x0800, byte_mask = 0xff;
+constexpr Word update = static_cast<Word>(isa::Opcode::move_address_update);
+constexpr Word positive = 0x0800, byte_mask = 0xff;
 constexpr Word left_padding = 0xa55aa5, ignored_modifier = 0xab0000;
 constexpr Word domain_size = 256;
 std::uint64_t cases = 0;
@@ -25,11 +28,14 @@ struct Probe {
 
 class Matrix {
 public:
-  Matrix(const Backend backend, const bool subtract)
-      : core_({.program = p_, .x = x_, .y = y_}, nullptr, {.backend = backend}),
+  explicit Matrix(const bool subtract)
+      : core_(Memory::separate({.program = p_, .x = x_, .y = y_})),
         seed_(register_model::seed(0)),
         subtract_(subtract) {
-    core_.write(Space::program, start, update | (subtract ? 0U : positive));
+    p_[start] = update | (subtract ? 0U : positive);
+    const auto image =
+        compile_program(std::span(p_).subspan(start, 1), start, {.program = p_, .x = x_, .y = y_});
+    core_.install(image, 0);
     seed_.sr = status_byte;
     seed_.m[0] = ignored_modifier;
   }
@@ -57,7 +63,7 @@ private:
   std::array<Word, memory_words> p_{};
   std::array<Word, memory_words> x_{};
   std::array<Word, memory_words> y_{};
-  TestCore core_;
+  Core core_;
   Registers seed_;
   std::uint64_t retired_ = 0;
   bool subtract_ = false;
@@ -98,12 +104,10 @@ void chains(Matrix &matrix, const bool subtract) {
 
 int main() {
   try {
-    for (const auto backend : {dsp56300::Backend::jit}) {
-      for (const bool subtract : {false, true}) {
-        dsp56300::test::Matrix matrix(backend, subtract);
-        dsp56300::test::dense(matrix);
-        dsp56300::test::chains(matrix, subtract);
-      }
+    for (const bool subtract : {false, true}) {
+      dsp56300::test::Matrix matrix(subtract);
+      dsp56300::test::dense(matrix);
+      dsp56300::test::chains(matrix, subtract);
     }
     std::cout << dsp56300::test::cases << " independent reverse-carry architectural cases passed\n";
   } catch (const std::exception &error) {

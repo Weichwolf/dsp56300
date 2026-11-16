@@ -5,13 +5,19 @@
 #include "fixture_memory.hpp"
 #include "support.hpp"
 
+#include <algorithm>
+#include <array>
 #include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <filesystem>
 #include <iostream>
+#include <map>
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace dsp56300::test {
 namespace {
@@ -54,7 +60,7 @@ private:
   bool matched_ = true;
 };
 
-void check(const BinaryCase &item) {
+void check(const BinaryCase &item, const NativeImage &image, const std::uint64_t variant) {
   auto memory = initial_memory(item);
   auto expected = memory;
   patch(expected, item.after);
@@ -62,6 +68,7 @@ void check(const BinaryCase &item) {
   Core core(Memory::separate({.program = memory[0], .x = memory[1], .y = memory[2]}),
             item.reset_actions.empty() ? nullptr : &script);
   require(!item.debug_interrupt_mode, "Fixture must use the supported non-JTAG instrument profile");
+  core.install(image, variant);
   core.set_registers(item.initial);
   const auto result = core.run(item.budget);
   require(result.retired == item.retired, "Retired dispatch count");
@@ -79,12 +86,37 @@ void check(const BinaryCase &item) {
   }
 }
 
+using Source = std::pair<Word, std::vector<Word>>;
+
+Source source(const BinaryCase &item) {
+  const auto found = std::ranges::find_if(item.before, [&](const MemoryBlock &block) {
+    return block.space == Space::program && block.address == item.initial.pc;
+  });
+  require(found != item.before.end(), "Fixture must declare its executable entry stream");
+  return {found->address, found->words};
+}
+
 void run(const std::filesystem::path &path) {
   const auto cases = read_fixture(path);
   require(!cases.empty(), "Fixture contains cases");
+  std::map<Source, std::uint64_t> catalogue;
+  for (const auto &item : cases) { catalogue.try_emplace(source(item), catalogue.size()); }
+  std::vector<CodeSpan> spans;
+  spans.reserve(catalogue.size());
+  std::vector<CodeVariant> variants;
+  for (const auto &[code, id] : catalogue) {
+    spans.push_back({.address = code.first, .words = code.second});
+    variants.push_back({.id = id,
+                        .code = std::span(&spans.back(), 1),
+                        .entries = std::span(&code.first, 1),
+                        .failed_fetches = {}});
+  }
+  const auto image = Core::compile(
+      {.variants = variants},
+      {.memory = {}, .interrupts = {}, .transitions = {}, .callbacks = {}, .bindings = {}});
   for (std::size_t index = 0; index < cases.size(); ++index) {
     try {
-      check(cases[index]);
+      check(cases[index], image, catalogue.at(source(cases[index])));
     } catch (const std::exception &error) {
       throw std::runtime_error(path.string() + ": case " + std::to_string(index) + " (" +
                                cases[index].name + "): " + error.what());

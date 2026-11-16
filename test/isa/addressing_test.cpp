@@ -1,15 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "installed_program.hpp"
+#include "isa.hpp"
 #include "support.hpp"
 
 #include <array>
+#include <cstdint>
 #include <exception>
 #include <iostream>
+#include <span>
 
 namespace dsp56300::test {
 namespace {
+std::uint64_t cases = 0;
+
 struct AddressCase {
   Word modifier = 0, cursor = 0, offset = 1, result = 0;
 };
@@ -26,7 +31,7 @@ constexpr std::array replacements{
     AddressCase{.modifier = 2, .cursor = 0x40002, .offset = 8, .result = 0x4000a},
     AddressCase{.modifier = 15, .cursor = 0x4000f, .result = 0x40000}};
 
-void reinitialize(TestCore &core, const unsigned index) {
+void reinitialize(Core &core, const unsigned index) {
   for (const auto &item : replacements) {
     auto state = initial_state();
     state.sr = status_byte;
@@ -40,6 +45,7 @@ void reinitialize(TestCore &core, const unsigned index) {
     const auto before = core.progress();
     core.set_registers(state);
     const auto result = core.run(1);
+    ++cases;
     require(result.retired == 1 && result.fault.kind == FaultKind::none,
             "Reinitialized AGU instruction retires");
     require(core.registers() == expected, "Address arithmetic follows host register replacement");
@@ -50,19 +56,21 @@ void reinitialize(TestCore &core, const unsigned index) {
   }
 }
 
-void check(const Backend backend) {
+void check() {
   std::array<Word, memory_words> p{};
   std::array<Word, memory_words> x{};
   std::array<Word, memory_words> y{};
-  TestCore core({.program = p, .x = x, .y = y}, nullptr, {.backend = backend});
-  constexpr Word update = 0x204800;
+  const Buffers memory{.program = p, .x = x, .y = y};
+  Core core(Memory::separate(memory));
+  constexpr Word update = static_cast<Word>(isa::Opcode::move_address_update) | (1U << 11);
   for (unsigned index = 0; index < agu_registers; ++index) {
-    core.write(Space::program, start, update | (index << 8));
+    p[start] = update | (index << 8);
+    const auto image = compile_program(std::span(p).subspan(start, 1), start, memory);
+    core.install(image, 0);
     const auto program = p;
     reinitialize(core, index);
-    core.clear_code_cache();
-    reinitialize(core, index);
     core.reset();
+    core.install(image, 0);
     reinitialize(core, index);
     require(p == program && x == y && x == std::array<Word, memory_words>{},
             "AGU register replacement never writes guest memory");
@@ -73,8 +81,9 @@ void check(const Backend backend) {
 
 int main() {
   try {
-    for (const auto backend : {dsp56300::Backend::jit}) { dsp56300::test::check(backend); }
-    std::cout << dsp56300::test::checks << " AGU host-boundary checks passed\n";
+    dsp56300::test::check();
+    std::cout << dsp56300::test::checks << " AGU host-boundary checks across "
+              << dsp56300::test::cases << " cases passed\n";
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';
     return 1;

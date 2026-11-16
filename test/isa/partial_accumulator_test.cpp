@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "installed_program.hpp"
+#include "isa.hpp"
 #include "support.hpp"
 
 #include <array>
@@ -9,8 +10,10 @@
 #include <cstdint>
 #include <exception>
 #include <iostream>
+#include <span>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace dsp56300::test {
 namespace {
@@ -22,14 +25,22 @@ struct Operation {
   bool binary = false;
 };
 
-constexpr std::array operations{Operation{.kind = LogicKind::bit_or, .byte = 0x42, .binary = true},
-                                Operation{.kind = LogicKind::bit_xor, .byte = 0x43, .binary = true},
-                                Operation{.kind = LogicKind::bit_and, .byte = 0x46, .binary = true},
-                                Operation{.kind = LogicKind::bit_not, .byte = 0x17},
-                                Operation{.kind = LogicKind::lsr, .byte = 0x23},
-                                Operation{.kind = LogicKind::lsl, .byte = 0x33},
-                                Operation{.kind = LogicKind::ror, .byte = 0x27},
-                                Operation{.kind = LogicKind::rol, .byte = 0x37}};
+constexpr std::array operations{
+    Operation{.kind = LogicKind::bit_or,
+              .byte = static_cast<Word>(isa::Opcode::or_x0_a) & status_byte,
+              .binary = true},
+    Operation{.kind = LogicKind::bit_xor,
+              .byte = static_cast<Word>(isa::Opcode::eor_x0_a) & status_byte,
+              .binary = true},
+    Operation{.kind = LogicKind::bit_and,
+              .byte = static_cast<Word>(isa::Opcode::and_x0_a) & status_byte,
+              .binary = true},
+    Operation{.kind = LogicKind::bit_not,
+              .byte = static_cast<Word>(isa::Opcode::not_a) & status_byte},
+    Operation{.kind = LogicKind::lsr, .byte = static_cast<Word>(isa::Opcode::lsr_a) & status_byte},
+    Operation{.kind = LogicKind::lsl, .byte = static_cast<Word>(isa::Opcode::lsl_a) & status_byte},
+    Operation{.kind = LogicKind::ror, .byte = static_cast<Word>(isa::Opcode::ror_a) & status_byte},
+    Operation{.kind = LogicKind::rol, .byte = static_cast<Word>(isa::Opcode::rol_a) & status_byte}};
 
 struct Part {
   Word selector;
@@ -128,7 +139,7 @@ Registers expected(const Registers &before, const Encoding input) {
   return result;
 }
 
-void check(TestCore &core, const Encoding input, const Registers &state) {
+void check(Core &core, const Encoding input, const Registers &state) {
   ++cases;
   core.set_registers(state);
   const auto before = core.progress();
@@ -147,7 +158,7 @@ void check(TestCore &core, const Encoding input, const Registers &state) {
           "A partial-word instruction changes retirement exactly once");
 }
 
-void values(TestCore &core, const Encoding input) {
+void values(Core &core, const Encoding input) {
   constexpr std::array mains{Word{0}, Word{1}, Word{0x7fffff}, sign24, word_mask, Word{0x13579b}};
   constexpr std::array payloads{Word{0}, Word{0x2468ac}, word_mask};
   for (const auto main : mains) {
@@ -169,25 +180,29 @@ void values(TestCore &core, const Encoding input) {
   }
 }
 
-struct Configuration {
-  Backend backend;
-};
-
-void backend(const Configuration configuration) {
+void matrix() {
   std::array<Word, 16> p{};
   std::array<Word, 16> x{};
   std::array<Word, 16> y{};
-  TestCore core({.program = p, .x = x, .y = y}, nullptr, {.backend = configuration.backend});
+  Core core(Memory::separate({.program = p, .x = x, .y = y}));
+  std::vector<Encoding> inputs;
+  std::vector<Word> opcodes;
   for (const auto operation : operations) {
     for (const bool b : {false, true}) {
       for (const auto part : parts) {
         for (unsigned source = 0; source < (operation.binary ? 4U : 1U); ++source) {
           const Encoding input{.operation = operation, .source = source, .b = b, .part = part};
-          core.write(Space::program, 1, encode(input));
-          values(core, input);
+          inputs.push_back(input);
+          opcodes.push_back(encode(input));
         }
       }
     }
+  }
+  const auto image = compile_operations(opcodes, 1);
+  for (std::size_t index = 0; index < inputs.size(); ++index) {
+    p[1] = opcodes[index];
+    core.install(image, index);
+    values(core, inputs[index]);
   }
   require(x == std::array<Word, 16>{} && y == std::array<Word, 16>{},
           "Register-only parallel instructions cannot alter X/Y RAM");
@@ -201,7 +216,10 @@ void literal() {
   std::array<Word, 16> x{};
   std::array<Word, 16> y{};
   p[1] = opcode;
-  TestCore core({.program = p, .x = x, .y = y});
+  const Buffers memory{.program = p, .x = x, .y = y};
+  Core core(Memory::separate(memory));
+  const auto image = compile_program(std::span(p).subspan(1, 1), 1, memory);
+  core.install(image, 0);
   auto state = initial_state();
   state.pc = 1;
   state.b = old_b;
@@ -214,6 +232,7 @@ void literal() {
   const auto run = core.run(1);
   state.pc = 2;
   state.b = new_b;
+  ++cases;
   require(run.retired == 1 && run.fault.kind == FaultKind::none && core.registers() == state,
           "Literal EOR X0,B / Y0->B0 red input retains its independently expected full state");
 }
@@ -223,9 +242,8 @@ void literal() {
 int main() {
   try {
     using namespace dsp56300;
-    constexpr std::array configurations{test::Configuration{.backend = Backend::jit}};
     test::literal();
-    for (const auto configuration : configurations) { test::backend(configuration); }
+    test::matrix();
     std::cout << test::checks << " partial accumulator assertions passed across " << test::cases
               << " independently described cases\n";
   } catch (const std::exception &error) {
