@@ -12,6 +12,24 @@ namespace dsp56300::detail {
 namespace {
 constexpr unsigned pair_bit = 23, y_mode_shift = 20, x_register_shift = 18, y_load_bit = 22;
 constexpr unsigned high_register_shift = 17;
+constexpr std::array xregs{x0_register, x1_register, a_register, b_register};
+constexpr std::array yregs{y0_register, y1_register, a_register, b_register};
+
+NativeMoves mixed_moves(const Instruction &instruction) {
+  const auto opcode = instruction.opcode;
+  const bool y = (opcode & (Word{1} << 14)) != 0;
+  const NativeMove move{.address = {.mode = (opcode >> 11) & 7,
+                                    .index = (opcode >> 8) & 7,
+                                    .extra = instruction.extension},
+                        .reg = y ? yregs.at((opcode >> 16) & 3)
+                                 : xregs.at((opcode >> x_register_shift) & 3),
+                        .space = y ? Space::y : Space::x,
+                        .load = (opcode & (Word{1} << 15)) != 0};
+  if (move.address.mode == 6 && move.address.index != 0 && !(move.immediate() && move.load)) {
+    return {};
+  }
+  return {.transfers = {move}, .count = 1};
+}
 
 NativeMoves long_moves(const Instruction &instruction) {
   const auto opcode = instruction.opcode;
@@ -79,8 +97,6 @@ NativeMoves plan_moves(const Instruction &instruction) {
   if (instruction.operation != Operation::parallel) { return result; }
   const auto opcode = instruction.opcode;
   if ((opcode & (Word{1} << pair_bit)) != 0) {
-    constexpr std::array xregs{x0_register, x1_register, a_register, b_register};
-    constexpr std::array yregs{y0_register, y1_register, a_register, b_register};
     const auto xmode = (opcode >> 11) & 3;
     const auto ymode = (opcode >> y_mode_shift) & 3;
     const auto xindex = (opcode >> 8) & 7;
@@ -96,6 +112,7 @@ NativeMoves plan_moves(const Instruction &instruction) {
     result.count = 2;
     return result;
   }
+  if ((opcode & pair_group_mask) == pair_group) { return mixed_moves(instruction); }
   if ((opcode & memory_group_mask) != memory_group) { return result; }
   if ((opcode & long_selector_mask) == 0) { return long_moves(instruction); }
   const unsigned reg =

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "dsp56300/memory.hpp"
 #include "fields.hpp"
 #include "instruction.hpp"
 #include "move.hpp"
@@ -13,11 +14,21 @@ bool plain_register(const unsigned reg, const bool partial) {
 }
 
 NativeRegisterMove plan_register_move(const Instruction &instruction, const bool partial) {
-  if (instruction.operation != Operation::parallel ||
-      (instruction.opcode & register_group_mask) != no_move_group) {
-    return {};
-  }
+  if (instruction.operation != Operation::parallel) { return {}; }
   const auto opcode = instruction.opcode;
+  if ((opcode & pair_group_mask) == pair_group && plan_moves(instruction).count == 1) {
+    constexpr unsigned x_accumulator_shift = 17;
+    constexpr unsigned y_accumulator_shift = 19;
+    constexpr unsigned x_destination_shift = 16;
+    constexpr unsigned y_destination_shift = 18;
+    const bool y = (opcode & (Word{1} << 14)) != 0;
+    return {.source = ((opcode >> (y ? y_accumulator_shift : x_accumulator_shift)) & 1U) != 0
+                          ? b_register
+                          : a_register,
+            .destination = (y ? x0_register : y0_register) +
+                           ((opcode >> (y ? y_destination_shift : x_destination_shift)) & 1U)};
+  }
+  if ((opcode & register_group_mask) != no_move_group) { return {}; }
   const auto source = (opcode >> 13) & five_bit_mask;
   const auto destination = (opcode >> 8) & five_bit_mask;
   if (!plain_register(source, partial) || !plain_register(destination, partial)) { return {}; }
