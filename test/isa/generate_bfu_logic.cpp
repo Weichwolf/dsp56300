@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Original BFU SM archives; only the portable fixture codec is linked.
+// Independent BFU SM programs; only the portable fixture codec is linked.
 #include "bfu_logic_model.hpp"
 #include "binary_fixture.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "isa.hpp"
 #include "register_model.hpp"
 #include "selection_model.hpp"
 #include "support.hpp"
@@ -34,7 +35,10 @@ constexpr std::array functions{Function::bit_and,
                                Function::rotate_right};
 constexpr std::array<Word, 8> values{
     0, 1, sign24 - 1, sign24, word_mask, 0x555555, 0xaaaaaa, 0x123456};
-constexpr Word conditional = 0x202000, update = 0x1000, load_x0 = 0x44d800, datum = 0x987654;
+constexpr Word conditional = static_cast<Word>(isa::Opcode::ifcc);
+constexpr Word update = static_cast<Word>(isa::Opcode::ifcc_u) ^ conditional;
+constexpr Word load_x0 = static_cast<Word>(isa::Opcode::move_x_effective) | (1U << 15) | (3U << 11);
+constexpr Word datum = 0x987654;
 
 Registers seed(const Word status) {
   auto state = register_model::seed(status);
@@ -222,7 +226,7 @@ void counts(Cases &cases) {
 }
 
 void repeated(Cases &cases, const Input input, const Word status) {
-  constexpr Word repeat = 0x0603a0;
+  constexpr Word repeat = static_cast<Word>(isa::Opcode::rep_immediate) | (3U << 8);
   for (Word budget = 1; budget <= 4; ++budget) {
     BinaryCase item;
     item.initial = seed(status);
