@@ -1,16 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "core_access.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "isa.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
 #include "selection_model.hpp"
 #include "support.hpp"
 
 #include <array>
+#include <cstddef>
 #include <exception>
 #include <iostream>
+#include <span>
 #include <stdexcept>
+#include <vector>
 
 namespace dsp56300::test {
 namespace {
@@ -23,7 +26,11 @@ constexpr std::array operations{Alu{.kind = Kind::maximum},
                                 Alu{.kind = Kind::test},
                                 Alu{.kind = Kind::test, .accumulator_b = true}};
 constexpr Word io_begin = 0xffff80, incoming = 0xab800001, payload = 0x800001;
-constexpr Word mac_a = 0x2000d2, mac_b = 0x2000da, adc_x_a = 0x200021, load_x0_increment = 0x44d800;
+constexpr Word mac_a = static_cast<Word>(isa::Opcode::mac_register_a) | (5U << 4);
+constexpr Word mac_b = static_cast<Word>(isa::Opcode::mac_register_b) | (5U << 4);
+constexpr Word adc_x_a = static_cast<Word>(isa::Opcode::adc_x_a);
+constexpr Word load_x0_increment =
+    static_cast<Word>(isa::Opcode::move_x_effective) | (1U << 15) | (3U << 11);
 
 class Observer final : public Io {
 public:
@@ -39,7 +46,7 @@ public:
         static_cast<void>(core->run(1));
       } catch (const std::logic_error &) { rejected = true; }
       valid = valid && rejected;
-      core->write(Space::program, start + 3, adc_x_a);
+      core->load(Space::program, start + 3, std::array{adc_x_a});
     } catch (...) { valid = false; }
     return accept;
   }
@@ -57,22 +64,53 @@ public:
     return false;
   }
 
-  TestCore *core = nullptr;
+  Core *core = nullptr;
   Registers expected;
   bool accept = true, valid = true;
   unsigned calls = 0;
 };
 
-void boundary(const Backend backend, const Alu alu, const bool accept) {
+NativeImage prepare() {
+  std::array<std::array<Word, 4>, operations.size()> programs{};
+  std::array<std::array<CodeSpan, 1>, operations.size() * 2> spans{};
+  const std::array first{start};
+  const std::array second{start + 3};
+  std::vector<CodeVariant> variants;
+  std::vector<CodeTransition> transitions;
+  variants.reserve(spans.size());
+  transitions.reserve(programs.size());
+  for (std::size_t index = 0; index < programs.size(); ++index) {
+    auto &words = programs[index];
+    words = {mac_a, mac_b, load_x0_increment | selection_model::code(operations[index]), adc_x_a};
+    const auto initial = index * 2;
+    spans[initial][0] = {.address = start, .words = std::span(words).first(3)};
+    spans[initial + 1][0] = {.address = start, .words = words};
+    variants.push_back(
+        {.id = initial, .code = spans[initial], .entries = first, .failed_fetches = {}});
+    variants.push_back(
+        {.id = initial + 1, .code = spans[initial + 1], .entries = second, .failed_fetches = {}});
+    transitions.push_back({.from = initial, .to = initial + 1, .entry = second[0]});
+  }
+  return Core::compile({.variants = variants},
+                       {.memory = {},
+                        .interrupts = {},
+                        .transitions = transitions,
+                        .callbacks = {},
+                        .bindings = {}});
+}
+
+void boundary(const NativeImage &image, const std::size_t index, const bool accept) {
   std::array<Word, memory_words> p{};
   std::array<Word, memory_words> x{};
   std::array<Word, memory_words> y{};
   Observer io;
-  TestCore core({.program = p, .x = x, .y = y}, &io, {.backend = backend});
+  Core core(Memory::separate({.program = p, .x = x, .y = y}), &io);
+  const auto alu = operations[index];
   io.core = &core;
   io.accept = accept;
   const std::array program{mac_a, mac_b, load_x0_increment | selection_model::code(alu), Word{0}};
   core.load(Space::program, start, program);
+  core.install(image, index * 2);
   auto initial = register_model::seed(0);
   initial.r[0] = io_begin;
   core.set_registers(initial);
@@ -89,13 +127,18 @@ void boundary(const Backend backend, const Alu alu, const bool accept) {
   require(io.valid && io.calls == 1,
           "Selection/status helper exposes canonical native state and rejects callback reentry");
   if (accept) {
+    require(result.retired == 3 && result.yielded && result.fault == Fault{} &&
+                result.progress == Progress{.instructions = 3, .estimated_cycles = 3},
+            "The accepted original move/ALU retires once before its declared changed-code handoff");
+    core.install(image, (index * 2) + 1);
+    const auto suffix = core.run(1);
     register_model::write(expected, 4, payload);
     selection_model::apply(expected, old_alu, alu);
     const auto old = expected;
     sequence_model::alu(expected, old, adc_x_a);
     ++expected.pc;
-    require(result.retired == 4 && result.fault.kind == FaultKind::none &&
-                result.progress == Progress{.instructions = 4, .estimated_cycles = 4} &&
+    require(result.retired + suffix.retired == 4 && suffix.fault.kind == FaultKind::none &&
+                suffix.progress == Progress{.instructions = 4, .estimated_cycles = 4} &&
                 core.registers() == expected,
             "An accepted move executes the ALU once, then consumes new Carry/input after P "
             "invalidation");
@@ -124,11 +167,10 @@ void boundary(const Backend backend, const Alu alu, const bool accept) {
 
 int main() {
   try {
-    for (const auto backend : {dsp56300::Backend::jit}) {
-      for (const auto operation : dsp56300::test::operations) {
-        dsp56300::test::boundary(backend, operation, false);
-        dsp56300::test::boundary(backend, operation, true);
-      }
+    const auto image = dsp56300::test::prepare();
+    for (std::size_t index = 0; index < dsp56300::test::operations.size(); ++index) {
+      dsp56300::test::boundary(image, index, false);
+      dsp56300::test::boundary(image, index, true);
     }
     std::cout << dsp56300::test::checks << " selection/status callback boundary checks passed\n";
   } catch (const std::exception &error) {
