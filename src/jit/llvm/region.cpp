@@ -8,7 +8,6 @@
 #include "fields.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
-#include "jit/block.hpp"
 #include "jit/llvm/alu.hpp"
 #include "jit/llvm/builder.hpp"
 #include "jit/llvm/region_memory.hpp"
@@ -19,7 +18,6 @@
 
 #include <algorithm>
 #include <array>
-#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -31,7 +29,6 @@
 #include <llvm/IR/Metadata.h>
 #include <llvm/IR/Value.h>
 #include <map>
-#include <memory>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -81,7 +78,6 @@ class RegionLifter {
 public:
   RegionLifter(LlvmModule &module,
                const RegionPlan &plan,
-               const void *fallback,
                const std::string_view entry = {},
                const bool admission_only = false,
                const std::size_t admission_steps = 0,
@@ -91,10 +87,8 @@ public:
         ir_(context_, LLVMAppendBasicBlockInContext(context_, function_, "entry")),
         plan_(plan),
         addressing_(addressing),
-        dynamic_(fallback == nullptr),
         self_loop_(
-            !admission_only && dynamic_ && !plan_.batch &&
-            plan_.control.stack == ControlStack::none &&
+            !admission_only && !plan_.batch && plan_.control.stack == ControlStack::none &&
             (captured_loop() || (region_independent(plan_.operations) && plan_.control.valid &&
                                  (plan_.control.reg < agu_registers ||
                                   plan_.control.target == plan_.operations.front().pc)))),
@@ -105,13 +99,13 @@ public:
     }
     if ((plan_.batch || !plan_.repeats.empty()) && addressing_ == BatchAddressing::automatic &&
         std::ranges::any_of(plan_.agu, [](bool used) { return used; })) {
-      generate_versions(module, fallback, admission_only, admission_steps);
+      generate_versions(module, admission_only, admission_steps);
     } else if (admission_only) {
       generate_admission(admission_steps);
     } else if (self_loop_) {
       generate_self_loop();
     } else {
-      generate(fallback);
+      generate();
     }
   }
 
@@ -143,20 +137,13 @@ private:
   }
 
   void generate_versions(LlvmModule &module,
-                         const void *fallback,
                          const bool admission_only,
                          const std::size_t admission_steps) {
     const std::string name = LLVMGetValueName(function_);
-    const RegionLifter linear(module,
-                              plan_,
-                              fallback,
-                              name + ".linear",
-                              admission_only,
-                              admission_steps,
-                              BatchAddressing::linear);
+    const RegionLifter linear(
+        module, plan_, name + ".linear", admission_only, admission_steps, BatchAddressing::linear);
     const RegionLifter general(module,
                                plan_,
-                               fallback,
                                name + ".general",
                                admission_only,
                                admission_steps,
@@ -366,10 +353,7 @@ private:
     LLVMAddIncoming(index, &first, &prior, 1);
     LLVMBuildCondBr(ir_.get(), ir_.CreateICmpULT(index, bounds.last), body, done);
     ir_.SetInsertPoint(body);
-    auto *base = dynamic_
-                     ? dynamic_known
-                     : LLVMConstIntToPtr(ir_.getInt64(std::bit_cast<std::uintptr_t>(window.known)),
-                                         ir_.getPtrTy());
+    auto *base = dynamic_known;
     auto *value = ir_.CreateLoad(ir_.getInt8Ty(), ir_.CreateGEP(ir_.getInt8Ty(), base, index));
     // Ordinary stores normalize knowledge to one. Only canonical destination
     // bytes can omit that metadata write on the optimized path.
@@ -458,9 +442,7 @@ private:
 
   V select_window(const unsigned bank, const Bounds bounds, const bool writing) {
     const auto order = window_order(bank, writing);
-    if (dynamic_) {
-      for (const auto index : order) { static_cast<void>(binding(bank, index, writing)); }
-    }
+    for (const auto index : order) { static_cast<void>(binding(bank, index, writing)); }
     auto *done = LLVMAppendBasicBlockInContext(context_, function_, "window_selected");
     std::vector<V> pointers;
     std::vector<V> acceptance;
@@ -472,8 +454,8 @@ private:
       auto *matches = ir_.CreateAnd(ir_.CreateICmpUGE(bounds.first, begin),
                                     ir_.CreateICmpULT(bounds.last, end));
       matches = ir_.CreateAnd(matches, ir_.CreateICmpULT(bounds.first, end));
-      const auto bound = dynamic_ ? binding(bank, index, writing) : Binding{};
-      if (dynamic_) { matches = ir_.CreateAnd(matches, bound.valid); }
+      const auto bound = binding(bank, index, writing);
+      matches = ir_.CreateAnd(matches, bound.valid);
       auto *inspect = LLVMAppendBasicBlockInContext(context_, function_, "window_known");
       auto *selected = LLVMAppendBasicBlockInContext(context_, function_, "window_match");
       auto *next = LLVMAppendBasicBlockInContext(context_, function_, "window_next");
@@ -484,8 +466,7 @@ private:
       auto *known = known_words(window, range, writing, bound.known);
       LLVMBuildCondBr(ir_.get(), known, selected, next);
       ir_.SetInsertPoint(selected);
-      auto *pointer = dynamic_ ? LLVMBuildPtrToInt(ir_.get(), bound.data, ir_.getInt64Ty(), "")
-                               : ir_.getInt64(std::bit_cast<std::uintptr_t>(window.data));
+      auto *pointer = LLVMBuildPtrToInt(ir_.get(), bound.data, ir_.getInt64Ty(), "");
       pointers.push_back(LLVMBuildIntToPtr(
           ir_.get(),
           ir_.CreateSub(pointer, ir_.getInt64(std::uint64_t{window.address} * sizeof(Word))),
@@ -1313,7 +1294,7 @@ private:
     llvm::unwrap<llvm::Instruction>(branch)->setMetadata(llvm::LLVMContext::MD_loop, loop);
   }
 
-  void generate(const void *fallback) {
+  void generate() {
     auto *windows = LLVMAppendBasicBlockInContext(context_, function_, "windows");
     auto *start = LLVMAppendBasicBlockInContext(context_, function_, "admitted");
     auto *miss = LLVMAppendBasicBlockInContext(context_, function_, "ordinary");
@@ -1323,21 +1304,7 @@ private:
     initial_memory_guards();
     LLVMBuildCondBr(ir_.get(), eligible_, start, miss);
     ir_.SetInsertPoint(miss);
-    if (fallback == nullptr) {
-      LLVMBuildRet(ir_.get(), ir_.getInt32(0));
-    } else {
-      std::array types{ir_.getPtrTy(), ir_.getPtrTy(), ir_.getPtrTy()};
-      auto *helper_type = LLVMFunctionType(ir_.getInt32Ty(), types.data(), types.size(), 0);
-      auto *helper = LLVMConstIntToPtr(ir_.getInt64(std::bit_cast<std::uintptr_t>(&enter_block)),
-                                       ir_.getPtrTy());
-      std::array arguments{
-          LLVMConstIntToPtr(ir_.getInt64(std::bit_cast<std::uintptr_t>(fallback)), ir_.getPtrTy()),
-          cpu_,
-          owner_};
-      LLVMBuildRet(
-          ir_.get(),
-          LLVMBuildCall2(ir_.get(), helper_type, helper, arguments.data(), arguments.size(), ""));
-    }
+    LLVMBuildRet(ir_.get(), ir_.getInt32(0));
     ir_.SetInsertPoint(start);
     for (unsigned bank = 0; bank < banks_.size(); ++bank) {
       banks_[bank] = reg(64, bank_fields[bank]);
@@ -1354,7 +1321,7 @@ private:
   llvm19::Builder ir_;
   const RegionPlan &plan_;
   BatchAddressing addressing_;
-  bool dynamic_, self_loop_, split_flags_ = false;
+  bool self_loop_, split_flags_ = false;
   Word loop_count_ = 0;
   V cpu_, owner_, initial_cycles_ = nullptr, initial_instructions_ = nullptr;
   V status_ = nullptr, initial_status_ = nullptr, lc_ = nullptr, sp_ = nullptr, sc_ = nullptr,
@@ -1393,20 +1360,6 @@ bool region_candidate(const std::span<const BlockInstruction> operations,
   return complete_loop || plan->control.valid || !at_loop_end(operations.back());
 }
 
-std::optional<PreparedRegion> compile_region(std::unique_ptr<LlvmCompiler> &compiler,
-                                             const std::span<const BlockInstruction> operations,
-                                             const JitRuntime &runtime,
-                                             const void *fallback) {
-  const auto plan = plan_region(operations, runtime);
-  if (!plan) { return {}; }
-  if (!compiler) { compiler = std::make_unique<LlvmCompiler>(); }
-  const auto before = compiler->native_bytes();
-  LlvmModule module("dsp_region_" + std::to_string(std::bit_cast<std::uintptr_t>(fallback)));
-  const RegionLifter lift(module, *plan, fallback);
-  const auto *entry = compiler->install(module);
-  return PreparedRegion{.entry = entry, .native_bytes = compiler->native_bytes() - before};
-}
-
 bool lift_region(LlvmModule &module,
                  const std::span<const BlockInstruction> operations,
                  const JitRuntime &runtime) {
@@ -1416,7 +1369,7 @@ bool lift_region(LlvmModule &module,
   }
   const auto plan = plan_region(operations, runtime);
   if (!plan) { return false; }
-  const RegionLifter lift(module, *plan, nullptr);
+  const RegionLifter lift(module, *plan);
   return true;
 }
 
@@ -1435,7 +1388,7 @@ bool lift_region(LlvmModule &module,
   if (properties != nullptr) {
     *properties = (plan->batch ? 1U : 0U) | (split_flags(*plan) ? 2U : 0U);
   }
-  const RegionLifter lift(module, *plan, nullptr, name);
+  const RegionLifter lift(module, *plan, name);
   return true;
 }
 
@@ -1452,7 +1405,7 @@ bool lift_region_admission(LlvmModule &module,
   if (!plan) { return false; }
   const auto prefix = admission_prefix(*plan);
   if (!prefix) { return false; }
-  const RegionLifter generated(module, *plan, nullptr, name, true, *prefix);
+  const RegionLifter generated(module, *plan, name, true, *prefix);
   return true;
 }
 }
