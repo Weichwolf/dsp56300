@@ -51,3 +51,25 @@ entries, variants, memory layout, devices, timing) through the public interface.
   Write short, result-first comments: table, what changed, what is open.
 - Sanitizer qualification (ASan/UBSan, separate TSan) of own and generated code
   happens at the goal, earlier only for a concrete risk.
+
+## Branches
+
+- `main` is the only long-lived branch, locally and on the remote. The remote
+  holds `main` and nothing else: no work, review or backup branches, no tags
+  used as backups.
+- Local `main` equals the remote `main`. Fast-forward it (`git fetch --prune`,
+  then `git merge --ff-only`) before starting work, before any measurement that
+  names a published commit, and before every push. Nothing is committed on
+  local `main` that is not pushed in the same step.
+- Unpublished work lives on at most one work branch per open step, named
+  `work/<issue>-<step>` (for example `work/37-r1`), rebased on the remote
+  `main`, without merge commits. Publishing is: fast-forward `main` to it,
+  push, delete the work branch, all in one step.
+- A measurement baseline may be a detached worktree at a published commit. It
+  is removed when the result is posted.
+- A branch, worktree or stash is orphaned when its step is published, cancelled
+  or superseded, or when no open issue step names it. Orphans are deleted, not
+  archived: history on `main` and the issue record are the archive. A stash is
+  never storage.
+- At every publication `git branch` shows `main` plus the active work branches
+  and `git worktree list` shows nothing else. No force pushes to `main`.
