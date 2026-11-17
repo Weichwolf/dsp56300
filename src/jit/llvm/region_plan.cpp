@@ -286,18 +286,26 @@ struct RepeatAnalysis {
   decltype(RegionPlan::definitions) definitions;
 };
 
-bool repeat_extents(RegionPlan &plan, const RepeatAnalysis &prior, const Word repetitions) {
+bool repeat_extents(RegionPlan &plan,
+                    const RepeatAnalysis &prior,
+                    const Word repetitions,
+                    RegionPlan::Repeat &repeat) {
   for (unsigned reg = 0; reg < agu_registers; ++reg) {
     std::int64_t travel = 0;
     if (__builtin_mul_overflow(plan.deltas[reg] - prior.origins[reg], repetitions - 1, &travel) ||
         __builtin_add_overflow(plan.deltas[reg], travel, &plan.deltas[reg])) {
       return false;
     }
+    repeat.deltas[reg] = plan.deltas[reg] - prior.origins[reg];
     for (unsigned bank = 0; bank < 2; ++bank) {
       auto &extent = plan.extents[bank][reg];
       if (extent.accessed) {
         auto &edge = travel < 0 ? extent.minimum : extent.maximum;
         if (__builtin_add_overflow(edge, travel, &edge)) { return false; }
+        repeat.extents[bank][reg] = {.minimum = extent.minimum - prior.origins[reg],
+                                     .maximum = extent.maximum - prior.origins[reg],
+                                     .accessed = true,
+                                     .writing = extent.writing};
       }
       const auto &earlier = prior.extents[bank][reg];
       if (!earlier.accessed) { continue; }
@@ -338,14 +346,19 @@ std::optional<std::size_t> append_repeat(RegionPlan &plan,
   const RepeatAnalysis prior{
       .extents = plan.extents, .origins = plan.deltas, .definitions = plan.definitions};
   plan.extents = {};
+  const auto batch = plan.batch;
+  plan.batch = true;
+  RegionPlan::Repeat repeat;
   if (!append_tree(plan,
                    index + 1,
                    after,
                    {.weight = static_cast<Word>(weight), .depth = context.depth + 1}) ||
       !plan.batch || plan.definitions != prior.definitions ||
-      !repeat_extents(plan, prior, repetitions)) {
+      !repeat_extents(plan, prior, repetitions, repeat)) {
     return {};
   }
+  plan.batch = batch;
+  plan.repeats.emplace(index, repeat);
   return after;
 }
 
@@ -421,7 +434,6 @@ std::optional<RegionPlan> make_plan(RegionPlan plan) {
     pc = (pc + operation.instruction.words) & word_mask;
   }
   if (!append_tree(plan, 0, operations.size())) { return {}; }
-  if (plan.depth != 0 && !plan.batch) { return {}; }
   if (!plan.batch &&
       std::ranges::all_of(plan.absolute, [](const auto &bank) { return bank.empty(); }) &&
       !std::ranges::any_of(plan.extents, [](const auto &bank) {

@@ -30,6 +30,7 @@ constexpr Word rep_short = isa::opcode<isa::Opcode::rep_absolute_short>()[0] | (
 constexpr Word rep_effective = isa::opcode<isa::Opcode::rep_effective>()[0] | (4U << 11);
 constexpr Word repeat_one = isa::opcode<isa::Opcode::rep_immediate>()[0] | (1U << 8);
 constexpr Word data_address = 0x180;
+constexpr Word reset_r0 = parallel_none | (4U << 13) | (16U << 8);
 constexpr std::size_t sequential_variant = 12, endings_variant = 13;
 
 struct Request {
@@ -472,6 +473,7 @@ unsigned nested_step(Registers &state,
   } else {
     const auto before = state;
     if (offset == 6) { memory.at(state.r[0]++) = static_cast<Word>(state.x) & word_mask; }
+    if (code[offset] == reset_r0) { state.r[0] = static_cast<Word>(state.x) & word_mask; }
     sequence_model::alu(state, before, code[offset]);
     ++state.pc;
   }
@@ -531,7 +533,7 @@ void nested_bounds(const NativeImage &image,
   }
 }
 
-auto nested_code(const bool relative, const bool arithmetic) {
+auto nested_code(const bool relative, const bool arithmetic, const bool reset) {
   const auto loop = [&](const Word count) {
     return isa::opcode<isa::Opcode::do_immediate>()[0] | (count << 8) |
            (relative ? relative_bit : 0U);
@@ -550,21 +552,22 @@ auto nested_code(const bool relative, const bool arithmetic) {
           (arithmetic ? isa::opcode<isa::Opcode::mac_register_a>()[0] & status_byte : 0U),
       isa::nop[0],
       arithmetic ? isa::opcode<isa::Opcode::rnd_a>()[0] : isa::nop[0],
-      isa::nop[0],
+      reset ? reset_r0 : isa::nop[0],
       isa::stop[0]};
 }
 
-void nested_do() {
+void nested_do(const bool reset) {
   constexpr std::array depths{0U, 2U, 9U};
   constexpr unsigned states = 6 * 4 * 3 * 3;
   for (const bool relative : {false, true}) {
     for (const bool arithmetic : {false, true}) {
-      const auto code = nested_code(relative, arithmetic);
+      const auto code = nested_code(relative, arithmetic, reset);
       Machine arena;
       const auto image =
           compile_program(code, start, {.program = arena.p, .x = arena.x, .y = arena.y});
       for (unsigned index = 0; index < states; ++index) {
         auto state = loop_case_state(index, depths);
+        if (reset) { state.x = (state.x & (long_mask ^ word_mask)) | 4U; }
         constexpr std::array accumulators{std::uint64_t{0}, sign56 - 1, sign56};
         state.a = accumulators[(index / (6 * 4)) % accumulators.size()];
         for (const bool captured : {false, true}) { nested_bounds(image, code, state, captured); }
@@ -576,9 +579,8 @@ void nested_do() {
 void nested_late_address() {
   constexpr Word loop = isa::opcode<isa::Opcode::do_immediate>()[0] | (2U << 8);
   constexpr Word store = isa::opcode<isa::Opcode::move_x_effective>()[0] | (3U << 11);
-  constexpr Word reset = parallel_none | (4U << 13) | (16U << 8);
   const std::array code{
-      loop, start + 7, loop, start + 5, store, isa::nop[0], reset, isa::nop[0], isa::stop[0]};
+      loop, start + 7, loop, start + 5, store, isa::nop[0], reset_r0, isa::nop[0], isa::stop[0]};
   Machine machine;
   const auto image =
       compile_program(code, start, {.program = machine.p, .x = machine.x, .y = machine.y});
@@ -615,6 +617,58 @@ void nested_late_address() {
           "Nested admission proves every repeated RAM access before a later R definition");
 }
 
+void nested_computed_fault() {
+  constexpr Word loop = isa::opcode<isa::Opcode::do_immediate>()[0] | (2U << 8);
+  constexpr Word load = isa::opcode<isa::Opcode::move_x_effective>()[0] | (1U << 15);
+  constexpr Word load_y0 = (load & ~(7U << 16)) | (6U << 16) | (4U << 11);
+  const std::array code{loop,
+                        start + 8,
+                        loop,
+                        start + 5,
+                        load | (3U << 11) | (1U << 8),
+                        isa::nop[0],
+                        reset_r0,
+                        load_y0,
+                        isa::nop[0],
+                        isa::stop[0]};
+  Machine machine;
+  const auto image =
+      compile_program(code, start, {.program = machine.p, .x = machine.x, .y = machine.y});
+  machine.core.load(Space::program, start, code);
+  machine.core.install(image, 0);
+  machine.x[1] = 3;
+  machine.x[2] = 4;
+  machine.x[3] = 7;
+  machine.x[4] = memory_words;
+  const auto memory = machine.x;
+  auto expected = initial_state();
+  expected.omr = 0;
+  expected.m.fill(suffix_linear);
+  expected.r[1] = 1;
+  machine.core.set_registers(expected);
+  expected.pc = start + 8;
+  expected.sr = lf;
+  expected.la = start + 8;
+  expected.lc = 1;
+  expected.sp = expected.sc = 2;
+  expected.r[0] = memory_words;
+  expected.r[1] = 5;
+  expected.x = expected.y = memory_words;
+  expected.stack[2] = std::uint64_t{start + 2} << word_bits;
+  expected.stack[3] = (std::uint64_t{start + 8} << word_bits) | 1U;
+  expected.stack[4] = (std::uint64_t{start + 4} << word_bits) | lf;
+  const auto result = machine.core.run(100);
+  require(result.retired == 15 &&
+              result.progress == Progress{.instructions = 15, .estimated_cycles = 15 + (3 * 4)} &&
+              result.fault == Fault{.kind = FaultKind::memory_read,
+                                    .space = Space::x,
+                                    .address = memory_words,
+                                    .pc = start + 7} &&
+              machine.core.registers() == expected && machine.x == memory &&
+              machine.y == std::array<Word, memory_words>{},
+          "A later computed-address miss commits only completed outer turns and scratch frames");
+}
+
 } // namespace
 } // namespace dsp56300::test
 
@@ -626,8 +680,10 @@ int main() {
     dsp56300::test::warm_endings(image);
     dsp56300::test::suffix_endings();
     dsp56300::test::complete_do();
-    dsp56300::test::nested_do();
+    dsp56300::test::nested_do(false);
+    dsp56300::test::nested_do(true);
     dsp56300::test::nested_late_address();
+    dsp56300::test::nested_computed_fault();
     std::cout << dsp56300::test::checks << " loop host-boundary checks passed\n";
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';

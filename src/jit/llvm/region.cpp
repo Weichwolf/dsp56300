@@ -92,10 +92,11 @@ public:
         plan_(plan),
         addressing_(addressing),
         dynamic_(fallback == nullptr),
-        self_loop_(!admission_only && dynamic_ && !plan_.batch &&
-                   region_independent(plan_.operations) && plan_.control.valid &&
-                   (plan_.control.reg < agu_registers ||
-                    plan_.control.target == plan_.operations.front().pc)),
+        self_loop_(
+            !admission_only && dynamic_ && !plan_.batch &&
+            (captured_loop() || (region_independent(plan_.operations) && plan_.control.valid &&
+                                 (plan_.control.reg < agu_registers ||
+                                  plan_.control.target == plan_.operations.front().pc)))),
         cpu_(LLVMGetParam(function_, 0)),
         owner_(LLVMGetParam(function_, 1)) {
     for (unsigned bank = 0; bank < bindings_.size(); ++bank) {
@@ -117,6 +118,12 @@ private:
   struct Bounds {
     V first = nullptr, last = nullptr;
   };
+
+  using Ranges = std::array<std::array<Bounds, agu_registers>, 2>;
+
+  [[nodiscard]] bool captured_loop() const {
+    return at_loop_end(plan_.operations.back()) && !plan_.control.valid;
+  }
 
   V boolean(const bool value) { return LLVMConstInt(ir_.getIntNTy(1), value ? 1U : 0U, 0); }
 
@@ -259,7 +266,7 @@ private:
                                      ir_.CreateZExt(lc_, ir_.getInt64Ty()));
     forever_ =
         ir_.CreateICmpNE(ir_.CreateAnd(status_, ir_.getInt32(forever_flag)), ir_.getInt32(0));
-    if (plan_.batch) {
+    if (plan_.batch || captured_loop()) {
       turns_ = ir_.CreateSelect(forever_, turns_, minimum(turns_, finite_count_));
     } else if (!self_loop_) {
       turns_ = minimum(turns_, ir_.getInt64(1));
@@ -306,7 +313,7 @@ private:
     if (!plan_.setup && at_loop_end(plan_.operations.back())) {
       require(ir_.CreateICmpUGE(sc_, ir_.getInt32(2)));
     }
-    if (plan_.batch && !plan_.setup) {
+    if ((plan_.batch || (self_loop_ && captured_loop())) && !plan_.setup) {
       require(ir_.CreateICmpEQ(ir_.CreateLShr(saved_, ir_.getInt64(word_bits)),
                                ir_.getInt64(plan_.operations.front().pc)));
     }
@@ -498,6 +505,17 @@ private:
     return base;
   }
 
+  Bounds address_bounds(Bounds range, const unsigned index) {
+    if (plan_.agu[index] && addressing_ != BatchAddressing::linear) {
+      auto *linear = ir_.CreateICmpEQ(masks_[index], ir_.getInt32(word_mask));
+      auto *begin = ir_.CreateZExt(origins_[index], ir_.getInt64Ty());
+      auto *end = ir_.CreateAdd(begin, ir_.CreateZExt(masks_[index], ir_.getInt64Ty()));
+      range.first = ir_.CreateSelect(linear, range.first, begin);
+      range.last = ir_.CreateSelect(linear, range.last, end);
+    }
+    return range;
+  }
+
   void batch_memory_guards() {
     for (unsigned index = 0; index < agu_registers; ++index) {
       for (unsigned bank = 0; bank < 2; ++bank) {
@@ -515,16 +533,8 @@ private:
         } else {
           last = ir_.CreateAdd(last, travel);
         }
-        if (plan_.agu[index] && addressing_ != BatchAddressing::linear) {
-          auto *linear = ir_.CreateICmpEQ(masks_[index], ir_.getInt32(word_mask));
-          auto *ring_begin = ir_.CreateZExt(origins_[index], ir_.getInt64Ty());
-          auto *ring_end =
-              ir_.CreateAdd(ring_begin, ir_.CreateZExt(masks_[index], ir_.getInt64Ty()));
-          first = ir_.CreateSelect(linear, first, ring_begin);
-          last = ir_.CreateSelect(linear, last, ring_end);
-        }
-        memory_bases_[bank][index] =
-            select_window(bank, {.first = first, .last = last}, extent.writing);
+        memory_bases_[bank][index] = select_window(
+            bank, address_bounds({.first = first, .last = last}, index), extent.writing);
       }
     }
   }
@@ -552,10 +562,48 @@ private:
     return form.mode == 5 || form.mode == 7 ? next : prior;
   }
 
+  void extend(Bounds &range, const Bounds next) {
+    range.first = range.first == nullptr ? next.first : minimum(range.first, next.first);
+    range.last =
+        range.last == nullptr
+            ? next.last
+            : ir_.CreateSelect(ir_.CreateICmpUGT(next.last, range.last), next.last, range.last);
+  }
+
+  void repeat_bounds(const Word roots,
+                     const RegionPlan::Repeat &repeat,
+                     std::array<V, agu_registers> &proof,
+                     Ranges &bounds) {
+    for (unsigned index = 0; index < agu_registers; ++index) {
+      if ((roots & (1U << index)) == 0) { continue; }
+      for (unsigned bank = 0; bank < 2; ++bank) {
+        const auto &extent = repeat.extents[bank][index];
+        if (!extent.accessed) { continue; }
+        auto *origin = ir_.CreateZExt(proof[index], ir_.getInt64Ty());
+        const Bounds range{.first = ir_.CreateAdd(
+                               origin, ir_.getInt64(static_cast<std::uint64_t>(extent.minimum))),
+                           .last = ir_.CreateAdd(
+                               origin, ir_.getInt64(static_cast<std::uint64_t>(extent.maximum)))};
+        extend(bounds[bank][index], address_bounds(range, index));
+      }
+      if (repeat.deltas[index] == 0) { continue; }
+      auto *next = ir_.CreateAdd(proof[index],
+                                 ir_.getInt32(static_cast<std::uint64_t>(repeat.deltas[index])));
+      proof[index] = ir_.CreateOr(origins_[index], ir_.CreateAnd(next, masks_[index]));
+    }
+  }
+
   auto memory_bounds(const Word roots, const std::span<const RegionPlan::Step> steps) {
     auto proof = cursors_;
-    std::array<std::array<Bounds, agu_registers>, 2> bounds{};
-    for (const auto &step : steps) {
+    Ranges bounds{};
+    const auto first = static_cast<std::size_t>(steps.data() - plan_.steps.data());
+    for (auto index = first; index < first + steps.size(); ++index) {
+      const auto &step = plan_.steps[index];
+      if (step.repeat_end != 0) {
+        repeat_bounds(roots, plan_.repeats.at(index), proof, bounds);
+        index = step.repeat_end - 1;
+        continue;
+      }
       V paired = nullptr;
       for (const auto &move : std::span(step.memory.transfers).first(step.memory.count)) {
         if (move.address.mode == 6 || (roots & (1U << move.address.index)) == 0) { continue; }
@@ -564,10 +612,7 @@ private:
         paired = at;
         auto &range = bounds[move.space == Space::x ? 0U : 1U][move.address.index];
         auto *wide = ir_.CreateZExt(at, ir_.getInt64Ty());
-        range.first = range.first == nullptr ? wide : minimum(range.first, wide);
-        range.last = range.last == nullptr
-                         ? wide
-                         : ir_.CreateSelect(ir_.CreateICmpUGT(wide, range.last), wide, range.last);
+        extend(range, {.first = wide, .last = wide});
       }
     }
     return bounds;
@@ -926,7 +971,7 @@ private:
 
   void body(LLVMBasicBlockRef miss, const std::size_t count) {
     auto *remaining = plan_.setup ? ir_.getInt32(plan_.setup_count) : lc_;
-    if (iteration_ != nullptr) {
+    if (iteration_ != nullptr && (plan_.setup || captured_loop())) {
       remaining =
           ir_.CreateAnd(ir_.CreateSub(remaining, ir_.CreateTrunc(iteration_, ir_.getInt32Ty())),
                         ir_.getInt32(word_mask));
@@ -1182,9 +1227,11 @@ private:
     body(guard_miss);
     const auto after = live();
     auto *next = ir_.CreateAdd(completed, ir_.getInt64(1));
-    auto *again =
-        ir_.CreateAnd(ir_.CreateICmpULT(next, limit),
-                      ir_.CreateICmpEQ(next_pc(), ir_.getInt32(plan_.operations.front().pc)));
+    auto *again = ir_.CreateICmpULT(next, limit);
+    if (!captured_loop()) {
+      again = ir_.CreateAnd(again,
+                            ir_.CreateICmpEQ(next_pc(), ir_.getInt32(plan_.operations.front().pc)));
+    }
     auto *backedge = LLVMGetInsertBlock(ir_.get());
     live_backedge(phis, after, backedge);
     LLVMAddIncoming(completed, &next, &backedge, 1);
