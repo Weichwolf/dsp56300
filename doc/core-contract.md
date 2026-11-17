@@ -1,4 +1,4 @@
-# Common core contract, version 8
+# Common core contract, version 9
 
 Every processor core in this family (cpu12, dsp56300, armv5, sharc and later
 ones) follows this contract. The file is identical in all core repositories; a
@@ -13,6 +13,13 @@ knowledge, clock source, scheduler or multi-core coupling, and no special case
 for one firmware's code patterns. The consumer owns all of those and supplies
 its knowledge through the interface below. Test for every interface decision:
 could a second device on this processor use the core without a core change?
+
+A core is generic. What a particular firmware does or uses is no argument for
+or against anything in a core. Firmware enters in two places only: as a
+declaration of the consumer (for example the memory mode an image is prepared
+in), and as a whole-instrument workload that measures a consumer. A core
+feature is justified by the architecture and by the common kernels of section
+8; no test, table or special case in a core is shaped after a firmware.
 
 ## 2. Public surface
 
@@ -95,6 +102,14 @@ show does not belong there.
 - Diagnostics are not in the product path: per-word knowledge tracking,
   counters, observers and consistency assertions exist only in a build or
   binding the consumer selects, and cost nothing when not selected.
+- A check stays on the executed path only if removing it would change what the
+  original processor does in normal operation, or if it guards an assumption of
+  the translation at the one place where that assumption can change. "It can
+  happen on this architecture" is a reason for a cold exact mode the consumer
+  can select, not for a check on the hot path.
+- When a whole-unit or whole-turn grant fails, the remainder up to the bound is
+  the exact tail: it may execute instruction by instruction with a check each,
+  cold and out of line, using the same instruction lowering as the unit.
 
 ## 5. State
 
@@ -123,6 +138,36 @@ show does not belong there.
   space with its own regions, addressed from zero. It is never a buffer hidden
   in the core and never a second naming scheme beside regions. Which space
   serves an access is architectural state of the guest.
+- A consumer may lend an address space completely, as one reservation of host
+  virtual memory covering every address the guest can form, with host page
+  protection expressing what is memory, what is read-only and what is absent.
+  For such a space the core performs no address admission: an access is the
+  view base plus the guest address. Where the processor has an MMU, the core
+  derives the host view from the actual guest translation state for every
+  mapping host pages can express, and runs exact where they cannot.
+- `CompileOptions::MemoryMode { exact, direct }`, default `exact`, is the
+  consumer's declaration. In `direct` mode an access the guest mapping or the
+  host protection forbids is a host fault that ends the run with a reported
+  fault naming address, operation and guest PC; it is not delivered to the
+  guest. In `exact` mode the core checks and delivers what the architecture
+  defines. The product build may enforce protection at host-page granularity;
+  the consumer's checked build is the exact reference.
+- `[[nodiscard]] static bool Core::host_fault(std::uintptr_t address, bool
+  writing, std::uintptr_t native_pc) noexcept` is called from the consumer's
+  process-wide fault handler, with the interrupted thread's signal mask in
+  effect (the handler restores it first and reinstates its own mask if the
+  call returns false). The core returns false unless the active owner is inside
+  generated code and the address lies in a view it was lent; otherwise it
+  records a fixed fault and escapes at its native-call adapter, inside all C++
+  execution scopes, without a system call on a successful native entry. The
+  handler does no allocation, formatting, decoding or state reconstruction.
+  After such a fault the instance is not resumed.
+- `NativeSymbols::fault_map` carries, as immutable data copied by `bind`, the
+  executable text ranges of the linked image (`TextRange {address, size}`) and
+  the mapping from native code intervals to guest instructions (`Site
+  {address, size, variant, guest_pc}`), taken from the linker and from the
+  line table of the image. Lowered guest instructions carry a debug location
+  with line `guest_pc + 1`; nothing is emitted on the access path for it.
 - `set_memory(Memory)` rebinds storage on a stopped owner, for devices whose
   memory map changes at run time. It revokes dependent bindings; a matching
   `install` follows before execution continues. The core learns no device map.
