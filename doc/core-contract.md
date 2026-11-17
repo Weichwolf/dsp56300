@@ -1,4 +1,4 @@
-# Common core contract, version 7
+# Common core contract, version 8
 
 Every processor core in this family (cpu12, dsp56300, armv5, sharc and later
 ones) follows this contract. The file is identical in all core repositories; a
@@ -73,6 +73,28 @@ could a second device on this processor use the core without a core change?
 - There is no `step`, `prepare`, captured-instruction or statistics entry point:
   `run(1)` steps, `install` validates and reports, and translation counters are
   not part of the interface.
+
+Checks in translated code: as many as necessary, as few as possible. Firmware
+is fixed code written for this processor, not arbitrary software. The executed
+path checks only what the original processor would observe and what the
+translation itself assumed; a check against behavior the installed image cannot
+show does not belong there.
+
+- Bounds and event admission are required for exactness. They are evaluated
+  once per grant: at the entry of a unit, or once for the number of loop turns
+  the bound admits, with accounting at the exit. Never per instruction, never
+  per turn.
+- A memory access over a declared fixed layout whose address is constant, or
+  affine in the loop turn, is proven once before the unit or the loop. Only an
+  access whose address is computed from data is checked at the access, by one
+  comparison.
+- An assumption of the translation (mode, mapping, code identity, return
+  target, loop state) is checked where it can change. Its failure is a cold
+  exit to exact dynamic semantics. It is never wrong execution and never
+  undefined behavior of the host.
+- Diagnostics are not in the product path: per-word knowledge tracking,
+  counters, observers and consistency assertions exist only in a build or
+  binding the consumer selects, and cost nothing when not selected.
 
 ## 5. State
 
