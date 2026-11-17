@@ -454,6 +454,7 @@ std::optional<RegionPlan> plan_region(const std::span<const BlockInstruction> op
   }
   auto plan = make_plan({.operations = operations,
                          .steps = {},
+                         .repeats = {},
                          .windows = declared_windows(runtime),
                          .windowed = {!runtime.windows[0].empty(), !runtime.windows[1].empty()},
                          .control = {}});
@@ -467,6 +468,7 @@ std::optional<RegionPlan> plan_region(const std::span<const BlockInstruction> op
       memory, [](const auto &region) { return region.space == Space::program; });
   RegionPlan plan{.operations = operations,
                   .steps = {},
+                  .repeats = {},
                   .windows = {},
                   .windowed = {external, external},
                   .control = {}};
