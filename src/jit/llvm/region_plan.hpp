@@ -13,10 +13,13 @@
 #include <vector>
 
 namespace dsp56300::detail {
+enum class ControlStack : std::uint8_t { none, push, pop };
+
 struct RegionControl {
   Word target = 0;
   unsigned selector = 16, reg = agu_registers;
   bool valid = false;
+  ControlStack stack = ControlStack::none;
 };
 
 struct RegionWindow {

@@ -94,6 +94,7 @@ public:
         dynamic_(fallback == nullptr),
         self_loop_(
             !admission_only && dynamic_ && !plan_.batch &&
+            plan_.control.stack == ControlStack::none &&
             (captured_loop() || (region_independent(plan_.operations) && plan_.control.valid &&
                                  (plan_.control.reg < agu_registers ||
                                   plan_.control.target == plan_.operations.front().pc)))),
@@ -223,6 +224,11 @@ private:
   V stack(V index) { return ir_.CreateLoad(ir_.getInt64Ty(), stack_address(index)); }
 
   void stack_admission() {
+    if (plan_.control.stack == ControlStack::push) {
+      require(ir_.CreateICmpULT(sc_, ir_.getInt32(stack_entries - 1)));
+    } else if (plan_.control.stack == ControlStack::pop) {
+      require(ir_.CreateICmpNE(sc_, ir_.getInt32(0)));
+    }
     if (plan_.depth != 0) {
       const auto added = 2U * (plan_.depth + (plan_.setup ? 1U : 0U));
       require(added < stack_entries
@@ -824,6 +830,22 @@ private:
     const auto &last = plan_.operations.back();
     auto *following = ir_.getInt32((last.pc + last.instruction.words) & word_mask);
     if (!plan_.control.valid) { return following; }
+    if (plan_.control.stack == ControlStack::pop) {
+      put(ir_.CreateAnd(ir_.CreateSub(sp_, ir_.getInt32(1)), ir_.getInt32(pointer_mask)),
+          offsetof(Registers, sp));
+      put(ir_.CreateSub(sc_, ir_.getInt32(1)), offsetof(Registers, sc));
+      return ir_.CreateTrunc(ir_.CreateLShr(saved_, ir_.getInt64(word_bits)), ir_.getInt32Ty());
+    }
+    if (plan_.control.stack == ControlStack::push) {
+      auto *pointer =
+          ir_.CreateAnd(ir_.CreateAdd(sp_, ir_.getInt32(1)), ir_.getInt32(pointer_mask));
+      auto *frame = ir_.CreateOr(
+          ir_.CreateShl(ir_.CreateZExt(following, ir_.getInt64Ty()), ir_.getInt64(word_bits)),
+          ir_.CreateZExt(status_, ir_.getInt64Ty()));
+      ir_.CreateStore(frame, stack_address(ir_.CreateAnd(pointer, ir_.getInt32(stack_mask))));
+      put(pointer, offsetof(Registers, sp));
+      put(ir_.CreateAdd(sc_, ir_.getInt32(1)), offsetof(Registers, sc));
+    }
     auto *target = plan_.control.reg < agu_registers
                        ? cursors_[plan_.control.reg]
                        : ir_.getInt32(plan_.control.target & word_mask);
@@ -1356,7 +1378,9 @@ bool region_independent(const std::span<const BlockInstruction> operations) {
   if (at_loop_end(last) || operations.front().pc > final_word) { return false; }
   const auto kind = last.instruction.operation;
   return kind == Operation::jump_short || kind == Operation::jump_effective ||
-         kind == Operation::conditional_jump || kind == Operation::relative_branch;
+         kind == Operation::conditional_jump || kind == Operation::relative_branch ||
+         kind == Operation::call_short || kind == Operation::call_effective ||
+         kind == Operation::return_subroutine;
 }
 
 bool region_candidate(const std::span<const BlockInstruction> operations,

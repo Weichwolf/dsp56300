@@ -189,13 +189,16 @@ bool append_moves(RegionPlan &plan, const NativeMoves &moves) {
 
 RegionControl relative_control(const BlockInstruction &operation) {
   const auto flow = successors(operation);
-  if (flow.call || flow.indirect || flow.count == 0) { return {}; }
+  if (flow.indirect || flow.count == 0) { return {}; }
   const auto opcode = operation.instruction.opcode;
   const bool short_form = (opcode & 0xff0000U) == 0x050000U;
+  const bool unconditional = (opcode & (1U << (short_form ? 11U : 7U))) != 0;
+  if (flow.call && !unconditional) { return {}; }
   return {.target = flow.direct[flow.count - 1],
-          .selector = flow.count == 1 ? 16U : (opcode >> (short_form ? 12U : 0U)) & 15U,
+          .selector = unconditional ? 16U : (opcode >> (short_form ? 12U : 0U)) & 15U,
           .reg = static_cast<unsigned>(agu_registers),
-          .valid = true};
+          .valid = true,
+          .stack = flow.call ? ControlStack::push : ControlStack::none};
 }
 
 RegionControl control(const BlockInstruction &operation) {
@@ -203,21 +206,26 @@ RegionControl control(const BlockInstruction &operation) {
     return relative_control(operation);
   }
   const auto kind = operation.instruction.operation;
+  if (kind == Operation::return_subroutine) { return {.valid = true, .stack = ControlStack::pop}; }
   const auto opcode = operation.instruction.opcode;
   constexpr Word short_address_mask = 0xfff;
   const bool conditional = kind == Operation::conditional_jump;
-  if (!conditional && kind != Operation::jump_short && kind != Operation::jump_effective) {
+  const bool call = kind == Operation::call_short || kind == Operation::call_effective;
+  if (!conditional && !call && kind != Operation::jump_short && kind != Operation::jump_effective) {
     return {};
   }
   if (conditional && (opcode & (1U << 16)) != 0) { return {}; }
-  const bool short_form = conditional ? (opcode & (1U << 18)) != 0 : kind == Operation::jump_short;
+  const bool short_form = conditional
+                              ? (opcode & (1U << 18)) != 0
+                              : kind == Operation::jump_short || kind == Operation::call_short;
   const auto mode = (opcode >> 11) & 7U;
   const auto index = (opcode >> 8) & 7U;
   if (!short_form && mode != 4 && (mode != 6 || index != 0)) { return {}; }
   return {.target = short_form ? opcode & short_address_mask : operation.instruction.extension,
           .selector = conditional ? (opcode >> (short_form ? 12U : 0U)) & 15U : 16U,
           .reg = !short_form && mode == 4 ? index : static_cast<unsigned>(agu_registers),
-          .valid = true};
+          .valid = true,
+          .stack = call ? ControlStack::push : ControlStack::none};
 }
 
 bool append_bit(RegionPlan &plan, const Instruction &instruction) {
