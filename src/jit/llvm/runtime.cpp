@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "jit/llvm/runtime.hpp"
 
-#include "dsp56300/core.hpp"
 #include "jit/llvm/bindings.hpp"
 #include "jit/llvm/lifecycle.hpp"
 #include "jit/llvm/native.hpp"
-#include "jit/llvm/sites.hpp"
+#include "native_sites.hpp"
 
 #if defined(__CET__)
 #include <array>
@@ -309,7 +308,7 @@ struct LlvmCompiler::Impl {
   LLVMOrcLLJITRef jit = nullptr;
   TargetMachine machine;
   std::uint64_t text_bytes = 0;
-  NativeSites sites;
+  llvm_native_sites::SourceMap sites;
 };
 
 LlvmModule::LlvmModule(std::string name) : name_(std::move(name)) {
@@ -439,7 +438,7 @@ std::uint64_t LlvmCompiler::native_bytes() const noexcept {
   return impl_->text_bytes;
 }
 
-NativeSymbols::FaultMap LlvmCompiler::fault_map() const noexcept {
+llvm_native_sites::FaultMap LlvmCompiler::fault_map() const noexcept {
   return impl_->sites.map();
 }
 

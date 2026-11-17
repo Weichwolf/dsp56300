@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
-#include "dsp56300/core.hpp"
-
 #include <cstddef>
 #include <cstdint>
 #include <llvm-c/Orc.h>
@@ -10,6 +8,10 @@
 #include <span>
 #include <string>
 #include <vector>
+
+namespace llvm_native_sites {
+struct FaultMap;
+}
 
 namespace dsp56300::detail {
 // Cold compiler ownership only; generated code uses the concrete native ABI.
@@ -61,7 +63,7 @@ public:
                                            const std::string &entry);
   // Cold materialization accounting; native execution does not update it.
   [[nodiscard]] std::uint64_t native_bytes() const noexcept;
-  [[nodiscard]] NativeSymbols::FaultMap fault_map() const noexcept;
+  [[nodiscard]] llvm_native_sites::FaultMap fault_map() const noexcept;
 
 private:
   struct Impl;

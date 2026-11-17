@@ -49,7 +49,7 @@ add_library(dsp56300_semantics OBJECT ${dsp56300_semantic_sources})
 add_library(dsp56300_core STATIC
   src/io.cpp src/memory.cpp src/image_compile.cpp src/image_artifact.cpp src/image_entry.cpp src/image_sites.cpp src/jit/preparation.cpp src/jit/image_plan.cpp
   src/jit/prefixes.cpp src/jit/prefix_access.cpp src/jit/llvm/runtime.cpp
-  src/jit/llvm/lifecycle.cpp src/jit/llvm/bindings.cpp src/jit/llvm/sites.cpp
+  src/jit/llvm/lifecycle.cpp src/jit/llvm/bindings.cpp
   src/jit/llvm/image.cpp src/jit/llvm/image_regions.cpp src/jit/llvm/image_specialize.cpp src/jit/llvm/origins.cpp
   src/jit/llvm/region.cpp src/jit/llvm/region_plan.cpp src/jit/llvm/alu.cpp
   src/jit/move.cpp src/jit/registers.cpp)
@@ -59,7 +59,11 @@ target_include_directories(dsp56300_core PUBLIC include)
 target_compile_features(dsp56300_core PUBLIC cxx_std_23)
 target_link_libraries(dsp56300_core PUBLIC dsp56300_quality PRIVATE dsp56300_semantics)
 include(cmake/Llvm.cmake)
-set(dsp56300_own_targets dsp56300_core dsp56300_semantics)
+add_library(llvm_native_sites STATIC src/llvm_native_sites/native_sites.cpp)
+target_include_directories(llvm_native_sites PUBLIC src/llvm_native_sites)
+target_link_libraries(llvm_native_sites PRIVATE LLVM)
+target_link_libraries(dsp56300_core PRIVATE llvm_native_sites)
+set(dsp56300_own_targets dsp56300_core dsp56300_semantics llvm_native_sites)
 set(DSP56300_SEMANTIC_TARGET dsp56300_semantics)
 # Retain public Io call boundaries until consumer binding, without changing native helpers.
 add_library(dsp56300_io_ir OBJECT src/io.cpp)

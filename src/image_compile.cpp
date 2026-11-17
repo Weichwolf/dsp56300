@@ -7,6 +7,7 @@
 #include "jit/llvm/image.hpp"
 #include "jit/llvm/runtime.hpp"
 #include "jit/prefixes.hpp"
+#include "native_sites.hpp"
 #include "semantic_ir.hpp"
 
 #include <algorithm>
@@ -415,14 +416,31 @@ NativeImage Core::compile(const CodeImage image, const CompileOptions options) {
         {.name = entry.name,
          .address = addresses.empty() ? first : compiler->resolve(std::string(entry.name))});
   }
-  if (compiler->fault_map().text_ranges.empty() || compiler->fault_map().sites.empty()) {
+  const auto map = compiler->fault_map();
+  if (map.text_ranges.empty() || map.sites.empty()) {
     throw std::runtime_error("DSP native provider did not prepare source attribution");
+  }
+  std::vector<NativeSymbols::TextRange> text_ranges;
+  text_ranges.reserve(map.text_ranges.size());
+  for (const auto &range : map.text_ranges) {
+    text_ranges.push_back({.address = range.address, .size = range.size});
+  }
+  std::vector<NativeSymbols::Site> sites;
+  sites.reserve(map.sites.size());
+  for (const auto &site : map.sites) {
+    if (site.guest_pc > word_mask) {
+      throw std::runtime_error("Native source PC exceeds DSP width");
+    }
+    sites.push_back({.address = site.address,
+                     .size = site.size,
+                     .variant = site.variant,
+                     .guest_pc = site.guest_pc});
   }
   return bind(semantic,
               {.owner = compiler,
                .symbols = addresses,
                .identity = semantic.identity(),
                .native_bytes = compiler->native_bytes(),
-               .fault_map = compiler->fault_map()});
+               .fault_map = {.text_ranges = text_ranges, .sites = sites}});
 }
 }

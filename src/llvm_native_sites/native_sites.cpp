@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "jit/llvm/sites.hpp"
-
-#include "dsp56300/core.hpp"
-#include "dsp56300/memory.hpp"
+#include "native_sites.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -24,6 +21,7 @@
 #include <llvm/Support/MemoryBufferRef.h>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -31,7 +29,7 @@
 #include <utility>
 #include <vector>
 
-namespace dsp56300::detail {
+namespace llvm_native_sites {
 namespace {
 using Graph = llvm::jitlink::LinkGraph;
 using Responsibility = llvm::orc::MaterializationResponsibility;
@@ -43,7 +41,7 @@ struct Section {
 
 struct Line {
   std::uint64_t section, address, size, variant;
-  Word pc;
+  std::uint32_t pc;
 };
 
 struct Input {
@@ -86,9 +84,6 @@ void lines(Input &input, const llvm::DWARFDebugLine::LineTable &table) {
     }
     const auto id = variant(file);
     if (!id) { continue; }
-    if (row.Line - 1 > word_mask) {
-      throw std::runtime_error("Native source PC exceeds DSP width");
-    }
     input.lines.push_back({.section = row.Address.SectionIndex,
                            .address = row.Address.Address,
                            .size = next.Address.Address - row.Address.Address,
@@ -165,7 +160,8 @@ std::vector<Block> blocks(const Input &input, Graph &graph) {
   return result;
 }
 
-void link(NativeSites &output, const Input &input, const std::vector<Block> &blocks, Graph &graph) {
+void link(SourceMap &output, const Input &input, const std::vector<Block> &blocks, Graph &graph) {
+  const std::lock_guard lock(output.mutation);
   for (const auto &section : graph.sections()) {
     if (!executable(section)) { continue; }
     for (const auto *block : section.blocks()) {
@@ -196,13 +192,13 @@ void link(NativeSites &output, const Input &input, const std::vector<Block> &blo
       }
     }
   }
-  std::ranges::sort(output.text, {}, &NativeSymbols::TextRange::address);
-  std::ranges::sort(output.sites, {}, &NativeSymbols::Site::address);
+  std::ranges::sort(output.text, {}, &TextRange::address);
+  std::ranges::sort(output.sites, {}, &Site::address);
 }
 
 class Sites final : public llvm::orc::ObjectLinkingLayer::Plugin {
 public:
-  explicit Sites(NativeSites &output) : output_(output) {}
+  explicit Sites(SourceMap &output) : output_(output) {}
 
   void notifyMaterializing(Responsibility & /*owner*/,
                            Graph &graph,
@@ -213,13 +209,17 @@ public:
     try {
       *input = parse(object);
     } catch (const std::exception &error) { input->failure = error.what(); }
+    const std::lock_guard lock(mutation_);
     inputs_.emplace(&graph, std::move(input));
   }
 
   void modifyPassConfig(Responsibility & /*owner*/,
                         Graph &materializing,
                         llvm::jitlink::PassConfiguration &config) override {
-    auto found = inputs_.extract(&materializing);
+    auto found = [&] {
+      const std::lock_guard lock(mutation_);
+      return inputs_.extract(&materializing);
+    }();
     if (found.empty()) {
       config.PostPrunePasses.emplace_back([](Graph & /*graph*/) -> llvm::Error {
         return llvm::make_error<llvm::StringError>("JITLink lost its native source object",
@@ -254,18 +254,19 @@ public:
                                    llvm::orc::ResourceKey /*source*/) override {}
 
 private:
-  NativeSites &output_;
+  SourceMap &output_;
+  std::mutex mutation_;
   std::map<const Graph *, std::shared_ptr<Input>> inputs_;
 };
 }
 
-void NativeSites::attach(llvm::orc::LLJIT &jit) {
+void SourceMap::attach(llvm::orc::LLJIT &jit) {
   auto *layer = llvm::dyn_cast<llvm::orc::ObjectLinkingLayer>(&jit.getObjLinkingLayer());
   if (layer == nullptr) { throw std::runtime_error("Native source attribution requires JITLink"); }
   layer->addPlugin(std::make_shared<Sites>(*this));
 }
 
-NativeSymbols::FaultMap NativeSites::map() const noexcept {
+FaultMap SourceMap::map() const noexcept {
   return {.text_ranges = text, .sites = sites};
 }
 }
