@@ -205,17 +205,20 @@ private:
 
   void require(V condition) { eligible_ = ir_.CreateAnd(eligible_, condition); }
 
-  V stack(V index) {
+  V stack_address(V index) {
     auto *bytes =
         ir_.CreateMul(ir_.CreateZExt(index, ir_.getInt64Ty()), ir_.getInt64(sizeof(std::uint64_t)));
     auto *base = address(cpu_, offsetof(Cpu, reg) + offsetof(Registers, stack));
-    return ir_.CreateLoad(ir_.getInt64Ty(), ir_.CreateGEP(ir_.getInt8Ty(), base, bytes));
+    return ir_.CreateGEP(ir_.getInt8Ty(), base, bytes);
   }
+
+  V stack(V index) { return ir_.CreateLoad(ir_.getInt64Ty(), stack_address(index)); }
 
   void admission() {
     initial_cycles_ = load(64, offsetof(Cpu, cycles));
     initial_instructions_ = load(64, offsetof(Cpu, instructions));
     status_ = reg(32, offsetof(Registers, sr));
+    initial_status_ = status_;
     lc_ = reg(32, offsetof(Registers, lc));
     sp_ = reg(32, offsetof(Registers, sp));
     sc_ = reg(32, offsetof(Registers, sc));
@@ -244,10 +247,22 @@ private:
       turns_ = minimum(turns_, ir_.getInt64(1));
     }
     eligible_ = ir_.CreateICmpUGT(turns_, ir_.getInt64(0));
+    if (plan_.setup) {
+      const auto count = (std::uint64_t{plan_.count} * plan_.setup_count) + 1;
+      const auto cost =
+          (std::uint64_t{plan_.cost} * plan_.setup_count) + plan_.setup->instruction.cycles;
+      turns_ = ir_.getInt64(plan_.setup_count);
+      eligible_ = ir_.CreateAnd(ir_.CreateICmpUGE(budget, ir_.getInt32(count)),
+                                ir_.CreateICmpUGE(credit, ir_.getInt64(cost)));
+      require(ir_.CreateICmpUGE(ir_.getInt64(std::numeric_limits<std::uint64_t>::max() - count),
+                                initial_instructions_));
+      require(ir_.CreateICmpUGE(ir_.getInt32(stack_entries - 3), sc_));
+    }
     require(ir_.CreateICmpEQ(ir_.CreateAnd(status_, ir_.getInt32(numeric_mode_mask)),
                              ir_.getInt32(plan_.operations.front().mode)));
-    require(ir_.CreateICmpEQ(reg(32, offsetof(Registers, pc)),
-                             ir_.getInt32(plan_.operations.front().pc)));
+    require(ir_.CreateICmpEQ(
+        reg(32, offsetof(Registers, pc)),
+        ir_.getInt32(plan_.setup ? plan_.setup->pc : plan_.operations.front().pc)));
     auto *active_la = ir_.CreateSelect(
         ir_.CreateICmpNE(ir_.CreateAnd(status_, ir_.getInt32(loop_flag)), ir_.getInt32(0)),
         reg(32, offsetof(Registers, la)),
@@ -256,20 +271,22 @@ private:
     const auto final_word = (last.pc + last.instruction.words - 1) & word_mask;
     const bool uncaptured =
         last.loop_address == inactive_loop && plan_.operations.front().pc <= final_word;
-    auto *outside =
-        ir_.CreateOr(ir_.CreateICmpULT(active_la, ir_.getInt32(plan_.operations.front().pc)),
-                     ir_.CreateICmpUGT(active_la, ir_.getInt32(final_word)));
-    if (uncaptured && !region_independent(plan_.operations)) {
+    const auto first_pc = plan_.setup ? plan_.setup->pc : plan_.operations.front().pc;
+    auto *outside = ir_.CreateOr(ir_.CreateICmpULT(active_la, ir_.getInt32(first_pc)),
+                                 ir_.CreateICmpUGT(active_la, ir_.getInt32(final_word)));
+    if (!plan_.setup && uncaptured && !region_independent(plan_.operations)) {
       endpoint_ = ir_.CreateICmpEQ(active_la, ir_.getInt32(final_word));
       require(ir_.CreateOr(outside, endpoint_));
       require(ir_.CreateOr(ir_.CreateNot(endpoint_), ir_.CreateICmpUGE(sc_, ir_.getInt32(2))));
-    } else if (uncaptured || region_independent(plan_.operations)) {
+    } else if (plan_.setup || uncaptured || region_independent(plan_.operations)) {
       require(outside);
     } else {
       require(ir_.CreateICmpEQ(active_la, ir_.getInt32(plan_.operations.front().loop_address)));
     }
-    if (at_loop_end(plan_.operations.back())) { require(ir_.CreateICmpUGE(sc_, ir_.getInt32(2))); }
-    if (plan_.batch) {
+    if (!plan_.setup && at_loop_end(plan_.operations.back())) {
+      require(ir_.CreateICmpUGE(sc_, ir_.getInt32(2)));
+    }
+    if (plan_.batch && !plan_.setup) {
       require(ir_.CreateICmpEQ(ir_.CreateLShr(saved_, ir_.getInt64(word_bits)),
                                ir_.getInt64(plan_.operations.front().pc)));
     }
@@ -782,13 +799,34 @@ private:
     }
     put(status_, offsetof(Registers, sr));
     auto *retired = ir_.CreateMul(turns_, ir_.getInt64(plan_.count));
+    auto *cycles = ir_.CreateMul(turns_, ir_.getInt64(plan_.cost));
+    if (plan_.setup) {
+      retired = ir_.CreateAdd(retired, ir_.getInt64(1));
+      cycles = ir_.CreateAdd(cycles, ir_.getInt64(plan_.setup->instruction.cycles));
+    }
     store(ir_.CreateAdd(initial_instructions_, retired), offsetof(Cpu, instructions));
-    store(ir_.CreateAdd(initial_cycles_, ir_.CreateMul(turns_, ir_.getInt64(plan_.cost))),
-          offsetof(Cpu, cycles));
+    store(ir_.CreateAdd(initial_cycles_, cycles), offsetof(Cpu, cycles));
     store(ir_.getInt8(0), offsetof(Cpu, repeat_completed));
     store(ir_.getInt8(0), offsetof(Cpu, interrupt_inhibited));
     auto *pc = next_pc();
     put(pc, offsetof(Registers, pc));
+    if (plan_.setup) {
+      const auto frame = [&](const unsigned advance, V high, V low) {
+        auto *index =
+            ir_.CreateAnd(ir_.CreateAdd(sp_, ir_.getInt32(advance)), ir_.getInt32(stack_mask));
+        auto *value = ir_.CreateOr(
+            ir_.CreateShl(ir_.CreateZExt(high, ir_.getInt64Ty()), ir_.getInt64(word_bits)),
+            ir_.CreateZExt(low, ir_.getInt64Ty()));
+        ir_.CreateStore(value, stack_address(index));
+      };
+      frame(1, reg(32, offsetof(Registers, la)), lc_);
+      frame(2, ir_.getInt32(plan_.operations.front().pc), initial_status_);
+      store(ir_.getInt8(static_cast<unsigned>(NativeBoundary::context)),
+            offsetof(NativeContext, boundary),
+            owner_);
+      LLVMBuildRet(ir_.get(), ir_.CreateTrunc(retired, ir_.getInt32Ty()));
+      return;
+    }
     if (!at_loop_end(plan_.operations.back()) && endpoint_ == nullptr) {
       LLVMBuildRet(ir_.get(), ir_.CreateTrunc(retired, ir_.getInt32Ty()));
       return;
@@ -1052,7 +1090,11 @@ private:
       }
       body(miss, prefix_steps);
     }
-    LLVMBuildRet(ir_.get(), ir_.CreateMul(turns_, ir_.getInt64(plan_.cost)));
+    auto *cycles = ir_.CreateMul(turns_, ir_.getInt64(plan_.cost));
+    if (plan_.setup) {
+      cycles = ir_.CreateAdd(cycles, ir_.getInt64(plan_.setup->instruction.cycles));
+    }
+    LLVMBuildRet(ir_.get(), cycles);
     ir_.SetInsertPoint(miss);
     LLVMBuildRet(ir_.get(), ir_.getInt64(0));
   }
@@ -1131,7 +1173,8 @@ private:
   bool dynamic_, self_loop_, deferred_ = false;
   llvm19::DeferredMac flags_{};
   V cpu_, owner_, initial_cycles_ = nullptr, initial_instructions_ = nullptr;
-  V status_ = nullptr, lc_ = nullptr, sp_ = nullptr, sc_ = nullptr, saved_ = nullptr;
+  V status_ = nullptr, initial_status_ = nullptr, lc_ = nullptr, sp_ = nullptr, sc_ = nullptr,
+    saved_ = nullptr;
   V turns_ = nullptr, forever_ = nullptr, finite_count_ = nullptr, eligible_ = nullptr;
   V endpoint_ = nullptr;
   std::array<V, 4> banks_{};

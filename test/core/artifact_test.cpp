@@ -277,9 +277,9 @@ void retirement_case(const std::array<NativeImage, 2> &images,
   constexpr unsigned complete = 32;
   if (limit == complete && !no_io) {
     require(after.io.counts ==
-                (fault ? std::array<std::uint64_t, 2>{0, 1} : std::array<std::uint64_t, 2>{6, 2}),
-            "The DO region counts six instructions; setup/STOP count precisely, faults do not");
-    require(after.io.batched == (fault ? 0U : 6U) && after.io.deferred == 0,
+                (fault ? std::array<std::uint64_t, 2>{0, 1} : std::array<std::uint64_t, 2>{7, 1}),
+            "The complete DO region counts setup and six body instructions; STOP stays precise");
+    require(after.io.batched == (fault ? 0U : 7U) && after.io.deferred == 0,
             "The optional region token distinguishes actual batched retirement");
     constexpr unsigned opcode_shift = 24;
     constexpr unsigned kind_shift = 48;
@@ -352,8 +352,8 @@ void region_mode_hints() {
   const auto reference = test::compile_image(baseline, binding);
   RetirementMachine original(reference, code, false);
   require(original.core->run().retired == 9 &&
-              original.io.counts == std::array<std::uint64_t, 2>{6, 3},
-          "Default preparation admits the six loop instructions after a guest mode change");
+              original.io.counts == std::array<std::uint64_t, 2>{7, 2},
+          "Default preparation admits DO setup and its body after a guest mode change");
   constexpr std::array hinted{Word{0}};
   constexpr std::array admitted{mode_up};
   for (const auto hint :
@@ -371,7 +371,7 @@ void region_mode_hints() {
     RetirementMachine machine(native, code, false);
     const auto result = machine.core->run();
     const auto expected_counts = !hint.empty() && hint.front() == mode_up
-                                     ? std::array<std::uint64_t, 2>{6, 3}
+                                     ? std::array<std::uint64_t, 2>{7, 2}
                                      : std::array<std::uint64_t, 2>{0, 9};
     const auto state = machine.core->state();
     const auto expected = original.core->state();

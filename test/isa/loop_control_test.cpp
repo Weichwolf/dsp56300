@@ -355,6 +355,95 @@ void suffix_endings() {
   }
 }
 
+constexpr Word complete_body = start + 2, complete_last = complete_body + 1;
+constexpr Word complete_count = 3;
+constexpr unsigned complete_instructions = 1 + (2 * complete_count);
+constexpr unsigned complete_cycles = 5 + (2 * complete_count);
+
+void complete_do_case(const NativeImage &image,
+                      const std::span<const Word> code,
+                      Registers expected,
+                      const unsigned limit,
+                      const bool deadline) {
+  Machine machine;
+  machine.core.load(Space::program, start, code);
+  machine.core.install(image, 0);
+  machine.core.set_registers(expected);
+  const auto retired = deadline && limit != 0 ? 1 + (limit > 5 ? limit - 5 : 0) : limit;
+  std::array<Word, memory_words> memory{};
+  if (retired != 0) {
+    const auto push = [&](const Word high, const Word low) {
+      expected.sp = (expected.sp + 1) & loop_frames::pointer_mask;
+      ++expected.sc;
+      expected.stack[expected.sp % stack_entries] = (std::uint64_t{high} << word_bits) | low;
+    };
+    push(expected.la, expected.lc);
+    expected.lc = complete_count;
+    push(complete_body, expected.sr);
+    expected.la = complete_last;
+    expected.sr = (expected.sr & ~fv) | lf;
+    expected.pc = complete_body;
+    for (unsigned index = 1; index < retired; ++index) {
+      if (expected.pc == complete_body) {
+        memory.at(expected.r[0]++) = static_cast<Word>(expected.x) & word_mask;
+      }
+      ++expected.pc;
+      if (expected.pc != complete_last + 1) { continue; }
+      if (expected.lc == 1) {
+        loop_frames::complete(expected);
+      } else {
+        --expected.lc;
+        expected.pc = complete_body;
+      }
+    }
+  }
+  const auto result = deadline ? machine.core.run_until(limit) : machine.core.run(limit);
+  const Progress progress{.instructions = retired,
+                          .estimated_cycles = retired == 0 ? 0U : retired + 4};
+  require(result.retired == retired && result.progress == progress && result.fault == Fault{} &&
+              !result.yielded && machine.core.registers() == expected && machine.x == memory &&
+              machine.y == std::array<Word, memory_words>{},
+          "Complete DO preserves all RAM, frames and every instruction/time cut");
+}
+
+void complete_do() {
+  constexpr std::array modes{
+      0U, mode_down, mode_up, mode_rm, mode_rm | mode_down, mode_rm | mode_up};
+  constexpr std::array pointers{0U, 15U, 63U};
+  constexpr std::array depths{0U, 2U, static_cast<Word>(stack_entries - 3)};
+  constexpr unsigned states = 6 * 4 * 3 * 3;
+  for (const bool relative : {false, true}) {
+    const std::array code{isa::opcode<isa::Opcode::do_immediate>()[0] | (complete_count << 8) |
+                              (relative ? relative_bit : 0U),
+                          relative ? complete_last - start : complete_last,
+                          isa::opcode<isa::Opcode::move_x_effective>()[0] | (3U << 11),
+                          isa::nop[0],
+                          isa::stop[0]};
+    Machine arena;
+    const auto image =
+        compile_program(code, start, {.program = arena.p, .x = arena.x, .y = arena.y});
+    for (unsigned index = 0; index < states; ++index) {
+      const auto mode = modes[index % modes.size()];
+      auto state = register_model::seed(mode);
+      state.pc = start;
+      state.sr = mode | (static_cast<Word>((index / modes.size()) % 4) << 15) | flag_c;
+      state.omr = 0;
+      state.la = outer_la;
+      state.lc = outer_lc;
+      state.sp = pointers[(index / (6 * 4)) % pointers.size()];
+      state.sc = depths[(index / (6 * 4 * 3)) % depths.size()];
+      state.r[0] = 1;
+      state.m.fill(suffix_linear);
+      for (const bool deadline : {false, true}) {
+        for (unsigned limit = 0; limit <= (deadline ? complete_cycles : complete_instructions);
+             ++limit) {
+          complete_do_case(image, code, state, limit, deadline);
+        }
+      }
+    }
+  }
+}
+
 } // namespace
 } // namespace dsp56300::test
 
@@ -365,6 +454,7 @@ int main() {
     dsp56300::test::sequential_repeats(image);
     dsp56300::test::warm_endings(image);
     dsp56300::test::suffix_endings();
+    dsp56300::test::complete_do();
     std::cout << dsp56300::test::checks << " loop host-boundary checks passed\n";
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';

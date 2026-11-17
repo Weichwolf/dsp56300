@@ -109,7 +109,14 @@ std::vector<std::vector<BlockInstruction>> image_regions(const ImagePlan &plan) 
     const auto last = (flow.direct[1] - 1) & word_mask;
     if (!seen.emplace(first, last).second) { continue; }
     auto operations = body(plan, first, last);
-    if (!operations.empty()) { result.push_back(std::move(operations)); }
+    if (!operations.empty()) {
+      if (instruction.operation == Operation::loop_immediate) {
+        auto complete = operations;
+        complete.insert(complete.begin(), {.instruction = instruction, .pc = pc});
+        result.push_back(std::move(complete));
+      }
+      result.push_back(std::move(operations));
+    }
   }
   ordinary_regions(plan, result);
   return result;

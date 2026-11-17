@@ -17,6 +17,7 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <span>
 #include <utility>
@@ -276,6 +277,28 @@ bool append(RegionPlan &plan, const BlockInstruction &operation) {
 std::optional<RegionPlan> make_plan(RegionPlan plan) {
   const auto operations = plan.operations;
   if (operations.empty()) { return {}; }
+  if (operations.front().instruction.operation == Operation::loop_immediate) {
+    const auto &first = operations.front();
+    const auto flow = successors(first);
+    const auto count =
+        ((first.instruction.opcode >> 8) & byte_mask) | ((first.instruction.opcode & 15U) << 8);
+    if (operations.size() < 2 || count == 0 || flow.count != 2 ||
+        flow.direct[0] != operations[1].pc ||
+        flow.direct[1] != operations.back().pc + operations.back().instruction.words) {
+      return {};
+    }
+    plan.operations = operations.subspan(1);
+    auto body = make_plan(std::move(plan));
+    if (!body || !body->batch || body->setup ||
+        (std::uint64_t{body->count} * count) + 1 > std::numeric_limits<Word>::max() ||
+        (std::uint64_t{body->cost} * count) + first.instruction.cycles >
+            std::numeric_limits<Word>::max()) {
+      return {};
+    }
+    body->setup = first;
+    body->setup_count = count;
+    return body;
+  }
   constexpr Word supported_modes = rounding_mode | scale_down | scale_up;
   const auto mode = operations.front().mode;
   if ((mode & ~supported_modes) != 0 ||

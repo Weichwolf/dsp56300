@@ -51,6 +51,8 @@ struct RegionPlan {
   std::array<std::optional<std::size_t>, agu_registers> definitions{};
   std::array<bool, agu_registers> guardable{}, deferred{};
   RegionControl control;
+  std::optional<BlockInstruction> setup = std::nullopt;
+  Word setup_count = 0;
   Word cost = 0, count = 0;
   bool batch = false, computation = false;
 };
