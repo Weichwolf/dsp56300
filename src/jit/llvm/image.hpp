@@ -31,9 +31,12 @@ struct ImageArtifact {
   std::vector<std::byte> bitcode;
 };
 
-[[nodiscard]] ImageArtifact lower_images(std::string_view name,
-                                         std::span<const ImageTranslation> translations,
-                                         std::span<const CallbackBinding> callbacks = {});
+[[nodiscard]] ImageArtifact
+lower_images(std::string_view name,
+             std::span<const ImageTranslation> translations,
+             std::span<const CallbackBinding> callbacks = {},
+             CompileOptions::MemoryMode mode = CompileOptions::MemoryMode::exact);
+void configure_memory(LlvmModule &module, CompileOptions::MemoryMode mode);
 enum class ImageExit : std::uint8_t { owner, fault, budget, deadline, unprepared };
 // Result: low 32 bits are retired instructions; high 32 bits contain ImageExit.
 using ImageEntry = std::uint64_t (*)(void *, Word, std::uint32_t, std::uint64_t) noexcept;
@@ -46,11 +49,13 @@ void lift_image(LlvmModule &module,
                 std::string_view entry = {},
                 std::optional<std::span<const RegionLayout>> memory = std::nullopt,
                 std::optional<std::span<const Word>> region_modes = std::nullopt,
-                std::uint64_t variant = 0);
+                std::uint64_t variant = 0,
+                bool direct = false);
 void lift_vector(LlvmModule &module,
                  const ImagePlan &plan,
                  std::string_view entry = {},
-                 std::uint64_t variant = 0);
+                 std::uint64_t variant = 0,
+                 bool direct = false);
 // Remove ordinary ISA calls before the shared native O3/export/install pipeline.
 void specialize_image(LlvmModule &module);
 void specialize_image(LlvmModule &module, std::span<const std::string> entries);

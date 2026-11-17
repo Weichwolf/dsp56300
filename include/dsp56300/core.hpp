@@ -139,6 +139,7 @@ struct CallbackBinding {
 };
 
 struct CompileOptions {
+  enum class MemoryMode : std::uint8_t { exact, direct };
   // Per variant: omitted means dynamic grants; an empty declared layout requires zero grants.
   std::span<const VariantLayout> memory;
   std::span<const InterruptRequest> interrupts;
@@ -146,6 +147,7 @@ struct CompileOptions {
   std::span<const CodeTransition> transitions;
   std::span<const CallbackBinding> callbacks;
   std::span<const std::byte> bindings;
+  MemoryMode memory_mode = MemoryMode::exact;
   // Absent prepares all supported numeric modes; an empty set prepares none.
   // Every unselected mode retains general native execution.
   std::optional<std::span<const Word>> region_modes = std::nullopt;
@@ -268,6 +270,10 @@ public:
   void install(const NativeImage &image, std::uint64_t variant);
   // Rebind borrowed storage while stopped; install a matching image before running.
   void set_memory(Memory memory);
+  // Called by the consumer's fault handler with the interrupted signal mask.
+  // A claimed fault is terminal; only its diagnostics are architectural evidence.
+  [[nodiscard]] static bool
+  host_fault(std::uintptr_t address, bool writing, std::uintptr_t native_pc) noexcept;
   void reset();
   [[nodiscard]] State state() const;
   // Completed nominal work; does not materialize a register snapshot.

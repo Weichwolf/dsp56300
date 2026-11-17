@@ -126,7 +126,8 @@ public:
               const bool vector = false,
               const std::optional<std::span<const RegionLayout>> memory = std::nullopt,
               const std::optional<std::span<const Word>> region_modes = std::nullopt,
-              const std::uint64_t variant = 0)
+              const std::uint64_t variant = 0,
+              const bool direct = false)
       : module_(*llvm::unwrap(module.code())),
         locations_(module_, variant),
         ir_(module_.getContext()),
@@ -135,11 +136,18 @@ public:
         edges_(plan.edges()),
         semantic_(semantic_function(module_, vector)),
         memory_(memory),
-        variant_(variant) {
+        variant_(variant),
+        direct_(direct) {
     if (module_.getNamedValue(name_) != nullptr) {
       throw std::invalid_argument("DSP image entry already exists");
     }
-    if (!vector && memory_) { prepare_regions(module, *memory_, region_modes); }
+    constexpr std::array complete{RegionLayout{.space = Space::x, .first = 0, .size = io_begin},
+                                  RegionLayout{.space = Space::y, .first = 0, .size = io_begin}};
+    if (!vector && direct_) {
+      prepare_regions(module, complete, region_modes);
+    } else if (!vector && memory_) {
+      prepare_regions(module, *memory_, region_modes);
+    }
     for (const auto head : plan_.units()) {
       units_.emplace(head, function(name_ + ".unit." + llvm::utohexstr(head, true), true));
     }
@@ -182,7 +190,9 @@ private:
                           llvm::utohexstr(last.loop_address, true) + "." +
                           llvm::utohexstr(mode, true);
         Word properties = 0;
-        if (!lift_region(module, operations, memory, name, &properties, variant_)) { continue; }
+        if (!lift_region(module, operations, memory, name, &properties, variant_, direct_)) {
+          continue;
+        }
         auto *function = module_.getFunction(name);
         function->setLinkage(llvm::GlobalValue::InternalLinkage);
         function->addFnAttr(llvm::Attribute::AlwaysInline);
@@ -576,7 +586,7 @@ private:
   }
 
   void memory_contracts() {
-    if (!memory_) { return; }
+    if (!memory_ || direct_) { return; }
     const auto regions = *memory_;
     const bool external = std::ranges::none_of(
         regions, [](const auto &region) { return region.space == Space::program; });
@@ -682,6 +692,7 @@ private:
   llvm::Function *semantic_, *dispatch_ = nullptr, *active_ = nullptr;
   const std::optional<std::span<const RegionLayout>> memory_;
   const std::uint64_t variant_;
+  const bool direct_;
   llvm::GlobalVariable *table_ = nullptr;
   std::map<Word, llvm::Function *> units_, targets_;
   std::map<std::pair<Word, Word>, llvm::Function *> semantic_variants_;
@@ -707,26 +718,29 @@ void lift_image(LlvmModule &module,
                 const std::string_view entry,
                 const std::optional<std::span<const RegionLayout>> memory,
                 const std::optional<std::span<const Word>> region_modes,
-                const std::uint64_t variant) {
+                const std::uint64_t variant,
+                const bool direct) {
   if (module.code() == nullptr) { throw std::logic_error("Image module was already transferred"); }
   if (plan.instructions.empty()) { throw std::invalid_argument("Image has no instructions"); }
-  const ImageLifter lifter(module, plan, entry, false, memory, region_modes, variant);
+  const ImageLifter lifter(module, plan, entry, false, memory, region_modes, variant, direct);
 }
 
 void lift_vector(LlvmModule &module,
                  const ImagePlan &plan,
                  const std::string_view entry,
-                 const std::uint64_t variant) {
+                 const std::uint64_t variant,
+                 const bool direct) {
   if (module.code() == nullptr) { throw std::logic_error("Image module was already transferred"); }
   if (plan.instructions.empty()) {
     throw std::invalid_argument("Vector image has no instructions");
   }
-  const ImageLifter lifter(module, plan, entry, true, std::nullopt, std::nullopt, variant);
+  const ImageLifter lifter(module, plan, entry, true, std::nullopt, std::nullopt, variant, direct);
 }
 
 ImageArtifact lower_images(const std::string_view name,
                            const std::span<const ImageTranslation> translations,
-                           const std::span<const CallbackBinding> callbacks) {
+                           const std::span<const CallbackBinding> callbacks,
+                           const CompileOptions::MemoryMode mode) {
   if (name.empty() || name.find('\0') != std::string_view::npos || translations.empty() ||
       translations.front().name != name) {
     throw std::invalid_argument("DSP semantic image requires its complete primary entry");
@@ -743,18 +757,24 @@ ImageArtifact lower_images(const std::string_view name,
   }
   LlvmModule module(result.name);
   module.link_bitcode(semantic_ir());
+  configure_memory(module, mode);
   mark_io(module);
   declare_callbacks(module, callbacks);
   for (const auto &translation : translations) {
     if (translation.vector) {
-      lift_vector(module, translation.plan, translation.name, translation.variant);
+      lift_vector(module,
+                  translation.plan,
+                  translation.name,
+                  translation.variant,
+                  mode == CompileOptions::MemoryMode::direct);
     } else {
       lift_image(module,
                  translation.plan,
                  translation.name,
                  translation.memory,
                  translation.region_modes,
-                 translation.variant);
+                 translation.variant,
+                 mode == CompileOptions::MemoryMode::direct);
     }
   }
   specialize_image(module, result.entries);

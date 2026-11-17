@@ -39,6 +39,7 @@ struct ImageContracts {
   std::set<std::pair<Word, unsigned>> interrupts;
   std::map<std::tuple<Word, Word, Word>, ImagePlan> vector_plans;
   PreparationReport report;
+  CompileOptions::MemoryMode memory_mode = CompileOptions::MemoryMode::exact;
 };
 }
 

@@ -7,6 +7,8 @@
 #include "execution_guard.hpp"
 #include "instruction.hpp"
 #include "io.hpp"
+#include "memory_views.hpp"
+#include "native_call.hpp"
 
 #include <algorithm>
 #include <array>
@@ -106,8 +108,15 @@ void Core::Impl::fail(const FaultKind kind,
 }
 
 Word Core::Impl::read_memory(const Space space, const Word address) {
-
-  if (external) { return read_external(space, address); }
+  if (detail::dsp56300_memory_direct()) {
+    if (space == Space::program || address < detail::io_begin) {
+      return static_cast<const volatile Word *>(
+                 views[static_cast<std::size_t>(space)].read.data.data())[address] &
+             word_mask;
+    }
+  } else if (external) {
+    return read_external(space, address);
+  }
   if (space != Space::program && address >= detail::io_begin) {
     Word value = 0;
     if (io == nullptr || !dsp56300_io_read(*io, space, address, current_pc, value)) {
@@ -128,7 +137,16 @@ Word Core::Impl::read_memory(const Space space, const Word address) {
 }
 
 void Core::Impl::write_memory(const Space space, const Word address, const Word value) {
-  if (external) {
+  if (detail::dsp56300_memory_direct()) {
+    if (space == Space::program || address < detail::io_begin) {
+      static_cast<volatile Word *>(
+          views[static_cast<std::size_t>(space)].write.data.data())[address] = value & word_mask;
+      if (space == Space::program) {
+        image_word_written({.address = address, .value = value & word_mask});
+      }
+      return;
+    }
+  } else if (external) {
     write_external(space, address, value);
     return;
   }
@@ -164,7 +182,9 @@ Core::Core(const Memory memory, Io *const io)
 
 void Core::set_memory(const Memory memory) {
   auto &self = *impl_;
-  if (self.executing) { throw std::logic_error("Memory binding requires stopped DSP execution"); }
+  if (self.executing || self.terminal_fault) {
+    throw std::logic_error("Memory binding requires a usable stopped DSP owner");
+  }
   const Impl replacement(bind_memory(memory, self.io, !memory.views_[0].read.data.empty()),
                          self.io,
                          memory.storage().program.empty(),
@@ -175,6 +195,7 @@ void Core::set_memory(const Memory memory) {
   self.views = replacement.views;
   self.external = replacement.external;
   self.aliases_program = replacement.aliases_program;
+  self.native_call = std::unique_ptr<detail::NativeCall>{};
   self.image.reset();
   self.active_image = nullptr;
   self.next_images = nullptr;
@@ -220,7 +241,9 @@ void Core::load(const Space space, const Word address, const std::span<const Wor
 Core::~Core() = default;
 
 void Core::reset() {
-  if (impl_->executing) { throw std::logic_error("Reset requires stopped DSP execution"); }
+  if (impl_->executing || impl_->terminal_fault) {
+    throw std::logic_error("Reset requires a usable stopped DSP owner");
+  }
 
   impl_->cpu = {};
   impl_->vector = {};

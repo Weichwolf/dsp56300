@@ -54,6 +54,7 @@ add_library(dsp56300_core STATIC
   src/jit/llvm/region.cpp src/jit/llvm/region_plan.cpp src/jit/llvm/alu.cpp
   src/jit/move.cpp src/jit/registers.cpp)
 add_library(dsp56300::core ALIAS dsp56300_core)
+target_sources(dsp56300_core PRIVATE src/native_call.cpp)
 target_include_directories(dsp56300_core PUBLIC include)
 target_compile_features(dsp56300_core PUBLIC cxx_std_23)
 target_link_libraries(dsp56300_core PUBLIC dsp56300_quality PRIVATE dsp56300_semantics)

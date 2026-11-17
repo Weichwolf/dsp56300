@@ -3,6 +3,7 @@
 #include "dsp56300/memory.hpp"
 #include "isa.hpp"
 #include "memory_arena.hpp"
+#include "native_faults.hpp"
 #include "reject_io.hpp"
 #include "support.hpp"
 
@@ -114,12 +115,20 @@ struct Storage {
   std::size_t page_ = 0;
 };
 
-NativeImage
-image(const Storage &storage, const bool fixed, const std::span<const Word> program = code) {
-  const std::array spans{CodeSpan{.address = start, .words = program}};
-  constexpr std::array entries{start};
+struct Origin {
+  Word pc = start;
+  std::uint64_t variant = 0;
+};
+
+NativeImage image(const Storage &storage,
+                  const bool fixed,
+                  const std::span<const Word> program = code,
+                  const CompileOptions::MemoryMode mode = CompileOptions::MemoryMode::exact,
+                  const Origin origin = {}) {
+  const std::array spans{CodeSpan{.address = origin.pc, .words = program}};
+  const std::array entries{origin.pc};
   const std::array variants{
-      CodeVariant{.id = 0, .code = spans, .entries = entries, .failed_fetches = {}}};
+      CodeVariant{.id = origin.variant, .code = spans, .entries = entries, .failed_fetches = {}}};
   std::array<RegionLayout, 3> regions{};
   for (std::size_t bank = 0; bank < regions.size(); ++bank) {
     regions[bank] = {.space = static_cast<Space>(bank),
@@ -127,13 +136,14 @@ image(const Storage &storage, const bool fixed, const std::span<const Word> prog
                      .size = storage.words(),
                      .writable = storage.regions[bank].writable};
   }
-  const std::array layouts{VariantLayout{.id = 0, .memory = regions}};
+  const std::array layouts{VariantLayout{.id = origin.variant, .memory = regions}};
   return Core::compile({.variants = variants},
                        {.memory = fixed ? std::span(layouts) : std::span<const VariantLayout>{},
                         .interrupts = {},
                         .transitions = {},
                         .callbacks = {},
-                        .bindings = {}});
+                        .bindings = {},
+                        .memory_mode = mode});
 }
 
 void initialize(Core &core, const NativeImage &native) {
@@ -152,10 +162,14 @@ bool same(const State &a, const State &b) {
          a.failure == b.failure;
 }
 
-void execution(const bool fixed) {
+void execution(const bool fixed, const bool direct = false) {
   const Storage first;
   const Storage second;
-  const auto native = image(first, fixed);
+  const auto native =
+      image(first,
+            fixed,
+            code,
+            direct ? CompileOptions::MemoryMode::direct : CompileOptions::MemoryMode::exact);
   Core core(first.memory());
   initialize(core, native);
   require(first.word(Space::program, start) == code.front(),
@@ -239,18 +253,59 @@ struct Discard final : test::RejectIo {
   unsigned stores = 0;
 };
 
-void read_only(const bool fixed) {
+void read_only(const bool fixed, const bool direct = false) {
   const Storage storage(true);
-  const auto native = image(storage, fixed);
+  const auto native =
+      image(storage,
+            fixed,
+            code,
+            direct ? CompileOptions::MemoryMode::direct : CompileOptions::MemoryMode::exact);
   Discard io;
   Core core(storage.memory(), &io);
   initialize(core, native);
   const auto result = core.run();
   require(
       result.retired == code.size() && result.fault == Fault{} &&
-          result.state == ExecutionState::stopped && io.stores == 1 &&
+          result.state == ExecutionState::stopped && io.stores == (direct ? 0U : 1U) &&
           (core.registers().x & word_mask) == other && storage.word(Space::x, target) == other,
       "Exact callback writes preserve read-only content despite a separate writable scratch view");
+}
+
+void native_failure(const bool writing) {
+  constexpr std::uint64_t variant = (std::uint64_t{1} << 48) + 7;
+  const Storage storage;
+  const auto operation =
+      static_cast<Word>(isa::Opcode::move_x_effective) | (4U << 11) | (writing ? 0U : 1U << 15);
+  const std::array program{
+      operation, static_cast<Word>(isa::Opcode::adc_x_a), static_cast<Word>(isa::Opcode::stop)};
+  const auto native = image(
+      storage, true, program, CompileOptions::MemoryMode::direct, {.pc = 0, .variant = variant});
+  Core core(storage.memory());
+  core.load(Space::program, 0, program);
+  auto registers = core.registers();
+  registers.omr = 0;
+  registers.r[0] = static_cast<Word>(storage.words());
+  registers.x = value;
+  core.set_registers(registers);
+  core.install(native, variant);
+  const test::NativeFaults::InterruptedMask interrupted;
+  const auto result = core.run_until(10);
+  require(interrupted.restored(),
+          "A native escape retains the interrupted mask and removes handler-only blocking");
+  require(result.fault.kind == (writing ? FaultKind::memory_write : FaultKind::memory_read) &&
+              result.fault.space == Space::x && result.fault.address == storage.words() &&
+              result.fault.pc == 0 && result.fault.variant == variant && result.retired == 0 &&
+              result.progress == Progress{},
+          "A real native read/write fault reports PC0 and the full source variant before later "
+          "arithmetic");
+  const auto repeated = core.run(1);
+  require(repeated.retired == 0 && repeated.fault == result.fault,
+          "A terminal escape releases the owner guard but never resumes guest execution");
+  bool refused = false;
+  try {
+    core.reset();
+  } catch (const std::logic_error &) { refused = true; }
+  require(refused, "A terminal native instance cannot be reset into execution");
 }
 
 void repeat_eligibility() {
@@ -283,11 +338,20 @@ void repeat_eligibility() {
 }
 
 int main() try {
+  const test::NativeFaults faults(Core::host_fault);
+  require(!Core::host_fault(0, false, 0),
+          "Unowned faults are not claimed outside native execution");
   geometry();
   execution(false);
   execution(true);
   read_only(false);
   read_only(true);
+  execution(false, true);
+  execution(true, true);
+  read_only(false, true);
+  read_only(true, true);
+  native_failure(false);
+  native_failure(true);
   repeat_eligibility();
   std::cout << "Borrowed DSP read/write views passed\n";
   return 0;

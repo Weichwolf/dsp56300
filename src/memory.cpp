@@ -16,6 +16,10 @@
 #include <unistd.h>
 
 namespace dsp56300 {
+bool detail::dsp56300_memory_direct() noexcept {
+  return false;
+}
+
 namespace {
 std::uintptr_t address(const std::span<Word> words) {
   return reinterpret_cast<std::uintptr_t>(words.data());

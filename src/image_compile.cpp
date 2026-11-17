@@ -98,6 +98,7 @@ std::string symbol(const CodeImage image, const CompileOptions options) {
     hash.update(llvm::StringRef(binding.symbol));
   }
   hash_bytes(hash, options.bindings);
+  hash_word(hash, static_cast<unsigned>(options.memory_mode));
   hash_word(hash, static_cast<std::uint64_t>(options.region_modes.has_value()));
   if (options.region_modes) {
     hash_word(hash, options.region_modes->size());
@@ -148,6 +149,10 @@ std::uint64_t vector_variant(const std::span<const detail::ImageContracts::Varia
 }
 
 void validate(const CodeImage image, const CompileOptions options) {
+  if (options.memory_mode != CompileOptions::MemoryMode::exact &&
+      options.memory_mode != CompileOptions::MemoryMode::direct) {
+    throw std::invalid_argument("DSP image has an invalid memory mode");
+  }
   if (image.variants.empty()) { throw std::invalid_argument("DSP image requires code variants"); }
   std::set<std::pair<Word, unsigned>> interrupts;
   for (const auto request : options.interrupts) {
@@ -258,6 +263,7 @@ SemanticImage Core::load(const CodeImage image,
 SemanticImage Core::lower(const CodeImage image, const CompileOptions options) {
   validate(image, options);
   auto result = std::make_shared<SemanticImage::Impl>();
+  result->memory_mode = options.memory_mode;
   for (const auto request : options.interrupts) {
     result->interrupts.emplace(request.vector, request.level);
   }
@@ -328,7 +334,8 @@ SemanticImage Core::lower(const CodeImage image, const CompileOptions options) {
                             .variant = vector_variant(result->variants, key)});
     result->report.prepared_entries += plan.instructions.size();
   }
-  auto artifact = detail::lower_images(image_name, translations, options.callbacks);
+  auto artifact =
+      detail::lower_images(image_name, translations, options.callbacks, options.memory_mode);
   result->bitcode = std::move(artifact.bitcode);
   result->names = std::move(artifact.entries);
   result->abis = std::move(artifact.abis);

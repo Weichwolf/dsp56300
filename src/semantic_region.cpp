@@ -3,6 +3,7 @@
 #include "core_impl.hpp"
 #include "dsp56300/core.hpp"
 #include "jit.hpp"
+#include "memory_views.hpp"
 #include "semantic.hpp"
 
 #include <algorithm>
@@ -25,13 +26,18 @@ std::uint64_t Core::Impl::semantic_region(void *const owner,
     return static_cast<std::uint64_t>(self.cpu.reg.pc) << pc_shift;
   }
   detail::NativeContext context{
-      .runtime = {.memory = {detail::JitMemory{.data = self.buffers.x.data(),
+      .runtime = {.memory = {detail::JitMemory{.data = detail::dsp56300_memory_direct()
+                                                           ? self.views[1].read.data.data()
+                                                           : self.buffers.x.data(),
                                                .words = self.buffers.x.size(),
                                                .aliases_program = self.aliases_program[1]},
-                             detail::JitMemory{.data = self.buffers.y.data(),
+                             detail::JitMemory{.data = detail::dsp56300_memory_direct()
+                                                           ? self.views[2].read.data.data()
+                                                           : self.buffers.y.data(),
                                                .words = self.buffers.y.size(),
                                                .aliases_program = self.aliases_program[2]}},
                   .windows = self.image_windows,
+                  .writes = {self.views[1].write.data.data(), self.views[2].write.data.data()},
                   .admitted_memory = true},
       .budget = budget,
       .cycle_deadline =

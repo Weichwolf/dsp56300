@@ -60,6 +60,11 @@ bool source(const detail::ImageContracts &image, const NativeSymbols::Site &site
 }
 
 void NativeImage::Impl::bind_sites(const NativeSymbols::FaultMap map) {
+  if (memory_mode == CompileOptions::MemoryMode::direct &&
+      (map.text_ranges.empty() || map.sites.empty())) {
+    throw std::invalid_argument(
+        "Direct DSP binding requires linked executable ranges and source intervals");
+  }
   if (map.text_ranges.empty() && map.sites.empty()) { return; }
   if (map.text_ranges.empty() || map.sites.empty()) { invalid(); }
   intervals(map.text_ranges);

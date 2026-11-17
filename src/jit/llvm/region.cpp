@@ -87,13 +87,15 @@ public:
                const bool admission_only = false,
                const std::size_t admission_steps = 0,
                const BatchAddressing addressing = BatchAddressing::automatic,
-               const std::uint64_t variant = 0)
+               const std::uint64_t variant = 0,
+               const bool direct = false)
       : context_(module.context()),
         function_(make_function(module, entry, admission_only)),
         locations_(*llvm::unwrap(module.code()), variant),
         ir_(context_, LLVMAppendBasicBlockInContext(context_, function_, "entry")),
         plan_(plan),
         addressing_(addressing),
+        direct_(direct),
         self_loop_(
             !admission_only && !plan_.batch && plan_.control.stack == ControlStack::none &&
             plan_.operations.back().instruction.operation != Operation::bit_jump &&
@@ -111,7 +113,8 @@ public:
     for (unsigned bank = 0; bank < bindings_.size(); ++bank) {
       bindings_[bank].resize(plan_.windows[bank].size());
     }
-    if ((plan_.batch || !plan_.repeats.empty()) && addressing_ == BatchAddressing::automatic &&
+    if (!direct_ && (plan_.batch || !plan_.repeats.empty()) &&
+        addressing_ == BatchAddressing::automatic &&
         std::ranges::any_of(plan_.agu, [](bool used) { return used; })) {
       generate_versions(module, admission_only, admission_steps);
     } else if (admission_only) {
@@ -471,6 +474,12 @@ private:
   }
 
   V select_window(const unsigned bank, const Bounds bounds, const bool writing) {
+    if (direct_) {
+      // Only the architectural peripheral boundary remains. Host protection
+      // handles ordinary memory, including holes and discarded-write pages.
+      require(ir_.CreateICmpULT(ir_.CreateOr(bounds.first, bounds.last), ir_.getInt64(io_begin)));
+      return direct_base(bank, false);
+    }
     const auto order = window_order(bank, writing);
     for (const auto index : order) { static_cast<void>(binding(bank, index, writing)); }
     auto *done = LLVMAppendBasicBlockInContext(context_, function_, "window_selected");
@@ -665,8 +674,33 @@ private:
     memory_guards(roots, plan_.steps);
   }
 
-  V memory(const NativeMove &move, V at) {
+  V direct_base(const unsigned bank, const bool writing) {
+    const auto offset = offsetof(NativeContext, runtime) +
+                        (writing ? offsetof(JitRuntime, writes) + (bank * sizeof(Word *))
+                                 : offsetof(JitRuntime, memory) + (bank * sizeof(JitMemory)) +
+                                       offsetof(JitMemory, data));
+    return ir_.CreateLoad(ir_.getPtrTy(),
+                          ir_.CreateGEP(ir_.getInt8Ty(), owner_, ir_.getInt64(offset)));
+  }
+
+  V word_load(V pointer) {
+    auto *value = ir_.CreateLoad(ir_.getInt32Ty(), pointer);
+    LLVMSetVolatile(value, direct_ ? 1 : 0);
+    return value;
+  }
+
+  void word_store(V value, V pointer) {
+    LLVMSetVolatile(LLVMBuildStore(ir_.get(), value, pointer), direct_ ? 1 : 0);
+  }
+
+  V memory(const NativeMove &move, V at) { return memory(move, at, !move.load); }
+
+  V memory(const NativeMove &move, V at, const bool writing) {
     const auto bank = move.space == Space::x ? 0U : 1U;
+    if (direct_) {
+      return ir_.CreateGEP(
+          ir_.getInt32Ty(), direct_base(bank, writing), ir_.CreateZExt(at, ir_.getInt64Ty()));
+    }
     auto *base = move.address.mode == 6 ? absolute_bases_[bank].at(move.address.extra & word_mask)
                                         : memory_bases_[bank][move.address.index];
     return ir_.CreateGEP(ir_.getInt32Ty(), base, ir_.CreateZExt(at, ir_.getInt64Ty()));
@@ -819,18 +853,18 @@ private:
     auto *x = memory(moves.transfers[0], at);
     auto *y = memory(moves.transfers[1], at);
     if (moves.transfers[0].load) {
-      auto *high = ir_.CreateAnd(ir_.CreateLoad(ir_.getInt32Ty(), x), ir_.getInt32(word_mask));
-      auto *low = ir_.CreateAnd(ir_.CreateLoad(ir_.getInt32Ty(), y), ir_.getInt32(word_mask));
+      auto *high = ir_.CreateAnd(word_load(x), ir_.getInt32(word_mask));
+      auto *low = ir_.CreateAnd(word_load(y), ir_.getInt32(word_mask));
       load_long(selector,
                 ir_.CreateOr(
                     ir_.CreateShl(ir_.CreateZExt(high, ir_.getInt64Ty()), ir_.getInt64(word_bits)),
                     ir_.CreateZExt(low, ir_.getInt64Ty())));
     } else {
       auto *value = long_value(selector);
-      ir_.CreateStore(
-          ir_.CreateTrunc(ir_.CreateLShr(value, ir_.getInt64(word_bits)), ir_.getInt32Ty()), x);
-      ir_.CreateStore(
-          ir_.CreateAnd(ir_.CreateTrunc(value, ir_.getInt32Ty()), ir_.getInt32(word_mask)), y);
+      word_store(ir_.CreateTrunc(ir_.CreateLShr(value, ir_.getInt64(word_bits)), ir_.getInt32Ty()),
+                 x);
+      word_store(ir_.CreateAnd(ir_.CreateTrunc(value, ir_.getInt32Ty()), ir_.getInt32(word_mask)),
+                 y);
     }
   }
 
@@ -849,8 +883,7 @@ private:
         continue;
       }
       pointers[index] = memory(move, effective(cursors_, move.address));
-      words[index] = move.load ? ir_.CreateAnd(ir_.CreateLoad(ir_.getInt32Ty(), pointers[index]),
-                                               ir_.getInt32(word_mask))
+      words[index] = move.load ? ir_.CreateAnd(word_load(pointers[index]), ir_.getInt32(word_mask))
                                : read_register(before, move.reg);
     }
     for (unsigned index = 0; index < moves.count; ++index) {
@@ -858,7 +891,7 @@ private:
       if (move.load) {
         write_register(move.reg, words[index]);
       } else {
-        ir_.CreateStore(words[index], pointers[index]);
+        word_store(words[index], pointers[index]);
       }
     }
   }
@@ -1059,8 +1092,9 @@ private:
   }
 
   void bit_transfer(const NativeMove &move, const BitAction action, const Word opcode) {
-    auto *pointer = memory(move, effective(cursors_, move.address));
-    auto *original = ir_.CreateLoad(ir_.getInt32Ty(), pointer);
+    auto *at = effective(cursors_, move.address);
+    auto *pointer = memory(move, at, false);
+    auto *original = word_load(pointer);
     const auto bit = opcode & five_bit_mask;
     auto *previous = ir_.CreateAnd(ir_.CreateLShr(original, ir_.getInt32(bit)), ir_.getInt32(1));
     status_ = ir_.CreateOr(ir_.CreateAnd(status_, ir_.getInt32(~carry)), previous);
@@ -1075,7 +1109,7 @@ private:
       case BitAction::test:
       default: throw std::logic_error("Invalid modifying region bit action");
     }
-    ir_.CreateStore(value, pointer);
+    word_store(value, memory(move, at, true));
   }
 
   void body(LLVMBasicBlockRef miss) { body(miss, plan_.steps.size()); }
@@ -1470,7 +1504,7 @@ private:
   llvm19::Builder ir_;
   const RegionPlan &plan_;
   BatchAddressing addressing_;
-  bool self_loop_, split_flags_ = false;
+  bool direct_, self_loop_, split_flags_ = false;
   Word loop_count_ = 0;
   V cpu_, owner_, initial_cycles_ = nullptr, initial_instructions_ = nullptr;
   V control_taken_ = nullptr, control_count_ = nullptr, control_status_ = nullptr;
@@ -1530,7 +1564,8 @@ bool lift_region(LlvmModule &module,
                  const std::span<const RegionLayout> memory,
                  const std::string_view entry,
                  Word *properties,
-                 const std::uint64_t variant) {
+                 const std::uint64_t variant,
+                 const bool direct) {
   if (module.code() == nullptr) { throw std::logic_error("Region module was already transferred"); }
   const auto name = entry.empty() ? module.name() : std::string(entry);
   if (LLVMGetNamedFunction(module.code(), name.c_str()) != nullptr) {
@@ -1541,7 +1576,8 @@ bool lift_region(LlvmModule &module,
   if (properties != nullptr) {
     *properties = (plan->batch ? 1U : 0U) | (split_flags(*plan) ? 2U : 0U);
   }
-  const RegionLifter lift(module, *plan, name, false, 0, BatchAddressing::automatic, variant);
+  const RegionLifter lift(
+      module, *plan, name, false, 0, BatchAddressing::automatic, variant, direct);
   return true;
 }
 

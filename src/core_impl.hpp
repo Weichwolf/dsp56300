@@ -22,6 +22,10 @@
 #include <span>
 #include <vector>
 
+namespace dsp56300::detail {
+class NativeCall;
+}
+
 namespace dsp56300 {
 struct Core::Impl {
   using VectorPhase = detail::VectorPhase;
@@ -112,6 +116,8 @@ struct Core::Impl {
       asm("dsp56300_semantic_vector_execute");
   [[nodiscard]] std::optional<Word> known_program_word(Word address) const;
   [[nodiscard]] RunResult run_image(std::uint32_t quota);
+  [[nodiscard]] std::uint64_t
+  call_image(detail::ImageEntry entry, Word pc, std::uint32_t instructions, std::uint64_t cycles);
   [[nodiscard]] detail::ImageEntry image_vector();
   [[nodiscard]] bool image_interrupt(Word address, unsigned level);
   [[nodiscard]] bool image_transition(bool eligible);
@@ -196,6 +202,7 @@ struct Core::Impl {
   detail::Cpu cpu;
   Io *io;
   std::unique_ptr<detail::ProgramCache> icache;
+  std::unique_ptr<detail::NativeCall> native_call;
   std::uint64_t cycle_deadline = std::numeric_limits<std::uint64_t>::max();
   const NativeImage::Impl::Variant *active_image = nullptr;
   const std::vector<std::uint64_t> *next_images = nullptr;
@@ -218,6 +225,7 @@ struct Core::Impl {
   bool yield_requested = false;
   bool image_ready = false;
   bool image_storage_admitted = false;
+  bool terminal_fault = false;
   std::array<bool, 3> aliases_program{true, false, false};
 };
 } // namespace dsp56300
