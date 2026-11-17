@@ -65,14 +65,16 @@ std::optional<std::size_t> admission_prefix(const RegionPlan &plan) {
 
 enum class BatchAddressing : std::uint8_t { automatic, linear, general };
 
-[[nodiscard]] bool deferred_mac(const RegionPlan &plan) {
-  if (!plan.batch || plan.count != 1) { return false; }
-  const auto &instruction = plan.operations.front().instruction;
-  constexpr Word mac_mask = 0x83;
-  constexpr Word mac_code = 0x82;
-  return instruction.operation == Operation::parallel &&
-         !llvm19::conditional_alu(instruction.opcode) &&
-         (instruction.opcode & mac_mask) == mac_code;
+[[nodiscard]] bool split_flags(const RegionPlan &plan) {
+  return plan.batch && plan.computation &&
+         std::ranges::none_of(plan.operations, [](const auto &operation) {
+           const auto &instruction = operation.instruction;
+           return instruction.operation != Operation::nop &&
+                  instruction.operation != Operation::bit_memory &&
+                  instruction.operation != Operation::arithmetic_shift_immediate &&
+                  (instruction.operation != Operation::parallel ||
+                   llvm19::flag_inputs(instruction.opcode) != 0);
+         });
 }
 
 class RegionLifter {
@@ -100,7 +102,7 @@ public:
     for (unsigned bank = 0; bank < bindings_.size(); ++bank) {
       bindings_[bank].resize(plan_.windows[bank].size());
     }
-    if (plan_.batch && addressing_ == BatchAddressing::automatic &&
+    if ((plan_.batch || !plan_.repeats.empty()) && addressing_ == BatchAddressing::automatic &&
         std::ranges::any_of(plan_.agu, [](bool used) { return used; })) {
       generate_versions(module, fallback, admission_only, admission_steps);
     } else if (admission_only) {
@@ -543,7 +545,7 @@ private:
                                                                     : ir_.CreateAdd(cursor, step);
     // The single-operation batch has already proved every accessed address in range.
     // Its final post-update may wrap; finish() masks the committed register.
-    if (deferred_ && addressing_ == BatchAddressing::linear) {
+    if (split_flags_ && loop_count_ == 1 && addressing_ == BatchAddressing::linear) {
       LLVMSetNSW(next, 1);
       if (form.mode == 3) { LLVMSetNUW(next, 1); }
       return next;
@@ -994,13 +996,8 @@ private:
             ir_, instruction.opcode, plan_.operations[index].mode, banks_, status_);
       } else if (!plan_.control.valid || index + 1 != plan_.steps.size()) {
         transfers(step.memory, instruction.opcode);
-        llvm19::lower_alu(ir_,
-                          instruction.opcode,
-                          plan_.operations[index].mode,
-                          before,
-                          banks_,
-                          status_,
-                          deferred_ ? &flags_ : nullptr);
+        llvm19::lower_alu(
+            ir_, instruction.opcode, plan_.operations[index].mode, before, banks_, status_);
       }
       if (step.guards == 0) { continue; }
       memory_guards(step.guards, std::span(plan_.steps).subspan(index + 1));
@@ -1023,7 +1020,7 @@ private:
                .strides = strides_,
                .status = status_,
                .frames = frames_};
-    if (deferred_) {
+    if (split_flags_) {
       state.limited =
           ir_.CreateICmpNE(ir_.CreateAnd(status_, ir_.getInt32(limit)), ir_.getInt32(0));
       state.grown = ir_.CreateICmpNE(ir_.CreateAnd(status_, ir_.getInt32(growth)), ir_.getInt32(0));
@@ -1060,7 +1057,7 @@ private:
       result.cursors[index] = phi(initial.cursors[index], "cursor");
       result.strides[index] = phi(initial.strides[index], "stride");
     }
-    result.status = deferred_ ? initial.status : phi(initial.status, "status");
+    result.status = split_flags_ ? initial.status : phi(initial.status, "status");
     for (unsigned index = 0; index < result.frames.size(); ++index) {
       if (initial.frames[index] != nullptr) {
         result.frames[index] = phi(initial.frames[index], "frame");
@@ -1111,42 +1108,69 @@ private:
     }
     frame(1, parent.address, parent.count);
     frame(2, ir_.getInt32(plan_.operations[first].pc), status);
-    const auto prior_deferred = deferred_;
-    const auto prior_flags = flags_;
     auto leaf = plan_;
     leaf.operations = plan_.operations.subspan(first, step.repeat_end - first);
     leaf.count = static_cast<Word>(leaf.operations.size());
-    deferred_ = deferred_mac(leaf);
+    leaf.batch = true;
+    const bool split = split_flags(leaf);
+    repeated_body(ir_.getInt64(step.repetitions), split, leaf.count, [&](V iteration) {
+      body(miss,
+           first,
+           step.repeat_end,
+           {.address = ir_.getInt32(last.pc + last.instruction.words - 1),
+            .count = ir_.CreateSub(ir_.getInt32(step.repetitions),
+                                   ir_.CreateTrunc(iteration, ir_.getInt32Ty())),
+            .depth = parent.depth + 1});
+    });
+    if (split && leaf.count == 1 && addressing_ == BatchAddressing::linear) {
+      for (const auto &move :
+           std::span(plan_.steps[first].memory.transfers).first(plan_.steps[first].memory.count)) {
+        const auto form = move.address;
+        if (form.mode == 4 || form.mode == 5 || form.mode == 6) { continue; }
+        cursors_[form.index] = ir_.CreateAnd(cursors_[form.index], ir_.getInt32(word_mask));
+      }
+    }
+  }
+
+  template <class Body> void repeated_body(V turns, const bool split, Word count, Body emit) {
+    const auto prior_split = split_flags_;
+    const auto prior_count = loop_count_;
+    split_flags_ = split;
+    loop_count_ = count;
     const auto initial = live();
     auto *start = LLVMGetInsertBlock(ir_.get());
     auto *loop = LLVMAppendBasicBlockInContext(context_, function_, "repeat");
     auto *done = LLVMAppendBasicBlockInContext(context_, function_, "repeat_done");
-    LLVMBuildBr(ir_.get(), loop);
+    auto *iterations = split_flags_ ? ir_.CreateSub(turns, ir_.getInt64(1)) : turns;
+    if (split_flags_) {
+      LLVMBuildCondBr(ir_.get(), ir_.CreateICmpEQ(iterations, ir_.getInt64(0)), done, loop);
+    } else {
+      LLVMBuildBr(ir_.get(), loop);
+    }
     ir_.SetInsertPoint(loop);
     const auto phis = live_phis(initial, start);
     auto *remaining = LLVMBuildPhi(ir_.get(), ir_.getInt64Ty(), "repeat_remaining");
-    auto *turns = ir_.getInt64(step.repetitions);
-    LLVMAddIncoming(remaining, &turns, &start, 1);
+    LLVMAddIncoming(remaining, &iterations, &start, 1);
     restore_live(phis);
-    if (deferred_) { flags_.limited = phis.limited; }
-    body(miss,
-         first,
-         step.repeat_end,
-         {.address = ir_.getInt32(last.pc + last.instruction.words - 1),
-          .count = ir_.CreateTrunc(remaining, ir_.getInt32Ty()),
-          .depth = parent.depth + 1});
-    auto after = live();
-    if (deferred_) { after.limited = ir_.CreateOr(after.limited, flags_.limited); }
+    emit(ir_.CreateSub(iterations, remaining));
+    const auto after = live();
     auto *backedge = LLVMGetInsertBlock(ir_.get());
     live_backedge(phis, after, backedge);
     auto *left = ir_.CreateSub(remaining, ir_.getInt64(1));
     LLVMAddIncoming(remaining, &left, &backedge, 1);
-    unroll_mac(LLVMBuildCondBr(ir_.get(), ir_.CreateICmpEQ(left, ir_.getInt64(0)), done, loop));
+    unroll_short_loop(
+        LLVMBuildCondBr(ir_.get(), ir_.CreateICmpEQ(left, ir_.getInt64(0)), done, loop), count);
     ir_.SetInsertPoint(done);
-    restore_live(after);
-    if (deferred_) { llvm19::finish_flags(ir_, leaf.operations.front().mode, flags_, status_); }
-    deferred_ = prior_deferred;
-    flags_ = prior_flags;
+    if (split_flags_) {
+      const auto final = live_phis(initial, start);
+      live_backedge(final, after, backedge);
+      restore_live(final);
+      emit(ir_.CreateSub(turns, ir_.getInt64(1)));
+    } else {
+      restore_live(after);
+    }
+    split_flags_ = prior_split;
+    loop_count_ = prior_count;
   }
 
   void self_loop_bindings() {
@@ -1255,8 +1279,8 @@ private:
     LLVMBuildRet(ir_.get(), ir_.getInt64(0));
   }
 
-  void unroll_mac(V branch) {
-    if (!deferred_) { return; }
+  void unroll_short_loop(V branch, const Word count) {
+    if (!split_flags_ || count != 1) { return; }
     auto &context = *llvm::unwrap(context_);
     auto *option = llvm::MDNode::get(
         context,
@@ -1271,8 +1295,6 @@ private:
     auto *windows = LLVMAppendBasicBlockInContext(context_, function_, "windows");
     auto *start = LLVMAppendBasicBlockInContext(context_, function_, "admitted");
     auto *miss = LLVMAppendBasicBlockInContext(context_, function_, "ordinary");
-    auto *loop = LLVMAppendBasicBlockInContext(context_, function_, "loop");
-    auto *complete = LLVMAppendBasicBlockInContext(context_, function_, "complete");
     admission();
     LLVMBuildCondBr(ir_.get(), eligible_, windows, miss);
     ir_.SetInsertPoint(windows);
@@ -1295,30 +1317,13 @@ private:
           LLVMBuildCall2(ir_.get(), helper_type, helper, arguments.data(), arguments.size(), ""));
     }
     ir_.SetInsertPoint(start);
-    deferred_ = deferred_mac(plan_);
     for (unsigned bank = 0; bank < banks_.size(); ++bank) {
       banks_[bank] = reg(64, bank_fields[bank]);
     }
-    const auto initial = live();
-    LLVMBuildBr(ir_.get(), loop);
-    ir_.SetInsertPoint(loop);
-    const auto phis = live_phis(initial, start);
-    auto *remaining = LLVMBuildPhi(ir_.get(), ir_.getInt64Ty(), "remaining");
-    LLVMAddIncoming(remaining, &turns_, &start, 1);
-    iteration_ = ir_.CreateSub(turns_, remaining);
-    restore_live(phis);
-    if (deferred_) { flags_.limited = phis.limited; }
-    body(miss);
-    auto after = live();
-    if (deferred_) { after.limited = ir_.CreateOr(after.limited, flags_.limited); }
-    auto *backedge = LLVMGetInsertBlock(ir_.get());
-    live_backedge(phis, after, backedge);
-    auto *left = ir_.CreateSub(remaining, ir_.getInt64(1));
-    LLVMAddIncoming(remaining, &left, &backedge, 1);
-    unroll_mac(LLVMBuildCondBr(ir_.get(), ir_.CreateICmpEQ(left, ir_.getInt64(0)), complete, loop));
-    ir_.SetInsertPoint(complete);
-    restore_live(after);
-    if (deferred_) { llvm19::finish_flags(ir_, plan_.operations.front().mode, flags_, status_); }
+    repeated_body(turns_, split_flags(plan_), plan_.count, [&](V iteration) {
+      iteration_ = iteration;
+      body(miss);
+    });
     finish();
   }
 
@@ -1327,8 +1332,8 @@ private:
   llvm19::Builder ir_;
   const RegionPlan &plan_;
   BatchAddressing addressing_;
-  bool dynamic_, self_loop_, deferred_ = false;
-  llvm19::DeferredMac flags_{};
+  bool dynamic_, self_loop_, split_flags_ = false;
+  Word loop_count_ = 0;
   V cpu_, owner_, initial_cycles_ = nullptr, initial_instructions_ = nullptr;
   V status_ = nullptr, initial_status_ = nullptr, lc_ = nullptr, sp_ = nullptr, sc_ = nullptr,
     saved_ = nullptr;
@@ -1404,7 +1409,7 @@ bool lift_region(LlvmModule &module,
   const auto plan = plan_region(operations, memory);
   if (!plan) { return false; }
   if (properties != nullptr) {
-    *properties = (plan->batch ? 1U : 0U) | (deferred_mac(*plan) ? 2U : 0U);
+    *properties = (plan->batch ? 1U : 0U) | (split_flags(*plan) ? 2U : 0U);
   }
   const RegionLifter lift(module, *plan, nullptr, name);
   return true;

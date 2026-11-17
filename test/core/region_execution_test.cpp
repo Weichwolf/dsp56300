@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "bfu_logic_model.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "installed_program.hpp"
@@ -33,6 +34,20 @@ constexpr std::array source{opcode<isa::Opcode::do_immediate> | (iterations << 8
                             opcode<isa::Opcode::add_x1_a>,
                             opcode<isa::Opcode::asr_a>,
                             opcode<isa::Opcode::stop>};
+using Alus = std::array<Word, 2>;
+constexpr Alus ordinary{opcode<isa::Opcode::add_x1_a>, opcode<isa::Opcode::asr_a>};
+constexpr Alus carried{opcode<isa::Opcode::adc_x_a>, opcode<isa::Opcode::asr_a>};
+constexpr Alus partial{opcode<isa::Opcode::add_x1_a>, opcode<isa::Opcode::or_y1_a>};
+
+constexpr auto with_alu(const Alus alu) {
+  auto result = source;
+  result[3] = alu[0];
+  result[4] = alu[1];
+  return result;
+}
+
+constexpr auto carried_source = with_alu(carried);
+constexpr auto partial_source = with_alu(partial);
 constexpr std::array<Word, iterations + 1> xdata{0xab000001,
                                                  test::sign24,
                                                  test::sign24 - 1,
@@ -73,9 +88,12 @@ constexpr std::array repeat_source{opcode<isa::Opcode::nop>,
 constexpr std::array descending_source{
     single_source[0], single_source[1], parallel_mac ^ (1U << 11) ^ (1U << 20), single_source[3]};
 
-std::span<const Word> program(const bool single, const bool repeat, const bool descending) {
+std::span<const Word>
+program(const bool single, const bool repeat, const bool descending, const Alus alu) {
   if (repeat) { return repeat_source; }
   if (descending) { return descending_source; }
+  if (alu == carried) { return carried_source; }
+  if (alu == partial) { return partial_source; }
   return single ? std::span<const Word>(single_source) : std::span<const Word>(source);
 }
 
@@ -110,9 +128,11 @@ void advance(Registers &state,
              const Word index,
              const bool single,
              const bool repeat,
-             const bool descending) {
+             const bool descending,
+             const Alus alu) {
   const auto old = state;
-  const auto operation = single ? parallel_mac : source[2 + (index % body_size)];
+  const auto position = index % body_size;
+  const auto operation = single || position == 0 ? parallel_mac : alu[position - 1];
   if (single || index % body_size == 0) {
     test::register_model::write(state, 4, xdata.at(old.r[0]) & word_mask);
     test::register_model::write(state, 6, ydata.at(old.r[4]) & word_mask);
@@ -120,7 +140,12 @@ void advance(Registers &state,
     state.r[0] = (state.r[0] + step) & word_mask;
     state.r[4] = (state.r[4] + step) & word_mask;
   }
-  test::sequence_model::alu(state, old, operation);
+  if (operation == opcode<isa::Opcode::or_y1_a>) {
+    test::bfu_model::apply(
+        state, old, {.function = test::bfu_model::Function::bit_or, .source = 3});
+  } else {
+    test::sequence_model::alu(state, old, operation);
+  }
   ++state.pc;
   if (single || index % body_size == body_size - 1) {
     if (state.lc > 1) {
@@ -136,16 +161,21 @@ void advance(Registers &state,
 
 struct Input {
   Word mode, prefix;
+  Alus alu = ordinary;
   bool single = false, below = false, repeat = false, descending = false;
 };
 
 void execute(const NativeImage &image, const Input input) {
-  const auto [mode, prefix, single, below, repeat, descending] = input;
-  const auto code = program(single, repeat, descending);
+  const auto [mode, prefix, alu, single, below, repeat, descending] = input;
+  const auto code = program(single, repeat, descending, alu);
   const auto count = single ? iterations : total;
   Storage storage(code);
   Core core(Memory::separate(storage.buffers()));
   auto expected = initial(mode, single, below);
+  if (alu == partial) {
+    constexpr auto boundary = std::uint64_t{1} << ((test::word_bits * 2) - 1);
+    expected.a = below ? 0 : boundary - 2;
+  }
   if (descending) { expected.r[0] = expected.r[4] = iterations - 1; }
   if (repeat) {
     expected.pc = entry + 1;
@@ -165,7 +195,7 @@ void execute(const NativeImage &image, const Input input) {
   const Word setup_instructions = repeat ? 1 : 0;
   const Word setup_cycles = repeat ? 5 : 0;
   for (Word index = 0; index < prefix; ++index) {
-    advance(expected, index, single, repeat, descending);
+    advance(expected, index, single, repeat, descending, alu);
   }
   if (single && prefix == 1) {
     require((expected.sr & (test::flag_v | test::flag_l)) == (test::flag_v | test::flag_l),
@@ -181,7 +211,7 @@ void execute(const NativeImage &image, const Input input) {
                                           .estimated_cycles = setup_cycles + prefix},
           "A fixed-layout loop prefix preserves old parallel operands and complete state");
   for (Word index = prefix; index < count; ++index) {
-    advance(expected, index, single, repeat, descending);
+    advance(expected, index, single, repeat, descending, alu);
   }
   const auto resumed = core.run_until(setup_cycles + count);
   require(resumed.retired == count - prefix && resumed.fault == Fault{} &&
@@ -198,11 +228,14 @@ void execute(const NativeImage &image, const Input input) {
 int main() try {
   constexpr std::array selected{Word{0}};
   using Hint = std::optional<std::span<const Word>>;
-  for (const unsigned shape : {0U, 1U, 2U, 3U}) {
-    const bool single = shape != 0;
+  for (const unsigned shape : {0U, 1U, 2U, 3U, 4U, 5U}) {
+    const bool single = shape != 0 && shape < 4;
     const bool repeat = shape == 2;
     const bool descending = shape == 3;
-    const auto code = program(single, repeat, descending);
+    auto alu = ordinary;
+    if (shape == 4) { alu = carried; }
+    if (shape == 5) { alu = partial; }
+    const auto code = program(single, repeat, descending, alu);
     Storage storage(code);
     const auto count = single ? iterations : total;
     for (const auto hint : {Hint{}, Hint{selected}}) {
@@ -213,6 +246,7 @@ int main() try {
             execute(image,
                     {.mode = mode,
                      .prefix = prefix,
+                     .alu = alu,
                      .single = single,
                      .below = below,
                      .repeat = repeat,

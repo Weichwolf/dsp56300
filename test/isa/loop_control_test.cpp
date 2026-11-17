@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "address_model.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "installed_program.hpp"
@@ -32,6 +33,8 @@ constexpr Word rep_effective = isa::opcode<isa::Opcode::rep_effective>()[0] | (4
 constexpr Word repeat_one = isa::opcode<isa::Opcode::rep_immediate>()[0] | (1U << 8);
 constexpr Word data_address = 0x180;
 constexpr Word reset_r0 = parallel_none | (4U << 13) | (16U << 8);
+constexpr Word stride_r0 = isa::opcode<isa::Opcode::move_address_update>()[0] | (1U << 11);
+constexpr Word copy_r0_x1 = parallel_none | (16U << 13) | (5U << 8);
 constexpr std::size_t sequential_variant = 12, endings_variant = 13;
 
 struct Request {
@@ -439,12 +442,28 @@ void complete_do() {
   }
 }
 
+void nested_transfer(Registers &state,
+                     std::array<Word, memory_words> &memory,
+                     const Word code,
+                     const bool store) {
+  if (store) {
+    memory.at(state.r[0]) = static_cast<Word>(state.x) & word_mask;
+    state.r[0] = address_model::updated(
+        {.modifier = state.m[0], .cursor = state.r[0], .mode = (code >> 11) & 7U});
+  }
+  if (code == reset_r0) { state.r[0] = static_cast<Word>(state.x) & word_mask; }
+  if (code == stride_r0) { state.r[0] = (state.r[0] + state.n[0]) & word_mask; }
+  if (code == copy_r0_x1) { register_model::write(state, 5, state.r[0]); }
+}
+
 unsigned nested_step(Registers &state,
                      std::array<Word, memory_words> &memory,
                      const std::span<const Word> code) {
   const auto pc = state.pc;
   const auto offset = pc - start;
-  const bool setup = offset < 6 && (offset % 2) == 0;
+  constexpr Word count_fields = (status_byte << 8) | 15U;
+  const bool setup = (code[offset] & ~(count_fields | relative_bit)) ==
+                     isa::opcode<isa::Opcode::do_immediate>()[0];
   if (setup) {
     const auto push = [&](const Word high, const Word low) {
       state.sp = (state.sp + 1) & loop_frames::pointer_mask;
@@ -452,16 +471,14 @@ unsigned nested_step(Registers &state,
       state.stack[state.sp % stack_entries] = (std::uint64_t{high} << word_bits) | low;
     };
     push(state.la, state.lc);
-    state.lc = offset == 2 ? 3U : 2U;
+    state.lc = ((code[offset] >> 8) & status_byte) | ((code[offset] & 15U) << 8);
     push(pc + 2, state.sr);
     state.sr = (state.sr & ~fv) | lf;
-    state.la = start + 9 - (offset / 2);
-    if (offset == 4 && (code[6] & status_byte) != 0) { --state.la; }
+    state.la = code[offset + 1] + ((code[offset] & relative_bit) != 0 ? pc : 0U);
     state.pc += 2;
   } else {
     const auto before = state;
-    if (offset == 6) { memory.at(state.r[0]++) = static_cast<Word>(state.x) & word_mask; }
-    if (code[offset] == reset_r0) { state.r[0] = static_cast<Word>(state.x) & word_mask; }
+    nested_transfer(state, memory, code[offset], offset + 5 == code.size());
     sequence_model::alu(state, before, code[offset]);
     ++state.pc;
   }
@@ -488,7 +505,7 @@ void nested_case(const NativeImage &image,
   std::array<Word, memory_words> memory{};
   Progress progress;
   while ((deadline ? progress.estimated_cycles : progress.instructions) < limit &&
-         expected.pc != start + 10) {
+         expected.pc != start + code.size() - 1) {
     progress.estimated_cycles += nested_step(expected, memory, code);
     ++progress.instructions;
   }
@@ -521,7 +538,7 @@ void nested_bounds(const NativeImage &image,
   }
 }
 
-auto nested_code(const bool relative, const bool arithmetic, const bool reset) {
+auto nested_code(const bool relative, const bool arithmetic, const Word tail) {
   const auto loop = [&](const Word count) {
     return isa::opcode<isa::Opcode::do_immediate>()[0] | (count << 8) |
            (relative ? relative_bit : 0U);
@@ -540,22 +557,23 @@ auto nested_code(const bool relative, const bool arithmetic, const bool reset) {
           (arithmetic ? isa::opcode<isa::Opcode::mac_register_a>()[0] & status_byte : 0U),
       isa::nop[0],
       arithmetic ? isa::opcode<isa::Opcode::rnd_a>()[0] : isa::nop[0],
-      reset ? reset_r0 : isa::nop[0],
+      tail,
       isa::stop[0]};
 }
 
-void nested_do(const bool reset) {
+void nested_do(const Word tail) {
   constexpr std::array depths{0U, 2U, 9U};
   constexpr unsigned states = 6 * 4 * 3 * 3;
   for (const bool relative : {false, true}) {
     for (const bool arithmetic : {false, true}) {
-      const auto code = nested_code(relative, arithmetic, reset);
+      const auto code = nested_code(relative, arithmetic, tail);
       Machine arena;
       const auto image =
           compile_program(code, start, {.program = arena.p, .x = arena.x, .y = arena.y});
       for (unsigned index = 0; index < states; ++index) {
         auto state = loop_case_state(index, depths);
-        if (reset) { state.x = (state.x & (long_mask ^ word_mask)) | 4U; }
+        if (tail == reset_r0) { state.x = (state.x & (long_mask ^ word_mask)) | 4U; }
+        if (tail == stride_r0) { state.n[0] = (word_mask + 1U) - 6U; }
         constexpr std::array accumulators{std::uint64_t{0}, sign56 - 1, sign56};
         state.a = accumulators[(index / (6 * 4)) % accumulators.size()];
         for (const bool captured : {false, true}) { nested_bounds(image, code, state, captured); }
@@ -603,6 +621,50 @@ void nested_late_address() {
               machine.core.registers() == expected && machine.x == memory &&
               machine.y == std::array<Word, memory_words>{},
           "Nested admission proves every repeated RAM access before a later R definition");
+}
+
+void nested_wrap() {
+  auto code = nested_code(false, true, copy_r0_x1);
+  code[6] ^= 1U << 11;
+  Machine arena;
+  const auto image = compile_program(code, start, {.program = arena.p, .x = arena.x, .y = arena.y});
+  constexpr std::array depths{0U};
+  for (const Word modifier : {suffix_linear, 7U}) {
+    for (unsigned mode = 0; mode < 6; ++mode) {
+      auto state = loop_case_state(mode, depths);
+      state.r[0] = 11;
+      state.m[0] = modifier;
+      nested_bounds(image, code, state, false);
+    }
+  }
+}
+
+void nested_child_wrap() {
+  constexpr Word loop = isa::opcode<isa::Opcode::do_immediate>()[0];
+  const std::array code{loop | (1U << 8),
+                        start + 7,
+                        loop | (2U << 8),
+                        start + 4,
+                        (isa::opcode<isa::Opcode::move_x_effective>()[0] | (2U << 11)) |
+                            (isa::opcode<isa::Opcode::mac_register_a>()[0] & status_byte),
+                        isa::nop[0],
+                        isa::opcode<isa::Opcode::rnd_a>()[0],
+                        copy_r0_x1,
+                        isa::stop[0]};
+  Machine arena;
+  const auto image = compile_program(code, start, {.program = arena.p, .x = arena.x, .y = arena.y});
+  constexpr std::array depths{0U};
+  for (const Word modifier : {suffix_linear, 7U}) {
+    for (unsigned mode = 0; mode < 6; ++mode) {
+      auto state = loop_case_state(mode, depths);
+      state.m[0] = modifier;
+      for (const bool deadline : {false, true}) {
+        for (unsigned limit = 0; limit <= (deadline ? 15U : 7U); ++limit) {
+          nested_case(image, code, state, limit, deadline);
+        }
+      }
+    }
+  }
 }
 
 void nested_computed_fault() {
@@ -668,9 +730,12 @@ int main() {
     dsp56300::test::warm_endings(image);
     dsp56300::test::suffix_endings();
     dsp56300::test::complete_do();
-    dsp56300::test::nested_do(false);
-    dsp56300::test::nested_do(true);
+    dsp56300::test::nested_do(dsp56300::isa::nop[0]);
+    dsp56300::test::nested_do(dsp56300::test::reset_r0);
+    dsp56300::test::nested_do(dsp56300::test::stride_r0);
     dsp56300::test::nested_late_address();
+    dsp56300::test::nested_wrap();
+    dsp56300::test::nested_child_wrap();
     dsp56300::test::nested_computed_fault();
     std::cout << dsp56300::test::checks << " loop host-boundary checks passed\n";
   } catch (const std::exception &error) {

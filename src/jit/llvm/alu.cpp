@@ -51,8 +51,7 @@ struct Result {
 
 class Alu {
 public:
-  Alu(Builder &ir, const Word mode, V &status, DeferredMac *deferred = nullptr)
-      : ir_(ir), mode_(mode), status_(status), deferred_(deferred) {}
+  Alu(Builder &ir, const Word mode, V &status) : ir_(ir), mode_(mode), status_(status) {}
 
   void lower(Word code, const Banks &before, Banks &after);
   void shift(Word opcode, Banks &banks);
@@ -129,7 +128,6 @@ private:
   Builder &ir_;
   const Word mode_;
   V &status_;
-  DeferredMac *deferred_;
 };
 
 Result Alu::product(const Word code, const Banks &before, const unsigned destination) {
@@ -147,7 +145,7 @@ Result Alu::product(const Word code, const Banks &before, const unsigned destina
 Result Alu::sum(const Word code, const Banks &before, const unsigned destination) {
   const auto group = (code >> 4) & 7U;
   const auto kind = code & 7U;
-  const bool carried = (group == 2 || group == 3) && (kind == 1 || kind == 5);
+  const bool carried = flag_inputs(code) != 0;
   const bool subtract = kind == 4 || kind == 5;
   auto *left = before[destination];
   auto *right = operand(before, group, destination != 0);
@@ -218,12 +216,6 @@ void Alu::rounding(Result &result) {
 }
 
 void Alu::flags(const Result &result) {
-  if (deferred_ != nullptr) {
-    deferred_->value = result.value;
-    deferred_->overflowed = result.overflowed;
-    deferred_->limited = ir_.CreateOr(deferred_->limited, result.overflowed);
-    return;
-  }
   const unsigned shift =
       integer_shift + ((mode_ & scale_down) != 0 ? 1U : 0U) - ((mode_ & scale_up) != 0 ? 1U : 0U);
   auto *integer = ir_.CreateLShr(result.value, ir_.getInt64(shift));
@@ -357,6 +349,15 @@ void Alu::lower(const Word code, const Banks &before, Banks &after) {
 }
 }
 
+Word flag_inputs(const Word opcode) {
+  if (conditional_alu(opcode)) { return byte_mask; }
+  const auto code = opcode & byte_mask;
+  const auto group = (code >> 4) & 7U;
+  const auto kind = code & 7U;
+  return (code & product_bit) == 0 && (group == 2 || group == 3) && (kind == 1 || kind == 5) ? carry
+                                                                                             : 0U;
+}
+
 V condition(Builder &ir, V status, const unsigned selector) {
   const auto test = [&](const Word mask) {
     return ir.CreateICmpNE(ir.CreateAnd(status, ir.getInt32(mask)), ir.getInt32(0));
@@ -388,26 +389,17 @@ bool supported_alu(const Word opcode) {
          ((group == 2 || group == 3) && (kind == 1 || kind == 5));
 }
 
-void lower_alu(Builder &ir,
-               const Word opcode,
-               const Word mode,
-               const Banks &before,
-               Banks &after,
-               V &status,
-               DeferredMac *deferred) {
+void lower_alu(
+    Builder &ir, const Word opcode, const Word mode, const Banks &before, Banks &after, V &status) {
   auto *const old_status = status;
   const auto old_banks = after;
   auto *selected = conditional_alu(opcode) ? condition(ir, status, (opcode >> 8) & 15U) : nullptr;
-  Alu(ir, mode, status, deferred).lower(opcode & byte_mask, before, after);
+  Alu(ir, mode, status).lower(opcode & byte_mask, before, after);
   if (selected == nullptr) { return; }
   for (unsigned bank = 0; bank < after.size(); ++bank) {
     after[bank] = ir.CreateSelect(selected, after[bank], old_banks[bank]);
   }
   status = (opcode & (1U << 12)) != 0 ? ir.CreateSelect(selected, status, old_status) : old_status;
-}
-
-void finish_flags(Builder &ir, const Word mode, const DeferredMac &flags, V &status) {
-  Alu(ir, mode, status).flags({.value = flags.value, .overflowed = flags.overflowed});
 }
 
 void lower_arithmetic_shift(

@@ -388,7 +388,8 @@ void retirement_observation() {
   constexpr std::array code{static_cast<Word>(isa::Opcode::do_immediate) | (3U << 8),
                             start + 3,
                             static_cast<Word>(isa::Opcode::move_x_effective) | (1U << 15) |
-                                (3U << 11),
+                                (3U << 11) |
+                                (static_cast<Word>(isa::Opcode::adc_x_a) & test::status_byte),
                             nop,
                             static_cast<Word>(isa::Opcode::stop)};
   const std::array spans{CodeSpan{.address = start, .words = code}};

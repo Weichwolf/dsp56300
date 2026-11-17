@@ -354,6 +354,8 @@ std::optional<std::size_t> append_repeat(RegionPlan &plan,
   const auto end = std::ranges::find(remaining, flow.direct[1], &BlockInstruction::pc);
   if (end == remaining.end() || end->pc != flow.direct[1]) { return {}; }
   const auto after = static_cast<std::size_t>(end - plan.operations.begin());
+  // Larger children retain their separately prepared native unit.
+  if (after != index + 2) { return {}; }
   plan.steps.push_back(
       {.memory = {}, .registers = {}, .repeat_end = after, .repetitions = repetitions});
   const RepeatAnalysis prior{
