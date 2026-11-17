@@ -193,7 +193,6 @@ RegionControl relative_control(const BlockInstruction &operation) {
   const auto opcode = operation.instruction.opcode;
   const bool short_form = (opcode & 0xff0000U) == 0x050000U;
   const bool unconditional = (opcode & (1U << (short_form ? 11U : 7U))) != 0;
-  if (flow.call && !unconditional) { return {}; }
   return {.target = flow.direct[flow.count - 1],
           .selector = unconditional ? 16U : (opcode >> (short_form ? 12U : 0U)) & 15U,
           .reg = static_cast<unsigned>(agu_registers),
@@ -206,15 +205,27 @@ RegionControl control(const BlockInstruction &operation) {
     return relative_control(operation);
   }
   const auto kind = operation.instruction.operation;
+  if (loop_setup(kind)) {
+    const auto flow = successors(operation);
+    const auto last = (flow.direct[1] - 1) & word_mask;
+    const bool separate = last != ((operation.pc + operation.instruction.words - 1) & word_mask);
+    return {.target = last, .valid = separate, .stack = ControlStack::loop};
+  }
+  if (kind == Operation::bit_jump || kind == Operation::bit_branch) {
+    const auto flow = successors(operation);
+    return {.target = flow.direct[1],
+            .valid = true,
+            .stack = bit_call(operation.instruction) ? ControlStack::push : ControlStack::none};
+  }
   if (kind == Operation::return_subroutine) { return {.valid = true, .stack = ControlStack::pop}; }
   const auto opcode = operation.instruction.opcode;
   constexpr Word short_address_mask = 0xfff;
   const bool conditional = kind == Operation::conditional_jump;
-  const bool call = kind == Operation::call_short || kind == Operation::call_effective;
+  const bool call = kind == Operation::call_short || kind == Operation::call_effective ||
+                    (conditional && (opcode & (1U << 16)) != 0);
   if (!conditional && !call && kind != Operation::jump_short && kind != Operation::jump_effective) {
     return {};
   }
-  if (conditional && (opcode & (1U << 16)) != 0) { return {}; }
   const bool short_form = conditional
                               ? (opcode & (1U << 18)) != 0
                               : kind == Operation::jump_short || kind == Operation::call_short;
@@ -244,6 +255,54 @@ bool append_bit(RegionPlan &plan, const Instruction &instruction) {
   if (!append_absolute(plan, move)) { return false; }
   plan.computation = true;
   plan.steps.push_back({.memory = {.transfers = {move}, .count = 1}, .registers = {}});
+  return true;
+}
+
+bool control_register(const unsigned number) {
+  return (number >= x0_register && number < m_register_base + agu_registers) ||
+         number == ep_register || number == vba_register || number == sc_register ||
+         number == sz_register || number == sr_register || number == omr_register ||
+         number == sp_register || number == ssl_register || number == la_register ||
+         number == lc_register;
+}
+
+bool append_operand(RegionPlan &plan, const BitOperand operand) {
+  if (operand.location == BitLocation::reg) {
+    if (!control_register(operand.selector)) { return false; }
+    plan.steps.push_back({});
+    return true;
+  }
+  const bool absolute = operand.location == BitLocation::short_address;
+  if (!absolute && (operand.location != BitLocation::effective || (operand.selector >> 3) == 6)) {
+    return false;
+  }
+  const NativeMove move{.address = {.mode = absolute ? 6U : operand.selector >> 3,
+                                    .index = absolute ? 0U : operand.selector & 7U,
+                                    .extra = absolute ? operand.selector : 0U},
+                        .space = operand.space,
+                        .load = true};
+  if (!append_move(plan, move, true)) { return false; }
+  plan.steps.push_back({.memory = {.transfers = {move}, .count = 1}, .registers = {}});
+  return true;
+}
+
+bool append_control(RegionPlan &plan, const Instruction &instruction) {
+  const auto kind = instruction.operation;
+  if (kind == Operation::bit_jump || kind == Operation::bit_branch) {
+    return (instruction.opcode & five_bit_mask) < word_bits &&
+           append_operand(plan, bit_operand(instruction));
+  }
+  if (kind == Operation::loop_register || kind == Operation::loop_short ||
+      kind == Operation::loop_effective) {
+    auto location = BitLocation::effective;
+    if (kind == Operation::loop_register) { location = BitLocation::reg; }
+    if (kind == Operation::loop_short) { location = BitLocation::short_address; }
+    return append_operand(plan,
+                          {.location = location,
+                           .selector = (instruction.opcode >> 8) & six_bit_mask,
+                           .space = (instruction.opcode & (1U << 6)) != 0 ? Space::y : Space::x});
+  }
+  plan.steps.push_back({});
   return true;
 }
 
@@ -401,12 +460,12 @@ bool append_tree(RegionPlan &plan,
     }
     plan.count = static_cast<Word>(count);
     plan.cost = static_cast<Word>(cost);
-    if (operation.instruction.operation == Operation::loop_immediate) {
+    if (index + 1 == plan.operations.size() && plan.control.valid) {
+      if (!append_control(plan, operation.instruction)) { return false; }
+    } else if (operation.instruction.operation == Operation::loop_immediate) {
       const auto after = append_repeat(plan, index, last, context);
       if (!after) { return false; }
       index = *after - 1;
-    } else if (index + 1 == plan.operations.size() && plan.control.valid) {
-      plan.steps.push_back({});
     } else if (!append(plan, operation)) {
       return false;
     }
@@ -417,7 +476,8 @@ bool append_tree(RegionPlan &plan,
 std::optional<RegionPlan> make_plan(RegionPlan plan) {
   const auto operations = plan.operations;
   if (operations.empty()) { return {}; }
-  if (operations.front().instruction.operation == Operation::loop_immediate &&
+  if (operations.size() > 1 &&
+      operations.front().instruction.operation == Operation::loop_immediate &&
       operations.front().loop_address == inactive_loop) {
     const auto &first = operations.front();
     const auto flow = successors(first);

@@ -5,6 +5,7 @@
 #include "isa.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
+#include "selection_model.hpp"
 #include "support.hpp"
 
 #include <algorithm>
@@ -33,6 +34,9 @@ struct Case {
   unsigned words, cycles;
   Word prefix = op<isa::Opcode::nop>;
   bool register_only = false;
+  bool call = false;
+  unsigned condition = 10;
+  Word sense = 0;
 };
 
 constexpr std::array cases{
@@ -116,7 +120,33 @@ constexpr std::array cases{
          .words = 1,
          .cycles = 3,
          .prefix = op<isa::Opcode::tst_a>,
-         .register_only = true}};
+         .register_only = true},
+    Case{.opcode = op<isa::Opcode::jsclr_register> | (4U << 8),
+         .extension = target,
+         .kind = Kind::bit,
+         .words = 2,
+         .cycles = 4,
+         .call = true},
+    Case{.opcode = op<isa::Opcode::jsset_register> | (4U << 8),
+         .extension = target,
+         .kind = Kind::bit,
+         .words = 2,
+         .cycles = 4,
+         .call = true,
+         .sense = 1},
+    Case{.opcode = op<isa::Opcode::bsclr_register> | (4U << 8),
+         .extension = target - transfer,
+         .kind = Kind::bit,
+         .words = 2,
+         .cycles = 5,
+         .call = true},
+    Case{.opcode = op<isa::Opcode::bsset_register> | (4U << 8),
+         .extension = target - transfer,
+         .kind = Kind::bit,
+         .words = 2,
+         .cycles = 5,
+         .call = true,
+         .sense = 1}};
 
 std::array<Word, code_words> program(const Case item) {
   std::array<Word, code_words> words;
@@ -129,8 +159,14 @@ std::array<Word, code_words> program(const Case item) {
       item.register_only ? test::parallel_none | (7U << 13) | (4U << 8) : move_x | (1U << 8);
   words[target - entry + 1] = op<isa::Opcode::nop>;
   words[target - entry + 2] =
-      item.kind == Kind::call ? op<isa::Opcode::rts> : op<isa::Opcode::stop>;
+      (item.kind == Kind::call || item.call) ? op<isa::Opcode::rts> : op<isa::Opcode::stop>;
   return words;
+}
+
+bool taken(const Registers &state, const Case item, const Word datum) {
+  return (item.kind != Kind::equal || test::selection_model::test_condition(
+                                          {.status = state.sr, .selector = item.condition})) &&
+         (item.kind != Kind::bit || datum % 2 == item.sense);
 }
 
 std::vector<State> prefixes(const Registers &initial, const Case item, const Word datum) {
@@ -151,10 +187,10 @@ std::vector<State> prefixes(const Registers &initial, const Case item, const Wor
   const auto before = state.registers;
   test::sequence_model::alu(state.registers, before, item.prefix);
   save(transfer, 1);
-  const bool taken = (item.kind != Kind::equal || (initial.sr & test::flag_z) != 0) &&
-                     (item.kind != Kind::bit || datum % 2 == 0);
+  const bool branched = taken(state.registers, item, datum);
+  const bool call = item.kind == Kind::call || item.call;
   const Word resume = transfer + item.words;
-  if (item.kind == Kind::call) {
+  if (call && branched) {
     state.registers.sp = (state.registers.sp + 1) % 64;
     ++state.registers.sc;
     state.registers.stack[state.registers.sp % stack_entries] =
@@ -163,12 +199,12 @@ std::vector<State> prefixes(const Registers &initial, const Case item, const Wor
     state.registers.sp = (state.registers.sp + pointer_mask) % 64;
     --state.registers.sc;
   }
-  save(taken ? target : resume, item.cycles);
-  if (taken) {
+  save(branched ? target : resume, item.cycles);
+  if (branched) {
     load(loaded_word);
     save(target + 1, 1);
     save(target + 2, 1);
-    if (item.kind == Kind::call) {
+    if (call) {
       state.registers.sp = (state.registers.sp + pointer_mask) % 64;
       --state.registers.sc;
       save(resume, 3);
@@ -208,11 +244,16 @@ void check_boundaries(Core &core, const Registers &initial, const std::vector<St
 }
 
 void fault_boundary(Core &core, Registers initial, const Case item, const Word datum) {
-  if (item.kind != Kind::call && item.kind != Kind::returned) { return; }
+  const bool call = item.kind == Kind::call || item.call;
+  if (!call && item.kind != Kind::returned) { return; }
   auto expected = prefixes(initial, item, datum)[2];
-  initial.sc = item.kind == Kind::call ? static_cast<Word>(stack_entries - 1) : 0U;
+  initial.sc = call ? static_cast<Word>(stack_entries - 1) : 0U;
+  if (call && !taken(expected.registers, item, datum)) {
+    check_boundaries(core, initial, prefixes(initial, item, datum));
+    return;
+  }
   expected.registers.sc = initial.sc;
-  expected.registers.pc = item.kind == Kind::call ? target : transfer + item.words;
+  expected.registers.pc = call && item.kind != Kind::bit ? target : transfer + item.words;
   expected.failure = {.kind = FaultKind::stack,
                       .space = Space::program,
                       .address = transfer,
@@ -276,6 +317,43 @@ void boundaries(const Case item) {
 int main() {
   try {
     for (const auto item : cases) { boundaries(item); }
+    for (unsigned condition = 0; condition < 16; ++condition) {
+      const std::array forms{
+          Case{.opcode = op<isa::Opcode::jscc_absolute_short> | (condition << 12) | target,
+               .extension = 0,
+               .kind = Kind::equal,
+               .words = 1,
+               .cycles = 4,
+               .call = true,
+               .condition = condition},
+          Case{.opcode = op<isa::Opcode::jscc_effective> | indirect | condition,
+               .extension = 0,
+               .kind = Kind::equal,
+               .words = 1,
+               .cycles = 4,
+               .call = true,
+               .condition = condition},
+          Case{.opcode = op<isa::Opcode::bscc_relative_long> | condition,
+               .extension = target - transfer,
+               .kind = Kind::equal,
+               .words = 2,
+               .cycles = 4,
+               .call = true,
+               .condition = condition},
+          Case{.opcode =
+                   op<isa::Opcode::bscc_relative_short> | (condition << 12) | (target - transfer),
+               .extension = 0,
+               .kind = Kind::equal,
+               .words = 1,
+               .cycles = 4,
+               .call = true,
+               .condition = condition}};
+      for (auto item : forms) {
+        boundaries(item);
+        item.prefix = op<isa::Opcode::tst_a>;
+        boundaries(item);
+      }
+    }
     std::cout << test::checks << " mixed native/control prefix checks passed\n";
     return 0;
   } catch (const std::exception &error) {

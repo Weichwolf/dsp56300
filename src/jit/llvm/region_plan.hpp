@@ -13,7 +13,13 @@
 #include <vector>
 
 namespace dsp56300::detail {
-enum class ControlStack : std::uint8_t { none, push, pop };
+enum class ControlStack : std::uint8_t { none, push, pop, loop };
+
+constexpr bool loop_setup(const Operation kind) {
+  return kind == Operation::loop_immediate || kind == Operation::loop_register ||
+         kind == Operation::loop_short || kind == Operation::loop_effective ||
+         kind == Operation::loop_forever;
+}
 
 struct RegionControl {
   Word target = 0;

@@ -89,6 +89,8 @@ public:
         addressing_(addressing),
         self_loop_(
             !admission_only && !plan_.batch && plan_.control.stack == ControlStack::none &&
+            plan_.operations.back().instruction.operation != Operation::bit_jump &&
+            plan_.operations.back().instruction.operation != Operation::bit_branch &&
             (captured_loop() || (region_independent(plan_.operations) && plan_.control.valid &&
                                  (plan_.control.reg < agu_registers ||
                                   plan_.control.target == plan_.operations.front().pc)))),
@@ -215,6 +217,8 @@ private:
       require(ir_.CreateICmpULT(sc_, ir_.getInt32(stack_entries - 1)));
     } else if (plan_.control.stack == ControlStack::pop) {
       require(ir_.CreateICmpNE(sc_, ir_.getInt32(0)));
+    } else if (plan_.control.stack == ControlStack::loop) {
+      require(ir_.CreateICmpUGE(ir_.getInt32(stack_entries - 3), sc_));
     }
     if (plan_.depth != 0) {
       const auto added = 2U * (plan_.depth + (plan_.setup ? 1U : 0U));
@@ -642,7 +646,33 @@ private:
     return ir_.CreateGEP(ir_.getInt32Ty(), base, ir_.CreateZExt(at, ir_.getInt64Ty()));
   }
 
+  V read_control_register(const unsigned number) {
+    if (number >= m_register_base && number < m_register_base + agu_registers) {
+      return reg(32, offsetof(Registers, m) + ((number - m_register_base) * sizeof(Word)));
+    }
+    const bool loop = plan_.control.stack == ControlStack::loop;
+    switch (number) {
+      case ep_register: return reg(32, offsetof(Registers, ep));
+      case vba_register: return reg(32, offsetof(Registers, vba));
+      case sz_register: return reg(32, offsetof(Registers, sz));
+      case omr_register: return reg(32, offsetof(Registers, omr));
+      case la_register: return reg(32, offsetof(Registers, la));
+      case lc_register: return lc_;
+      case sr_register: return status_;
+      case sp_register:
+        return loop ? ir_.CreateAnd(ir_.CreateAdd(sp_, ir_.getInt32(1)), ir_.getInt32(pointer_mask))
+                    : sp_;
+      case sc_register: return loop ? ir_.CreateAdd(sc_, ir_.getInt32(1)) : sc_;
+      case ssl_register:
+        return loop ? lc_
+                    : ir_.CreateAnd(ir_.CreateTrunc(saved_, ir_.getInt32Ty()),
+                                    ir_.getInt32(word_mask));
+      default: throw std::logic_error("Invalid native control register");
+    }
+  }
+
   V read_register(const std::array<V, 4> &values, const unsigned number) {
+    if (number >= m_register_base) { return read_control_register(number); }
     if (number >= n_register_base) { return strides_[number - n_register_base]; }
     if (number >= r_register_base) { return cursors_[number - r_register_base]; }
     if (number == a_register || number == b_register) {
@@ -807,17 +837,90 @@ private:
     }
   }
 
+  V control_operand(const Instruction &instruction, const RegionPlan::Step &step) {
+    if (step.memory.count != 0) {
+      const auto move = step.memory.transfers[0];
+      auto *at = effective(cursors_, move.address);
+      return ir_.CreateLoad(ir_.getInt32Ty(), memory(move, at));
+    }
+    const auto number = instruction.operation == Operation::loop_register
+                            ? (instruction.opcode >> 8) & six_bit_mask
+                            : bit_operand(instruction).selector;
+    return read_register(banks_, number);
+  }
+
+  void loop_control(const Instruction &instruction, const RegionPlan::Step &step) {
+    const bool forever = instruction.operation == Operation::loop_forever;
+    if (forever) {
+      control_count_ = lc_;
+    } else if (instruction.operation == Operation::loop_immediate) {
+      control_count_ =
+          ir_.getInt32(((instruction.opcode >> 8) & byte_mask) | ((instruction.opcode & 15U) << 8));
+    } else {
+      control_count_ = ir_.CreateAnd(control_operand(instruction, step), ir_.getInt32(word_mask));
+    }
+    control_status_ = status_;
+    control_taken_ = forever ? boolean(true) : ir_.CreateICmpNE(control_count_, ir_.getInt32(0));
+    status_ = ir_.CreateSelect(
+        control_taken_,
+        ir_.CreateOr(ir_.CreateAnd(status_, ir_.getInt32(word_mask ^ forever_flag)),
+                     ir_.getInt32(loop_flag | (forever ? forever_flag : 0U))),
+        status_);
+  }
+
+  V loop_next_pc(V following) {
+    auto *first = ir_.CreateAnd(ir_.CreateAdd(sp_, ir_.getInt32(1)), ir_.getInt32(pointer_mask));
+    auto *second = ir_.CreateAnd(ir_.CreateAdd(first, ir_.getInt32(1)), ir_.getInt32(pointer_mask));
+    auto *outer_address = reg(32, offsetof(Registers, la));
+    const auto save = [&](V index, const std::array<V, 2> words) {
+      auto *frame = ir_.CreateOr(
+          ir_.CreateShl(ir_.CreateZExt(words[0], ir_.getInt64Ty()), ir_.getInt64(word_bits)),
+          ir_.CreateZExt(words[1], ir_.getInt64Ty()));
+      ir_.CreateStore(frame, stack_address(ir_.CreateAnd(index, ir_.getInt32(stack_mask))));
+    };
+    save(first, {outer_address, lc_});
+    auto *active = LLVMAppendBasicBlockInContext(context_, function_, "enter_loop");
+    auto *done = LLVMAppendBasicBlockInContext(context_, function_, "loop_setup_done");
+    LLVMBuildCondBr(ir_.get(), control_taken_, active, done);
+    ir_.SetInsertPoint(active);
+    save(second, {following, control_status_});
+    store(ir_.getInt8(static_cast<unsigned>(NativeBoundary::context)),
+          offsetof(NativeContext, boundary),
+          owner_);
+    LLVMBuildBr(ir_.get(), done);
+    ir_.SetInsertPoint(done);
+    put(ir_.CreateSelect(control_taken_, second, sp_), offsetof(Registers, sp));
+    put(ir_.CreateSelect(control_taken_, ir_.CreateAdd(sc_, ir_.getInt32(2)), sc_),
+        offsetof(Registers, sc));
+    put(ir_.CreateSelect(control_taken_, control_count_, lc_), offsetof(Registers, lc));
+    put(ir_.CreateSelect(control_taken_, ir_.getInt32(plan_.control.target), outer_address),
+        offsetof(Registers, la));
+    return ir_.CreateSelect(
+        control_taken_, following, ir_.getInt32((plan_.control.target + 1) & word_mask));
+  }
+
   V next_pc() {
     const auto &last = plan_.operations.back();
     auto *following = ir_.getInt32((last.pc + last.instruction.words) & word_mask);
     if (!plan_.control.valid) { return following; }
+    if (plan_.control.stack == ControlStack::loop) { return loop_next_pc(following); }
     if (plan_.control.stack == ControlStack::pop) {
       put(ir_.CreateAnd(ir_.CreateSub(sp_, ir_.getInt32(1)), ir_.getInt32(pointer_mask)),
           offsetof(Registers, sp));
       put(ir_.CreateSub(sc_, ir_.getInt32(1)), offsetof(Registers, sc));
       return ir_.CreateTrunc(ir_.CreateLShr(saved_, ir_.getInt64(word_bits)), ir_.getInt32Ty());
     }
+    auto *taken = control_taken_;
+    if (taken == nullptr) {
+      taken = plan_.control.selector == 16
+                  ? boolean(true)
+                  : llvm19::condition(ir_, status_, plan_.control.selector);
+    }
     if (plan_.control.stack == ControlStack::push) {
+      auto *push = LLVMAppendBasicBlockInContext(context_, function_, "call_taken");
+      auto *done = LLVMAppendBasicBlockInContext(context_, function_, "call_ready");
+      LLVMBuildCondBr(ir_.get(), taken, push, done);
+      ir_.SetInsertPoint(push);
       auto *pointer =
           ir_.CreateAnd(ir_.CreateAdd(sp_, ir_.getInt32(1)), ir_.getInt32(pointer_mask));
       auto *frame = ir_.CreateOr(
@@ -826,14 +929,13 @@ private:
       ir_.CreateStore(frame, stack_address(ir_.CreateAnd(pointer, ir_.getInt32(stack_mask))));
       put(pointer, offsetof(Registers, sp));
       put(ir_.CreateAdd(sc_, ir_.getInt32(1)), offsetof(Registers, sc));
+      LLVMBuildBr(ir_.get(), done);
+      ir_.SetInsertPoint(done);
     }
     auto *target = plan_.control.reg < agu_registers
                        ? cursors_[plan_.control.reg]
                        : ir_.getInt32(plan_.control.target & word_mask);
-    return plan_.control.selector == 16
-               ? target
-               : ir_.CreateSelect(
-                     llvm19::condition(ir_, status_, plan_.control.selector), target, following);
+    return ir_.CreateSelect(taken, target, following);
   }
 
   void finish() {
@@ -992,7 +1094,16 @@ private:
         write_register(step.immediate.destination, ir_.getInt32(step.immediate.value));
       }
       const auto &instruction = plan_.operations[index].instruction;
-      if (instruction.operation == Operation::bit_memory) {
+      if (instruction.operation == Operation::bit_jump ||
+          instruction.operation == Operation::bit_branch) {
+        auto *value = control_operand(instruction, step);
+        const auto mask = Word{1} << (instruction.opcode & five_bit_mask);
+        control_taken_ =
+            ir_.CreateICmpEQ(ir_.CreateAnd(value, ir_.getInt32(mask)),
+                             ir_.getInt32((instruction.opcode & (1U << 5)) != 0 ? mask : 0U));
+      } else if (loop_setup(instruction.operation)) {
+        loop_control(instruction, step);
+      } else if (instruction.operation == Operation::bit_memory) {
         bit_transfer(step.memory.transfers[0], bit_action(instruction.opcode), instruction.opcode);
       } else if (instruction.operation == Operation::arithmetic_shift_immediate) {
         llvm19::lower_arithmetic_shift(
@@ -1324,6 +1435,7 @@ private:
   bool self_loop_, split_flags_ = false;
   Word loop_count_ = 0;
   V cpu_, owner_, initial_cycles_ = nullptr, initial_instructions_ = nullptr;
+  V control_taken_ = nullptr, control_count_ = nullptr, control_status_ = nullptr;
   V status_ = nullptr, initial_status_ = nullptr, lc_ = nullptr, sp_ = nullptr, sc_ = nullptr,
     saved_ = nullptr;
   V turns_ = nullptr, forever_ = nullptr, finite_count_ = nullptr, eligible_ = nullptr;
@@ -1347,7 +1459,8 @@ bool region_independent(const std::span<const BlockInstruction> operations) {
   return kind == Operation::jump_short || kind == Operation::jump_effective ||
          kind == Operation::conditional_jump || kind == Operation::relative_branch ||
          kind == Operation::call_short || kind == Operation::call_effective ||
-         kind == Operation::return_subroutine;
+         kind == Operation::return_subroutine || kind == Operation::bit_jump ||
+         kind == Operation::bit_branch || loop_setup(kind);
 }
 
 bool region_candidate(const std::span<const BlockInstruction> operations,
