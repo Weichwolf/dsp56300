@@ -269,6 +269,10 @@ void retirement_case(const std::array<NativeImage, 2> &images,
               first.yielded == second.yielded && before.program == after.program &&
               before.x == after.x && before.y == after.y,
           "Retirement observation preserves every register, memory word, fault and boundary");
+  require(before.io.unit_entries == 0 &&
+              (no_io || second.retired == 0 || after.io.unit_entries != 0) &&
+              (limit != 0 || after.io.unit_entries == 0),
+          "Only explicitly observed native execution counts unit entries; zero grants enter none");
   require(before.io.batched == 0 && after.io.deferred <= after.io.batched &&
               after.io.batched <= after.io.counts[0] &&
               before.io.counts == std::array<std::uint64_t, 2>{} &&
@@ -384,6 +388,54 @@ void region_mode_hints() {
   }
 }
 
+void unit_entries(const std::span<const std::byte> binding) {
+  constexpr std::array code{nop, nop, static_cast<Word>(isa::Opcode::stop)};
+  const std::array spans{CodeSpan{.address = start, .words = code}};
+  const std::array variants{
+      CodeVariant{.id = 0, .code = spans, .entries = initial_entries, .failed_fetches = {}}};
+  const std::array callbacks{
+      CallbackBinding{.role = CallbackRole::retired, .symbol = "record_retired"}};
+  const CompileOptions options{.memory = {},
+                               .interrupts = {},
+                               .transitions = {},
+                               .callbacks = callbacks,
+                               .bindings = binding};
+  const auto image = test::compile_image(Core::lower({.variants = variants}, options), binding);
+  RetirementMachine partial(image, code, false);
+  for (unsigned prefix = 0; prefix < code.size(); ++prefix) {
+    require(partial.core->run(0).retired == 0 && partial.io.unit_entries == prefix,
+            "A zero grant does not execute a native entry or duplicate an event");
+    require(partial.core->run(1).retired == 1 && partial.io.unit_entries == prefix + 1,
+            "Each resumed one-instruction run enters the same logical unit exactly once");
+  }
+  require(partial.core->run().retired == 0 && partial.io.unit_entries == code.size(),
+          "Stopped execution does not manufacture new native entries");
+  RetirementMachine whole(image, code, false);
+  require(whole.core->run().retired == code.size() && whole.io.unit_entries == 1 &&
+              whole.io.counts[0] + whole.io.counts[1] == code.size() &&
+              whole.core->state().registers == partial.core->state().registers,
+          "A complete straight-line unit enters once independently of its instruction count");
+  for (const bool at_entry : {false, true}) {
+    RetirementMachine yielded(image, code, false);
+    yielded.io.yield_owner = yielded.core.get();
+    yielded.io.yield_at_entry = at_entry;
+    yielded.io.yield = [](void *owner) noexcept { static_cast<Core *>(owner)->request_yield(); };
+    const auto result = yielded.core->run();
+    const unsigned completed = at_entry ? 0U : 1U;
+    require(result.retired == completed && result.yielded && result.fault == Fault{} &&
+                result.state == ExecutionState::running &&
+                result.progress.instructions == completed &&
+                result.progress.estimated_cycles == completed &&
+                yielded.core->registers().pc == start + completed && yielded.io.unit_entries == 1,
+            "An observer yield stops before the next instruction at entry or retirement");
+    yielded.io.yield = nullptr;
+    require(yielded.core->run().retired == code.size() - completed &&
+                yielded.core->state().registers == whole.core->state().registers &&
+                yielded.io.counts[0] + yielded.io.counts[1] == code.size(),
+            "An observer yield resumes without replay or missing retirement");
+  }
+}
+
 void retirement_observation() {
   constexpr std::array code{static_cast<Word>(isa::Opcode::do_immediate) | (3U << 8),
                             start + 3,
@@ -401,6 +453,7 @@ void retirement_observation() {
       CallbackBinding{.role = CallbackRole::retired, .symbol = "record_retired"}};
   const auto binding = retirement_binding();
   retirement_vectors(binding);
+  unit_entries(binding);
   const CompileOptions off{
       .memory = layouts, .interrupts = {}, .transitions = {}, .callbacks = {}, .bindings = {}};
   auto on = off;
@@ -419,6 +472,21 @@ void retirement_observation() {
   const auto traced =
       test::compile_image(Core::load({.variants = variants}, on, observed.artifact()), binding);
   const std::array images{plain, traced};
+  RetirementMachine yielded_region(traced, code, false);
+  yielded_region.io.yield_owner = yielded_region.core.get();
+  yielded_region.io.yield = [](void *owner) noexcept {
+    static_cast<Core *>(owner)->request_yield();
+  };
+  const auto yielded = yielded_region.core->run();
+  constexpr unsigned region_instructions = 7;
+  require(yielded.yielded && yielded.retired == region_instructions &&
+              yielded.progress.instructions == region_instructions && yielded.fault == Fault{} &&
+              yielded_region.core->registers().pc == start + code.size() - 1,
+          "A region retirement observer yield preserves its complete admitted prefix");
+  yielded_region.io.yield = nullptr;
+  require(yielded_region.core->run().retired == 1 &&
+              yielded_region.io.counts[0] + yielded_region.io.counts[1] == region_instructions + 1,
+          "A yielded region resumes at STOP without redoing its body or observation");
   for (const bool fault : {false, true}) {
     for (const bool deadline : {false, true}) {
       for (unsigned limit = 0; limit <= 12; ++limit) {

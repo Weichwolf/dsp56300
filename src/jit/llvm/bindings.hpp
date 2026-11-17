@@ -20,9 +20,9 @@ void link_callbacks(LlvmModule &module,
 void mark_io(LlvmModule &module);
 void inline_io(LlvmModule &module);
 void finalize_io(LlvmModule &module);
-void emit_retirement(llvm::BasicBlock &block,
-                     llvm::Value *owner,
-                     llvm::Value *count,
-                     bool region,
-                     std::uint64_t site = 0);
+[[nodiscard]] llvm::Value *emit_retirement(llvm::BasicBlock &block,
+                                           llvm::Value *owner,
+                                           llvm::Value *count,
+                                           bool region,
+                                           std::uint64_t site = 0);
 }

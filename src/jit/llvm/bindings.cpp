@@ -272,16 +272,16 @@ void finalize_io(LlvmModule &module) {
   }
 }
 
-void emit_retirement(llvm::BasicBlock &block,
-                     llvm::Value *const owner,
-                     llvm::Value *const count,
-                     const bool region,
-                     const std::uint64_t site) {
+llvm::Value *emit_retirement(llvm::BasicBlock &block,
+                             llvm::Value *const owner,
+                             llvm::Value *const count,
+                             const bool region,
+                             const std::uint64_t site) {
   auto &module = *block.getModule();
   const auto *observer = module.getFunction("dsp56300_io_retired");
-  if (observer == nullptr || !observer->hasFnAttribute("dsp56300-retirement")) { return; }
+  if (observer == nullptr || !observer->hasFnAttribute("dsp56300-retirement")) { return nullptr; }
   auto *helper = module.getFunction("dsp56300_semantic_retired");
-  if (helper == nullptr || helper->isDeclaration() || !helper->getReturnType()->isVoidTy() ||
+  if (helper == nullptr || helper->isDeclaration() || !helper->getReturnType()->isIntegerTy(1) ||
       helper->arg_size() != 4 || !helper->getFunctionType()->getParamType(0)->isPointerTy() ||
       !helper->getFunctionType()->getParamType(1)->isIntegerTy(32) ||
       !helper->getFunctionType()->getParamType(2)->isIntegerTy(1) ||
@@ -291,5 +291,6 @@ void emit_retirement(llvm::BasicBlock &block,
   llvm::IRBuilder<> ir(&block);
   auto *call = ir.CreateCall(helper, {owner, count, ir.getInt1(region), ir.getInt64(site)});
   call->setAttributes(helper->getAttributes());
+  return call;
 }
 }

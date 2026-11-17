@@ -82,7 +82,7 @@ struct Core::Impl {
   void assume_image_admission() const noexcept;
   [[nodiscard]] static Word semantic_numeric_mode(void *owner) noexcept
       asm("dsp56300_semantic_numeric_mode");
-  static void
+  [[nodiscard]] static bool
   semantic_retired(void *owner, std::uint32_t count, bool region, std::uint64_t site) noexcept
       asm("dsp56300_semantic_retired");
   static void semantic_memory(void *owner, const detail::SemanticMemory &memory) noexcept

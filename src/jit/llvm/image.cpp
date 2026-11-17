@@ -149,7 +149,7 @@ public:
     dispatch_->addFnAttr(llvm::Attribute::AlwaysInline);
     table_ = table();
     emit_dispatch();
-    for (const auto &unit : units_) { emit_unit(unit.second); }
+    for (const auto &unit : units_) { emit_unit(unit.second, unit.first); }
     emit_entry();
   }
 
@@ -207,7 +207,7 @@ private:
     ir_.CreateStore(ir_.CreateSub(window, cost), window_);
     ir_.CreateStore(next, pc_);
     const auto site = pc | (std::uint64_t{region.properties} << word_bits);
-    emit_retirement(*ir_.GetInsertBlock(), active_->getArg(0), retired, true, site);
+    retirement(retired, true, site);
     const auto end = (region.last_pc + region.last_words) & word_mask;
     std::set<Word> targets{pc, end};
     for (const auto target : edges_.at(region.last_pc)) {
@@ -516,7 +516,7 @@ private:
     const auto site = static_cast<std::uint64_t>(pc) |
                       (static_cast<std::uint64_t>(operation.opcode) << opcode_shift) |
                       (static_cast<std::uint64_t>(operation.operation) << kind_shift);
-    emit_retirement(*ir_.GetInsertBlock(), active_->getArg(0), ir_.getInt32(1), false, site);
+    retirement(ir_.getInt32(1), false, site);
     ir_.CreateCondBr(
         ir_.CreateICmpEQ(flow, ir_.getInt8(static_cast<unsigned>(SemanticFlow::owner))),
         exits_.at(ImageExit::owner),
@@ -598,7 +598,16 @@ private:
     }
   }
 
-  void emit_unit(llvm::Function *unit) {
+  void retirement(Value *count, const bool region, const std::uint64_t site) {
+    if (auto *ready =
+            emit_retirement(*ir_.GetInsertBlock(), active_->getArg(0), count, region, site)) {
+      auto *continued = block(active_, "observed");
+      ir_.CreateCondBr(ready, continued, exits_.at(ImageExit::owner));
+      ir_.SetInsertPoint(continued);
+    }
+  }
+
+  void emit_unit(llvm::Function *unit, const Word unit_head) {
     active_ = unit;
     sites_.clear();
     links_.clear();
@@ -614,7 +623,6 @@ private:
     ir_.CreateStore(unit->getArg(4), count_);
     ir_.CreateStore(unit->getArg(3), window_);
     ir_.CreateStore(unit->getArg(1), pc_);
-    ir_.CreateBr(local_dispatch_);
     for (const auto reason : {ImageExit::owner,
                               ImageExit::fault,
                               ImageExit::budget,
@@ -624,6 +632,9 @@ private:
       exits_.emplace(reason, exit);
       cold_.insert(exit);
     }
+    constexpr auto unit_entry = std::uint64_t{1} << 26;
+    retirement(ir_.getInt32(0), true, unit_head | unit_entry);
+    ir_.CreateBr(local_dispatch_);
     for (const auto &[pc, target] : targets_) {
       if (target == unit) { sites_.emplace(pc, block(unit, "pc." + llvm::utohexstr(pc, true))); }
     }

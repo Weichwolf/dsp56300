@@ -28,11 +28,13 @@ extern "C" const std::array<Word, semantic_abi_fields> dsp56300_semantic_abi{
 }
 
 namespace dsp56300 {
-void Core::Impl::semantic_retired(void *const owner,
+bool Core::Impl::semantic_retired(void *const owner,
                                   const std::uint32_t count,
                                   const bool region,
                                   const std::uint64_t site) noexcept {
-  dsp56300_io_retired(static_cast<Impl *>(owner)->io, count, region, site);
+  auto &self = *static_cast<Impl *>(owner);
+  dsp56300_io_retired(self.io, count, region, site);
+  return !self.yield_requested;
 }
 
 Word Core::Impl::semantic_numeric_mode(void *const owner) noexcept {
