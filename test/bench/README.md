@@ -55,9 +55,15 @@ cmake --build build/release --target dsp56300_kernel_bench
 timeout 120s build/release/dsp56300_kernel_bench
 ```
 
-The command emits JSON lines for ordinary native code and mode-zero regions.
+The command emits JSON lines for checked (`exact`) and complete-view (`direct`)
+memory, each with ordinary native code and mode-zero regions. Pass `exact` or
+`direct` to select one memory mode. Both use the same guest code, inputs,
+page-aligned backing and declared ordinary spans; Direct lends full P/X/Y views
+and omits fixed-layout admission. These disjoint-space kernels do not replace
+the separate alias and protected-hole regressions.
 Each timed guest run follows a complete untimed warm run. All 262144 outputs,
 all final biquad states, exact instruction totals and guest IRQ counts are checked.
+`verified_output_sha256` identifies the independently validated complete output.
 The native Q1.23 reference is compiled at O3 for the local host in a separate
 translation unit without LTO. Its reported time is the median of three warmed
 runs adjacent to each guest measurement; setup and checks are outside timing.
