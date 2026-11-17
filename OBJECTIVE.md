@@ -15,7 +15,7 @@ organizational boundaries. Keep LLVM private and production execution native-onl
   retained fetch forms before use. Separate executable streams from readable
   data. A partial optimizing subset is not complete translation.
 - One semantic frontend serves startup installation and build-time LLVM bitcode/
-  relocatable-object export. Fuse compatible host IR before LLVM19 O3. Validate
+  relocatable-object export. Fuse compatible host IR before final LLVM 19 optimization. Validate
   source/variant, binding ABI, target/features and relocations before publication.
 - Preserve original loader/program-write effects while selecting prepared native
   versions. Changed code/mappings revoke dependent bindings. No first-use decoding,

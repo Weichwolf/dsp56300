@@ -38,7 +38,7 @@ Include known indirect targets, loader outputs, IRQ vectors and retained fetch
 forms. Unknown dynamic transfers may select only prepared targets. Incomplete
 coverage fails with identity, address and reason before execution.
 
-Core::lower owns source/variant/layout metadata and detached pre-O3 IR without a
+Core::lower owns source/variant/layout metadata and detached unoptimized IR without a
 runtime Core, borrowed execution RAM, TargetMachine or native engine. Preserve
 all guest/event roots. Compile exact ISA semantics once; consumers never copy
 lowering or reconstruct private core state. Core::compile uses the same
@@ -140,8 +140,9 @@ instruction slices or changed guest time. Consumer horizons and source timestamp
 remain separate from local nominal-cycle bounds.
 
 Generated code follows the host build mode. Debug includes assertions and selected
-diagnostic/sanitizer instrumentation. Release uses joint LLVM19 O3 with no optional
-Debug/sanitizer work or redundant proved checks. Both preserve the same required
+diagnostic/sanitizer instrumentation. The consumer selects the final LLVM 19
+optimization level by measurement. Release omits optional instrumentation and
+redundant proved checks. Both modes preserve the same required
 ISA/fault/device semantics. Verify source/IR/bindings during preparation; inspect
 optimized code to qualify the execution path. Instrument our host/generated code,
 not packaged foreign libraries. Sanitizer checks execute at runtime after insertion.
