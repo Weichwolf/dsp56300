@@ -160,10 +160,27 @@ struct NativeSymbol {
 };
 
 struct NativeSymbols {
+  struct TextRange {
+    std::uintptr_t address = 0;
+    std::uint64_t size = 0;
+  };
+
+  struct Site {
+    std::uintptr_t address = 0;
+    std::uint64_t size = 0, variant = 0;
+    std::uint32_t guest_pc = 0;
+  };
+
+  struct FaultMap {
+    std::span<const TextRange> text_ranges;
+    std::span<const Site> sites;
+  };
+
   std::shared_ptr<const void> owner;
   std::span<const NativeSymbol> symbols;
   std::string_view identity;
   std::uint64_t native_bytes = 0;
+  FaultMap fault_map{};
 };
 
 // Immutable owned pre-O3 code/contracts; no Core, RAM or native execution owner.

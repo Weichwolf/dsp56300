@@ -20,6 +20,7 @@
 #include "llvm/Support/Error.h"
 #include "llvm/Support/MemoryBufferRef.h"
 
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <cstddef>
@@ -164,12 +165,12 @@ void check() {
   const std::array layouts{VariantLayout{.id = 0, .memory = regions},
                            VariantLayout{.id = high_variant, .memory = regions}};
   constexpr std::array interrupts{InterruptRequest{.vector = irq, .level = 0}};
-  const auto image = Core::lower({.variants = variants},
-                                 {.memory = layouts,
-                                  .interrupts = interrupts,
-                                  .transitions = {},
-                                  .callbacks = {},
-                                  .bindings = {}});
+  const CompileOptions options{.memory = layouts,
+                               .interrupts = interrupts,
+                               .transitions = {},
+                               .callbacks = {},
+                               .bindings = {}};
+  const auto image = Core::lower({.variants = variants}, options);
   const auto attributed = inspect(object(image, false));
   const auto stripped = inspect(object(image, true));
   require(!attributed.text.empty() && attributed.text == stripped.text &&
@@ -182,6 +183,25 @@ void check() {
                               Location{0, irq + 1}}) {
     require(attributed.locations.contains(location),
             "Native source intervals retain PC0, full variant IDs, loop memory and shared vectors");
+  }
+  const auto native = Core::compile({.variants = variants}, options);
+  for (const auto id : {std::uint64_t{0}, high_variant}) {
+    std::array<Word, 16> program{};
+    std::array<Word, 16> x{};
+    std::array<Word, 16> y{};
+    const auto code = id == 0 ? std::span<const Word>(first) : std::span<const Word>(second);
+    std::ranges::copy(code, program.begin());
+    std::ranges::copy(vector, program.begin() + irq);
+    Core core(Memory::separate({.program = program, .x = x, .y = y}));
+    auto registers = core.registers();
+    registers.omr = 0;
+    core.set_registers(registers);
+    core.install(native, id);
+    const auto result = core.run();
+    require(
+        result.state == ExecutionState::stopped && result.fault == Fault{} &&
+            result.retired == (id == 0 ? 9U : 2U),
+        "The standalone provider binds real linked intervals and executes both declared variants");
   }
 }
 }

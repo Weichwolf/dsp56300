@@ -390,6 +390,7 @@ NativeImage Core::bind(const SemanticImage &image, const NativeSymbols &symbols)
   for (const auto &[key, name] : image.impl_->vector_symbols) {
     result->vectors.emplace(key, std::bit_cast<detail::ImageEntry>(addresses.at(name)));
   }
+  result->bind_sites(symbols.fault_map);
   return NativeImage(std::move(result));
 }
 
@@ -407,10 +408,14 @@ NativeImage Core::compile(const CodeImage image, const CompileOptions options) {
         {.name = entry.name,
          .address = addresses.empty() ? first : compiler->resolve(std::string(entry.name))});
   }
+  if (compiler->fault_map().text_ranges.empty() || compiler->fault_map().sites.empty()) {
+    throw std::runtime_error("DSP native provider did not prepare source attribution");
+  }
   return bind(semantic,
               {.owner = compiler,
                .symbols = addresses,
                .identity = semantic.identity(),
-               .native_bytes = compiler->native_bytes()});
+               .native_bytes = compiler->native_bytes(),
+               .fault_map = compiler->fault_map()});
 }
 }

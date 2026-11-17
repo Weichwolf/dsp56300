@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
+#include "dsp56300/core.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <llvm-c/Orc.h>
@@ -59,6 +61,7 @@ public:
                                            const std::string &entry);
   // Cold materialization accounting; native execution does not update it.
   [[nodiscard]] std::uint64_t native_bytes() const noexcept;
+  [[nodiscard]] NativeSymbols::FaultMap fault_map() const noexcept;
 
 private:
   struct Impl;

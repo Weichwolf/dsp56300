@@ -47,9 +47,9 @@ set(dsp56300_semantic_sources
   src/transfer_parallel.cpp src/transfer_special.cpp src/viterbi.cpp)
 add_library(dsp56300_semantics OBJECT ${dsp56300_semantic_sources})
 add_library(dsp56300_core STATIC
-  src/io.cpp src/image_compile.cpp src/image_artifact.cpp src/image_entry.cpp src/jit/preparation.cpp src/jit/image_plan.cpp
+  src/io.cpp src/image_compile.cpp src/image_artifact.cpp src/image_entry.cpp src/image_sites.cpp src/jit/preparation.cpp src/jit/image_plan.cpp
   src/jit/prefixes.cpp src/jit/prefix_access.cpp src/jit/llvm/runtime.cpp
-  src/jit/llvm/lifecycle.cpp src/jit/llvm/bindings.cpp
+  src/jit/llvm/lifecycle.cpp src/jit/llvm/bindings.cpp src/jit/llvm/sites.cpp
   src/jit/llvm/image.cpp src/jit/llvm/image_regions.cpp src/jit/llvm/image_specialize.cpp src/jit/llvm/origins.cpp
   src/jit/llvm/region.cpp src/jit/llvm/region_plan.cpp src/jit/llvm/alu.cpp
   src/jit/move.cpp src/jit/registers.cpp)
