@@ -49,7 +49,7 @@ struct RegionPlan {
 
   std::span<const BlockInstruction> operations;
   std::vector<Step> steps;
-  std::map<std::size_t, Repeat> repeats{};
+  std::map<std::size_t, Repeat> repeats;
   std::array<std::vector<RegionWindow>, 2> windows;
   std::array<bool, 2> windowed{};
   std::array<std::array<Extent, agu_registers>, 2> extents{};
