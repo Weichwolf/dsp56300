@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "image_compiler.hpp"
 #include "isa.hpp"
 #include "memory_arena.hpp"
 #include "native_faults.hpp"
@@ -14,6 +15,10 @@
 #include <exception>
 #include <fcntl.h>
 #include <iostream>
+#include <llvm-c/BitReader.h>
+#include <llvm-c/Core.h>
+#include <llvm-c/Transforms/PassBuilder.h>
+#include <llvm-c/Types.h>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -214,6 +219,112 @@ void execution(const bool fixed, const bool direct = false) {
           "The checked path reports a protected undeclared word without dereferencing the hole");
 }
 
+// Inspect only the public artifact, then run the real shared mappings through
+// the native provider. No private Core layout or host-address alias assumption.
+struct AccessPcs {
+  Word read, write;
+};
+
+void volatile_accesses(const std::span<const Word> program, const AccessPcs pcs) {
+  using test::image_compiler::Owner;
+  const std::array spans{CodeSpan{.address = start, .words = program}};
+  const std::array entries{start};
+  const std::array variants{
+      CodeVariant{.id = 0, .code = spans, .entries = entries, .failed_fetches = {}}};
+  const auto lowered = Core::lower({.variants = variants},
+                                   {.memory = {},
+                                    .interrupts = {},
+                                    .transitions = {},
+                                    .callbacks = {},
+                                    .bindings = {},
+                                    .memory_mode = CompileOptions::MemoryMode::direct});
+  const Owner<LLVMContextRef, LLVMContextDispose> context(LLVMContextCreate());
+  const auto bytes = lowered.bitcode();
+  const Owner<LLVMMemoryBufferRef, LLVMDisposeMemoryBuffer> buffer(
+      LLVMCreateMemoryBufferWithMemoryRangeCopy(
+          reinterpret_cast<const char *>(bytes.data()), bytes.size(), "direct-alias"));
+  LLVMModuleRef parsed = nullptr;
+  const auto invalid = LLVMParseBitcodeInContext2(context.get(), buffer.get(), &parsed);
+  const Owner<LLVMModuleRef, LLVMDisposeModule> module(parsed);
+  require(invalid == 0 && module, "The public direct-memory artifact parses");
+  const Owner<LLVMPassBuilderOptionsRef, LLVMDisposePassBuilderOptions> options(
+      LLVMCreatePassBuilderOptions());
+  test::image_compiler::checked(LLVMRunPasses(module.get(), "default<O3>", nullptr, options.get()));
+  unsigned reads = 0;
+  unsigned writes = 0;
+  for (auto *function = LLVMGetFirstFunction(module.get()); function != nullptr;
+       function = LLVMGetNextFunction(function)) {
+    for (auto *block = LLVMGetFirstBasicBlock(function); block != nullptr;
+         block = LLVMGetNextBasicBlock(block)) {
+      for (auto *instruction = LLVMGetFirstInstruction(block); instruction != nullptr;
+           instruction = LLVMGetNextInstruction(instruction)) {
+        const auto operation = LLVMGetInstructionOpcode(instruction);
+        if (operation != LLVMLoad && operation != LLVMStore) { continue; }
+        if (LLVMGetVolatile(instruction) == 0) { continue; }
+        auto *const type = operation == LLVMLoad ? LLVMTypeOf(instruction)
+                                                 : LLVMTypeOf(LLVMGetOperand(instruction, 0));
+        require(LLVMGetTypeKind(type) == LLVMIntegerTypeKind && LLVMGetIntTypeWidth(type) == 32,
+                "Every direct guest access retains its scalar Word type after O3");
+        const auto line = LLVMGetDebugLocLine(instruction);
+        reads += static_cast<unsigned>(operation == LLVMLoad && line == pcs.read + 1);
+        writes += static_cast<unsigned>(operation == LLVMStore && line == pcs.write + 1);
+      }
+    }
+  }
+  require(reads != 0 && writes != 0,
+          "O3 retains ordered guest reads and writes at both source instructions");
+  require(LLVMGetNamedFunction(module.get(), "dsp56300_memory_direct") == nullptr,
+          "The memory-mode marker is eliminated before native execution");
+}
+
+void aliases() {
+  constexpr Word turns = 256;
+  constexpr Word load = static_cast<Word>(isa::Opcode::move_x_effective) | (1U << 15);
+  constexpr Word store = static_cast<Word>(isa::Opcode::move_x_effective);
+  constexpr auto stop = static_cast<Word>(isa::Opcode::stop);
+  constexpr std::array reload{store | (4U << 11),
+                              static_cast<Word>(isa::Opcode::move_immediate_x0),
+                              load | (4U << 11),
+                              stop};
+  constexpr std::array shifted{static_cast<Word>(isa::Opcode::do_immediate) |
+                                   ((turns & 0xffU) << 8) | ((turns >> 8) & 15U),
+                               start + 3,
+                               load | (3U << 11),
+                               store | (3U << 11) | (1U << 8),
+                               stop};
+  for (const bool loop : {false, true}) {
+    const auto program = loop ? std::span<const Word>(shifted) : std::span<const Word>(reload);
+    volatile_accesses(program, {.read = start + 2, .write = loop ? start + 3 : start});
+    const Storage storage;
+    const auto native = image(storage, true, program, CompileOptions::MemoryMode::direct);
+    Core core(storage.memory());
+    core.load(Space::program, start, program);
+    std::array<Word, turns + 1> words{};
+    words[0] = value;
+    core.load(Space::x, 0, words);
+    auto registers = core.registers();
+    registers.pc = start;
+    registers.omr = 0;
+    registers.m.fill(word_mask);
+    registers.r[1] = 1;
+    registers.x = value;
+    core.set_registers(registers);
+    core.install(native, 0);
+    const auto result = core.run();
+    require(result.fault == Fault{} && result.state == ExecutionState::stopped &&
+                result.retired == (loop ? (turns * 2) + 2 : reload.size()) &&
+                (core.registers().x & word_mask) == value,
+            "The native call observes writes through a distinct real read alias");
+    if (!loop) { continue; }
+    require(core.registers().r[0] == turns && core.registers().r[1] == turns + 1,
+            "The shifted loop executes every source and destination increment");
+    for (Word index = 0; index <= turns; ++index) {
+      require(storage.word(Space::x, index) == value,
+              "Forward overlapping copy propagates the seed through every aliased word");
+    }
+  }
+}
+
 void geometry() {
   const Storage storage;
   for (unsigned mutation = 0; mutation != 6; ++mutation) {
@@ -341,6 +452,7 @@ int main() try {
   const test::NativeFaults faults(Core::host_fault);
   require(!Core::host_fault(0, false, 0),
           "Unowned faults are not claimed outside native execution");
+  aliases();
   geometry();
   execution(false);
   execution(true);
