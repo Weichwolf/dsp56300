@@ -1,4 +1,4 @@
-# Common core contract, version 9
+# Common core contract, version 10
 
 Every processor core in this family (cpu12, dsp56300, armv5, sharc and later
 ones) follows this contract. The file is identical in all core repositories; a
@@ -58,6 +58,20 @@ feature is justified by the architecture and by the common kernels of section
   device state enters an artifact.
 - `Core::install(NativeImage, variant)` runs on a stopped owner, validates the
   actual code words and memory layout, and changes no guest state or time.
+- What LLVM can optimise is left to LLVM. The lowering emits straightforward IR
+  that carries the full meaning (guest state as SSA values, flags as values,
+  guest calls to static targets as calls, loops as loops) and does not
+  implement by hand a transformation the optimiser performs: inlining, removal
+  of unobserved flags and state, hoisting, unrolling, register allocation
+  across edges. A hand-written transformation in a core needs a measurement
+  showing that LLVM cannot do it from IR the lowering could emit.
+- Preparation uses all host cores. `lower`, `load` and `bind` are safe to call
+  concurrently from several threads for different images, variants and units,
+  and hold no process-wide mutable state. Lowering partitions its output so
+  that independent parts can be optimised and compiled in parallel; the
+  consumer, which owns optimisation and native code, runs them on as many
+  threads as the host offers. The result is byte-identical to a
+  single-threaded preparation.
 - One code generator: LLVM. No interpreter and no hand-written per-host emitter
   in production. Unsupported, undeclared or changed code fails explicitly with
   identity, address and reason; a code or mapping change revokes bindings.
@@ -145,6 +159,19 @@ show does not belong there.
   view base plus the guest address. Where the processor has an MMU, the core
   derives the host view from the actual guest translation state for every
   mapping host pages can express, and runs exact where they cannot.
+- A lent space is described by `Memory::complete(regions, views)`: per address
+  space a read view and a write view (`View { data, mirrored_tail }`), which
+  may be the same mapping. Memory is the same backing in both; read-only
+  content is present in the read view only; a read-modify-write loads through
+  the read view and stores through the write view. Where a multi-element
+  access can cross the top of the space, a view carries a mirrored tail: one
+  host page after the view that aliases its first page. The core checks
+  geometry at construction and `install`; identity of the backings and the
+  alias of the tail are declarations of the consumer and are not probed.
+- In direct mode every guest access is observable, because the host may fault
+  on it, and the views create aliases the optimiser cannot see. Guest loads
+  and stores through lent views are therefore typed volatile accesses;
+  registers, flags and owner state remain ordinary SSA.
 - `CompileOptions::MemoryMode { exact, direct }`, default `exact`, is the
   consumer's declaration. In `direct` mode an access the guest mapping or the
   host protection forbids is a host fault that ends the run with a reported
@@ -161,7 +188,10 @@ show does not belong there.
   records a fixed fault and escapes at its native-call adapter, inside all C++
   execution scopes, without a system call on a successful native entry. The
   handler does no allocation, formatting, decoding or state reconstruction.
-  After such a fault the instance is not resumed.
+  After such a fault the instance is not resumed, and only the fault
+  diagnostics are defined (address, operation, 64-bit variant, guest PC): the
+  register backing may be partially materialized and is not an architectural
+  snapshot; `Progress` denotes the last completed owner return.
 - `NativeSymbols::fault_map` carries, as immutable data copied by `bind`, the
   executable text ranges of the linked image (`TextRange {address, size}`) and
   the mapping from native code intervals to guest instructions (`Site
