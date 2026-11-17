@@ -54,10 +54,9 @@ public:
   }
 
   [[nodiscard]] std::optional<Counts> stop() const noexcept {
+    if (!valid_) { return std::nullopt; }
 #if defined(__linux__)
-    if (!valid_ || ioctl(leader_, PERF_EVENT_IOC_DISABLE, PERF_IOC_FLAG_GROUP) != 0) {
-      return std::nullopt;
-    }
+    if (ioctl(leader_, PERF_EVENT_IOC_DISABLE, PERF_IOC_FLAG_GROUP) != 0) { return std::nullopt; }
     // nr, time_enabled, time_running, cycles, instructions; group insertion order.
     std::array<std::uint64_t, 5> values{};
     if (read(leader_, values.data(), sizeof(values)) != sizeof(values) || values[0] != 2 ||
@@ -76,7 +75,7 @@ public:
 private:
 #if defined(__linux__)
   int leader_ = -1, member_ = -1;
-  bool valid_ = false;
 #endif
+  bool valid_ = false;
 };
 }

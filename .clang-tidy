@@ -1,5 +1,5 @@
 HeaderFilterRegex: '.*/(include|src|test)/.*'
-ExcludeHeaderFilterRegex: '.*/(usr|doc/local|build)/.*'
+ExcludeHeaderFilterRegex: '.*/(usr|doc/local|generated|CMakeFiles|_deps)/.*'
 FormatStyle: file
 Checks: >
   -*,
