@@ -382,33 +382,46 @@ void read_only(const bool fixed, const bool direct = false) {
       "Exact callback writes preserve read-only content despite a separate writable scratch view");
 }
 
-void native_failure(const bool writing) {
+void native_failure(const bool writing, const bool loop = false) {
   constexpr std::uint64_t variant = (std::uint64_t{1} << 48) + 7;
   const Storage storage;
   const auto operation =
       static_cast<Word>(isa::Opcode::move_x_effective) | (4U << 11) | (writing ? 0U : 1U << 15);
-  const std::array program{
+  const std::array ordinary{
       operation, static_cast<Word>(isa::Opcode::adc_x_a), static_cast<Word>(isa::Opcode::stop)};
+  const std::array region{static_cast<Word>(isa::Opcode::do_immediate) | (4U << 8),
+                          Word{4},
+                          operation ^ (7U << 11),
+                          static_cast<Word>(isa::Opcode::adc_x_a),
+                          static_cast<Word>(isa::Opcode::nop),
+                          static_cast<Word>(isa::Opcode::stop)};
+  const auto program = loop ? std::span<const Word>(region) : std::span<const Word>(ordinary);
   const auto native = image(
       storage, true, program, CompileOptions::MemoryMode::direct, {.pc = 0, .variant = variant});
   Core core(storage.memory());
   core.load(Space::program, 0, program);
   auto registers = core.registers();
   registers.omr = 0;
-  registers.r[0] = static_cast<Word>(storage.words());
+  registers.r[0] = static_cast<Word>(storage.words()) - (loop ? 1U : 0U);
+  registers.m.fill(word_mask);
   registers.x = value;
   core.set_registers(registers);
   core.install(native, variant);
+  if (loop) {
+    const auto setup = core.run(1);
+    require(setup.retired == 1 && setup.fault == Fault{} && core.registers().pc == 2,
+            "The DO setup completes at a real owner boundary before entering its memory loop");
+  }
+  const auto before = core.progress();
   const test::NativeFaults::InterruptedMask interrupted;
-  const auto result = core.run_until(10);
+  const auto result = core.run_until(50);
   require(interrupted.restored(),
           "A native escape retains the interrupted mask and removes handler-only blocking");
   require(result.fault.kind == (writing ? FaultKind::memory_write : FaultKind::memory_read) &&
               result.fault.space == Space::x && result.fault.address == storage.words() &&
-              result.fault.pc == 0 && result.fault.variant == variant && result.retired == 0 &&
-              result.progress == Progress{},
-          "A real native read/write fault reports PC0 and the full source variant before later "
-          "arithmetic");
+              result.fault.pc == (loop ? 2U : 0U) && result.fault.variant == variant &&
+              result.retired == 0 && result.progress == before,
+          "A native fault preserves its source variant, actual memory PC and last owner progress");
   const auto repeated = core.run(1);
   require(repeated.retired == 0 && repeated.fault == result.fault,
           "A terminal escape releases the owner guard but never resumes guest execution");
@@ -464,6 +477,8 @@ int main() try {
   read_only(true, true);
   native_failure(false);
   native_failure(true);
+  native_failure(false, true);
+  native_failure(true, true);
   repeat_eligibility();
   std::cout << "Borrowed DSP read/write views passed\n";
   return 0;
