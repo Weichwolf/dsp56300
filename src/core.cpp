@@ -138,6 +138,11 @@ Word Core::Impl::read_memory(const Space space, const Word address) {
 
 void Core::Impl::write_memory(const Space space, const Word address, const Word value) {
   if (detail::dsp56300_memory_direct()) {
+    // Undeclared P stores retain the consumer's loader/code-change effects.
+    if (space == Space::program && io != nullptr && memory_window(space, address) == nullptr) {
+      write_external(space, address, value);
+      return;
+    }
     if (space == Space::program || address < detail::io_begin) {
       static_cast<volatile Word *>(
           views[static_cast<std::size_t>(space)].write.data.data())[address] = value & word_mask;

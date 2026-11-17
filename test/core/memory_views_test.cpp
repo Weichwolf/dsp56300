@@ -19,6 +19,7 @@
 #include <llvm-c/Core.h>
 #include <llvm-c/Transforms/PassBuilder.h>
 #include <llvm-c/Types.h>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -432,6 +433,63 @@ void native_failure(const bool writing, const bool loop = false) {
   require(refused, "A terminal native instance cannot be reset into execution");
 }
 
+void program_store() {
+  const Storage storage;
+  constexpr std::array program{static_cast<Word>(isa::Opcode::movem_absolute_short) |
+                                   (target << 8) | 4U,
+                               static_cast<Word>(isa::Opcode::stop)};
+  auto regions = storage.regions;
+  regions[0].address = start;
+  regions[0].words = storage.views[0].read.data.subspan(start, program.size());
+  auto descriptors = storage.descriptors;
+  descriptors[0] = std::span(regions.data(), 1);
+
+  struct Loader final : test::RejectIo {
+    explicit Loader(Word *destination) : destination(destination) {}
+
+    bool write(Space space, Word address, Word pc, Word word) noexcept override {
+      ++stores;
+      transfer = {.space = space, .address = address, .pc = pc, .value = word};
+      if (transfer.space != Space::program || transfer.address != target) { return false; }
+      *static_cast<volatile Word *>(destination) = word;
+      loaded = true;
+      return true;
+    }
+
+    [[nodiscard]] std::optional<Word> inspect_program(Word address) const noexcept override {
+      return loaded && address == target
+                 ? std::optional<Word>(*static_cast<const volatile Word *>(destination))
+                 : std::nullopt;
+    }
+
+    Word *destination;
+
+    struct Transfer {
+      Space space = Space::program;
+      Word address = 0, pc = 0, value = 0;
+    } transfer;
+
+    unsigned stores = 0;
+    bool loaded = false;
+  } io(storage.views[0].write.data.data() + target);
+
+  const auto native = image(storage, false, program, CompileOptions::MemoryMode::direct);
+  Core core(Memory::complete(descriptors, storage.views), &io);
+  core.load(Space::program, start, program);
+  auto registers = core.registers();
+  registers.pc = start;
+  registers.omr = 0;
+  registers.x = value;
+  core.set_registers(registers);
+  core.install(native, 0);
+  require(!io.inspect_program(target), "Original program contents are not predeclared loaded");
+  const auto result = core.run();
+  require(result.fault == Fault{} && result.state == ExecutionState::stopped &&
+              result.retired == program.size() && io.stores == 1 && io.transfer.pc == start &&
+              io.inspect_program(target) == value && storage.word(Space::program, target) == value,
+          "A Direct P store preserves the consumer's real loader and cold code-knownness effects");
+}
+
 void repeat_eligibility() {
   const Storage storage;
   constexpr std::array program{static_cast<Word>(isa::Opcode::rep_immediate) | (3U << 8),
@@ -479,6 +537,7 @@ int main() try {
   native_failure(true);
   native_failure(false, true);
   native_failure(true, true);
+  program_store();
   repeat_eligibility();
   std::cout << "Borrowed DSP read/write views passed\n";
   return 0;
