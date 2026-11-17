@@ -457,13 +457,6 @@ std::optional<RegionPlan> make_plan(RegionPlan plan) {
     pc = (pc + operation.instruction.words) & word_mask;
   }
   if (!append_tree(plan, 0, operations.size())) { return {}; }
-  if (!plan.batch &&
-      std::ranges::all_of(plan.absolute, [](const auto &bank) { return bank.empty(); }) &&
-      !std::ranges::any_of(plan.extents, [](const auto &bank) {
-        return std::ranges::any_of(bank, [](const auto &extent) { return extent.accessed; });
-      })) {
-    return {};
-  }
   return plan;
 }
 }

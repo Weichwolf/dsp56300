@@ -32,6 +32,7 @@ struct Case {
   Kind kind;
   unsigned words, cycles;
   Word prefix = op<isa::Opcode::nop>;
+  bool register_only = false;
 };
 
 constexpr std::array cases{
@@ -101,16 +102,31 @@ constexpr std::array cases{
          .kind = Kind::returned,
          .words = 1,
          .cycles = 3,
-         .prefix = op<isa::Opcode::tst_a>}};
+         .prefix = op<isa::Opcode::tst_a>},
+    Case{.opcode = op<isa::Opcode::jsr_absolute_short> | target,
+         .extension = 0,
+         .kind = Kind::call,
+         .words = 1,
+         .cycles = 3,
+         .prefix = op<isa::Opcode::tst_a>,
+         .register_only = true},
+    Case{.opcode = op<isa::Opcode::rts>,
+         .extension = 0,
+         .kind = Kind::returned,
+         .words = 1,
+         .cycles = 3,
+         .prefix = op<isa::Opcode::tst_a>,
+         .register_only = true}};
 
 std::array<Word, code_words> program(const Case item) {
   std::array<Word, code_words> words;
   words.fill(op<isa::Opcode::stop>);
-  words[0] = move_x;
+  words[0] = item.register_only ? test::parallel_none | (6U << 13) | (4U << 8) : move_x;
   words[1] = item.prefix;
   words[2] = item.opcode;
   if (item.words == 2) { words[3] = item.extension; }
-  words[target - entry] = move_x | (1U << 8);
+  words[target - entry] =
+      item.register_only ? test::parallel_none | (7U << 13) | (4U << 8) : move_x | (1U << 8);
   words[target - entry + 1] = op<isa::Opcode::nop>;
   words[target - entry + 2] =
       item.kind == Kind::call ? op<isa::Opcode::rts> : op<isa::Opcode::stop>;
@@ -237,6 +253,9 @@ void boundaries(const Case item) {
         for (const Word datum : {0x800004U, 0x800005U}) {
           x[0] = datum;
           auto initial = test::register_model::seed(mode);
+          if (item.register_only) {
+            initial.y = (std::uint64_t{loaded_word} << test::word_bits) | datum;
+          }
           initial.pc = entry;
           initial.sr = mode | flags | irq_mask;
           initial.r[0] = target;

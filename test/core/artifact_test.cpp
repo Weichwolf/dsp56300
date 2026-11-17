@@ -3,6 +3,7 @@
 #include "dsp56300/memory.hpp"
 #include "image_compiler.hpp"
 #include "isa.hpp"
+#include "register_model.hpp"
 #include "retirement_observer.hpp"
 #include "support.hpp"
 
@@ -226,6 +227,58 @@ void roundtrip() {
 
 using test::retirement_binding;
 using test::RetirementIo;
+
+void register_only_control() {
+  constexpr std::size_t code_words = destination - start + 4;
+  constexpr std::uint64_t cycles = (2 * 3) + 4 + 10;
+  std::array<Word, code_words> code;
+  code.fill(static_cast<Word>(isa::Opcode::stop));
+  code[0] = move | (3U << 8);
+  code[1] = nop;
+  code[2] = static_cast<Word>(isa::Opcode::jsr_absolute_short) | destination;
+  code[destination - start] = move | (1U << 16) | (5U << 8);
+  code[destination - start + 1] = nop;
+  code[destination - start + 2] = static_cast<Word>(isa::Opcode::rts);
+  const std::array spans{CodeSpan{.address = start, .words = code}};
+  const std::array variants{
+      CodeVariant{.id = 0, .code = spans, .entries = initial_entries, .failed_fetches = {}}};
+  const Source source;
+  const std::array layouts{VariantLayout{.id = 0, .memory = source.memory}};
+  const std::array callbacks{
+      CallbackBinding{.role = CallbackRole::retired, .symbol = "record_retired"}};
+  const auto binding = retirement_binding();
+  const auto image = Core::compile({.variants = variants},
+                                   {.memory = layouts,
+                                    .interrupts = {},
+                                    .transitions = {},
+                                    .callbacks = callbacks,
+                                    .bindings = binding});
+  std::array<Word, program_words> program{};
+  std::array<Word, data_words> x{};
+  std::array<Word, data_words> y{};
+  std::ranges::copy(code, program.begin() + start);
+  RetirementIo io;
+  Core core(Memory::separate({.program = program, .x = x, .y = y}), &io);
+  auto expected = test::register_model::seed(0);
+  expected.pc = start;
+  expected.sr = 0;
+  expected.sp = program_words - 1;
+  expected.sc = 0;
+  core.set_registers(expected);
+  core.install(image, 0);
+  expected.pc = start + 4;
+  expected.r[0] = 3;
+  expected.r[1] = 5;
+  expected.stack[0] = std::uint64_t{start + 3} << test::word_bits;
+  const auto result = core.run();
+  require(result.retired == 7 &&
+              result.progress == Progress{.instructions = 7, .estimated_cycles = cycles} &&
+              result.state == ExecutionState::stopped && result.fault == Fault{} &&
+              core.registers() == expected,
+          "Register-only calls and returns preserve the complete authored state and clock");
+  require(io.counts == std::array<std::uint64_t, 2>{6, 1},
+          "RAM-free control prefixes retire natively; only STOP uses exact instruction lowering");
+}
 
 struct RetirementMachine {
   RetirementMachine(const NativeImage &image,
@@ -511,6 +564,7 @@ extern "C" LLVMErrorRef LLVMRunPasses(LLVMModuleRef M,
 }
 
 int main() try {
+  register_only_control();
   roundtrip();
   retirement_observation();
   region_mode_hints();
