@@ -55,8 +55,11 @@ entries, variants, memory layout, devices, timing) through the public interface.
 ## Branches
 
 - `main` is the only long-lived branch, locally and on the remote. The remote
-  holds `main` and nothing else: no work, review or backup branches, no tags
-  used as backups.
+  holds `main`; no review or backup branches, no tags used as backups. One
+  exception: to hand unpublished work to another developer or host, push the
+  step's work branch (`work/<issue>-<step>`) and name it in the issue. Its
+  owner deletes it on the remote when the step is published or dropped. Code
+  is handed over as a branch, never as a patch pasted into an issue.
 - Local `main` equals the remote `main`. Fast-forward it (`git fetch --prune`,
   then `git merge --ff-only`) before starting work, before any measurement that
   names a published commit, and before every push. Nothing is committed on
