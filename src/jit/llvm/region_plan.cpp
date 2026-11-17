@@ -253,6 +253,19 @@ bool append(RegionPlan &plan, const BlockInstruction &operation) {
       !llvm19::supported_alu(instruction.opcode)) {
     return false;
   }
+  plan.computation = plan.computation || (instruction.opcode & byte_mask) != 0;
+  if (llvm19::conditional_alu(instruction.opcode)) {
+    plan.batch = false;
+    plan.steps.push_back({});
+    return true;
+  }
+  if (const auto update = plan_address_update(instruction)) {
+    if (update->mode < 2 && plan.changed_n[update->index]) { return false; }
+    plan.batch = false;
+    plan.agu[update->index] = true;
+    plan.steps.push_back({.update = update});
+    return true;
+  }
   const auto immediate = plan_address_immediate(instruction);
   if (immediate.valid()) {
     if (!destination(plan, immediate.destination)) { return false; }
@@ -260,7 +273,7 @@ bool append(RegionPlan &plan, const BlockInstruction &operation) {
     return true;
   }
   const auto moves = plan_moves(instruction);
-  plan.computation = plan.computation || moves.long_pair || (instruction.opcode & byte_mask) != 0;
+  plan.computation = plan.computation || moves.long_pair;
   const auto registers = plan_register_move(instruction, true);
   if (!append_moves(plan, moves)) { return false; }
   if (registers.valid() &&

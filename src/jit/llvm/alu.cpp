@@ -357,6 +357,23 @@ void Alu::lower(const Word code, const Banks &before, Banks &after) {
 }
 }
 
+V condition(Builder &ir, V status, const unsigned selector) {
+  const auto test = [&](const Word mask) {
+    return ir.CreateICmpNE(ir.CreateAnd(status, ir.getInt32(mask)), ir.getInt32(0));
+  };
+  auto *ge = ir.CreateICmpEQ(test(negative), test(overflow));
+  const std::array truth{ir.CreateNot(test(carry)),
+                         ge,
+                         ir.CreateNot(test(zero)),
+                         ir.CreateNot(test(negative)),
+                         ir.CreateAnd(ir.CreateNot(test(zero)), test(unnormalized | extension)),
+                         ir.CreateNot(test(extension)),
+                         ir.CreateNot(test(limit)),
+                         ir.CreateAnd(ge, ir.CreateNot(test(zero)))};
+  auto *selected = truth[selector & 7U];
+  return (selector & 8U) != 0 ? ir.CreateNot(selected) : selected;
+}
+
 bool supported_alu(const Word opcode) {
   const auto code = opcode & byte_mask;
   const auto form = code & alu_mask;
@@ -378,7 +395,15 @@ void lower_alu(Builder &ir,
                Banks &after,
                V &status,
                DeferredMac *deferred) {
+  auto *const old_status = status;
+  const auto old_banks = after;
+  auto *selected = conditional_alu(opcode) ? condition(ir, status, (opcode >> 8) & 15U) : nullptr;
   Alu(ir, mode, status, deferred).lower(opcode & byte_mask, before, after);
+  if (selected == nullptr) { return; }
+  for (unsigned bank = 0; bank < after.size(); ++bank) {
+    after[bank] = ir.CreateSelect(selected, after[bank], old_banks[bank]);
+  }
+  status = (opcode & (1U << 12)) != 0 ? ir.CreateSelect(selected, status, old_status) : old_status;
 }
 
 void finish_flags(Builder &ir, const Word mode, const DeferredMac &flags, V &status) {

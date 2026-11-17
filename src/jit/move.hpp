@@ -5,6 +5,7 @@
 #include "instruction.hpp"
 
 #include <array>
+#include <optional>
 
 namespace dsp56300::detail {
 struct NativeMove {
@@ -36,7 +37,7 @@ struct NativeAddressImmediate {
 };
 
 // Compile-time transfer description, independent of the host instruction set.
-[[nodiscard]] bool pure_address_update(const Instruction &instruction);
+[[nodiscard]] std::optional<AddressForm> plan_address_update(const Instruction &instruction);
 [[nodiscard]] NativeAddressImmediate plan_address_immediate(const Instruction &instruction);
 [[nodiscard]] NativeMoves plan_moves(const Instruction &instruction);
 [[nodiscard]] NativeRegisterMove plan_register_move(const Instruction &instruction);

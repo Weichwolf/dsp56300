@@ -14,6 +14,13 @@ struct DeferredMac {
   LLVMValueRef value = nullptr, overflowed = nullptr, limited = nullptr;
 };
 
+[[nodiscard]] constexpr bool conditional_alu(const Word opcode) {
+  constexpr Word mask = 0xffe000;
+  constexpr Word group = 0x202000;
+  return (opcode & mask) == group;
+}
+
+[[nodiscard]] LLVMValueRef condition(Builder &ir, LLVMValueRef status, unsigned selector);
 [[nodiscard]] bool supported_alu(Word opcode);
 void lower_alu(Builder &ir,
                Word opcode,

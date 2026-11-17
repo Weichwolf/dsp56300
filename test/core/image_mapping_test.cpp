@@ -2,6 +2,7 @@
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "isa.hpp"
+#include "reject_io.hpp"
 #include "support.hpp"
 
 #include <algorithm>
@@ -26,7 +27,7 @@ constexpr std::array code{static_cast<Word>(isa::Opcode::movec_immediate) | (1U 
                           static_cast<Word>(isa::Opcode::move_x_absolute_short) | (1U << 15),
                           static_cast<Word>(isa::Opcode::stop)};
 
-struct Bus final : Io {
+struct Bus final : test::RejectIo {
   Bus() {
     std::ranges::copy(code, program.begin() + start);
     std::ranges::copy(inserted, program.begin() + vector);
@@ -46,31 +47,13 @@ struct Bus final : Io {
     return window;
   }
 
-  bool read(Space /*space*/, Word /*address*/, Word /*pc*/, Word & /*value*/) noexcept override {
-    ++reads;
-    return false;
-  }
-
-  bool write(Space /*space*/, Word /*address*/, Word /*pc*/, Word /*value*/) noexcept override {
-    return false;
-  }
-
-  bool bit(Space /*space*/,
-           Word /*address*/,
-           Word /*pc*/,
-           Word /*bit*/,
-           BitAction /*action*/,
-           bool & /*previous*/) noexcept override {
-    return false;
-  }
-
   std::array<Word, 64> program{};
   std::array<Word, 1> first{first_value}, second{second_value};
   std::array<MemoryWindow, 1> window{};
   std::array<std::uint8_t, 1> known{1};
   bool tracked = false;
   Core *owner = nullptr;
-  unsigned grants = 0, reads = 0;
+  unsigned grants = 0;
 };
 
 bool same(const State &left, const State &right) {

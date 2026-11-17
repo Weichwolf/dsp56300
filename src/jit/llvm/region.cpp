@@ -68,12 +68,10 @@ enum class BatchAddressing : std::uint8_t { automatic, linear, general };
 [[nodiscard]] bool deferred_mac(const RegionPlan &plan) {
   if (!plan.batch || plan.count != 1) { return false; }
   const auto &instruction = plan.operations.front().instruction;
-  constexpr Word conditional_mask = 0xffe000;
-  constexpr Word conditional_group = 0x202000;
   constexpr Word mac_mask = 0x83;
   constexpr Word mac_code = 0x82;
   return instruction.operation == Operation::parallel &&
-         (instruction.opcode & conditional_mask) != conditional_group &&
+         !llvm19::conditional_alu(instruction.opcode) &&
          (instruction.opcode & mac_mask) == mac_code;
 }
 
@@ -604,6 +602,7 @@ private:
         index = step.repeat_end - 1;
         continue;
       }
+      if (step.update) { static_cast<void>(effective(proof, *step.update)); }
       V paired = nullptr;
       for (const auto &move : std::span(step.memory.transfers).first(step.memory.count)) {
         if (move.address.mode == 6 || (roots & (1U << move.address.index)) == 0) { continue; }
@@ -819,23 +818,6 @@ private:
     }
   }
 
-  V condition(const unsigned selector) {
-    const auto test = [&](const Word mask) {
-      return ir_.CreateICmpNE(ir_.CreateAnd(status_, ir_.getInt32(mask)), ir_.getInt32(0));
-    };
-    auto *ge = ir_.CreateICmpEQ(test(negative), test(overflow));
-    const std::array truth{ir_.CreateNot(test(carry)),
-                           ge,
-                           ir_.CreateNot(test(zero)),
-                           ir_.CreateNot(test(negative)),
-                           ir_.CreateAnd(ir_.CreateNot(test(zero)), test(unnormalized | extension)),
-                           ir_.CreateNot(test(extension)),
-                           ir_.CreateNot(test(limit)),
-                           ir_.CreateAnd(ge, ir_.CreateNot(test(zero)))};
-    auto *selected = truth[selector & 7U];
-    return (selector & 8U) != 0 ? ir_.CreateNot(selected) : selected;
-  }
-
   V next_pc() {
     const auto &last = plan_.operations.back();
     auto *following = ir_.getInt32((last.pc + last.instruction.words) & word_mask);
@@ -845,14 +827,15 @@ private:
                        : ir_.getInt32(plan_.control.target & word_mask);
     return plan_.control.selector == 16
                ? target
-               : ir_.CreateSelect(condition(plan_.control.selector), target, following);
+               : ir_.CreateSelect(
+                     llvm19::condition(ir_, status_, plan_.control.selector), target, following);
   }
 
   void finish() {
     for (unsigned bank = 0; bank < banks_.size(); ++bank) { put(banks_[bank], bank_fields[bank]); }
     for (unsigned index = 0; index < agu_registers; ++index) {
-      if (plan_.extents[0][index].accessed || plan_.extents[1][index].accessed ||
-          plan_.definitions[index].has_value()) {
+      if (plan_.agu[index] || plan_.extents[0][index].accessed ||
+          plan_.extents[1][index].accessed || plan_.definitions[index].has_value()) {
         put(ir_.CreateAnd(cursors_[index], ir_.getInt32(word_mask)),
             offsetof(Registers, r) + (index * sizeof(Word)));
       }
@@ -996,6 +979,7 @@ private:
         index = step.repeat_end - 1;
         continue;
       }
+      if (step.update) { static_cast<void>(effective(cursors_, *step.update)); }
       if (step.registers.valid()) {
         write_register(step.registers.destination, read_register(before, step.registers.source));
       }

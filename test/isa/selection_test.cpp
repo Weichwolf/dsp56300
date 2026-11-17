@@ -5,6 +5,7 @@
 #include "isa.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
+#include "reject_io.hpp"
 #include "selection_model.hpp"
 #include "support.hpp"
 
@@ -33,7 +34,7 @@ constexpr Word adc_x_a = static_cast<Word>(isa::Opcode::adc_x_a);
 constexpr Word load_x0_increment =
     static_cast<Word>(isa::Opcode::move_x_effective) | (1U << 15) | (3U << 11);
 
-class Observer final : public Io {
+class Observer final : public RejectIo {
 public:
   bool read(const Space space, const Word address, const Word pc, Word &value) noexcept override {
     ++calls;
@@ -50,19 +51,6 @@ public:
       core->load(Space::program, start + 3, std::array{adc_x_a});
     } catch (...) { valid = false; }
     return accept;
-  }
-
-  bool write(Space /*space*/, Word /*address*/, Word /*pc*/, Word /*value*/) noexcept override {
-    return false;
-  }
-
-  bool bit(Space /*space*/,
-           Word /*address*/,
-           Word /*pc*/,
-           Word /*bit*/,
-           BitAction /*action*/,
-           bool & /*previous*/) noexcept override {
-    return false;
   }
 
   Core *core = nullptr;

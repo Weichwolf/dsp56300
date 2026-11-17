@@ -6,6 +6,7 @@
 #include "loop_frames.hpp"
 #include "native_sequence_model.hpp"
 #include "register_model.hpp"
+#include "reject_io.hpp"
 #include "support.hpp"
 
 #include <algorithm>
@@ -39,7 +40,7 @@ struct Request {
   bool repeat = false, relative = false, accept = true, replace = false;
 };
 
-class CountIo final : public Io {
+class CountIo final : public RejectIo {
 public:
   explicit CountIo(const Request request) : request_(request) {}
 
@@ -69,19 +70,6 @@ public:
     }
     value = payload;
     return request_.accept;
-  }
-
-  bool write(Space /*space*/, Word /*address*/, Word /*pc*/, Word /*value*/) noexcept override {
-    return false;
-  }
-
-  bool bit(Space /*space*/,
-           Word /*address*/,
-           Word /*pc*/,
-           Word /*bit*/,
-           BitAction /*action*/,
-           bool & /*previous*/) noexcept override {
-    return false;
   }
 
 private:

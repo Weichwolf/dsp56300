@@ -7,6 +7,7 @@
 #include "instruction.hpp"
 
 #include <array>
+#include <optional>
 
 namespace dsp56300::detail {
 namespace {
@@ -68,16 +69,19 @@ NativeMoves long_moves(const Instruction &instruction) {
 }
 }
 
-bool pure_address_update(const Instruction &instruction) {
-  return instruction.operation == Operation::parallel &&
-         (instruction.opcode & update_group_mask) == update_group &&
-         (instruction.opcode & byte_mask) == 0;
+std::optional<AddressForm> plan_address_update(const Instruction &instruction) {
+  if (instruction.operation != Operation::parallel ||
+      (instruction.opcode & update_group_mask) != update_group) {
+    return {};
+  }
+  return AddressForm{.mode = (instruction.opcode >> 11) & 3U,
+                     .index = (instruction.opcode >> 8) & 7U};
 }
 
 NativeAddressImmediate plan_address_immediate(const Instruction &instruction) {
   if (instruction.operation != Operation::parallel) { return {}; }
   const auto opcode = instruction.opcode;
-  if (instruction.words == 1 && (opcode & (parallel_group_mask | byte_mask)) == immediate_group) {
+  if (instruction.words == 1 && (opcode & parallel_group_mask) == immediate_group) {
     const auto reg = (opcode >> 16) & five_bit_mask;
     if (reg >= r_register_base) { return {.destination = reg, .value = (opcode >> 8) & byte_mask}; }
     return {};

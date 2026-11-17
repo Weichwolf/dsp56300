@@ -2,6 +2,7 @@
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "isa.hpp"
+#include "reject_io.hpp"
 #include "support.hpp"
 
 #include <algorithm>
@@ -40,7 +41,7 @@ NativeImage compile(const std::span<const RegionLayout> layout = memory) {
                         .bindings = {}});
 }
 
-struct Bus final : Io {
+struct Bus final : test::RejectIo {
   Bus() {
     std::ranges::copy(prefix, program.begin() + start);
     std::ranges::copy(body, program.begin() + destination);
@@ -57,30 +58,11 @@ struct Bus final : Io {
     return space == Space::x && granted ? std::span(&window, 1) : std::span<const MemoryWindow>{};
   }
 
-  bool read(Space /*space*/, Word /*address*/, Word /*pc*/, Word & /*value*/) noexcept override {
-    ++reads;
-    return false;
-  }
-
-  bool write(Space /*space*/, Word /*address*/, Word /*pc*/, Word /*value*/) noexcept override {
-    return false;
-  }
-
-  bool bit(Space /*space*/,
-           Word /*address*/,
-           Word /*pc*/,
-           Word /*bit*/,
-           BitAction /*action*/,
-           bool & /*previous*/) noexcept override {
-    return false;
-  }
-
   std::array<Word, 64> program{};
   std::array<Word, 1> data{value};
   std::array<std::uint8_t, 1> known{1};
   MemoryWindow window{};
   bool tracked = true, granted = true;
-  unsigned reads = 0;
 };
 
 bool same(const State &left, const State &right) {

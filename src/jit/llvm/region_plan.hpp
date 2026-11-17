@@ -29,9 +29,10 @@ struct RegionWindow {
 
 struct RegionPlan {
   struct Step {
-    NativeMoves memory;
-    NativeRegisterMove registers;
+    NativeMoves memory{};
+    NativeRegisterMove registers{};
     NativeAddressImmediate immediate{};
+    std::optional<AddressForm> update = std::nullopt;
     Word guards = 0;
     std::size_t repeat_end = 0;
     Word repetitions = 0;

@@ -5,6 +5,7 @@
 #include "installed_program.hpp"
 #include "isa.hpp"
 #include "register_model.hpp"
+#include "reject_io.hpp"
 #include "saturated_shift_model.hpp"
 #include "saturation_model.hpp"
 #include "support.hpp"
@@ -176,7 +177,7 @@ void undefined_counts(const NativeImage &image) {
   }
 }
 
-class Observer final : public Io {
+class Observer final : public RejectIo {
 public:
   Core *core = nullptr;
   Registers expected;
@@ -195,19 +196,6 @@ public:
     }
     value = datum;
     return accept && observed;
-  }
-
-  bool write(Space /*space*/, Word /*address*/, Word /*pc*/, Word /*value*/) noexcept override {
-    return false;
-  }
-
-  bool bit(Space /*space*/,
-           Word /*address*/,
-           Word /*pc*/,
-           Word /*bit*/,
-           BitAction /*action*/,
-           bool & /*previous*/) noexcept override {
-    return false;
   }
 };
 
