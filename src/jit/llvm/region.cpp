@@ -113,8 +113,7 @@ public:
     for (unsigned bank = 0; bank < bindings_.size(); ++bank) {
       bindings_[bank].resize(plan_.windows[bank].size());
     }
-    if (!direct_ && (plan_.batch || !plan_.repeats.empty()) &&
-        addressing_ == BatchAddressing::automatic &&
+    if ((plan_.batch || !plan_.repeats.empty()) && addressing_ == BatchAddressing::automatic &&
         std::ranges::any_of(plan_.agu, [](bool used) { return used; })) {
       generate_versions(module, admission_only, admission_steps);
     } else if (admission_only) {
@@ -167,14 +166,16 @@ private:
                               admission_only,
                               admission_steps,
                               BatchAddressing::linear,
-                              variant_);
+                              variant_,
+                              direct_);
     const RegionLifter general(module,
                                plan_,
                                name + ".general",
                                admission_only,
                                admission_steps,
                                BatchAddressing::general,
-                               variant_);
+                               variant_,
+                               direct_);
     auto *all_linear = boolean(true);
     for (unsigned index = 0; index < agu_registers; ++index) {
       if (!plan_.agu[index]) { continue; }
