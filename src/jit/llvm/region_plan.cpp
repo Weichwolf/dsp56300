@@ -11,6 +11,7 @@
 #include "jit/llvm/alu.hpp"
 #include "jit/move.hpp"
 #include "jit/preparation.hpp"
+#include "jit/translation.hpp"
 
 #include <algorithm>
 #include <array>
@@ -274,10 +275,114 @@ bool append(RegionPlan &plan, const BlockInstruction &operation) {
   return true;
 }
 
+struct TreeContext {
+  Word weight = 1;
+  unsigned depth = 0;
+};
+
+struct RepeatAnalysis {
+  decltype(RegionPlan::extents) extents;
+  decltype(RegionPlan::deltas) origins;
+  decltype(RegionPlan::definitions) definitions;
+};
+
+bool repeat_extents(RegionPlan &plan, const RepeatAnalysis &prior, const Word repetitions) {
+  for (unsigned reg = 0; reg < agu_registers; ++reg) {
+    std::int64_t travel = 0;
+    if (__builtin_mul_overflow(plan.deltas[reg] - prior.origins[reg], repetitions - 1, &travel) ||
+        __builtin_add_overflow(plan.deltas[reg], travel, &plan.deltas[reg])) {
+      return false;
+    }
+    for (unsigned bank = 0; bank < 2; ++bank) {
+      auto &extent = plan.extents[bank][reg];
+      if (extent.accessed) {
+        auto &edge = travel < 0 ? extent.minimum : extent.maximum;
+        if (__builtin_add_overflow(edge, travel, &edge)) { return false; }
+      }
+      const auto &earlier = prior.extents[bank][reg];
+      if (!earlier.accessed) { continue; }
+      if (!extent.accessed) {
+        extent = earlier;
+      } else {
+        extent.minimum = std::min(extent.minimum, earlier.minimum);
+        extent.maximum = std::max(extent.maximum, earlier.maximum);
+        extent.writing = extent.writing || earlier.writing;
+      }
+    }
+  }
+  return true;
+}
+
+bool append_tree(RegionPlan &plan, std::size_t first, std::size_t last, TreeContext context = {});
+
+std::optional<std::size_t> append_repeat(RegionPlan &plan,
+                                         const std::size_t index,
+                                         const std::size_t last,
+                                         const TreeContext context) {
+  const auto &operation = plan.operations[index];
+  const auto flow = successors(operation);
+  const auto repetitions = ((operation.instruction.opcode >> 8) & byte_mask) |
+                           ((operation.instruction.opcode & 15U) << 8);
+  const auto weight = std::uint64_t{context.weight} * repetitions;
+  if (repetitions == 0 || flow.count != 2 || index + 1 >= last ||
+      flow.direct[0] != plan.operations[index + 1].pc ||
+      weight > std::numeric_limits<Word>::max()) {
+    return {};
+  }
+  const auto remaining = plan.operations.subspan(index + 1, last - index - 1);
+  const auto end = std::ranges::find(remaining, flow.direct[1], &BlockInstruction::pc);
+  if (end == remaining.end() || end->pc != flow.direct[1]) { return {}; }
+  const auto after = static_cast<std::size_t>(end - plan.operations.begin());
+  plan.steps.push_back(
+      {.memory = {}, .registers = {}, .repeat_end = after, .repetitions = repetitions});
+  const RepeatAnalysis prior{
+      .extents = plan.extents, .origins = plan.deltas, .definitions = plan.definitions};
+  plan.extents = {};
+  if (!append_tree(plan,
+                   index + 1,
+                   after,
+                   {.weight = static_cast<Word>(weight), .depth = context.depth + 1}) ||
+      !plan.batch || plan.definitions != prior.definitions ||
+      !repeat_extents(plan, prior, repetitions)) {
+    return {};
+  }
+  return after;
+}
+
+bool append_tree(RegionPlan &plan,
+                 const std::size_t first,
+                 const std::size_t last,
+                 const TreeContext context) {
+  if (context.depth >= stack_entries / 2) { return false; }
+  plan.depth = std::max(plan.depth, context.depth);
+  for (auto index = first; index < last; ++index) {
+    const auto &operation = plan.operations[index];
+    const auto count = std::uint64_t{plan.count} + context.weight;
+    const auto cost =
+        std::uint64_t{plan.cost} + (std::uint64_t{context.weight} * operation.instruction.cycles);
+    if (count > std::numeric_limits<Word>::max() || cost > std::numeric_limits<Word>::max()) {
+      return false;
+    }
+    plan.count = static_cast<Word>(count);
+    plan.cost = static_cast<Word>(cost);
+    if (operation.instruction.operation == Operation::loop_immediate) {
+      const auto after = append_repeat(plan, index, last, context);
+      if (!after) { return false; }
+      index = *after - 1;
+    } else if (index + 1 == plan.operations.size() && plan.control.valid) {
+      plan.steps.push_back({});
+    } else if (!append(plan, operation)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 std::optional<RegionPlan> make_plan(RegionPlan plan) {
   const auto operations = plan.operations;
   if (operations.empty()) { return {}; }
-  if (operations.front().instruction.operation == Operation::loop_immediate) {
+  if (operations.front().instruction.operation == Operation::loop_immediate &&
+      operations.front().loop_address == inactive_loop) {
     const auto &first = operations.front();
     const auto flow = successors(first);
     const auto count =
@@ -289,7 +394,7 @@ std::optional<RegionPlan> make_plan(RegionPlan plan) {
     }
     plan.operations = operations.subspan(1);
     auto body = make_plan(std::move(plan));
-    if (!body || !body->batch || body->setup ||
+    if (!body || !body->batch || body->setup || body->depth + 1U >= stack_entries / 2 ||
         (std::uint64_t{body->count} * count) + 1 > std::numeric_limits<Word>::max() ||
         (std::uint64_t{body->cost} * count) + first.instruction.cycles >
             std::numeric_limits<Word>::max()) {
@@ -314,14 +419,9 @@ std::optional<RegionPlan> make_plan(RegionPlan plan) {
       return {};
     }
     pc = (pc + operation.instruction.words) & word_mask;
-    if (&operation == &operations.back() && plan.control.valid) {
-      plan.steps.push_back({});
-    } else if (!append(plan, operation)) {
-      return {};
-    }
-    plan.cost += operation.instruction.cycles;
-    ++plan.count;
   }
+  if (!append_tree(plan, 0, operations.size())) { return {}; }
+  if (plan.depth != 0 && !plan.batch) { return {}; }
   if (!plan.batch &&
       std::ranges::all_of(plan.absolute, [](const auto &bank) { return bank.empty(); }) &&
       !std::ranges::any_of(plan.extents, [](const auto &bank) {

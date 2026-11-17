@@ -54,6 +54,7 @@ std::optional<std::size_t> admission_prefix(const RegionPlan &plan) {
     if (plan.steps[index].guards != 0) { count = index + 1; }
   }
   for (const auto &step : std::span(plan.steps).first(count)) {
+    if (step.repeat_end != 0) { return {}; }
     if (std::ranges::any_of(std::span(step.memory.transfers).first(step.memory.count),
                             [](const auto &move) { return !move.load; })) {
       return {};
@@ -214,6 +215,23 @@ private:
 
   V stack(V index) { return ir_.CreateLoad(ir_.getInt64Ty(), stack_address(index)); }
 
+  void stack_admission() {
+    if (plan_.depth != 0) {
+      const auto added = 2U * (plan_.depth + (plan_.setup ? 1U : 0U));
+      require(added < stack_entries
+                  ? ir_.CreateICmpUGE(ir_.getInt32(stack_entries - 1 - added), sc_)
+                  : boolean(false));
+    }
+  }
+
+  void stack_state() {
+    const auto base = plan_.setup ? 2U : 0U;
+    for (unsigned offset = base + 1; offset <= base + (2U * plan_.depth); ++offset) {
+      frames_[offset] =
+          stack(ir_.CreateAnd(ir_.CreateAdd(sp_, ir_.getInt32(offset)), ir_.getInt32(stack_mask)));
+    }
+  }
+
   void admission() {
     initial_cycles_ = load(64, offsetof(Cpu, cycles));
     initial_instructions_ = load(64, offsetof(Cpu, instructions));
@@ -258,6 +276,8 @@ private:
                                 initial_instructions_));
       require(ir_.CreateICmpUGE(ir_.getInt32(stack_entries - 3), sc_));
     }
+    stack_admission();
+    stack_state();
     require(ir_.CreateICmpEQ(ir_.CreateAnd(status_, ir_.getInt32(numeric_mode_mask)),
                              ir_.getInt32(plan_.operations.front().mode)));
     require(ir_.CreateICmpEQ(
@@ -798,6 +818,12 @@ private:
       }
     }
     put(status_, offsetof(Registers, sr));
+    for (unsigned offset = 0; offset < frames_.size(); ++offset) {
+      if (frames_[offset] == nullptr) { continue; }
+      auto *slot =
+          ir_.CreateAnd(ir_.CreateAdd(sp_, ir_.getInt32(offset)), ir_.getInt32(stack_mask));
+      ir_.CreateStore(frames_[offset], stack_address(slot));
+    }
     auto *retired = ir_.CreateMul(turns_, ir_.getInt64(plan_.count));
     auto *cycles = ir_.CreateMul(turns_, ir_.getInt64(plan_.cost));
     if (plan_.setup) {
@@ -893,10 +919,38 @@ private:
 
   void body(LLVMBasicBlockRef miss) { body(miss, plan_.steps.size()); }
 
+  struct Frame {
+    V address, count;
+    unsigned depth = 0;
+  };
+
   void body(LLVMBasicBlockRef miss, const std::size_t count) {
-    for (std::size_t index = 0; index < count; ++index) {
+    auto *remaining = plan_.setup ? ir_.getInt32(plan_.setup_count) : lc_;
+    if (iteration_ != nullptr) {
+      remaining =
+          ir_.CreateAnd(ir_.CreateSub(remaining, ir_.CreateTrunc(iteration_, ir_.getInt32Ty())),
+                        ir_.getInt32(word_mask));
+    }
+    body(miss,
+         0,
+         count,
+         {.address = plan_.setup ? ir_.getInt32(plan_.operations.back().loop_address)
+                                 : reg(32, offsetof(Registers, la)),
+          .count = remaining});
+  }
+
+  void body(LLVMBasicBlockRef miss,
+            const std::size_t first,
+            const std::size_t count,
+            const Frame parent) {
+    for (auto index = first; index < count; ++index) {
       const auto before = banks_;
       const auto &step = plan_.steps[index];
+      if (step.repeat_end != 0) {
+        repeat(miss, index, parent);
+        index = step.repeat_end - 1;
+        continue;
+      }
       if (step.registers.valid()) {
         write_register(step.registers.destination, read_register(before, step.registers.source));
       }
@@ -931,10 +985,15 @@ private:
     std::array<V, 4> banks;
     std::array<V, agu_registers> cursors, strides;
     V status, limited = nullptr, grown = nullptr;
+    std::array<V, stack_entries> frames{};
   };
 
   [[nodiscard]] Live live() {
-    Live state{.banks = banks_, .cursors = cursors_, .strides = strides_, .status = status_};
+    Live state{.banks = banks_,
+               .cursors = cursors_,
+               .strides = strides_,
+               .status = status_,
+               .frames = frames_};
     if (deferred_) {
       state.limited =
           ir_.CreateICmpNE(ir_.CreateAnd(status_, ir_.getInt32(limit)), ir_.getInt32(0));
@@ -949,6 +1008,7 @@ private:
     cursors_ = state.cursors;
     strides_ = state.strides;
     status_ = state.status;
+    frames_ = state.frames;
     if (state.limited != nullptr) {
       status_ = ir_.CreateOr(
           status_,
@@ -972,6 +1032,11 @@ private:
       result.strides[index] = phi(initial.strides[index], "stride");
     }
     result.status = deferred_ ? initial.status : phi(initial.status, "status");
+    for (unsigned index = 0; index < result.frames.size(); ++index) {
+      if (initial.frames[index] != nullptr) {
+        result.frames[index] = phi(initial.frames[index], "frame");
+      }
+    }
     if (initial.limited != nullptr) {
       result.limited = phi(initial.limited, "limited");
       result.grown = phi(initial.grown, "grown");
@@ -988,12 +1053,71 @@ private:
       incoming(phis.cursors[index], after.cursors[index]);
       incoming(phis.strides[index], after.strides[index]);
     }
+    for (unsigned index = 0; index < phis.frames.size(); ++index) {
+      if (phis.frames[index] != nullptr) { incoming(phis.frames[index], after.frames[index]); }
+    }
     if (phis.limited != nullptr) {
       incoming(phis.limited, after.limited);
       incoming(phis.grown, after.grown);
     } else {
       incoming(phis.status, after.status);
     }
+  }
+
+  void repeat(LLVMBasicBlockRef miss, const std::size_t index, const Frame parent) {
+    const auto &step = plan_.steps[index];
+    const auto first = index + 1;
+    const auto &last = plan_.operations[step.repeat_end - 1];
+    const auto frame = [&](const unsigned offset, V high, V low) {
+      const auto depth = 2U * (parent.depth + (plan_.setup ? 1U : 0U));
+      auto *value = ir_.CreateOr(
+          ir_.CreateShl(ir_.CreateZExt(high, ir_.getInt64Ty()), ir_.getInt64(word_bits)),
+          ir_.CreateZExt(low, ir_.getInt64Ty()));
+      frames_[depth + offset] = value;
+    };
+    auto *status = status_;
+    if (parent.depth != 0 || plan_.setup) {
+      status =
+          ir_.CreateOr(ir_.CreateAnd(status, ir_.getInt32(~forever_flag)), ir_.getInt32(loop_flag));
+    }
+    frame(1, parent.address, parent.count);
+    frame(2, ir_.getInt32(plan_.operations[first].pc), status);
+    const auto prior_deferred = deferred_;
+    const auto prior_flags = flags_;
+    auto leaf = plan_;
+    leaf.operations = plan_.operations.subspan(first, step.repeat_end - first);
+    leaf.count = static_cast<Word>(leaf.operations.size());
+    deferred_ = deferred_mac(leaf);
+    const auto initial = live();
+    auto *start = LLVMGetInsertBlock(ir_.get());
+    auto *loop = LLVMAppendBasicBlockInContext(context_, function_, "repeat");
+    auto *done = LLVMAppendBasicBlockInContext(context_, function_, "repeat_done");
+    LLVMBuildBr(ir_.get(), loop);
+    ir_.SetInsertPoint(loop);
+    const auto phis = live_phis(initial, start);
+    auto *remaining = LLVMBuildPhi(ir_.get(), ir_.getInt64Ty(), "repeat_remaining");
+    auto *turns = ir_.getInt64(step.repetitions);
+    LLVMAddIncoming(remaining, &turns, &start, 1);
+    restore_live(phis);
+    if (deferred_) { flags_.limited = phis.limited; }
+    body(miss,
+         first,
+         step.repeat_end,
+         {.address = ir_.getInt32(last.pc + last.instruction.words - 1),
+          .count = ir_.CreateTrunc(remaining, ir_.getInt32Ty()),
+          .depth = parent.depth + 1});
+    auto after = live();
+    if (deferred_) { after.limited = ir_.CreateOr(after.limited, flags_.limited); }
+    auto *backedge = LLVMGetInsertBlock(ir_.get());
+    live_backedge(phis, after, backedge);
+    auto *left = ir_.CreateSub(remaining, ir_.getInt64(1));
+    LLVMAddIncoming(remaining, &left, &backedge, 1);
+    unroll_mac(LLVMBuildCondBr(ir_.get(), ir_.CreateICmpEQ(left, ir_.getInt64(0)), done, loop));
+    ir_.SetInsertPoint(done);
+    restore_live(after);
+    if (deferred_) { llvm19::finish_flags(ir_, leaf.operations.front().mode, flags_, status_); }
+    deferred_ = prior_deferred;
+    flags_ = prior_flags;
   }
 
   void self_loop_bindings() {
@@ -1054,6 +1178,7 @@ private:
     initial_memory_guards();
     LLVMBuildCondBr(ir_.get(), eligible_, step, guard_miss);
     ir_.SetInsertPoint(step);
+    iteration_ = completed;
     body(guard_miss);
     const auto after = live();
     auto *next = ir_.CreateAdd(completed, ir_.getInt64(1));
@@ -1149,6 +1274,7 @@ private:
     const auto phis = live_phis(initial, start);
     auto *remaining = LLVMBuildPhi(ir_.get(), ir_.getInt64Ty(), "remaining");
     LLVMAddIncoming(remaining, &turns_, &start, 1);
+    iteration_ = ir_.CreateSub(turns_, remaining);
     restore_live(phis);
     if (deferred_) { flags_.limited = phis.limited; }
     body(miss);
@@ -1177,6 +1303,8 @@ private:
     saved_ = nullptr;
   V turns_ = nullptr, forever_ = nullptr, finite_count_ = nullptr, eligible_ = nullptr;
   V endpoint_ = nullptr;
+  V iteration_ = nullptr;
+  std::array<V, stack_entries> frames_{};
   std::array<V, 4> banks_{};
   std::array<V, agu_registers> cursors_{}, strides_{}, masks_{}, origins_{};
   std::array<std::array<V, agu_registers>, 2> memory_bases_{};

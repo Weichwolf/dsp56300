@@ -33,6 +33,8 @@ struct RegionPlan {
     NativeRegisterMove registers;
     NativeAddressImmediate immediate{};
     Word guards = 0;
+    std::size_t repeat_end = 0;
+    Word repetitions = 0;
   };
 
   struct Extent {
@@ -53,6 +55,7 @@ struct RegionPlan {
   RegionControl control;
   std::optional<BlockInstruction> setup = std::nullopt;
   Word setup_count = 0;
+  unsigned depth = 0;
   Word cost = 0, count = 0;
   bool batch = false, computation = false;
 };

@@ -39,7 +39,9 @@ auto body(const ImagePlan &plan, const Word first, const Word last) {
     if (instruction == nullptr || instruction->words - 1U > last - pc) {
       return std::vector<BlockInstruction>{};
     }
-    if (!ordinary(instruction->operation)) { return std::vector<BlockInstruction>{}; }
+    if (!ordinary(instruction->operation) && instruction->operation != Operation::loop_immediate) {
+      return std::vector<BlockInstruction>{};
+    }
     result.push_back({.instruction = *instruction, .pc = pc, .loop_address = last});
     pc += instruction->words;
   }
