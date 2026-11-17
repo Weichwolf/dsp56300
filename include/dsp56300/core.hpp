@@ -58,6 +58,7 @@ struct Fault {
   FaultKind kind = FaultKind::none;
   Space space = Space::program;
   Word address = 0, value = 0, pc = 0;
+  std::uint64_t variant = 0;
   bool operator==(const Fault &) const = default;
 };
 
@@ -265,6 +266,8 @@ public:
   [[nodiscard]] static NativeImage compile(CodeImage image, CompileOptions options);
   // Cold owner boundary: validate code/layout and bind RAM/events before publishing.
   void install(const NativeImage &image, std::uint64_t variant);
+  // Rebind borrowed storage while stopped; install a matching image before running.
+  void set_memory(Memory memory);
   void reset();
   [[nodiscard]] State state() const;
   // Completed nominal work; does not materialize a register snapshot.

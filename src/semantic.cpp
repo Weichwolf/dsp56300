@@ -46,6 +46,26 @@ Word Core::Impl::semantic_numeric_mode(void *const owner) noexcept {
 // RAM pointers, contents and per-word initialization remain dynamic.
 void Core::Impl::semantic_memory(void *const owner, const detail::SemanticMemory &memory) noexcept {
   const auto &self = *static_cast<Impl *>(owner);
+  // A complete loan always declares P regions. A fixed external layout without
+  // P therefore proves the ordinary callback/window form at installation.
+  if (memory.external != 0) {
+    const bool ordinary = !self.complete_memory();
+    __builtin_assume(ordinary);
+  }
+  if (self.complete_memory()) {
+    const auto regions = self.regions[memory.space];
+    const bool count = regions.size() == memory.regions;
+    __builtin_assume(count);
+    if (memory.regions == 0) { return; }
+    const auto &region = regions[memory.index];
+    const bool matches =
+        region.address == memory.first && region.words.size() == memory.words &&
+        region.writable == ((memory.flags & detail::memory_writable) != 0) &&
+        region.aliases_program == ((memory.flags & detail::memory_program_alias) != 0) &&
+        region.known.size() == ((memory.flags & detail::memory_tracked) != 0 ? memory.words : 0);
+    __builtin_assume(matches);
+    return;
+  }
   const bool mode = self.external == (memory.external != 0);
   __builtin_assume(mode);
   const auto space = static_cast<Space>(memory.space);

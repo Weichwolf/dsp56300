@@ -65,7 +65,15 @@ struct Core::Impl {
   void step_vector_semantic(const detail::Instruction &decoded);
   void call_vector(const detail::Instruction &decoded);
 
-  explicit Impl(Buffers supplied, Io *io, bool external_memory = false);
+  explicit Impl(Buffers supplied,
+                Io *host_io,
+                bool external_memory = false,
+                std::array<std::span<const MemoryWindow>, 3> region_views = {},
+                std::array<Memory::Views, 3> address_views = {});
+
+  void load_views(Space space, Word address, std::span<const Word> words);
+
+  [[nodiscard]] bool complete_memory() const noexcept { return !views[0].read.data.empty(); }
 
   void retire_instruction(const unsigned cycles) {
     ++cpu.instructions;
@@ -112,7 +120,7 @@ struct Core::Impl {
   void image_io_completed() noexcept;
   void unprepared(Word address, Word value = 0) noexcept;
   [[nodiscard]] const MemoryWindow *memory_window(Space space, Word address) const noexcept;
-  [[nodiscard]] static std::optional<Word> jit_program(void *owner, Word address) noexcept;
+  [[nodiscard]] bool write_window(Space space, Word address, Word value);
   void execute_operation(const detail::Instruction &decoded);
   void execute_return(const detail::Instruction &decoded);
   void execute_immediate(const detail::Instruction &decoded);
@@ -188,26 +196,28 @@ struct Core::Impl {
   detail::Cpu cpu;
   Io *io;
   std::unique_ptr<detail::ProgramCache> icache;
-  std::array<std::uint64_t, 4> latched{};
-  Buffers buffers;
-  Word current_pc = 0;
-  unsigned current_words = 1;
-  detail::Instruction repeated;
-  Fault fault;
-  Vector vector;
-  bool executing = false;
-  std::array<bool, 3> aliases_program{true, false, false};
-  Word debug_vector = 0;
-  bool external = false;
-  bool yield_requested = false;
   std::uint64_t cycle_deadline = std::numeric_limits<std::uint64_t>::max();
-  Word program_omr = 0;
-  std::shared_ptr<const NativeImage::Impl> image;
   const NativeImage::Impl::Variant *active_image = nullptr;
   const std::vector<std::uint64_t> *next_images = nullptr;
+  std::uint64_t image_revision = 0;
+  std::shared_ptr<const NativeImage::Impl> image;
+  std::array<std::uint64_t, 4> latched{};
+  std::array<std::span<const MemoryWindow>, 2> image_windows{};
+  std::array<std::span<const MemoryWindow>, 3> regions;
+  Buffers buffers;
+  std::array<Memory::Views, 3> views;
+  Fault fault;
+  Word current_pc = 0;
+  unsigned current_words = 1;
+  Word debug_vector = 0;
+  Word program_omr = 0;
+  detail::Instruction repeated;
+  Vector vector;
+  bool executing = false;
+  bool external = false;
+  bool yield_requested = false;
   bool image_ready = false;
   bool image_storage_admitted = false;
-  std::uint64_t image_revision = 0;
-  std::array<std::span<const MemoryWindow>, 2> image_windows{};
+  std::array<bool, 3> aliases_program{true, false, false};
 };
 } // namespace dsp56300

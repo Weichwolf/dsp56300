@@ -11,6 +11,7 @@
 #include "jit/llvm/image.hpp"
 #include "jit/llvm/region_memory.hpp"
 #include "jit/prefixes.hpp"
+#include "memory_views.hpp"
 #include "program_cache.hpp"
 
 #include <algorithm>
@@ -51,6 +52,33 @@ bool equal(const RegionLayout &left, const RegionLayout &right) {
          left.aliases_program == right.aliases_program;
 }
 
+Windows windows(const auto &core) {
+  if (core.complete_memory()) {
+    detail::validate_memory_views(core.regions, core.views);
+    return {core.regions[1], core.regions[2]};
+  }
+  return core.external ? windows(core.io) : Windows{};
+}
+
+bool storage(const auto &core, const Windows &granted) {
+  // The exact region strategy uses one virtual pointer per memory stream.
+  // Distinct aliases instead need the ordered, checked instruction lowering.
+  if (core.complete_memory() && std::ranges::any_of(core.views, [](const auto &view) {
+        return view.read.data.data() != view.write.data.data();
+      })) {
+    return false;
+  }
+  const detail::JitRuntime memory{
+      .memory = {detail::JitMemory{.data = core.buffers.x.data(),
+                                   .words = core.buffers.x.size(),
+                                   .aliases_program = core.aliases_program[1]},
+                 detail::JitMemory{.data = core.buffers.y.data(),
+                                   .words = core.buffers.y.size(),
+                                   .aliases_program = core.aliases_program[2]}},
+      .windows = granted};
+  return detail::admit_region_memory(std::as_bytes(std::span(&core, 1)), memory);
+}
+
 std::vector<RegionLayout> layout(const Buffers buffers,
                                  const Windows &windows,
                                  const bool external,
@@ -76,6 +104,21 @@ std::vector<RegionLayout> layout(const Buffers buffers,
                         .first = 0,
                         .size = banks[bank].size(),
                         .aliases_program = bank != 0 && aliases[bank]});
+    }
+  }
+  return result;
+}
+
+std::vector<RegionLayout> layout(const std::array<std::span<const MemoryWindow>, 3> &regions) {
+  std::vector<RegionLayout> result;
+  for (std::size_t bank = 0; bank < regions.size(); ++bank) {
+    for (const auto &region : regions[bank]) {
+      result.push_back({.space = static_cast<Space>(bank),
+                        .first = region.address,
+                        .size = region.words.size(),
+                        .writable = region.writable,
+                        .tracked = !region.known.empty(),
+                        .aliases_program = region.aliases_program});
     }
   }
   return result;
@@ -162,11 +205,11 @@ void Core::install(const NativeImage &image, const std::uint64_t variant) {
     throw std::invalid_argument("DSP image does not prepare the retained vector continuation");
   }
   const auto revision = self.io != nullptr ? dsp56300_io_revision(*self.io) : 0;
-  const auto granted = self.external ? windows(self.io) : Windows{};
-  if (selected.fixed_memory &&
-      !std::ranges::equal(selected.memory,
-                          layout(self.buffers, granted, self.external, self.aliases_program),
-                          equal)) {
+  const auto granted = windows(self);
+  const auto actual = self.complete_memory()
+                          ? layout(self.regions)
+                          : layout(self.buffers, granted, self.external, self.aliases_program);
+  if (selected.fixed_memory && !std::ranges::equal(selected.memory, actual, equal)) {
     throw std::invalid_argument("DSP image memory layout differs from this owner");
   }
   validate_program(self, selected);
@@ -176,16 +219,7 @@ void Core::install(const NativeImage &image, const std::uint64_t variant) {
       throw std::invalid_argument("DSP image differs from the latched REP instruction");
     }
   }
-  const detail::JitRuntime storage{
-      .memory = {detail::JitMemory{.data = self.buffers.x.data(),
-                                   .words = self.buffers.x.size(),
-                                   .aliases_program = self.aliases_program[1]},
-                 detail::JitMemory{.data = self.buffers.y.data(),
-                                   .words = self.buffers.y.size(),
-                                   .aliases_program = self.aliases_program[2]}},
-      .windows = granted};
-  const bool admitted = selected.fixed_memory &&
-                        detail::admit_region_memory(std::as_bytes(std::span(&self, 1)), storage);
+  const bool admitted = selected.fixed_memory && storage(self, granted);
   if (self.io != nullptr && revision != dsp56300_io_revision(*self.io)) {
     throw std::invalid_argument("DSP image binding changed during installation");
   }

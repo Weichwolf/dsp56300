@@ -47,7 +47,7 @@ set(dsp56300_semantic_sources
   src/transfer_parallel.cpp src/transfer_special.cpp src/viterbi.cpp)
 add_library(dsp56300_semantics OBJECT ${dsp56300_semantic_sources})
 add_library(dsp56300_core STATIC
-  src/io.cpp src/image_compile.cpp src/image_artifact.cpp src/image_entry.cpp src/image_sites.cpp src/jit/preparation.cpp src/jit/image_plan.cpp
+  src/io.cpp src/memory.cpp src/image_compile.cpp src/image_artifact.cpp src/image_entry.cpp src/image_sites.cpp src/jit/preparation.cpp src/jit/image_plan.cpp
   src/jit/prefixes.cpp src/jit/prefix_access.cpp src/jit/llvm/runtime.cpp
   src/jit/llvm/lifecycle.cpp src/jit/llvm/bindings.cpp src/jit/llvm/sites.cpp
   src/jit/llvm/image.cpp src/jit/llvm/image_regions.cpp src/jit/llvm/image_specialize.cpp src/jit/llvm/origins.cpp
@@ -269,6 +269,11 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   add_executable(dsp56300_public_api_test test/core/public_api_test.cpp)
   target_link_libraries(dsp56300_public_api_test PRIVATE dsp56300::core)
   add_test(NAME public-core-api COMMAND dsp56300_public_api_test)
+  add_executable(dsp56300_memory_views_test test/core/memory_views_test.cpp)
+  target_include_directories(dsp56300_memory_views_test PRIVATE test/support)
+  target_link_libraries(dsp56300_memory_views_test PRIVATE dsp56300::core)
+  add_test(NAME borrowed-memory-views COMMAND dsp56300_memory_views_test)
+  set_tests_properties(borrowed-memory-views PROPERTIES TIMEOUT 30)
   set_tests_properties(public-core-api PROPERTIES TIMEOUT 30)
   get_directory_property(core_test_targets BUILDSYSTEM_TARGETS)
   foreach(core_test_target IN LISTS core_test_targets)

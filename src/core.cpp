@@ -9,6 +9,7 @@
 #include "io.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -36,8 +37,8 @@ private:
   std::uint64_t &limit_;
 };
 
-Buffers bind_memory(const Memory memory, Io *const io) {
-  if (memory.storage().program.empty() && io == nullptr) {
+Buffers bind_memory(const Memory memory, Io *const io, const bool complete) {
+  if (memory.storage().program.empty() && io == nullptr && !complete) {
     throw std::invalid_argument("External DSP memory requires an I/O owner");
   }
   return memory.storage();
@@ -57,8 +58,16 @@ Buffers validate(const Buffers buffers, const bool external) {
 }
 }
 
-Core::Impl::Impl(const Buffers supplied, Io *const host_io, const bool external_memory)
-    : io(host_io), buffers(validate(supplied, external_memory)), external(external_memory) {
+Core::Impl::Impl(const Buffers supplied,
+                 Io *const host_io,
+                 const bool external_memory,
+                 const std::array<std::span<const MemoryWindow>, 3> region_views,
+                 const std::array<Memory::Views, 3> address_views)
+    : io(host_io),
+      regions(region_views),
+      buffers(validate(supplied, external_memory)),
+      views(address_views),
+      external(external_memory) {
   aliases_program[1] = overlaps_program(buffers.x);
   aliases_program[2] = overlaps_program(buffers.y);
 }
@@ -145,8 +154,34 @@ void Core::Impl::write_memory(const Space space, const Word address, const Word 
 }
 
 Core::Core(const Memory memory, Io *const io)
-    : impl_(std::make_unique<Impl>(bind_memory(memory, io), io, memory.storage().program.empty())) {
+    : impl_(std::make_unique<Impl>(bind_memory(memory, io, !memory.views_[0].read.data.empty()),
+                                   io,
+                                   memory.storage().program.empty(),
+                                   memory.regions_,
+                                   memory.views_)) {
   reset();
+}
+
+void Core::set_memory(const Memory memory) {
+  auto &self = *impl_;
+  if (self.executing) { throw std::logic_error("Memory binding requires stopped DSP execution"); }
+  const Impl replacement(bind_memory(memory, self.io, !memory.views_[0].read.data.empty()),
+                         self.io,
+                         memory.storage().program.empty(),
+                         memory.regions_,
+                         memory.views_);
+  self.buffers = replacement.buffers;
+  self.regions = replacement.regions;
+  self.views = replacement.views;
+  self.external = replacement.external;
+  self.aliases_program = replacement.aliases_program;
+  self.image.reset();
+  self.active_image = nullptr;
+  self.next_images = nullptr;
+  self.image_ready = false;
+  self.image_storage_admitted = false;
+  self.image_windows = {};
+  self.icache.reset();
 }
 
 State Core::state() const {
@@ -157,6 +192,10 @@ State Core::state() const {
 }
 
 void Core::load(const Space space, const Word address, const std::span<const Word> words) {
+  if (impl_->complete_memory()) {
+    impl_->load_views(space, address, words);
+    return;
+  }
   const auto memory = impl_->area(space);
   if (address > memory.size() || words.size() > memory.size() - address) {
     throw std::out_of_range("DSP host load outside memory span");
@@ -245,7 +284,7 @@ bool Core::interrupt_ready() const {
   const auto pc = impl_->cpu.reg.pc;
   Word opcode = 0;
   if (impl_->external) {
-    const auto known = Impl::jit_program(impl_.get(), pc);
+    const auto known = impl_->known_program_word(pc);
     if (!known) {
       throw std::logic_error("Interrupt eligibility requires known next-instruction metadata");
     }
