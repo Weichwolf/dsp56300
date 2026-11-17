@@ -21,6 +21,7 @@ struct ImageTranslation {
   bool vector = false;
   std::optional<std::span<const RegionLayout>> memory;
   std::optional<std::span<const Word>> region_modes = std::nullopt;
+  std::uint64_t variant = 0;
 };
 
 // Owned pre-O3 IR and exports; no execution owner or native compiler is retained.
@@ -44,8 +45,12 @@ void lift_image(LlvmModule &module,
                 const ImagePlan &plan,
                 std::string_view entry = {},
                 std::optional<std::span<const RegionLayout>> memory = std::nullopt,
-                std::optional<std::span<const Word>> region_modes = std::nullopt);
-void lift_vector(LlvmModule &module, const ImagePlan &plan, std::string_view entry = {});
+                std::optional<std::span<const Word>> region_modes = std::nullopt,
+                std::uint64_t variant = 0);
+void lift_vector(LlvmModule &module,
+                 const ImagePlan &plan,
+                 std::string_view entry = {},
+                 std::uint64_t variant = 0);
 // Remove ordinary ISA calls before the shared native O3/export/install pipeline.
 void specialize_image(LlvmModule &module);
 void specialize_image(LlvmModule &module, std::span<const std::string> entries);

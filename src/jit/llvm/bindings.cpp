@@ -2,6 +2,7 @@
 #include "jit/llvm/bindings.hpp"
 
 #include "dsp56300/core.hpp"
+#include "jit/llvm/origins.hpp"
 #include "jit/llvm/runtime.hpp"
 
 #include <algorithm>
@@ -289,6 +290,9 @@ llvm::Value *emit_retirement(llvm::BasicBlock &block,
     throw std::invalid_argument("DSP image lacks its retirement observer ABI");
   }
   llvm::IRBuilder<> ir(&block);
+  if (block.getParent()->getSubprogram() != nullptr) {
+    ir.SetCurrentDebugLocation(Origins::generated(*block.getParent()));
+  }
   auto *call = ir.CreateCall(helper, {owner, count, ir.getInt1(region), ir.getInt64(site)});
   call->setAttributes(helper->getAttributes());
   return call;

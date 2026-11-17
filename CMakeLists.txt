@@ -50,7 +50,7 @@ add_library(dsp56300_core STATIC
   src/io.cpp src/image_compile.cpp src/image_artifact.cpp src/image_entry.cpp src/jit/preparation.cpp src/jit/image_plan.cpp
   src/jit/prefixes.cpp src/jit/prefix_access.cpp src/jit/llvm/runtime.cpp
   src/jit/llvm/lifecycle.cpp src/jit/llvm/bindings.cpp
-  src/jit/llvm/image.cpp src/jit/llvm/image_regions.cpp src/jit/llvm/image_specialize.cpp
+  src/jit/llvm/image.cpp src/jit/llvm/image_regions.cpp src/jit/llvm/image_specialize.cpp src/jit/llvm/origins.cpp
   src/jit/llvm/region.cpp src/jit/llvm/region_plan.cpp src/jit/llvm/alu.cpp
   src/jit/move.cpp src/jit/registers.cpp)
 add_library(dsp56300::core ALIAS dsp56300_core)
@@ -132,6 +132,12 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   target_link_libraries(dsp56300_artifact_test PRIVATE dsp56300::core ${CMAKE_DL_LIBS})
   add_test(NAME semantic-image-artifacts COMMAND dsp56300_artifact_test)
   set_tests_properties(semantic-image-artifacts PROPERTIES TIMEOUT 30)
+  add_executable(dsp56300_native_origins_test test/core/native_origins_test.cpp)
+  target_include_directories(dsp56300_native_origins_test PRIVATE test/support)
+  target_include_directories(dsp56300_native_origins_test SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
+  target_link_libraries(dsp56300_native_origins_test PRIVATE dsp56300::core LLVM)
+  add_test(NAME native-source-attribution COMMAND dsp56300_native_origins_test)
+  set_tests_properties(native-source-attribution PROPERTIES TIMEOUT 30)
   add_library(dsp56300_binary_fixtures STATIC test/support/binary_fixture.cpp)
   target_include_directories(dsp56300_binary_fixtures PUBLIC include test/support)
   target_link_libraries(dsp56300_binary_fixtures PRIVATE dsp56300_quality)

@@ -21,7 +21,8 @@ namespace dsp56300::detail {
                                std::span<const BlockInstruction> operations,
                                std::span<const RegionLayout> memory,
                                std::string_view entry = {},
-                               Word *properties = nullptr);
+                               Word *properties = nullptr,
+                               std::uint64_t variant = 0);
 
 // Read-only uint64_t(const Cpu *, const NativeContext *) query: complete base
 // periods or zero. Relevant state/storage changes invalidate the certificate.

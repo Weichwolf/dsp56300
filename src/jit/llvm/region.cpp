@@ -10,6 +10,7 @@
 #include "jit.hpp"
 #include "jit/llvm/alu.hpp"
 #include "jit/llvm/builder.hpp"
+#include "jit/llvm/origins.hpp"
 #include "jit/llvm/region_memory.hpp"
 #include "jit/llvm/region_plan.hpp"
 #include "jit/llvm/runtime.hpp"
@@ -24,10 +25,13 @@
 #include <llvm-c/Core.h>
 #include <llvm-c/Types.h>
 #include <llvm/IR/Constant.h>
+#include <llvm/IR/Function.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Metadata.h>
+#include <llvm/IR/Module.h>
 #include <llvm/IR/Value.h>
+#include <llvm/Support/Casting.h>
 #include <map>
 #include <optional>
 #include <span>
@@ -82,9 +86,11 @@ public:
                const std::string_view entry = {},
                const bool admission_only = false,
                const std::size_t admission_steps = 0,
-               const BatchAddressing addressing = BatchAddressing::automatic)
+               const BatchAddressing addressing = BatchAddressing::automatic,
+               const std::uint64_t variant = 0)
       : context_(module.context()),
         function_(make_function(module, entry, admission_only)),
+        locations_(*llvm::unwrap(module.code()), variant),
         ir_(context_, LLVMAppendBasicBlockInContext(context_, function_, "entry")),
         plan_(plan),
         addressing_(addressing),
@@ -96,7 +102,12 @@ public:
                                  (plan_.control.reg < agu_registers ||
                                   plan_.control.target == plan_.operations.front().pc)))),
         cpu_(LLVMGetParam(function_, 0)),
-        owner_(LLVMGetParam(function_, 1)) {
+        owner_(LLVMGetParam(function_, 1)),
+        variant_(variant) {
+    locations_.function(*llvm::cast<llvm::Function>(llvm::unwrap(function_)));
+    LLVMSetCurrentDebugLocation2(
+        ir_.get(),
+        llvm::wrap(Origins::generated(*llvm::cast<llvm::Function>(llvm::unwrap(function_)))));
     for (unsigned bank = 0; bank < bindings_.size(); ++bank) {
       bindings_[bank].resize(plan_.windows[bank].size());
     }
@@ -147,14 +158,20 @@ private:
                          const bool admission_only,
                          const std::size_t admission_steps) {
     const std::string name = LLVMGetValueName(function_);
-    const RegionLifter linear(
-        module, plan_, name + ".linear", admission_only, admission_steps, BatchAddressing::linear);
+    const RegionLifter linear(module,
+                              plan_,
+                              name + ".linear",
+                              admission_only,
+                              admission_steps,
+                              BatchAddressing::linear,
+                              variant_);
     const RegionLifter general(module,
                                plan_,
                                name + ".general",
                                admission_only,
                                admission_steps,
-                               BatchAddressing::general);
+                               BatchAddressing::general,
+                               variant_);
     auto *all_linear = boolean(true);
     for (unsigned index = 0; index < agu_registers; ++index) {
       if (!plan_.agu[index]) { continue; }
@@ -1088,6 +1105,10 @@ private:
             const std::size_t count,
             const Frame parent) {
     for (auto index = first; index < count; ++index) {
+      LLVMSetCurrentDebugLocation2(
+          ir_.get(),
+          llvm::wrap(Origins::instruction(*llvm::cast<llvm::Function>(llvm::unwrap(function_)),
+                                          plan_.operations[index].pc)));
       const auto before = banks_;
       const auto &step = plan_.steps[index];
       if (step.repeat_end != 0) {
@@ -1445,6 +1466,7 @@ private:
 
   LLVMContextRef context_;
   LLVMValueRef function_;
+  Origins locations_;
   llvm19::Builder ir_;
   const RegionPlan &plan_;
   BatchAddressing addressing_;
@@ -1452,6 +1474,7 @@ private:
   Word loop_count_ = 0;
   V cpu_, owner_, initial_cycles_ = nullptr, initial_instructions_ = nullptr;
   V control_taken_ = nullptr, control_count_ = nullptr, control_status_ = nullptr;
+  const std::uint64_t variant_;
   V status_ = nullptr, initial_status_ = nullptr, lc_ = nullptr, sp_ = nullptr, sc_ = nullptr,
     saved_ = nullptr;
   V turns_ = nullptr, forever_ = nullptr, finite_count_ = nullptr, eligible_ = nullptr;
@@ -1506,7 +1529,8 @@ bool lift_region(LlvmModule &module,
                  const std::span<const BlockInstruction> operations,
                  const std::span<const RegionLayout> memory,
                  const std::string_view entry,
-                 Word *properties) {
+                 Word *properties,
+                 const std::uint64_t variant) {
   if (module.code() == nullptr) { throw std::logic_error("Region module was already transferred"); }
   const auto name = entry.empty() ? module.name() : std::string(entry);
   if (LLVMGetNamedFunction(module.code(), name.c_str()) != nullptr) {
@@ -1517,7 +1541,7 @@ bool lift_region(LlvmModule &module,
   if (properties != nullptr) {
     *properties = (plan->batch ? 1U : 0U) | (split_flags(*plan) ? 2U : 0U);
   }
-  const RegionLifter lift(module, *plan, name);
+  const RegionLifter lift(module, *plan, name, false, 0, BatchAddressing::automatic, variant);
   return true;
 }
 

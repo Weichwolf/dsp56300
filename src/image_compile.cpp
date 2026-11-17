@@ -133,6 +133,20 @@ memory_view(const detail::ImageContracts::Variant &variant) {
                               : std::nullopt;
 }
 
+std::uint64_t vector_variant(const std::span<const detail::ImageContracts::Variant> variants,
+                             const std::tuple<Word, Word, Word> &code) {
+  const auto address = std::get<0>(code);
+  for (const auto &variant : variants) {
+    const auto first = variant.words.find(address);
+    const auto second = variant.words.find((address + 1) & word_mask);
+    if (first != variant.words.end() && second != variant.words.end() &&
+        first->second == std::get<1>(code) && second->second == std::get<2>(code)) {
+      return variant.id;
+    }
+  }
+  throw std::logic_error("DSP vector has no declared source variant");
+}
+
 void validate(const CodeImage image, const CompileOptions options) {
   if (image.variants.empty()) { throw std::invalid_argument("DSP image requires code variants"); }
   std::set<std::pair<Word, unsigned>> interrupts;
@@ -298,7 +312,8 @@ SemanticImage Core::lower(const CodeImage image, const CompileOptions options) {
     translations.push_back({.name = names.back(),
                             .plan = plans[index],
                             .memory = memory_view(variant),
-                            .region_modes = options.region_modes});
+                            .region_modes = options.region_modes,
+                            .variant = variant.id});
     result->report.prepared_entries += variant.instructions.size();
   }
   for (const auto &[key, plan] : vector_plans) {
@@ -306,8 +321,11 @@ SemanticImage Core::lower(const CodeImage image, const CompileOptions options) {
     const auto name = image_name + ".vector." + llvm::utohexstr(address, true) + "." +
                       llvm::utohexstr(first, true) + "." + llvm::utohexstr(second, true);
     const auto symbol = vector_symbols.emplace(key, name).first;
-    translations.push_back(
-        {.name = symbol->second, .plan = plan, .vector = true, .memory = std::nullopt});
+    translations.push_back({.name = symbol->second,
+                            .plan = plan,
+                            .vector = true,
+                            .memory = std::nullopt,
+                            .variant = vector_variant(result->variants, key)});
     result->report.prepared_entries += plan.instructions.size();
   }
   auto artifact = detail::lower_images(image_name, translations, options.callbacks);
