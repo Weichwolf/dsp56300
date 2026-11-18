@@ -69,6 +69,7 @@ enum class BatchAddressing : std::uint8_t { automatic, linear, general };
            return instruction.operation != Operation::nop &&
                   instruction.operation != Operation::bit_memory &&
                   instruction.operation != Operation::arithmetic_shift_immediate &&
+                  instruction.operation != Operation::immediate_alu &&
                   (instruction.operation != Operation::parallel ||
                    llvm19::flag_inputs(instruction.opcode) != 0);
          });
@@ -1108,6 +1109,9 @@ private:
       } else if (instruction.operation == Operation::arithmetic_shift_immediate) {
         llvm19::lower_arithmetic_shift(
             ir_, instruction.opcode, plan_.operations[index].mode, banks_, status_);
+      } else if (instruction.operation == Operation::immediate_alu) {
+        llvm19::lower_immediate_alu(
+            ir_, instruction, plan_.operations[index].mode, banks_, status_);
       } else if (!plan_.control.valid || index + 1 != plan_.steps.size()) {
         transfers(step.memory, instruction.opcode);
         llvm19::lower_alu(

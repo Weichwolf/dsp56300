@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "bfu_logic_model.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "image_compiler.hpp"
 #include "isa.hpp"
+#include "native_sequence_model.hpp"
 #include "register_model.hpp"
 #include "retirement_observer.hpp"
 #include "support.hpp"
@@ -305,6 +307,85 @@ struct RetirementMachine {
   std::unique_ptr<Core> core;
 };
 
+void immediate_alu(const Word width, const bool destination_b) {
+  using enum isa::Opcode;
+  using test::bfu_model::Function;
+  constexpr std::array forms{std::pair{add_immediate_short, add_immediate_long},
+                             std::pair{sub_immediate_short, sub_immediate_long},
+                             std::pair{cmp_immediate_short, cmp_immediate_long},
+                             std::pair{or_immediate_short, or_immediate_long},
+                             std::pair{eor_immediate_short, eor_immediate_long},
+                             std::pair{and_immediate_short, and_immediate_long}};
+  constexpr std::array register_ops{add_x0_a, sub_x0_a, cmp_x0_a};
+  constexpr std::array logic{Function::bit_or, Function::bit_xor, Function::bit_and};
+  constexpr std::array<Word, forms.size()> literals{
+      test::sign24 + 1, word_mask, test::sign24 + 1, word_mask - 1, test::sign24 + 1, 0};
+  constexpr Word short_operand_mask = 0x3f;
+  const auto operand = [&](const std::size_t index) {
+    return width == 1 ? literals.at(index) & short_operand_mask : literals.at(index);
+  };
+  const Word destination_bit = destination_b ? 8U : 0U;
+  std::vector<Word> code;
+  for (std::size_t index = 0; index < forms.size(); ++index) {
+    const auto form = width == 1 ? forms.at(index).first : forms.at(index).second;
+    code.push_back(static_cast<Word>(form) | destination_bit |
+                   (width == 1 ? operand(index) << 8 : 0U));
+    if (width == 2) { code.push_back(operand(index)); }
+  }
+  code.push_back(static_cast<Word>(stop));
+  const std::array spans{CodeSpan{.address = start, .words = code}};
+  const std::array variants{
+      CodeVariant{.id = 0, .code = spans, .entries = initial_entries, .failed_fetches = {}}};
+  const Source source;
+  const std::array layouts{VariantLayout{.id = 0, .memory = source.memory}};
+  const std::array callbacks{
+      CallbackBinding{.role = CallbackRole::retired, .symbol = "record_retired"}};
+  const auto binding = retirement_binding();
+  const auto image = Core::compile({.variants = variants},
+                                   {.memory = layouts,
+                                    .interrupts = {},
+                                    .transitions = {},
+                                    .callbacks = callbacks,
+                                    .bindings = binding});
+  for (const auto mode : {0U, test::mode_up, test::mode_down | test::mode_rm}) {
+    auto expected = test::register_model::seed(mode);
+    expected.pc = start;
+    expected.sr = mode | test::status_byte;
+    expected.a = test::sign56 - 1;
+    expected.b = test::sign56 + 1;
+    const auto initial = expected;
+    for (std::size_t index = 0; index < forms.size(); ++index) {
+      auto old = expected;
+      if (index < register_ops.size()) {
+        old.x = operand(index);
+        test::sequence_model::alu(
+            expected, old, static_cast<Word>(register_ops.at(index)) | destination_bit);
+      } else {
+        test::bfu_model::apply(expected,
+                               old,
+                               {.function = logic.at(index - register_ops.size()),
+                                .form = test::bfu_model::Form::long_immediate,
+                                .value = operand(index),
+                                .destination_b = destination_b});
+      }
+      expected.pc += width;
+      RetirementMachine machine(image, code, false);
+      machine.core->set_registers(initial);
+      const auto prefix = index + 1;
+      const auto result = machine.core->run_until(prefix * width);
+      require(result.fault == Fault{} && result.retired == prefix &&
+                  result.progress ==
+                      Progress{.instructions = prefix, .estimated_cycles = prefix * width} &&
+                  machine.core->registers() == expected,
+              "Immediate ALU regions preserve every timed prefix and complete accumulator state");
+      if (prefix == forms.size()) {
+        require(machine.io.counts == std::array<std::uint64_t, 2>{forms.size(), 0},
+                "The complete immediate ALU prefix retires through the native region");
+      }
+    }
+  }
+}
+
 void retirement_case(const std::array<NativeImage, 2> &images,
                      const std::span<const Word> code,
                      const bool fault,
@@ -565,6 +646,9 @@ extern "C" LLVMErrorRef LLVMRunPasses(LLVMModuleRef M,
 
 int main() try {
   register_only_control();
+  for (const Word width : {1U, 2U}) {
+    for (const bool destination_b : {false, true}) { immediate_alu(width, destination_b); }
+  }
   roundtrip();
   retirement_observation();
   region_mode_hints();

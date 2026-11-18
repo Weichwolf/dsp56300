@@ -306,15 +306,25 @@ bool append_control(RegionPlan &plan, const Instruction &instruction) {
   return true;
 }
 
+bool append_immediate_alu(RegionPlan &plan, const Instruction &instruction) {
+  if (instruction.operation == Operation::immediate_alu) {
+    const auto kind = instruction.opcode & 7U;
+    if (kind == 1 || kind == 7) { return false; }
+  } else {
+    constexpr Word count_mask = 63;
+    if (((instruction.opcode >> 1) & count_mask) >= accumulator_bits) { return false; }
+  }
+  plan.computation = true;
+  plan.steps.push_back({});
+  return true;
+}
+
 bool append(RegionPlan &plan, const BlockInstruction &operation) {
   const auto &instruction = operation.instruction;
   if (instruction.operation == Operation::bit_memory) { return append_bit(plan, instruction); }
-  if (instruction.operation == Operation::arithmetic_shift_immediate) {
-    plan.computation = true;
-    constexpr Word count_mask = 63;
-    if (((instruction.opcode >> 1) & count_mask) >= accumulator_bits) { return false; }
-    plan.steps.push_back({});
-    return true;
+  if (instruction.operation == Operation::immediate_alu ||
+      instruction.operation == Operation::arithmetic_shift_immediate) {
+    return append_immediate_alu(plan, instruction);
   }
   if ((instruction.operation != Operation::parallel && instruction.operation != Operation::nop) ||
       !llvm19::supported_alu(instruction.opcode)) {

@@ -4,6 +4,7 @@
 #include "architecture.hpp"
 #include "dsp56300/memory.hpp"
 #include "fields.hpp"
+#include "instruction.hpp"
 #include "jit/llvm/builder.hpp"
 
 #include <array>
@@ -54,6 +55,7 @@ public:
   Alu(Builder &ir, const Word mode, V &status) : ir_(ir), mode_(mode), status_(status) {}
 
   void lower(Word code, const Banks &before, Banks &after);
+  void immediate(const Instruction &instruction, Banks &banks);
   void shift(Word opcode, Banks &banks);
   void flags(const Result &result);
 
@@ -118,12 +120,18 @@ private:
   }
 
   Result product(Word code, const Banks &before, unsigned destination);
-  Result sum(Word code, const Banks &before, unsigned destination);
+  Result sum(V left, V right, Word kind, bool carried);
   std::optional<Result> unary(Word code, V value);
   void rounding(Result &result);
-  void logic(Word code, const Banks &before, Banks &after, unsigned destination);
+  void logic(Word code, V left, V right, Banks &after, unsigned destination);
   void word_shift(Word code, const Banks &before, Banks &after, unsigned destination);
   void word_result(V value, Banks &after, unsigned destination, V carried = nullptr);
+
+  V word(V accumulator) {
+    return ir_.CreateAnd(
+        ir_.CreateTrunc(ir_.CreateLShr(accumulator, ir_.getInt64(bus_shift)), ir_.getInt32Ty()),
+        ir_.getInt32(word_mask));
+  }
 
   Builder &ir_;
   const Word mode_;
@@ -142,13 +150,8 @@ Result Alu::product(const Word code, const Banks &before, const unsigned destina
   return arithmetic(initial, term, false);
 }
 
-Result Alu::sum(const Word code, const Banks &before, const unsigned destination) {
-  const auto group = (code >> 4) & 7U;
-  const auto kind = code & 7U;
-  const bool carried = flag_inputs(code) != 0;
+Result Alu::sum(V left, V right, const Word kind, const bool carried) {
   const bool subtract = kind == 4 || kind == 5;
-  auto *left = before[destination];
-  auto *right = operand(before, group, destination != 0);
   auto first = arithmetic(left, right, subtract);
   auto *intermediate = first.value;
   auto *input = carried ? ir_.CreateShl(ir_.CreateZExt(ir_.CreateAnd(status_, ir_.getInt32(carry)),
@@ -164,6 +167,20 @@ Result Alu::sum(const Word code, const Banks &before, const unsigned destination
           .overflowed = carried ? overflowed(left, right, value, subtract) : first.overflowed,
           .carried = carry_out,
           .compare = kind == 5 && !carried};
+}
+
+void Alu::immediate(const Instruction &instruction, Banks &banks) {
+  const auto opcode = instruction.opcode;
+  const auto input = instruction.words == 2 ? instruction.extension : (opcode >> 8) & six_bit_mask;
+  const auto destination = (opcode & 8U) != 0 ? 1U : 0U;
+  const auto kind = opcode & 7U;
+  if (kind == 2 || kind == 3 || kind == 6) {
+    logic(kind, word(banks[destination]), ir_.getInt32(input), banks, destination);
+    return;
+  }
+  const auto result = sum(banks[destination], ir_.getInt64(aligned_word(input)), kind, false);
+  flags(result);
+  if (!result.compare) { banks[destination] = result.value; }
 }
 
 std::optional<Result> Alu::unary(const Word code, V value) {
@@ -239,14 +256,7 @@ void Alu::flags(const Result &result) {
   status_ = ir_.CreateOr(ir_.CreateAnd(status_, ir_.getInt32(~changed)), bits);
 }
 
-void Alu::logic(const Word code, const Banks &before, Banks &after, const unsigned destination) {
-  auto *left = ir_.CreateTrunc(ir_.CreateLShr(before[destination], ir_.getInt64(bus_shift)),
-                               ir_.getInt32Ty());
-  left = ir_.CreateAnd(left, ir_.getInt32(word_mask));
-  auto *right = ir_.CreateTrunc(
-      ir_.CreateLShr(operand(before, (code >> 4) & 7U, destination != 0), ir_.getInt64(bus_shift)),
-      ir_.getInt32Ty());
-  right = ir_.CreateAnd(right, ir_.getInt32(word_mask));
+void Alu::logic(const Word code, V left, V right, Banks &after, const unsigned destination) {
   const auto kind = code & 7U;
   V value = nullptr;
   if ((code & alu_mask) == complement) {
@@ -282,15 +292,13 @@ void Alu::word_shift(const Word code,
                      const Banks &before,
                      Banks &after,
                      const unsigned destination) {
-  auto *word =
-      ir_.CreateAnd(ir_.CreateTrunc(ir_.CreateLShr(before[destination], ir_.getInt64(bus_shift)),
-                                    ir_.getInt32Ty()),
-                    ir_.getInt32(word_mask));
+  auto *original = word(before[destination]);
   const bool left = (code & alu_mask) == word_left;
-  auto *value = left ? ir_.CreateAnd(ir_.CreateShl(word, ir_.getInt32(1)), ir_.getInt32(word_mask))
-                     : ir_.CreateLShr(word, ir_.getInt32(1));
-  auto *carried =
-      ir_.CreateICmpNE(ir_.CreateAnd(word, ir_.getInt32(left ? sign24_bit : 1U)), ir_.getInt32(0));
+  auto *value =
+      left ? ir_.CreateAnd(ir_.CreateShl(original, ir_.getInt32(1)), ir_.getInt32(word_mask))
+           : ir_.CreateLShr(original, ir_.getInt32(1));
+  auto *carried = ir_.CreateICmpNE(ir_.CreateAnd(original, ir_.getInt32(left ? sign24_bit : 1U)),
+                                   ir_.getInt32(0));
   word_result(value, after, destination, carried);
 }
 
@@ -329,7 +337,11 @@ void Alu::lower(const Word code, const Banks &before, Banks &after) {
     return;
   }
   if (logical(code)) {
-    logic(code, before, after, destination);
+    logic(code,
+          word(before[destination]),
+          word(operand(before, (code >> 4) & 7U, destination != 0)),
+          after,
+          destination);
     return;
   }
   if ((code & alu_mask) == word_left || (code & alu_mask) == word_right) {
@@ -339,7 +351,10 @@ void Alu::lower(const Word code, const Banks &before, Banks &after) {
   auto operation = unary(code, before[destination]);
   if (!operation) {
     operation = (code & product_bit) != 0 ? product(code, before, destination)
-                                          : sum(code, before, destination);
+                                          : sum(before[destination],
+                                                operand(before, (code >> 4) & 7U, destination != 0),
+                                                code & 7U,
+                                                flag_inputs(code) != 0);
   }
   if ((code & alu_mask) == rounded || ((code & product_bit) != 0 && (code & 1U) != 0)) {
     rounding(*operation);
@@ -405,6 +420,11 @@ void lower_alu(
 void lower_arithmetic_shift(
     Builder &ir, const Word opcode, const Word mode, Banks &banks, V &status) {
   Alu(ir, mode, status).shift(opcode, banks);
+}
+
+void lower_immediate_alu(
+    Builder &ir, const Instruction &instruction, const Word mode, Banks &banks, V &status) {
+  Alu(ir, mode, status).immediate(instruction, banks);
 }
 
 V transfer_word(Builder &ir, V value, const Word mode, V &status) {
