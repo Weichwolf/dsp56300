@@ -7,6 +7,7 @@
 #include "image_entry.hpp"
 #include "jit/llvm/image.hpp"
 
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -84,12 +85,14 @@ Fault NativeCall::fault(const std::span<const NativeSymbols::Site> sites) const 
   }
   const auto writing = writing_.load(std::memory_order_relaxed);
   const auto address = address_.load(std::memory_order_relaxed);
-  for (std::size_t bank = 0; bank < views_.size(); ++bank) {
-    const auto &view = writing ? views_[bank].write : views_[bank].read;
+  constexpr std::array spaces{Space::program, Space::x, Space::y};
+  for (const auto space : spaces) {
+    const auto &views = views_[static_cast<std::size_t>(space)];
+    const auto &view = writing ? views.write : views.read;
     const auto first = reinterpret_cast<std::uintptr_t>(view.data.data());
     if (address >= first && address - first < view.data.size_bytes()) {
       return {.kind = writing ? FaultKind::memory_write : FaultKind::memory_read,
-              .space = static_cast<Space>(bank),
+              .space = space,
               .address = static_cast<Word>((address - first) / sizeof(Word)),
               .pc = source->guest_pc,
               .variant = source->variant};
