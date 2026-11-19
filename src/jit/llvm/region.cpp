@@ -123,6 +123,10 @@ private:
     return at_loop_end(plan_.operations.back()) && !plan_.control.valid;
   }
 
+  [[nodiscard]] bool single_turn() const {
+    return !plan_.setup && !plan_.batch && !captured_loop() && !self_loop_;
+  }
+
   V boolean(const bool value) { return LLVMConstInt(ir_.getIntNTy(1), value ? 1U : 0U, 0); }
 
   static LLVMValueRef
@@ -237,6 +241,34 @@ private:
     }
   }
 
+  void budget_admission(V budget, V credit) {
+    if (plan_.setup || single_turn()) {
+      const auto turns = plan_.setup ? plan_.setup_count : 1U;
+      const auto count = (std::uint64_t{plan_.count} * turns) + (plan_.setup ? 1U : 0U);
+      const auto cost = (std::uint64_t{plan_.cost} * turns) +
+                        (plan_.setup ? plan_.setup->instruction.cycles : 0U);
+      turns_ = ir_.getInt64(turns);
+      eligible_ = ir_.CreateAnd(ir_.CreateICmpUGE(budget, ir_.getInt32(count)),
+                                ir_.CreateICmpUGE(credit, ir_.getInt64(cost)));
+      require(ir_.CreateICmpUGE(ir_.getInt64(std::numeric_limits<std::uint64_t>::max() - count),
+                                initial_instructions_));
+      if (plan_.setup) { require(ir_.CreateICmpUGE(ir_.getInt32(stack_entries - 3), sc_)); }
+    } else {
+      turns_ = minimum(
+          ir_.CreateZExt(ir_.CreateUDiv(budget, ir_.getInt32(plan_.count)), ir_.getInt64Ty()),
+          ir_.CreateUDiv(credit, ir_.getInt64(plan_.cost)));
+      turns_ = minimum(
+          turns_,
+          ir_.CreateUDiv(ir_.CreateSub(ir_.getInt64(std::numeric_limits<std::uint64_t>::max()),
+                                       initial_instructions_),
+                         ir_.getInt64(plan_.count)));
+      if (plan_.batch || captured_loop()) {
+        turns_ = ir_.CreateSelect(forever_, turns_, minimum(turns_, finite_count_));
+      }
+      eligible_ = ir_.CreateICmpUGT(turns_, ir_.getInt64(0));
+    }
+  }
+
   void admission() {
     initial_cycles_ = load(64, offsetof(Cpu, cycles));
     initial_instructions_ = load(64, offsetof(Cpu, instructions));
@@ -251,36 +283,12 @@ private:
                                     ir_.CreateSub(deadline, initial_cycles_),
                                     ir_.getInt64(0));
     auto *budget = load(32, offsetof(NativeContext, budget), owner_);
-    turns_ =
-        minimum(ir_.CreateZExt(ir_.CreateUDiv(budget, ir_.getInt32(plan_.count)), ir_.getInt64Ty()),
-                ir_.CreateUDiv(credit, ir_.getInt64(plan_.cost)));
-    turns_ = minimum(
-        turns_,
-        ir_.CreateUDiv(ir_.CreateSub(ir_.getInt64(std::numeric_limits<std::uint64_t>::max()),
-                                     initial_instructions_),
-                       ir_.getInt64(plan_.count)));
     finite_count_ = ir_.CreateSelect(ir_.CreateICmpEQ(lc_, ir_.getInt32(0)),
                                      ir_.getInt64(address_words),
                                      ir_.CreateZExt(lc_, ir_.getInt64Ty()));
     forever_ =
         ir_.CreateICmpNE(ir_.CreateAnd(status_, ir_.getInt32(forever_flag)), ir_.getInt32(0));
-    if (plan_.batch || captured_loop()) {
-      turns_ = ir_.CreateSelect(forever_, turns_, minimum(turns_, finite_count_));
-    } else if (!self_loop_) {
-      turns_ = minimum(turns_, ir_.getInt64(1));
-    }
-    eligible_ = ir_.CreateICmpUGT(turns_, ir_.getInt64(0));
-    if (plan_.setup) {
-      const auto count = (std::uint64_t{plan_.count} * plan_.setup_count) + 1;
-      const auto cost =
-          (std::uint64_t{plan_.cost} * plan_.setup_count) + plan_.setup->instruction.cycles;
-      turns_ = ir_.getInt64(plan_.setup_count);
-      eligible_ = ir_.CreateAnd(ir_.CreateICmpUGE(budget, ir_.getInt32(count)),
-                                ir_.CreateICmpUGE(credit, ir_.getInt64(cost)));
-      require(ir_.CreateICmpUGE(ir_.getInt64(std::numeric_limits<std::uint64_t>::max() - count),
-                                initial_instructions_));
-      require(ir_.CreateICmpUGE(ir_.getInt32(stack_entries - 3), sc_));
-    }
+    budget_admission(budget, credit);
     stack_admission();
     stack_state();
     require(ir_.CreateICmpEQ(ir_.CreateAnd(status_, ir_.getInt32(numeric_mode_mask)),
@@ -1424,10 +1432,14 @@ private:
     for (unsigned bank = 0; bank < banks_.size(); ++bank) {
       banks_[bank] = reg(64, bank_fields[bank]);
     }
-    repeated_body(turns_, split_flags(plan_), plan_.count, [&](V iteration) {
-      iteration_ = iteration;
+    if (single_turn()) {
       body(miss);
-    });
+    } else {
+      repeated_body(turns_, split_flags(plan_), plan_.count, [&](V iteration) {
+        iteration_ = iteration;
+        body(miss);
+      });
+    }
     finish();
   }
 
