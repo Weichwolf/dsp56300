@@ -601,10 +601,126 @@ void repeat_eligibility() {
   } catch (const std::logic_error &) { refused = true; }
   require(refused, "Missing post-REP metadata reports an error without reading a protected P hole");
 }
+
+void direct_self_loop_empty_window() {
+  Storage storage;
+  constexpr auto read = static_cast<Word>(isa::Opcode::move_x_effective) | (4U << 11) | (1U << 15);
+  constexpr auto adc = static_cast<Word>(isa::Opcode::adc_x_a);
+  constexpr auto jump = static_cast<Word>(isa::Opcode::jmp_absolute_short) | start;
+  constexpr std::array program{read, adc, jump};
+  const auto native = image(storage, false, program, CompileOptions::MemoryMode::direct);
+  Core programmer(storage.memory());
+  programmer.load(Space::program, start, program);
+  programmer.load(Space::x, target, std::array{value});
+  const auto configure = [&](Core &core) {
+    auto registers = core.registers();
+    registers.pc = start;
+    registers.omr = 0;
+    registers.r[0] = target;
+    registers.m.fill(word_mask);
+    core.set_registers(registers);
+    core.install(native, 0);
+  };
+  configure(programmer);
+  const auto executed = programmer.run(12);
+  require(executed.retired == 12 && executed.fault == Fault{} &&
+              (programmer.registers().x & word_mask) == value,
+          "A protected direct self-loop reads mapped X and completes all four turns");
+  storage.descriptors[1] = {};
+  const auto x = storage.views[1].read.data.first(storage.words());
+  checked(mprotect(x.data(), x.size_bytes(), PROT_NONE) == 0);
+  Core blocked(storage.memory());
+  configure(blocked);
+  const auto result = blocked.run(12);
+  require(result.retired == 0 && result.fault.kind == FaultKind::memory_read &&
+              result.fault.space == Space::x && result.fault.address == target &&
+              result.fault.pc == start,
+          "An unmapped direct self-loop read reports the protected address and guest PC");
+}
+
+void protected_operands() {
+  const Storage storage;
+  constexpr auto variant = (std::uint64_t{1} << 48) + 7;
+  constexpr Word indirect = 4U << 11;
+  constexpr Word load = 1U << 15;
+  constexpr Word y = 1U << 6;
+  constexpr Word vector_address = 8;
+  constexpr Word instruction_limit = 20;
+  constexpr auto nop = static_cast<Word>(isa::Opcode::nop);
+  constexpr auto stop = static_cast<Word>(isa::Opcode::stop);
+  constexpr auto adc = static_cast<Word>(isa::Opcode::adc_x_a);
+  constexpr auto bit = static_cast<Word>(isa::Opcode::jset_effective) | indirect;
+  constexpr auto do_effective = static_cast<Word>(isa::Opcode::do_effective) | indirect;
+  constexpr auto movem = static_cast<Word>(isa::Opcode::movem_effective) | indirect | 4U;
+  constexpr auto read_y = static_cast<Word>(isa::Opcode::move_y_effective) | indirect | load;
+  constexpr std::array vector{nop, read_y};
+  constexpr std::array bit_x{adc, bit, start + 3, stop};
+  constexpr std::array bit_y{adc, bit | y, start + 3, stop};
+  constexpr std::array loop_count{adc, do_effective, start + 4, nop, adc, stop};
+  constexpr std::array load_p{adc, movem | load, stop};
+  constexpr std::array store_p{adc, movem, stop};
+  constexpr std::array foreground{nop, stop};
+  constexpr std::array entry{start};
+  constexpr std::array irqs{InterruptRequest{.vector = vector_address, .level = 0}};
+
+  struct Case {
+    std::span<const Word> program;
+    Space space = Space::x;
+    FaultKind operation = FaultKind::memory_read;
+    bool irq = false;
+  };
+
+  const std::array cases{
+      Case{.program = bit_x},
+      Case{.program = bit_y, .space = Space::y},
+      Case{.program = loop_count},
+      Case{.program = load_p, .space = Space::program},
+      Case{.program = store_p, .space = Space::program, .operation = FaultKind::memory_write},
+      Case{.program = foreground, .space = Space::y, .irq = true}};
+  for (const auto &test : cases) {
+    const auto extra =
+        test.irq ? std::span<const InterruptRequest>(irqs) : std::span<const InterruptRequest>{};
+    const std::array spans{CodeSpan{.address = start, .words = test.program},
+                           CodeSpan{.address = vector_address, .words = vector}};
+    const std::array images{CodeVariant{.id = variant,
+                                        .code = std::span(spans).first(test.irq ? 2U : 1U),
+                                        .entries = entry,
+                                        .failed_fetches = {}}};
+    const auto native = Core::compile({.variants = images},
+                                      {.memory = {},
+                                       .interrupts = extra,
+                                       .transitions = {},
+                                       .callbacks = {},
+                                       .bindings = {},
+                                       .memory_mode = CompileOptions::MemoryMode::direct});
+    Core core(storage.memory());
+    core.load(Space::program, start, test.program);
+    if (test.irq) { core.load(Space::program, vector_address, vector); }
+    auto registers = core.registers();
+    registers.pc = start;
+    registers.omr = 0;
+    registers.sr = 0;
+    registers.r[0] = static_cast<Word>(storage.words());
+    registers.m.fill(word_mask);
+    registers.x = value;
+    core.set_registers(registers);
+    core.install(native, variant);
+    if (test.irq) { core.request_interrupt(vector_address, 0); }
+    const Fault expected{.kind = test.operation,
+                         .space = test.space,
+                         .address = registers.r[0],
+                         .pc = (test.irq ? vector_address : start) + 1,
+                         .variant = variant};
+    require(core.run(instruction_limit).fault == expected && core.run(1).fault == expected,
+            "A protected opcode operand reports its actual source and stops further execution");
+  }
+}
 }
 
 int main() try {
   const test::NativeFaults faults(Core::host_fault);
+  direct_self_loop_empty_window();
+  protected_operands();
   require(!Core::host_fault(0, false, 0),
           "Unowned faults are not claimed outside native execution");
   aliases();
