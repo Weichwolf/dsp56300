@@ -16,6 +16,7 @@
 #include <iostream>
 #include <optional>
 #include <span>
+#include <string_view>
 
 namespace {
 using namespace dsp56300;
@@ -237,39 +238,47 @@ void execute(const NativeImage &image, const Input input) {
   require(storage.p == original.p && storage.x == xdata && storage.y == ydata,
           "Declared code and both borrowed data banks remain unchanged");
 }
-}
 
-int main() try {
+void check_shape(const unsigned shape) {
   constexpr std::array selected{Word{0}};
   using Hint = std::optional<std::span<const Word>>;
-  for (const unsigned shape : {0U, 1U, 2U, 3U, 4U, 5U, 6U}) {
-    const bool single = shape != 0 && shape < 4;
-    const bool repeat = shape == 2;
-    const bool descending = shape == 3;
-    auto alu = ordinary;
-    if (shape == 4) { alu = carried; }
-    if (shape == 5) { alu = partial; }
-    if (shape == 6) { alu = logical; }
-    const auto code = program(single, repeat, descending, alu);
-    Storage storage(code);
-    const auto count = single ? iterations : total;
-    for (const auto hint : {Hint{}, Hint{selected}}) {
-      const auto image = test::compile_program(code, entry, storage.buffers(), hint);
-      for (const auto mode : modes) {
-        for (const bool below : {false, true}) {
-          for (Word prefix = 0; prefix <= count; ++prefix) {
-            execute(image,
-                    {.mode = mode,
-                     .prefix = prefix,
-                     .alu = alu,
-                     .single = single,
-                     .below = below,
-                     .repeat = repeat,
-                     .descending = descending});
-          }
+  const bool single = shape != 0 && shape < 4;
+  const bool repeat = shape == 2;
+  const bool descending = shape == 3;
+  auto alu = ordinary;
+  if (shape == 4) { alu = carried; }
+  if (shape == 5) { alu = partial; }
+  if (shape == 6) { alu = logical; }
+  const auto code = program(single, repeat, descending, alu);
+  Storage storage(code);
+  const auto count = single ? iterations : total;
+  for (const auto hint : {Hint{}, Hint{selected}}) {
+    const auto image = test::compile_program(code, entry, storage.buffers(), hint);
+    for (const auto mode : modes) {
+      for (const bool below : {false, true}) {
+        for (Word prefix = 0; prefix <= count; ++prefix) {
+          execute(image,
+                  {.mode = mode,
+                   .prefix = prefix,
+                   .alu = alu,
+                   .single = single,
+                   .below = below,
+                   .repeat = repeat,
+                   .descending = descending});
         }
       }
     }
+  }
+}
+}
+
+int main(const int argc, const char *const *const argv) try {
+  const bool logical_shifts = argc == 2 && std::string_view{argv[1]} == "--logical-shifts";
+  require(argc == 1 || logical_shifts, "Expected --logical-shifts or no arguments");
+  if (logical_shifts) {
+    check_shape(6);
+  } else {
+    for (const unsigned shape : {0U, 1U, 2U, 3U, 4U, 5U}) { check_shape(shape); }
   }
   std::cout << test::checks << " fixed-layout loop boundary checks passed\n";
 } catch (const std::exception &error) {
