@@ -23,11 +23,13 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <system_error>
 #include <unistd.h>
+#include <vector>
 
 namespace {
 using namespace dsp56300;
@@ -433,6 +435,88 @@ void native_failure(const bool writing, const bool loop = false) {
   require(refused, "A terminal native instance cannot be reset into execution");
 }
 
+class AuthoredProgram final : public Io {
+public:
+  [[nodiscard]] std::optional<Word> inspect_program(const Word address) const noexcept override {
+    ++inspections;
+    if (address >= start && address - start < code.size()) { return code[address - start]; }
+    return {};
+  }
+
+  bool read(Space /*space*/, Word /*address*/, Word /*pc*/, Word & /*value*/) noexcept override {
+    return false;
+  }
+
+  bool write(Space /*space*/, Word /*address*/, Word /*pc*/, Word /*value*/) noexcept override {
+    return false;
+  }
+
+  bool bit(Space /*space*/,
+           Word /*address*/,
+           Word /*pc*/,
+           Word /*bit*/,
+           BitAction /*action*/,
+           bool & /*previous*/) noexcept override {
+    return false;
+  }
+
+  mutable unsigned inspections = 0;
+};
+
+void mapped_program_source_precedes_io() {
+  const Storage storage;
+  AuthoredProgram owner;
+  const auto native = image(storage, true, code, CompileOptions::MemoryMode::direct);
+  Core core(storage.memory(), &owner);
+  core.load(Space::program, start, code);
+  core.install(native, 0);
+  require(owner.inspections == 0,
+          "Mapped code satisfies installation without consulting the owner");
+
+  const auto changed = std::array{other};
+  core.load(Space::program, start, changed);
+  require(owner.inspect_program(start) == code.front() &&
+              storage.word(Space::program, start) == other,
+          "Owner's ordinary inspection is deliberately stale while protected P contains new code");
+
+  bool refused = false;
+  try {
+    core.install(native, 0);
+  } catch (const std::invalid_argument &error) {
+    refused = std::string(error.what()).find("P:$000010") != std::string::npos;
+  }
+  require(refused && owner.inspections == 1,
+          "Installation rejects the actual mapped mismatch without an owner override");
+}
+
+void mapped_program_known_boundary() {
+  Storage storage;
+  constexpr auto split = start + 1;
+  const auto words = storage.regions[0].words;
+  std::vector<std::uint8_t> known(words.size() - split, 1);
+  const std::array program{
+      MemoryWindow{.address = 0, .words = words.first(split), .known = {}, .writable = true},
+      MemoryWindow{
+          .address = split, .words = words.subspan(split), .known = known, .writable = true}};
+  storage.descriptors[0] = program;
+
+  AuthoredProgram owner;
+  const auto native = image(storage, false);
+  Core core(storage.memory(), &owner);
+  core.load(Space::program, start, code);
+  core.install(native, 0);
+
+  known[1] = 0;
+  bool second = false;
+  try {
+    core.install(native, 0);
+  } catch (const std::invalid_argument &error) {
+    second = std::string_view(error.what()).ends_with("P:$000012");
+  }
+  require(second && owner.inspections == 0,
+          "The first unknown word in a second mapping fails before consulting an owner");
+}
+
 void program_store() {
   const Storage storage;
   constexpr std::array program{static_cast<Word>(isa::Opcode::movem_absolute_short) |
@@ -537,6 +621,8 @@ int main() try {
   native_failure(true);
   native_failure(false, true);
   native_failure(true, true);
+  mapped_program_source_precedes_io();
+  mapped_program_known_boundary();
   program_store();
   repeat_eligibility();
   std::cout << "Borrowed DSP read/write views passed\n";

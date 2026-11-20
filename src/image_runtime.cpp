@@ -16,16 +16,30 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <llvm/ADT/StringExtras.h>
 #include <memory>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <utility>
 #include <vector>
 
 namespace dsp56300 {
+
+std::optional<Word>
+detail::ImageContracts::Variant::source_word(const Word address) const noexcept {
+  // NOLINTNEXTLINE(misc-include-cleaner) -- <algorithm> provides the ranges overload.
+  const auto after = std::ranges::upper_bound(program, address, {}, &ProgramRun::first);
+  if (after == program.begin()) { return {}; }
+  const auto &run = *(after - 1);
+  const auto offset = address - run.first;
+  return offset < run.words.size() ? std::optional(run.words[offset]) : std::nullopt;
+}
+
 namespace {
 using Windows = std::array<std::span<const MemoryWindow>, 2>;
 
@@ -141,12 +155,44 @@ std::vector<RegionLayout> layout(const std::array<std::span<const MemoryWindow>,
   return result;
 }
 
+std::size_t matching_program_words(const MemoryWindow &window,
+                                   const Word address,
+                                   const std::span<const Word> expected) {
+  const auto offset = address - window.address;
+  auto count = expected.size();
+  if (!window.known.empty()) {
+    const auto known = window.known.subspan(offset, count);
+    count = static_cast<std::size_t>(std::ranges::find(known, std::uint8_t{0}) - known.begin());
+  }
+  const auto actual = window.words.subspan(offset, count);
+  if (count == 0 || std::memcmp(actual.data(), expected.data(), actual.size_bytes()) == 0) {
+    return count;
+  }
+  return static_cast<std::size_t>(std::ranges::mismatch(actual, expected).in1 - actual.begin());
+}
+
 void validate_program(const auto &core, const detail::ImageContracts::Variant &selected) {
-  for (const auto &[address, expected] : selected.words) {
-    const auto actual = core.known_program_word(address);
-    if (!actual || *actual != expected) {
-      throw std::invalid_argument("DSP image code mismatch at P:$" +
-                                  llvm::utohexstr(address, true, 6));
+  // Observe writes through the stopped owner's other host mapping before reading P.
+  std::atomic_signal_fence(std::memory_order_acq_rel);
+  for (const auto &run : selected.program) {
+    for (std::size_t offset = 0; offset < run.words.size();) {
+      const auto address = run.first + static_cast<Word>(offset);
+      const auto *window = core.memory_window(Space::program, address);
+      std::size_t matched = 0;
+      std::size_t count = 1;
+      if (window != nullptr) {
+        count =
+            std::min(run.words.size() - offset, window->words.size() - (address - window->address));
+        matched = matching_program_words(
+            *window, address, std::span<const Word>(run.words).subspan(offset, count));
+      } else {
+        matched = core.known_program_word(address) == run.words[offset] ? 1U : 0U;
+      }
+      if (matched != count) {
+        throw std::invalid_argument("DSP image code mismatch at P:$" +
+                                    llvm::utohexstr(address + matched, true, 6));
+      }
+      offset += count;
     }
   }
   for (const auto address : selected.failed_fetches) {
@@ -325,7 +371,7 @@ bool Core::Impl::image_interrupt(const Word address, const unsigned level) {
   if (!image_ready || (external && program_omr != cpu.reg.omr) ||
       (io != nullptr && image_revision != dsp56300_io_revision(*io)) || debug_ready() ||
       instruction_cache_active() || !image->interrupts.contains({address, level}) ||
-      !active_image->words.contains(address) || !active_image->words.contains(address + 1)) {
+      !active_image->source_word(address) || !active_image->source_word(address + 1)) {
     unprepared(address, level);
     return false;
   }
@@ -339,13 +385,13 @@ detail::ImageEntry Core::Impl::image_vector() {
   }
   auto words = vector.words;
   if (!vector.loaded) {
-    const auto first = active_image->words.find(vector.address);
-    const auto second = active_image->words.find(vector.address + 1);
-    if (first == active_image->words.end() || second == active_image->words.end()) {
+    const auto first = active_image->source_word(vector.address);
+    const auto second = active_image->source_word(vector.address + 1);
+    if (!first || !second) {
       unprepared(vector.address);
       return nullptr;
     }
-    words = {first->second, second->second};
+    words = {*first, *second};
   }
   const auto entry = image->vector_entry(vector.address, words);
   if (entry == nullptr) {
@@ -359,13 +405,13 @@ detail::ImageEntry Core::Impl::image_vector() {
 
 void Core::Impl::image_word_written(const detail::ProgramCache::Write transfer) noexcept {
   if (active_image == nullptr) { return; }
-  const auto found = active_image->words.find(transfer.address);
-  if (found == active_image->words.end()) { return; }
+  const auto word = active_image->source_word(transfer.address);
+  if (!word) { return; }
   const auto value =
       detail::dsp56300_memory_direct()
           ? static_cast<const volatile Word *>(views[0].read.data.data())[transfer.address]
           : transfer.value;
-  if (found->second == value) { return; }
+  if (*word == value) { return; }
   image_ready = false;
   yield_requested = true;
 }

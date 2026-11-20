@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <span>
 #include <string>
@@ -22,8 +23,15 @@
 namespace dsp56300::detail {
 struct ImageContracts {
   struct Variant {
+    struct ProgramRun {
+      Word first = 0;
+      std::vector<Word> words;
+    };
+
     std::uint64_t id = 0;
-    std::map<Word, Word> words;
+    std::vector<ProgramRun> program;
+    void append_word(std::pair<Word, Word> word);
+    [[nodiscard]] std::optional<Word> source_word(Word address) const noexcept;
     std::map<Word, Instruction> instructions;
     std::map<Word, std::vector<std::uint64_t>> transitions;
     std::set<Word> failed_fetches;

@@ -51,10 +51,9 @@ bool source(const detail::ImageContracts &image, const NativeSymbols::Site &site
   return std::ranges::any_of(image.vector_plans, [&](const auto &vector) {
     const auto &[key, plan] = vector;
     if (!plan.instructions.contains(site.guest_pc)) { return false; }
-    const auto first = variant->words.find(std::get<0>(key));
-    const auto second = variant->words.find((std::get<0>(key) + 1) & word_mask);
-    return first != variant->words.end() && second != variant->words.end() &&
-           first->second == std::get<1>(key) && second->second == std::get<2>(key);
+    const auto first = variant->source_word(std::get<0>(key));
+    const auto second = variant->source_word((std::get<0>(key) + 1) & word_mask);
+    return first && second && *first == std::get<1>(key) && *second == std::get<2>(key);
   });
 }
 }
