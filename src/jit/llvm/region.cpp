@@ -687,7 +687,9 @@ private:
   V word_load(V pointer) {
     auto *value = ir_.CreateLoad(ir_.getInt32Ty(), pointer);
     LLVMSetVolatile(value, direct_ ? 1 : 0);
-    return value;
+    // LLVM 19 can drop the volatile load's source location while folding a
+    // subsequent extension. Keep the concrete word separate from that extension.
+    return direct_ ? LLVMBuildFreeze(ir_.get(), value, "") : value;
   }
 
   void word_store(V value, V pointer) {
@@ -901,7 +903,7 @@ private:
     if (step.memory.count != 0) {
       const auto move = step.memory.transfers[0];
       auto *at = effective(cursors_, move.address);
-      return ir_.CreateLoad(ir_.getInt32Ty(), memory(move, at));
+      return word_load(memory(move, at));
     }
     const auto number = instruction.operation == Operation::loop_register
                             ? (instruction.opcode >> 8) & six_bit_mask
@@ -1383,7 +1385,7 @@ private:
     auto *limit = turns_;
     LLVMBuildCondBr(ir_.get(), eligible_, start, miss);
     ir_.SetInsertPoint(start);
-    self_loop_bindings();
+    if (!direct_) { self_loop_bindings(); }
     for (unsigned bank = 0; bank < banks_.size(); ++bank) {
       banks_[bank] = reg(64, bank_fields[bank]);
     }
