@@ -102,10 +102,15 @@ VectorKey key(ArtifactReader &reader) {
 
 void variant(ArtifactWriter &writer, const detail::ImageContracts::Variant &value) {
   writer.integer(value.id);
-  sequence(writer, value.words, [&](const auto &entry) {
-    writer.integer(entry.first);
-    writer.integer(entry.second);
-  });
+  std::size_t words = 0;
+  for (const auto &run : value.program) { words += run.words.size(); }
+  writer.integer(words);
+  for (const auto &run : value.program) {
+    for (std::size_t index = 0; index < run.words.size(); ++index) {
+      writer.integer(run.first + index);
+      writer.integer(run.words[index]);
+    }
+  }
   instructions(writer, value.instructions);
   sequence(writer, value.transitions, [&](const auto &entry) {
     writer.integer(entry.first);
@@ -130,7 +135,15 @@ void variant(ArtifactWriter &writer, const detail::ImageContracts::Variant &valu
 detail::ImageContracts::Variant variant(ArtifactReader &reader) {
   detail::ImageContracts::Variant value;
   value.id = reader.integer();
-  value.words = mapping<Word>(reader, [&] { return word(reader); });
+  for (auto count = reader.count(2 * sizeof(std::uint64_t)); count != 0; --count) {
+    const auto address = word(reader);
+    const auto data = word(reader);
+    if (!value.program.empty() &&
+        address < value.program.back().first + value.program.back().words.size()) {
+      ArtifactReader::fail();
+    }
+    value.append_word({address, data});
+  }
   value.instructions = instructions(reader);
   value.transitions = mapping<std::vector<std::uint64_t>>(reader, [&] {
     std::vector<std::uint64_t> targets;

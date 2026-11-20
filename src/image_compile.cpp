@@ -139,10 +139,9 @@ std::uint64_t vector_variant(const std::span<const detail::ImageContracts::Varia
                              const std::tuple<Word, Word, Word> &code) {
   const auto address = std::get<0>(code);
   for (const auto &variant : variants) {
-    const auto first = variant.words.find(address);
-    const auto second = variant.words.find((address + 1) & word_mask);
-    if (first != variant.words.end() && second != variant.words.end() &&
-        first->second == std::get<1>(code) && second->second == std::get<2>(code)) {
+    const auto first = variant.source_word(address);
+    const auto second = variant.source_word((address + 1) & word_mask);
+    if (first && second && *first == std::get<1>(code) && *second == std::get<2>(code)) {
       return variant.id;
     }
   }
@@ -218,6 +217,27 @@ detail::ImageEntry NativeImage::Impl::vector_entry(const Word address,
   return found == vectors.end() ? nullptr : found->second;
 }
 
+void detail::ImageContracts::Variant::append_word(const std::pair<Word, Word> word) {
+  const auto [address, value] = word;
+  if (program.empty() || address != program.back().first + program.back().words.size()) {
+    program.push_back({.first = address, .words = {}});
+  }
+  program.back().words.push_back(value);
+}
+
+namespace {
+void append_program(detail::ImageContracts::Variant &variant,
+                    const std::span<const CodeSpan> code) {
+  std::map<Word, Word> ordered;
+  for (const auto &span : code) {
+    for (std::size_t index = 0; index < span.words.size(); ++index) {
+      ordered.emplace((span.address + static_cast<Word>(index)) & word_mask, span.words[index]);
+    }
+  }
+  for (const auto &word : ordered) { variant.append_word(word); }
+}
+}
+
 std::map<std::tuple<Word, Word, Word>, detail::ImagePlan>
 detail::ImageContracts::plan_vectors(const std::vector<detail::ImagePlan> &plans) const {
   std::map<std::tuple<Word, Word, Word>, detail::ImagePlan> result;
@@ -230,17 +250,16 @@ detail::ImageContracts::plan_vectors(const std::vector<detail::ImagePlan> &plans
     external.insert(external.end(), source.failed_fetches.begin(), source.failed_fetches.end());
     for (const auto &[address, level] : interrupts) {
       static_cast<void>(level);
-      const auto first = source.words.find(address);
-      const auto second = source.words.find(address + 1);
-      if (first == source.words.end() && second == source.words.end()) { continue; }
-      if (first == source.words.end() || second == source.words.end()) {
+      const auto first = source.source_word(address);
+      const auto second = source.source_word(address + 1);
+      if (!first && !second) { continue; }
+      if (!first || !second) {
         throw std::invalid_argument("DSP vector has incomplete source at P:$" +
                                     llvm::utohexstr(address, true, 6));
       }
       // Validate the target closure in every foreground variant, even for shared vectors.
-      auto plan =
-          detail::plan_vector(address, {first->second, second->second}, plans[index], external);
-      result.try_emplace(std::tuple(address, first->second, second->second), std::move(plan));
+      auto plan = detail::plan_vector(address, {*first, *second}, plans[index], external);
+      result.try_emplace(std::tuple(address, *first, *second), std::move(plan));
       available.insert(address);
     }
   }
@@ -294,12 +313,7 @@ SemanticImage Core::lower(const CodeImage image, const CompileOptions options) {
         std::ranges::find(options.memory, source.id, &VariantLayout::id) != options.memory.end();
     if (variant.fixed_memory) { variant.memory = regions(source.id, options); }
     variant.prefixes = detail::foreground_prefixes(plan, variant.memory);
-    for (const auto &span : source.code) {
-      for (std::size_t index = 0; index < span.words.size(); ++index) {
-        variant.words.emplace((span.address + static_cast<Word>(index)) & word_mask,
-                              span.words[index]);
-      }
-    }
+    append_program(variant, source.code);
     plans.push_back(plan);
     result->variants.push_back(std::move(variant));
   }
