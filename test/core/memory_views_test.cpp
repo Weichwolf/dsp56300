@@ -65,7 +65,7 @@ struct Backing {
 };
 
 struct Storage {
-  explicit Storage(const bool read_only_x = false) {
+  explicit Storage(const bool read_only_x = false, const bool shared_views = false) {
     const auto page = sysconf(_SC_PAGESIZE);
     require(page > 0, "The test queries the actual host page size");
     page_ = static_cast<std::size_t>(page);
@@ -89,8 +89,9 @@ struct Storage {
       }
       views[bank] = {.read = {.data = reads[bank], .mirrored_tail = {}},
                      .write = {.data = writes[bank], .mirrored_tail = {}}};
+      if (shared_views) { views[bank].read = views[bank].write; }
       regions[bank] = {.address = 0,
-                       .words = reads[bank].first(page_ / sizeof(Word)),
+                       .words = views[bank].read.data.first(page_ / sizeof(Word)),
                        .known = {},
                        .writable = true};
       descriptors[bank] = std::span(&regions[bank], 1);
@@ -220,6 +221,30 @@ void execution(const bool fixed, const bool direct = false) {
   require(failed.retired == 0 && failed.fault.kind == FaultKind::memory_read &&
               failed.fault.address == second.words() && failed.fault.pc == start + 1,
           "The checked path reports a protected undeclared word without dereferencing the hole");
+}
+
+void exact_shared_views() {
+  const Storage storage(false, true);
+  const auto native = image(storage, true);
+  Core core(storage.memory());
+  initialize(core, native);
+  const auto result = core.run();
+  require(result.retired == code.size() && result.state == ExecutionState::stopped &&
+              result.fault == Fault{} && storage.word(Space::x, target) == value &&
+              (core.registers().x & word_mask) == value,
+          "A fixed exact native region binds a complete loan with identical read and write views");
+
+  core.reset();
+  auto registers = core.registers();
+  registers.pc = start;
+  registers.omr = 0;
+  registers.r[0] = static_cast<Word>(storage.words());
+  core.set_registers(registers);
+  core.install(native, 0);
+  const auto hole = core.run();
+  require(hole.retired == 0 && hole.fault.kind == FaultKind::memory_write &&
+              hole.fault.address == registers.r[0] && hole.fault.pc == start,
+          "A complete exact region reports the first access outside the checked loan");
 }
 
 // Inspect only the public artifact, then run the real shared mappings through
@@ -727,6 +752,7 @@ int main() try {
   geometry();
   execution(false);
   execution(true);
+  exact_shared_views();
   read_only(false);
   read_only(true);
   execution(false, true);
