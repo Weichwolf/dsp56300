@@ -34,14 +34,13 @@ bool storage(const Cpu &cpu,
 std::optional<MemoryWindow> window(const NativeContext &owner, const RegionMemory &memory) {
   if (memory.bank >= owner.runtime.windows.size()) { return {}; }
   const auto views = owner.runtime.windows[memory.bank];
-  if ((memory.flags & region_windowed) != 0) {
+  // A complete loan can satisfy a flat layout with an actual window.
+  if ((memory.flags & region_windowed) != 0 || !views.empty()) {
     if (views.size() != memory.regions || memory.index >= views.size()) { return {}; }
     return views[memory.index];
   }
   const auto &flat = owner.runtime.memory[memory.bank];
-  if (!views.empty() || memory.regions != 1 || memory.index != 0 || flat.data == nullptr) {
-    return {};
-  }
+  if (memory.regions != 1 || memory.index != 0 || flat.data == nullptr) { return {}; }
   return MemoryWindow{.words = {flat.data, std::min(flat.words, std::size_t{io_begin})},
                       .known = {},
                       .writable = true,
@@ -64,7 +63,8 @@ bool knowledge(const JitRuntime &runtime, const MemoryWindow &selected) {
 }
 
 MemoryWindow bound_window(const JitRuntime &runtime, const RegionMemory &memory) {
-  if ((memory.flags & region_windowed) != 0) { return runtime.windows[memory.bank][memory.index]; }
+  const auto views = runtime.windows[memory.bank];
+  if ((memory.flags & region_windowed) != 0 || !views.empty()) { return views[memory.index]; }
   const auto &flat = runtime.memory[memory.bank];
   return {.words = {flat.data, std::min(flat.words, std::size_t{io_begin})},
           .known = {},
