@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -38,6 +39,19 @@ struct MemoryLayout {
 // Borrowed memory; the consumer owns all backing storage and its lifetime.
 class Memory {
 public:
+  struct View {
+    std::span<Word> data, mirrored_tail;
+  };
+
+  struct Views {
+    View read, write;
+  };
+
+  // Full host reservations; RAM backing aliases between the two views.
+  // Different guest spaces have disjoint virtual views. Whole words need no tail.
+  [[nodiscard]] static Memory complete(std::array<std::span<const MemoryWindow>, 3> regions,
+                                       std::array<Views, 3> views);
+
   [[nodiscard]] static constexpr Memory external(const CacheRegion cache = {}) noexcept {
     return Memory(Buffers{.program = {}, .x = {}, .y = {}, .cache = cache});
   }
@@ -83,5 +97,8 @@ private:
   explicit constexpr Memory(const Buffers buffers) noexcept : buffers_(buffers) {}
 
   Buffers buffers_;
+  std::array<std::span<const MemoryWindow>, 3> regions_{};
+  std::array<Views, 3> views_{};
+  friend class Core;
 };
 }

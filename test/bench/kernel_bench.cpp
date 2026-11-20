@@ -5,6 +5,7 @@
 #include "kernel_host.hpp"
 #include "kernel_program.hpp"
 #include "kernel_reference.hpp"
+#include "memory_arena.hpp"
 #include "retirement_observer.hpp"
 #include "support.hpp"
 
@@ -30,6 +31,7 @@ namespace k = test::kernels;
 namespace reference = core_kernels;
 using test::require;
 using Clock = std::chrono::steady_clock;
+using MemoryMode = CompileOptions::MemoryMode;
 constexpr unsigned bits = reference::dsp_fraction_bits;
 constexpr double nanoseconds = 1e9;
 constexpr std::uint64_t minimum_instructions = 10'000'000;
@@ -115,8 +117,11 @@ double host_time(const Workload &workload) {
 }
 
 struct Machine {
-  explicit Machine(const Workload &workload, const NativeImage &image, Io *const io = nullptr)
-      : core(Memory::separate({.program = program, .x = x, .y = y}), io) {
+  explicit Machine(const Workload &workload,
+                   const NativeImage &image,
+                   const MemoryMode mode,
+                   Io *const io = nullptr)
+      : core(memory(mode), io) {
     std::ranges::copy(workload.code, program.begin() + k::entry);
     std::ranges::copy(k::irq, program.begin() + k::irq_vector);
     for (std::size_t index = 0; index < workload.input.size(); ++index) {
@@ -181,13 +186,37 @@ struct Machine {
     require(x[0] == interrupts, "The guest IRQ handler counts every delivered interrupt");
   }
 
-  std::vector<Word> program = std::vector<Word>(k::program_words);
-  std::vector<Word> x = std::vector<Word>(k::data_words);
-  std::vector<Word> y = std::vector<Word>(k::data_words);
+  [[nodiscard]] Memory memory(const MemoryMode mode) const {
+    if (mode == MemoryMode::exact) {
+      return Memory::separate({.program = program, .x = x, .y = y});
+    }
+    const auto full = arena.buffers();
+    const std::array spaces{full.program, full.x, full.y};
+    std::array<Memory::Views, 3> views{};
+    std::array<std::span<const MemoryWindow>, 3> grants{};
+    for (std::size_t index = 0; index < views.size(); ++index) {
+      views[index] = {.read = {.data = spaces[index], .mirrored_tail = {}},
+                      .write = {.data = spaces[index], .mirrored_tail = {}}};
+      grants[index] = std::span(&windows[index], 1);
+    }
+    return Memory::complete(grants, views);
+  }
+
+  test::MemoryArena arena;
+  std::span<Word> program = arena.buffers().program.first(k::program_words);
+  std::span<Word> x = arena.buffers().x.first(k::data_words);
+  std::span<Word> y = arena.buffers().y.first(k::data_words);
+  std::array<MemoryWindow, 3> windows{
+      MemoryWindow{.address = 0, .words = program, .known = {}, .writable = true},
+      MemoryWindow{.address = 0, .words = x, .known = {}, .writable = true},
+      MemoryWindow{.address = 0, .words = y, .known = {}, .writable = true}};
   Core core;
 };
 
-NativeImage prepare(const Workload &workload, const bool regions, const bool observed = false) {
+NativeImage prepare(const Workload &workload,
+                    const bool regions,
+                    const MemoryMode mode,
+                    const bool observed = false) {
   const std::array spans{CodeSpan{.address = k::entry, .words = workload.code},
                          CodeSpan{.address = k::irq_vector, .words = k::irq}};
   const std::array entries{k::entry};
@@ -205,11 +234,12 @@ NativeImage prepare(const Workload &workload, const bool regions, const bool obs
   const auto bindings = observed ? test::retirement_binding() : std::vector<std::byte>{};
   return Core::compile(
       {.variants = variants},
-      {.memory = layouts,
+      {.memory = mode == MemoryMode::exact ? std::span(layouts) : std::span<const VariantLayout>{},
        .interrupts = interrupts,
        .transitions = {},
        .callbacks = observed ? std::span(callbacks) : std::span<const CallbackBinding>{},
        .bindings = bindings,
+       .memory_mode = mode,
        .region_modes = regions ? std::span<const Word>(modes) : std::span<const Word>{}});
 }
 
@@ -255,10 +285,13 @@ RunStats execute(Core &core, const RunMode mode) {
   }
 }
 
-void observe(const Workload &workload, const bool regions, const RunMode mode) {
-  const auto image = prepare(workload, regions, true);
+void observe(const Workload &workload,
+             const bool regions,
+             const RunMode mode,
+             const MemoryMode memory_mode) {
+  const auto image = prepare(workload, regions, memory_mode, true);
   test::RetirementIo io;
-  Machine machine(workload, image, &io);
+  Machine machine(workload, image, memory_mode, &io);
   const auto stats = execute(machine.core, mode);
   machine.verify(workload, stats.interrupts);
   const auto instructions = machine.core.progress().instructions;
@@ -266,6 +299,7 @@ void observe(const Workload &workload, const bool regions, const RunMode mode) {
               io.counts[0] + io.counts[1] == instructions,
           "The separate observer accounts for every retired guest instruction");
   std::cout << R"({"observation":true,"kernel":")" << kernel_name(workload, mode)
+            << R"(","memory_mode":")" << (memory_mode == MemoryMode::direct ? "direct" : "exact")
             << R"(","regions_enabled":)" << (regions ? "true" : "false") << R"(,"bounded":)"
             << (mode == RunMode::continuous ? "false" : "true") << R"(,"interrupts":)"
             << stats.interrupts << R"(,"region_instructions":)" << io.counts[0]
@@ -278,11 +312,12 @@ void measure(const Workload &workload,
              const NativeImage &image,
              const bool regions,
              const RunMode mode,
+             const MemoryMode memory_mode,
              const double preparation) {
-  Machine warm(workload, image);
+  Machine warm(workload, image, memory_mode);
   const auto warm_stats = execute(warm.core, mode);
   warm.verify(workload, warm_stats.interrupts);
-  Machine machine(workload, image);
+  Machine machine(workload, image, memory_mode);
   reference::Counters counters;
   counters.start();
   const auto start = Clock::now();
@@ -294,6 +329,8 @@ void measure(const Workload &workload,
   const auto progress = machine.core.progress();
   const auto instructions = static_cast<double>(progress.instructions);
   std::cout << std::setprecision(10) << R"({"kernel":")" << kernel_name(workload, mode)
+            << R"(","memory_mode":")" << (memory_mode == MemoryMode::direct ? "direct" : "exact")
+            << R"(","verified_output_sha256":")" << (workload.biquad ? biquad_hash : fir_hash)
             << R"(","regions_enabled":)" << (regions ? "true" : "false") << R"(,"bounded":)"
             << (mode == RunMode::continuous ? "false" : "true") << R"(,"preparation_s":)"
             << preparation << R"(,"native_bytes":)" << image.report().native_bytes
@@ -321,25 +358,39 @@ void measure(const Workload &workload,
   }
   std::cout << "}\n" << std::flush;
 }
+
+void benchmark(const MemoryMode memory_mode) {
+  for (const bool biquad : {false, true}) {
+    const Workload workload(biquad);
+    for (const bool regions : {false, true}) {
+      const auto preparing = Clock::now();
+      const auto image = prepare(workload, regions, memory_mode);
+      const auto preparation = std::chrono::duration<double>(Clock::now() - preparing).count();
+      measure(workload, image, regions, RunMode::continuous, memory_mode, preparation);
+      if (!biquad) {
+        for (const auto mode : {RunMode::bounded, RunMode::interrupts}) {
+          measure(workload, image, regions, mode, memory_mode, 0);
+        }
+      }
+      observe(workload, regions, RunMode::continuous, memory_mode);
+      if (!biquad) { observe(workload, regions, RunMode::interrupts, memory_mode); }
+    }
+  }
+}
 }
 
-int main() {
+int main(const int argc, char **argv) {
   try {
-    for (const bool biquad : {false, true}) {
-      const Workload workload(biquad);
-      for (const bool regions : {false, true}) {
-        const auto preparing = Clock::now();
-        const auto image = prepare(workload, regions);
-        const auto preparation = std::chrono::duration<double>(Clock::now() - preparing).count();
-        measure(workload, image, regions, RunMode::continuous, preparation);
-        if (!biquad) {
-          for (const auto mode : {RunMode::bounded, RunMode::interrupts}) {
-            measure(workload, image, regions, mode, 0);
-          }
-        }
-        observe(workload, regions, RunMode::continuous);
-        if (!biquad) { observe(workload, regions, RunMode::interrupts); }
+    const std::string_view selection = argc == 2 ? argv[1] : "both";
+    if (argc > 2 || (selection != "exact" && selection != "direct" && selection != "both")) {
+      throw std::invalid_argument("Usage: dsp56300_kernel_bench [exact|direct|both]");
+    }
+    for (const auto memory_mode : {MemoryMode::exact, MemoryMode::direct}) {
+      if ((selection == "exact" && memory_mode != MemoryMode::exact) ||
+          (selection == "direct" && memory_mode != MemoryMode::direct)) {
+        continue;
       }
+      benchmark(memory_mode);
     }
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';

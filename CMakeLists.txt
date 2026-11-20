@@ -47,18 +47,23 @@ set(dsp56300_semantic_sources
   src/transfer_parallel.cpp src/transfer_special.cpp src/viterbi.cpp)
 add_library(dsp56300_semantics OBJECT ${dsp56300_semantic_sources})
 add_library(dsp56300_core STATIC
-  src/io.cpp src/image_compile.cpp src/image_artifact.cpp src/image_entry.cpp src/jit/preparation.cpp src/jit/image_plan.cpp
+  src/io.cpp src/memory.cpp src/image_compile.cpp src/image_artifact.cpp src/image_entry.cpp src/image_sites.cpp src/jit/preparation.cpp src/jit/image_plan.cpp
   src/jit/prefixes.cpp src/jit/prefix_access.cpp src/jit/llvm/runtime.cpp
   src/jit/llvm/lifecycle.cpp src/jit/llvm/bindings.cpp
-  src/jit/llvm/image.cpp src/jit/llvm/image_regions.cpp src/jit/llvm/image_specialize.cpp
+  src/jit/llvm/image.cpp src/jit/llvm/image_regions.cpp src/jit/llvm/image_specialize.cpp src/jit/llvm/origins.cpp
   src/jit/llvm/region.cpp src/jit/llvm/region_plan.cpp src/jit/llvm/alu.cpp
   src/jit/move.cpp src/jit/registers.cpp)
 add_library(dsp56300::core ALIAS dsp56300_core)
+target_sources(dsp56300_core PRIVATE src/native_call.cpp)
 target_include_directories(dsp56300_core PUBLIC include)
 target_compile_features(dsp56300_core PUBLIC cxx_std_23)
 target_link_libraries(dsp56300_core PUBLIC dsp56300_quality PRIVATE dsp56300_semantics)
 include(cmake/Llvm.cmake)
-set(dsp56300_own_targets dsp56300_core dsp56300_semantics)
+add_library(llvm_native_sites STATIC src/llvm_native_sites/native_sites.cpp)
+target_include_directories(llvm_native_sites PUBLIC src/llvm_native_sites)
+target_link_libraries(llvm_native_sites PRIVATE LLVM)
+target_link_libraries(dsp56300_core PRIVATE llvm_native_sites)
+set(dsp56300_own_targets dsp56300_core dsp56300_semantics llvm_native_sites)
 set(DSP56300_SEMANTIC_TARGET dsp56300_semantics)
 # Retain public Io call boundaries until consumer binding, without changing native helpers.
 add_library(dsp56300_io_ir OBJECT src/io.cpp)
@@ -132,6 +137,12 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   target_link_libraries(dsp56300_artifact_test PRIVATE dsp56300::core ${CMAKE_DL_LIBS})
   add_test(NAME semantic-image-artifacts COMMAND dsp56300_artifact_test)
   set_tests_properties(semantic-image-artifacts PROPERTIES TIMEOUT 30)
+  add_executable(dsp56300_native_origins_test test/core/native_origins_test.cpp)
+  target_include_directories(dsp56300_native_origins_test PRIVATE test/support)
+  target_include_directories(dsp56300_native_origins_test SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
+  target_link_libraries(dsp56300_native_origins_test PRIVATE dsp56300::core LLVM)
+  add_test(NAME native-source-attribution COMMAND dsp56300_native_origins_test)
+  set_tests_properties(native-source-attribution PROPERTIES TIMEOUT 30)
   add_library(dsp56300_binary_fixtures STATIC test/support/binary_fixture.cpp)
   target_include_directories(dsp56300_binary_fixtures PUBLIC include test/support)
   target_link_libraries(dsp56300_binary_fixtures PRIVATE dsp56300_quality)
@@ -263,6 +274,12 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   add_executable(dsp56300_public_api_test test/core/public_api_test.cpp)
   target_link_libraries(dsp56300_public_api_test PRIVATE dsp56300::core)
   add_test(NAME public-core-api COMMAND dsp56300_public_api_test)
+  add_executable(dsp56300_memory_views_test test/core/memory_views_test.cpp)
+  target_include_directories(dsp56300_memory_views_test PRIVATE test/support)
+  target_include_directories(dsp56300_memory_views_test SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
+  target_link_libraries(dsp56300_memory_views_test PRIVATE dsp56300::core LLVM)
+  add_test(NAME borrowed-memory-views COMMAND dsp56300_memory_views_test)
+  set_tests_properties(borrowed-memory-views PROPERTIES TIMEOUT 30)
   set_tests_properties(public-core-api PROPERTIES TIMEOUT 30)
   get_directory_property(core_test_targets BUILDSYSTEM_TARGETS)
   foreach(core_test_target IN LISTS core_test_targets)

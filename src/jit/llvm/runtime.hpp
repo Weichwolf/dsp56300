@@ -9,6 +9,10 @@
 #include <string>
 #include <vector>
 
+namespace llvm_native_sites {
+struct FaultMap;
+}
+
 namespace dsp56300::detail {
 // Cold compiler ownership only; generated code uses the concrete native ABI.
 class LlvmModule {
@@ -59,6 +63,7 @@ public:
                                            const std::string &entry);
   // Cold materialization accounting; native execution does not update it.
   [[nodiscard]] std::uint64_t native_bytes() const noexcept;
+  [[nodiscard]] llvm_native_sites::FaultMap fault_map() const noexcept;
 
 private:
   struct Impl;

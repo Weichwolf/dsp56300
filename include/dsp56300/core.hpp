@@ -58,6 +58,7 @@ struct Fault {
   FaultKind kind = FaultKind::none;
   Space space = Space::program;
   Word address = 0, value = 0, pc = 0;
+  std::uint64_t variant = 0;
   bool operator==(const Fault &) const = default;
 };
 
@@ -138,6 +139,7 @@ struct CallbackBinding {
 };
 
 struct CompileOptions {
+  enum class MemoryMode : std::uint8_t { exact, direct };
   // Per variant: omitted means dynamic grants; an empty declared layout requires zero grants.
   std::span<const VariantLayout> memory;
   std::span<const InterruptRequest> interrupts;
@@ -145,6 +147,7 @@ struct CompileOptions {
   std::span<const CodeTransition> transitions;
   std::span<const CallbackBinding> callbacks;
   std::span<const std::byte> bindings;
+  MemoryMode memory_mode = MemoryMode::exact;
   // Absent prepares all supported numeric modes; an empty set prepares none.
   // Every unselected mode retains general native execution.
   std::optional<std::span<const Word>> region_modes = std::nullopt;
@@ -160,10 +163,27 @@ struct NativeSymbol {
 };
 
 struct NativeSymbols {
+  struct TextRange {
+    std::uintptr_t address = 0;
+    std::uint64_t size = 0;
+  };
+
+  struct Site {
+    std::uintptr_t address = 0;
+    std::uint64_t size = 0, variant = 0;
+    std::uint32_t guest_pc = 0;
+  };
+
+  struct FaultMap {
+    std::span<const TextRange> text_ranges;
+    std::span<const Site> sites;
+  };
+
   std::shared_ptr<const void> owner;
   std::span<const NativeSymbol> symbols;
   std::string_view identity;
   std::uint64_t native_bytes = 0;
+  FaultMap fault_map{};
 };
 
 // Immutable owned pre-O3 code/contracts; no Core, RAM or native execution owner.
@@ -248,6 +268,12 @@ public:
   [[nodiscard]] static NativeImage compile(CodeImage image, CompileOptions options);
   // Cold owner boundary: validate code/layout and bind RAM/events before publishing.
   void install(const NativeImage &image, std::uint64_t variant);
+  // Rebind borrowed storage while stopped; install a matching image before running.
+  void set_memory(Memory memory);
+  // Called by the consumer's fault handler with the interrupted signal mask.
+  // A claimed fault is terminal; only its diagnostics are architectural evidence.
+  [[nodiscard]] static bool
+  host_fault(std::uintptr_t address, bool writing, std::uintptr_t native_pc) noexcept;
   void reset();
   [[nodiscard]] State state() const;
   // Completed nominal work; does not materialize a register snapshot.

@@ -5,12 +5,13 @@
 #include "dsp56300/memory.hpp"
 #include "execution_guard.hpp"
 #include "image.hpp"
-#include "image_entry.hpp"
 #include "io.hpp"
 #include "jit.hpp"
 #include "jit/llvm/image.hpp"
 #include "jit/llvm/region_memory.hpp"
 #include "jit/prefixes.hpp"
+#include "memory_views.hpp"
+#include "native_call.hpp"
 #include "program_cache.hpp"
 
 #include <algorithm>
@@ -18,8 +19,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <llvm/ADT/StringExtras.h>
+#include <memory>
 #include <span>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace dsp56300 {
@@ -51,6 +54,48 @@ bool equal(const RegionLayout &left, const RegionLayout &right) {
          left.aliases_program == right.aliases_program;
 }
 
+Windows windows(const auto &core) {
+  if (core.complete_memory()) {
+    detail::validate_memory_views(core.regions, core.views);
+    return {core.regions[1], core.regions[2]};
+  }
+  return core.external ? windows(core.io) : Windows{};
+}
+
+bool storage(const auto &core, const Windows &granted) {
+  // The exact region strategy uses one virtual pointer per memory stream.
+  // Distinct aliases instead need the ordered, checked instruction lowering.
+  if (core.complete_memory() && std::ranges::any_of(core.views, [](const auto &view) {
+        return view.read.data.data() != view.write.data.data();
+      })) {
+    return false;
+  }
+  const detail::JitRuntime memory{
+      .memory = {detail::JitMemory{.data = core.buffers.x.data(),
+                                   .words = core.buffers.x.size(),
+                                   .aliases_program = core.aliases_program[1]},
+                 detail::JitMemory{.data = core.buffers.y.data(),
+                                   .words = core.buffers.y.size(),
+                                   .aliases_program = core.aliases_program[2]}},
+      .windows = granted};
+  return detail::admit_region_memory(std::as_bytes(std::span(&core, 1)), memory);
+}
+
+void validate_direct(const auto &core, const auto &image) {
+  if (image.memory_mode != CompileOptions::MemoryMode::direct) { return; }
+  if (!core.complete_memory()) {
+    throw std::invalid_argument("Direct DSP execution requires complete memory views");
+  }
+  for (const auto &bank : core.regions) {
+    for (const auto &region : bank) {
+      if (!region.known.empty() || (region.writable && region.aliases_program)) {
+        throw std::invalid_argument(
+            "Direct DSP data requires untracked storage without writable program aliases");
+      }
+    }
+  }
+}
+
 std::vector<RegionLayout> layout(const Buffers buffers,
                                  const Windows &windows,
                                  const bool external,
@@ -76,6 +121,21 @@ std::vector<RegionLayout> layout(const Buffers buffers,
                         .first = 0,
                         .size = banks[bank].size(),
                         .aliases_program = bank != 0 && aliases[bank]});
+    }
+  }
+  return result;
+}
+
+std::vector<RegionLayout> layout(const std::array<std::span<const MemoryWindow>, 3> &regions) {
+  std::vector<RegionLayout> result;
+  for (std::size_t bank = 0; bank < regions.size(); ++bank) {
+    for (const auto &region : regions[bank]) {
+      result.push_back({.space = static_cast<Space>(bank),
+                        .first = region.address,
+                        .size = region.words.size(),
+                        .writable = region.writable,
+                        .tracked = !region.known.empty(),
+                        .aliases_program = region.aliases_program});
     }
   }
   return result;
@@ -141,12 +201,13 @@ std::uint64_t Core::foreground_prefix() const {
 
 void Core::install(const NativeImage &image, const std::uint64_t variant) {
   auto &self = *impl_;
-  if (self.executing) {
+  if (self.executing || self.terminal_fault) {
     throw std::logic_error("Image installation requires stopped DSP execution");
   }
   const detail::ExecutionGuard guard(self.executing);
   if (!image.impl_) { throw std::invalid_argument("Cannot install an empty DSP image"); }
   const auto &selected = image.impl_->variant(variant);
+  validate_direct(self, *image.impl_);
   if (self.next_images != nullptr &&
       (image.impl_ != self.image ||
        std::ranges::find(*self.next_images, selected.id) == self.next_images->end())) {
@@ -162,11 +223,11 @@ void Core::install(const NativeImage &image, const std::uint64_t variant) {
     throw std::invalid_argument("DSP image does not prepare the retained vector continuation");
   }
   const auto revision = self.io != nullptr ? dsp56300_io_revision(*self.io) : 0;
-  const auto granted = self.external ? windows(self.io) : Windows{};
-  if (selected.fixed_memory &&
-      !std::ranges::equal(selected.memory,
-                          layout(self.buffers, granted, self.external, self.aliases_program),
-                          equal)) {
+  const auto granted = windows(self);
+  const auto actual = self.complete_memory()
+                          ? layout(self.regions)
+                          : layout(self.buffers, granted, self.external, self.aliases_program);
+  if (selected.fixed_memory && !std::ranges::equal(selected.memory, actual, equal)) {
     throw std::invalid_argument("DSP image memory layout differs from this owner");
   }
   validate_program(self, selected);
@@ -176,19 +237,16 @@ void Core::install(const NativeImage &image, const std::uint64_t variant) {
       throw std::invalid_argument("DSP image differs from the latched REP instruction");
     }
   }
-  const detail::JitRuntime storage{
-      .memory = {detail::JitMemory{.data = self.buffers.x.data(),
-                                   .words = self.buffers.x.size(),
-                                   .aliases_program = self.aliases_program[1]},
-                 detail::JitMemory{.data = self.buffers.y.data(),
-                                   .words = self.buffers.y.size(),
-                                   .aliases_program = self.aliases_program[2]}},
-      .windows = granted};
-  const bool admitted = selected.fixed_memory &&
-                        detail::admit_region_memory(std::as_bytes(std::span(&self, 1)), storage);
+  const bool admitted = image.impl_->memory_mode == CompileOptions::MemoryMode::direct ||
+                        (selected.fixed_memory && storage(self, granted));
   if (self.io != nullptr && revision != dsp56300_io_revision(*self.io)) {
     throw std::invalid_argument("DSP image binding changed during installation");
   }
+  auto native_call =
+      image.impl_->memory_mode == CompileOptions::MemoryMode::direct
+          ? std::make_unique<detail::NativeCall>(image.impl_->text_ranges, self.views)
+          : nullptr;
+  self.native_call = std::move(native_call);
   self.image = image.impl_;
   self.active_image = &selected;
   self.image_windows = granted;
@@ -223,8 +281,7 @@ RunResult Core::Impl::run_image(const std::uint32_t quota) {
     // the invalidated binding after that exact architectural continuation ends.
     const auto allowance = image_ready ? quota - result.retired
                                        : std::min(quota - result.retired, cpu.repeat_remaining);
-    const auto outcome =
-        detail::dsp56300_image_enter(entry, this, address, allowance, cycle_deadline - cpu.cycles);
+    const auto outcome = call_image(entry, address, allowance, cycle_deadline - cpu.cycles);
     constexpr unsigned reason_shift = 32;
     const auto retired = static_cast<std::uint32_t>(outcome);
     result.retired += retired;
@@ -303,18 +360,24 @@ detail::ImageEntry Core::Impl::image_vector() {
 void Core::Impl::image_word_written(const detail::ProgramCache::Write transfer) noexcept {
   if (active_image == nullptr) { return; }
   const auto found = active_image->words.find(transfer.address);
-  if (found == active_image->words.end() || found->second == transfer.value) { return; }
+  if (found == active_image->words.end()) { return; }
+  const auto value =
+      detail::dsp56300_memory_direct()
+          ? static_cast<const volatile Word *>(views[0].read.data.data())[transfer.address]
+          : transfer.value;
+  if (found->second == value) { return; }
   image_ready = false;
   yield_requested = true;
 }
 
 void Core::Impl::image_io_completed() noexcept {
-  if (!image || io == nullptr) { return; }
+  if (!image) { return; }
   const bool remapped = external && program_omr != cpu.reg.omr;
-  if (!remapped && image_revision == dsp56300_io_revision(*io)) { return; }
+  const bool revised = io != nullptr && image_revision != dsp56300_io_revision(*io);
+  if (!remapped && !revised) { return; }
   image_ready = false;
   yield_requested = true;
-  if (!external) { return; }
+  if (!external || complete_memory() || io == nullptr) { return; }
   constexpr std::array spaces{Space::x, Space::y};
   for (std::size_t bank = 0; bank < image_windows.size(); ++bank) {
     image_windows[bank] = io->memory_windows(spaces[bank]);

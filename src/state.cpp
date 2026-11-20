@@ -49,7 +49,7 @@ void Core::set_registers(const Registers &state) {
         "Register initialization requires reset before a pending image transfer");
   }
 
-  if (impl_->executing) {
+  if (impl_->executing || impl_->terminal_fault) {
     throw std::logic_error("Register initialization requires stopped DSP execution");
   }
   validate(state);

@@ -39,6 +39,7 @@ struct ImageContracts {
   std::set<std::pair<Word, unsigned>> interrupts;
   std::map<std::tuple<Word, Word, Word>, ImagePlan> vector_plans;
   PreparationReport report;
+  CompileOptions::MemoryMode memory_mode = CompileOptions::MemoryMode::exact;
 };
 }
 
@@ -56,9 +57,12 @@ struct SemanticImage::Impl : detail::ImageContracts {
 };
 
 struct NativeImage::Impl : detail::ImageContracts {
+  void bind_sites(NativeSymbols::FaultMap map);
   [[nodiscard]] const Variant &variant(std::uint64_t id) const;
   [[nodiscard]] detail::ImageEntry vector_entry(Word address, std::array<Word, 2> words) const;
   std::shared_ptr<const void> owner;
+  std::vector<NativeSymbols::TextRange> text_ranges;
+  std::vector<NativeSymbols::Site> sites;
   std::map<std::tuple<Word, Word, Word>, detail::ImageEntry> vectors;
 };
 }

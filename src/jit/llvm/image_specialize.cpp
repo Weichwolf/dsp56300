@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "dsp56300/core.hpp"
 #include "jit/llvm/image.hpp"
 #include "jit/llvm/runtime.hpp"
 
@@ -9,6 +10,7 @@
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/GlobalValue.h>
+#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Module.h>
@@ -82,6 +84,19 @@ llvm::IRHash fingerprint(const llvm::Module &module) {
   if (llvm::verifyModule(module, &output)) { throw std::invalid_argument(diagnostic); }
   return llvm::StructuralHash(module, true);
 }
+}
+
+void configure_memory(LlvmModule &module, const CompileOptions::MemoryMode mode) {
+  auto &native = *llvm::unwrap(module.code());
+  auto *function = native.getFunction("dsp56300_memory_direct");
+  if (function == nullptr || !function->isDeclaration() || function->arg_size() != 0 ||
+      !function->getReturnType()->isIntegerTy(1)) {
+    throw std::invalid_argument("DSP semantic IR lacks its memory-mode declaration");
+  }
+  llvm::IRBuilder<> ir(llvm::BasicBlock::Create(native.getContext(), "entry", function));
+  ir.CreateRet(ir.getInt1(mode == CompileOptions::MemoryMode::direct));
+  function->setLinkage(llvm::GlobalValue::InternalLinkage);
+  function->addFnAttr(llvm::Attribute::AlwaysInline);
 }
 
 void specialize_image(LlvmModule &module) {

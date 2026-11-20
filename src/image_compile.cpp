@@ -7,6 +7,7 @@
 #include "jit/llvm/image.hpp"
 #include "jit/llvm/runtime.hpp"
 #include "jit/prefixes.hpp"
+#include "native_sites.hpp"
 #include "semantic_ir.hpp"
 
 #include <algorithm>
@@ -98,6 +99,7 @@ std::string symbol(const CodeImage image, const CompileOptions options) {
     hash.update(llvm::StringRef(binding.symbol));
   }
   hash_bytes(hash, options.bindings);
+  hash_word(hash, static_cast<unsigned>(options.memory_mode));
   hash_word(hash, static_cast<std::uint64_t>(options.region_modes.has_value()));
   if (options.region_modes) {
     hash_word(hash, options.region_modes->size());
@@ -133,7 +135,25 @@ memory_view(const detail::ImageContracts::Variant &variant) {
                               : std::nullopt;
 }
 
+std::uint64_t vector_variant(const std::span<const detail::ImageContracts::Variant> variants,
+                             const std::tuple<Word, Word, Word> &code) {
+  const auto address = std::get<0>(code);
+  for (const auto &variant : variants) {
+    const auto first = variant.words.find(address);
+    const auto second = variant.words.find((address + 1) & word_mask);
+    if (first != variant.words.end() && second != variant.words.end() &&
+        first->second == std::get<1>(code) && second->second == std::get<2>(code)) {
+      return variant.id;
+    }
+  }
+  throw std::logic_error("DSP vector has no declared source variant");
+}
+
 void validate(const CodeImage image, const CompileOptions options) {
+  if (options.memory_mode != CompileOptions::MemoryMode::exact &&
+      options.memory_mode != CompileOptions::MemoryMode::direct) {
+    throw std::invalid_argument("DSP image has an invalid memory mode");
+  }
   if (image.variants.empty()) { throw std::invalid_argument("DSP image requires code variants"); }
   std::set<std::pair<Word, unsigned>> interrupts;
   for (const auto request : options.interrupts) {
@@ -244,6 +264,7 @@ SemanticImage Core::load(const CodeImage image,
 SemanticImage Core::lower(const CodeImage image, const CompileOptions options) {
   validate(image, options);
   auto result = std::make_shared<SemanticImage::Impl>();
+  result->memory_mode = options.memory_mode;
   for (const auto request : options.interrupts) {
     result->interrupts.emplace(request.vector, request.level);
   }
@@ -298,7 +319,8 @@ SemanticImage Core::lower(const CodeImage image, const CompileOptions options) {
     translations.push_back({.name = names.back(),
                             .plan = plans[index],
                             .memory = memory_view(variant),
-                            .region_modes = options.region_modes});
+                            .region_modes = options.region_modes,
+                            .variant = variant.id});
     result->report.prepared_entries += variant.instructions.size();
   }
   for (const auto &[key, plan] : vector_plans) {
@@ -306,11 +328,15 @@ SemanticImage Core::lower(const CodeImage image, const CompileOptions options) {
     const auto name = image_name + ".vector." + llvm::utohexstr(address, true) + "." +
                       llvm::utohexstr(first, true) + "." + llvm::utohexstr(second, true);
     const auto symbol = vector_symbols.emplace(key, name).first;
-    translations.push_back(
-        {.name = symbol->second, .plan = plan, .vector = true, .memory = std::nullopt});
+    translations.push_back({.name = symbol->second,
+                            .plan = plan,
+                            .vector = true,
+                            .memory = std::nullopt,
+                            .variant = vector_variant(result->variants, key)});
     result->report.prepared_entries += plan.instructions.size();
   }
-  auto artifact = detail::lower_images(image_name, translations, options.callbacks);
+  auto artifact =
+      detail::lower_images(image_name, translations, options.callbacks, options.memory_mode);
   result->bitcode = std::move(artifact.bitcode);
   result->names = std::move(artifact.entries);
   result->abis = std::move(artifact.abis);
@@ -372,6 +398,7 @@ NativeImage Core::bind(const SemanticImage &image, const NativeSymbols &symbols)
   for (const auto &[key, name] : image.impl_->vector_symbols) {
     result->vectors.emplace(key, std::bit_cast<detail::ImageEntry>(addresses.at(name)));
   }
+  result->bind_sites(symbols.fault_map);
   return NativeImage(std::move(result));
 }
 
@@ -389,10 +416,31 @@ NativeImage Core::compile(const CodeImage image, const CompileOptions options) {
         {.name = entry.name,
          .address = addresses.empty() ? first : compiler->resolve(std::string(entry.name))});
   }
+  const auto map = compiler->fault_map();
+  if (map.text_ranges.empty() || map.sites.empty()) {
+    throw std::runtime_error("DSP native provider did not prepare source attribution");
+  }
+  std::vector<NativeSymbols::TextRange> text_ranges;
+  text_ranges.reserve(map.text_ranges.size());
+  for (const auto &range : map.text_ranges) {
+    text_ranges.push_back({.address = range.address, .size = range.size});
+  }
+  std::vector<NativeSymbols::Site> sites;
+  sites.reserve(map.sites.size());
+  for (const auto &site : map.sites) {
+    if (site.guest_pc > word_mask) {
+      throw std::runtime_error("Native source PC exceeds DSP width");
+    }
+    sites.push_back({.address = site.address,
+                     .size = site.size,
+                     .variant = site.variant,
+                     .guest_pc = site.guest_pc});
+  }
   return bind(semantic,
               {.owner = compiler,
                .symbols = addresses,
                .identity = semantic.identity(),
-               .native_bytes = compiler->native_bytes()});
+               .native_bytes = compiler->native_bytes(),
+               .fault_map = {.text_ranges = text_ranges, .sites = sites}});
 }
 }

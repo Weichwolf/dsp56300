@@ -4,6 +4,7 @@
 #include "jit/llvm/bindings.hpp"
 #include "jit/llvm/lifecycle.hpp"
 #include "jit/llvm/native.hpp"
+#include "native_sites.hpp"
 
 #if defined(__CET__)
 #include <array>
@@ -307,6 +308,7 @@ struct LlvmCompiler::Impl {
   LLVMOrcLLJITRef jit = nullptr;
   TargetMachine machine;
   std::uint64_t text_bytes = 0;
+  llvm_native_sites::SourceMap sites;
 };
 
 LlvmModule::LlvmModule(std::string name) : name_(std::move(name)) {
@@ -404,6 +406,7 @@ LlvmCompiler::LlvmCompiler() : impl_(std::make_unique<Impl>()) {
   LLVMOrcLLJITBuilderSetJITTargetMachineBuilder(
       builder, LLVMOrcJITTargetMachineBuilderCreateFromTargetMachine(machine.release()));
   check(LLVMOrcCreateLLJIT(&impl_->jit, builder));
+  impl_->sites.attach(native_jit(impl_->jit));
   LLVMOrcObjectTransformLayerSetTransform(
       LLVMOrcLLJITGetObjTransformLayer(impl_->jit), Impl::object, impl_.get());
   LLVMOrcDefinitionGeneratorRef symbols = nullptr;
@@ -433,6 +436,10 @@ void LlvmCompiler::define(const std::string &name, const void *address) {
 
 std::uint64_t LlvmCompiler::native_bytes() const noexcept {
   return impl_->text_bytes;
+}
+
+llvm_native_sites::FaultMap LlvmCompiler::fault_map() const noexcept {
+  return impl_->sites.map();
 }
 
 void LlvmCompiler::Impl::prepare(LlvmModule &module) const {

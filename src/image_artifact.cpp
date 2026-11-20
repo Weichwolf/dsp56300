@@ -25,7 +25,7 @@ namespace {
 using detail::ArtifactReader;
 using detail::ArtifactWriter;
 using VectorKey = std::tuple<Word, Word, Word>;
-constexpr std::string_view format = "dsp56300.semantic.1";
+constexpr std::string_view format = "dsp56300.semantic.2";
 
 void sequence(ArtifactWriter &writer, const auto &values, const auto &write) {
   writer.integer(values.size());
@@ -173,6 +173,7 @@ void SemanticImage::Impl::serialize(const std::string_view input_identity) {
   writer.text(input_identity);
   writer.text(identity);
   writer.bytes(bitcode);
+  writer.integer(static_cast<unsigned>(memory_mode));
   sequence(writer, exports, [&](const auto symbol) {
     writer.text(symbol.name);
     writer.text(symbol.abi);
@@ -213,6 +214,8 @@ SemanticImage::Impl::deserialize(const std::span<const std::byte> artifact,
   const auto code = reader.bytes();
   if (result->identity.empty() || code.empty()) { ArtifactReader::fail(); }
   result->bitcode.assign(code.begin(), code.end());
+  result->memory_mode =
+      flag(reader) ? CompileOptions::MemoryMode::direct : CompileOptions::MemoryMode::exact;
   sequence(reader, [&] {
     result->names.push_back(reader.text());
     result->abis.push_back(reader.text());
