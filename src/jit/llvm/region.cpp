@@ -944,9 +944,6 @@ private:
     LLVMBuildCondBr(ir_.get(), control_taken_, active, done);
     ir_.SetInsertPoint(active);
     save(second, {following, control_status_});
-    store(ir_.getInt8(static_cast<unsigned>(NativeBoundary::context)),
-          offsetof(NativeContext, boundary),
-          owner_);
     LLVMBuildBr(ir_.get(), done);
     ir_.SetInsertPoint(done);
     put(ir_.CreateSelect(control_taken_, second, sp_), offsetof(Registers, sp));
@@ -1042,9 +1039,6 @@ private:
       };
       frame(1, reg(32, offsetof(Registers, la)), lc_);
       frame(2, ir_.getInt32(plan_.operations.front().pc), initial_status_);
-      store(ir_.getInt8(static_cast<unsigned>(NativeBoundary::context)),
-            offsetof(NativeContext, boundary),
-            owner_);
       LLVMBuildRet(ir_.get(), ir_.CreateTrunc(retired, ir_.getInt32Ty()));
       return;
     }
@@ -1084,9 +1078,6 @@ private:
             ir_.CreateAnd(ir_.CreateTrunc(saved_, ir_.getInt32Ty()), ir_.getInt32(loop_bits))),
         offsetof(Registers, sr));
     put(following, offsetof(Registers, pc));
-    store(ir_.getInt8(static_cast<unsigned>(NativeBoundary::context)),
-          offsetof(NativeContext, boundary),
-          owner_);
     LLVMBuildBr(ir_.get(), done);
     ir_.SetInsertPoint(done);
     LLVMBuildRet(ir_.get(), ir_.CreateTrunc(retired, ir_.getInt32Ty()));

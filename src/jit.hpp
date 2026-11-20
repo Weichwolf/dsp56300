@@ -5,7 +5,6 @@
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 #include "translation.hpp"
-#include "vector_state.hpp"
 
 #include <array>
 #include <cstddef>
@@ -45,65 +44,9 @@ struct JitRuntime {
   bool admitted_memory = false;
 };
 
-enum class NativeBoundary : std::uint8_t { none, owner, context };
-
-enum class BusAction : std::uint8_t { read, write, bit_test, bit_clear, bit_set, bit_change };
-
-struct NativeAccess {
-  Fault failure{};
-  Word address = 0, value = 0, pc = 0;
-  Space space = Space::program;
-  BusAction action = BusAction::read;
-};
-
-void access_bit_io(Io *io, NativeAccess &access) noexcept;
-
-struct NativeWindow {
-  Word address = 0;
-  std::size_t words = 0;
-  Word *data = nullptr;
-  std::uint8_t *known = nullptr;
-  bool writable = false, aliases_program = false;
-};
-
-struct NativeWindows {
-  const NativeWindow *data = nullptr;
-  std::size_t count = 0;
-};
-
-struct NativeBus {
-  JitMemory program{};
-  std::array<NativeWindows, 2> windows{};
-  CacheRegion cache{};
-  void *owner = nullptr;
-  void (*access)(void *, NativeAccess &) noexcept = nullptr;
-  Fault *failure = nullptr;
-  bool external = false;
-};
-
-struct CacheState;
-
-[[nodiscard]] bool reset_io(Io *io, Word pc) noexcept;
-
-struct NativeEvents {
-  VectorState *vector = nullptr;
-  Word *debug_vector = nullptr;
-  Io *io = nullptr;
-  void *cache_owner = nullptr;
-  CacheState *(*cache)(void *) noexcept = nullptr;
-};
-
 struct NativeContext {
   JitRuntime runtime;
-  bool *exit_requested = nullptr;
-  std::array<std::uint8_t *, 2> write_known{};
   std::uint32_t budget = 0;
-  // Helpers return to the owner; retained loop-context changes may stay native.
-  NativeBoundary boundary = NativeBoundary::none;
-  Fault failure{};
-  NativeBus bus{};
-  bool program_written = false;
-  NativeEvents events{};
   std::uint64_t cycle_deadline = std::numeric_limits<std::uint64_t>::max();
 };
 

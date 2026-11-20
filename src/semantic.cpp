@@ -92,8 +92,9 @@ void Core::Impl::semantic_memory(void *const owner, const detail::SemanticMemory
 
 // Native owners and every continuing native edge have already admitted this state.
 void Core::Impl::assume_image_admission() const noexcept {
-  const bool admitted = image != nullptr && active_image != nullptr && image_ready &&
-                        fault.kind == FaultKind::none &&
+  // A captured REP can finish after the owner invalidates the prepared image.
+  const bool admitted = image != nullptr && active_image != nullptr &&
+                        (image_ready || cpu.repeat_loaded) && fault.kind == FaultKind::none &&
                         cpu.processing == ExecutionState::running && !yield_requested &&
                         !debug_ready() && !instruction_cache_active();
   __builtin_assume(admitted);
@@ -108,7 +109,6 @@ void Core::Impl::step_semantic(const detail::Instruction &decoded) {
     fail(FaultKind::invalid_instruction, Space::program, current_pc, decoded.opcode);
     return;
   }
-  current_words = decoded.words;
   cpu.interrupt_inhibited = false;
   cpu.reg.pc = (current_pc + decoded.words) & word_mask;
   execute_operation(decoded);
@@ -130,7 +130,7 @@ void Core::Impl::step_semantic(const detail::Instruction &decoded) {
   } else if (!detail::is_repeat(decoded.operation)) {
     cpu.repeat_completed = false;
   }
-  finish_loop();
+  finish_loop((current_pc + decoded.words - 1U) & word_mask);
   if (fault.kind == FaultKind::none) { retire_instruction(decoded.cycles); }
 }
 
@@ -185,7 +185,6 @@ std::uint64_t Core::Impl::semantic_vector_entry(void *const owner,
   }
   self.current_pc =
       (self.vector.address + (self.vector.phase == VectorPhase::second ? 1U : 0U)) & word_mask;
-  self.current_words = decoded.words;
   const auto previous_status = self.cpu.reg.sr;
   self.step_vector_semantic(decoded);
   const bool installed = self.image != nullptr;

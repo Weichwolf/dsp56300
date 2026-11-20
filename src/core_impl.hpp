@@ -195,7 +195,7 @@ struct Core::Impl {
   void round(std::uint64_t &value);
   void push(Word high, Word low);
   [[nodiscard]] std::uint64_t pop();
-  void finish_loop();
+  void finish_loop(Word last);
   void restore_loop();
   void execute_loop(const detail::Instruction &decoded);
   [[nodiscard]] Word loop_count(const detail::Instruction &decoded);
@@ -215,7 +215,6 @@ struct Core::Impl {
   std::array<Memory::Views, 3> views;
   Fault fault;
   Word current_pc = 0;
-  unsigned current_words = 1;
   Word debug_vector = 0;
   Word program_omr = 0;
   detail::Instruction repeated;
