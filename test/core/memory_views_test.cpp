@@ -740,10 +740,83 @@ void protected_operands() {
             "A protected opcode operand reports its actual source and stops further execution");
   }
 }
+
+class DescendingIo final : public test::RejectIo {
+public:
+  // The core callback fixes the order of the address and issuing PC.
+  // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
+  bool read(const Space space, const Word address, const Word pc, Word &result) noexcept override {
+    constexpr Word peripheral_first = 0xffff80;
+    if (space != Space::x || address < peripheral_first || reads == addresses.size()) {
+      return false;
+    }
+    addresses[reads] = address;
+    pcs[reads++] = pc;
+    result = address;
+    return true;
+  }
+
+  std::array<Word, 2> addresses{}, pcs{};
+};
+
+void crossing_zero() {
+  constexpr auto xread = static_cast<Word>(isa::Opcode::move_x_effective) | (1U << 15);
+  constexpr auto setup = static_cast<Word>(isa::Opcode::do_immediate) | (3U << 8);
+  constexpr auto adc = static_cast<Word>(isa::Opcode::adc_x_a);
+  constexpr auto stop = static_cast<Word>(isa::Opcode::stop);
+  constexpr auto outer = static_cast<Word>(isa::Opcode::do_immediate) | (1U << 8);
+  constexpr Word child = start + 5;
+  constexpr auto finish = child + 1;
+  // An indexed read keeps the outer DO on the dynamically addressed region.
+  constexpr std::array program{
+      outer, finish, xread | (5U << 11), setup, child, xread | (2U << 11), adc, stop};
+  constexpr std::array<Word, 4> source{0x001, 0x142, 0x243, 0x344};
+  const Storage storage;
+  Core programmer(storage.memory());
+  programmer.load(Space::program, start, program);
+  programmer.load(Space::x, 0, source);
+  const auto checked = image(storage, false, program, CompileOptions::MemoryMode::exact);
+  const auto direct = image(storage, false, program, CompileOptions::MemoryMode::direct);
+  constexpr Word instruction_count = 8;
+  for (Word origin = 0; origin < source.size(); ++origin) {
+    DescendingIo checked_io;
+    DescendingIo direct_io;
+    Core reference(storage.memory(), &checked_io);
+    Core product(storage.memory(), &direct_io);
+    const auto prepare = [origin](Core &core, const NativeImage &native) {
+      auto registers = core.registers();
+      registers.pc = start;
+      registers.sr = 0;
+      registers.omr = 0;
+      registers.r[0] = origin;
+      registers.m.fill(word_mask);
+      core.set_registers(registers);
+      core.install(native, 0);
+      return core.run();
+    };
+    const auto expected = prepare(reference, checked);
+    const auto result = prepare(product, direct);
+    require(expected.fault == Fault{} && expected.retired == instruction_count,
+            "Execute the complete exact witness");
+    require(result.fault == Fault{} && result.retired == expected.retired &&
+                product.state().progress == reference.state().progress &&
+                product.registers() == reference.registers(),
+            "Direct and exact execution agree at the zero-address wrap");
+    const auto count = origin < 2 ? 2U - origin : 0U;
+    require(direct_io.addresses == checked_io.addresses && direct_io.pcs == checked_io.pcs &&
+                direct_io.reads == checked_io.reads && direct_io.reads == count,
+            "Only descending children crossing the peripheral boundary reach the I/O owner");
+    if (count != 0) {
+      require(direct_io.pcs[0] == child && direct_io.addresses[0] == word_mask,
+              "Report the original descending DO child and the real wrapped address");
+    }
+  }
+}
 }
 
 int main() try {
   const test::NativeFaults faults(Core::host_fault);
+  crossing_zero();
   direct_self_loop_empty_window();
   protected_operands();
   require(!Core::host_fault(0, false, 0),
