@@ -290,6 +290,38 @@ private:
     }
   }
 
+  [[nodiscard]] bool repeated_unit_reads(const unsigned index) const {
+    if (!single_turn()) { return false; }
+    const auto uses_stride = [index](const AddressForm form) {
+      return form.index == index && (form.mode < 2 || form.mode == 5);
+    };
+    unsigned reads = 0;
+    for (const auto &step : plan_.steps) {
+      if (step.update && uses_stride(*step.update)) { return false; }
+      for (const auto &move : std::span(step.memory.transfers).first(step.memory.count)) {
+        if (move.address.mode == 6 || move.address.index != index) { continue; }
+        if (uses_stride(move.address) || !move.load) { return false; }
+        if (move.address.mode != 4) { ++reads; }
+      }
+    }
+    return reads >= 4;
+  }
+
+  V extended_unit_mask(V modifier) {
+    auto *linear = ir_.CreateICmpEQ(modifier, ir_.getInt32(modifier_mask));
+    auto *reverse = ir_.CreateICmpEQ(modifier, ir_.getInt32(0));
+    auto *mask = ir_.CreateAnd(modifier, ir_.getInt32(multiple_wrap_mask | multiple_reserved_bit));
+    auto *nonempty = ir_.CreateOr(reverse, ir_.CreateICmpNE(mask, ir_.getInt32(0)));
+    auto *power = ir_.CreateICmpEQ(ir_.CreateAnd(mask, ir_.CreateAdd(mask, ir_.getInt32(1))),
+                                   ir_.getInt32(0));
+    auto *mode =
+        ir_.CreateICmpULT(modifier, ir_.getInt32(multiple_wrap_bit | multiple_reserved_bit));
+    require(ir_.CreateOr(linear, ir_.CreateAnd(mode, ir_.CreateAnd(nonempty, power))));
+    // An increment or decrement by one in reverse carry toggles only bit zero.
+    auto *step_mask = ir_.CreateSelect(reverse, ir_.getInt32(1), mask);
+    return ir_.CreateSelect(linear, ir_.getInt32(word_mask), step_mask);
+  }
+
   void admission() {
     initial_cycles_ = load(64, offsetof(Cpu, cycles));
     initial_instructions_ = load(64, offsetof(Cpu, instructions));
@@ -356,6 +388,11 @@ private:
                                      ir_.getInt32(modifier_mask));
       auto *linear = ir_.CreateICmpEQ(modifier, ir_.getInt32(modifier_mask));
       if (plan_.batch && addressing_ == BatchAddressing::linear) { require(linear); }
+      if (direct_ && repeated_unit_reads(index)) {
+        masks_[index] = extended_unit_mask(modifier);
+        origins_[index] = ir_.CreateAnd(cursors_[index], ir_.CreateNot(masks_[index]));
+        continue;
+      }
       auto *mask = ir_.CreateAnd(modifier, ir_.getInt32(multiple_wrap_mask));
       auto *ring = ir_.CreateAnd(
           ir_.CreateICmpEQ(

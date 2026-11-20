@@ -133,11 +133,15 @@ NativeImage image(const Storage &storage,
                   const bool fixed,
                   const std::span<const Word> program = code,
                   const CompileOptions::MemoryMode mode = CompileOptions::MemoryMode::exact,
-                  const Origin origin = {}) {
+                  const Origin origin = {},
+                  const std::span<const Word> entries = {}) {
   const std::array spans{CodeSpan{.address = origin.pc, .words = program}};
-  const std::array entries{origin.pc};
+  const std::array default_entry{origin.pc};
   const std::array variants{
-      CodeVariant{.id = origin.variant, .code = spans, .entries = entries, .failed_fetches = {}}};
+      CodeVariant{.id = origin.variant,
+                  .code = spans,
+                  .entries = entries.empty() ? std::span<const Word>(default_entry) : entries,
+                  .failed_fetches = {}}};
   std::array<RegionLayout, 3> regions{};
   for (std::size_t bank = 0; bank < regions.size(); ++bank) {
     regions[bank] = {.space = static_cast<Space>(bank),
@@ -759,6 +763,46 @@ public:
   std::array<Word, 2> addresses{}, pcs{};
 };
 
+constexpr Word read_stream = start + 8;
+constexpr Word stream_read_count = 5;
+
+void repeated_unit_reads(const Storage &storage,
+                         const NativeImage &exact_image,
+                         const NativeImage &direct_image) {
+  constexpr std::array<Word, 16> values{
+      0x1, 0x3, 0x5, 0x7, 0x9, 0xb, 0xd, 0xf, 0x11, 0x13, 0x15, 0x17, 0x19, 0x1b, 0x1d, 0x1f};
+  constexpr std::array modifiers{0U, 2U, 3U, 7U, 0x8003U, 0x8007U, word_mask};
+  constexpr Word first_data = 8;
+  constexpr Word last_data = 15;
+  Core exact(storage.memory());
+  Core direct(storage.memory());
+  exact.load(Space::x, first_data - 2, values);
+  exact.install(exact_image, 0);
+  direct.install(direct_image, 0);
+  for (const auto modifier : modifiers) {
+    for (auto origin = first_data; origin <= last_data; ++origin) {
+      for (Word prefix = 1; prefix <= stream_read_count; ++prefix) {
+        const auto execute_prefix = [&](Core &core) {
+          auto registers = core.registers();
+          registers.pc = read_stream;
+          registers.sr = 0;
+          registers.r[0] = origin;
+          registers.m[0] = modifier;
+          registers.x = 0;
+          core.set_registers(registers);
+          const auto result = core.run(prefix);
+          require(result.retired == prefix && result.fault == Fault{},
+                  "Each unit-step memory prefix reaches its actual next instruction");
+          return core.registers();
+        };
+        const auto checked = execute_prefix(exact);
+        require(checked == execute_prefix(direct),
+                "Protected repeated loads preserve wraps, read values and address state");
+      }
+    }
+  }
+}
+
 void crossing_zero() {
   constexpr auto xread = static_cast<Word>(isa::Opcode::move_x_effective) | (1U << 15);
   constexpr auto setup = static_cast<Word>(isa::Opcode::do_immediate) | (3U << 8);
@@ -768,15 +812,32 @@ void crossing_zero() {
   constexpr Word child = start + 5;
   constexpr auto finish = child + 1;
   // An indexed read keeps the outer DO on the dynamically addressed region.
-  constexpr std::array program{
-      outer, finish, xread | (5U << 11), setup, child, xread | (2U << 11), adc, stop};
+  constexpr auto increment = 3U << 11;
+  constexpr auto decrement = 2U << 11;
+  const std::array program{outer,
+                           finish,
+                           xread | (5U << 11),
+                           setup,
+                           child,
+                           xread | decrement,
+                           adc,
+                           stop,
+                           xread | increment,
+                           xread | increment,
+                           xread | decrement,
+                           xread | increment,
+                           xread | decrement,
+                           stop};
+  const std::array entries{start, read_stream};
   constexpr std::array<Word, 4> source{0x001, 0x142, 0x243, 0x344};
   const Storage storage;
   Core programmer(storage.memory());
   programmer.load(Space::program, start, program);
   programmer.load(Space::x, 0, source);
-  const auto checked = image(storage, false, program, CompileOptions::MemoryMode::exact);
-  const auto direct = image(storage, false, program, CompileOptions::MemoryMode::direct);
+  const auto checked =
+      image(storage, false, program, CompileOptions::MemoryMode::exact, {}, entries);
+  const auto direct =
+      image(storage, false, program, CompileOptions::MemoryMode::direct, {}, entries);
   constexpr Word instruction_count = 8;
   for (Word origin = 0; origin < source.size(); ++origin) {
     DescendingIo checked_io;
@@ -811,6 +872,7 @@ void crossing_zero() {
               "Report the original descending DO child and the real wrapped address");
     }
   }
+  repeated_unit_reads(storage, checked, direct);
 }
 }
 
