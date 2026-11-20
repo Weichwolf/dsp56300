@@ -590,6 +590,14 @@ private:
   }
 
   void extend(Bounds &range, const Bounds next) {
+    if (direct_) {
+      // Keep every endpoint's high bits, including a descending loop's
+      // wrapped lower endpoint. An unsigned minimum can hide that endpoint.
+      auto *bits = ir_.CreateOr(next.first, next.last);
+      range.last = range.last == nullptr ? bits : ir_.CreateOr(range.last, bits);
+      range.first = range.last;
+      return;
+    }
     range.first = range.first == nullptr ? next.first : minimum(range.first, next.first);
     range.last =
         range.last == nullptr
