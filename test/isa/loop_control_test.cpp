@@ -293,7 +293,7 @@ void suffix_case(const NativeImage &image,
   const Progress progress{.instructions = quota, .estimated_cycles = quota + (extended ? 1U : 0U)};
   if ((initial.sr & lf) != 0 && quota != 0 && expected.pc - 1 == initial.la) {
     if (initial.lc != 1 || (initial.sr & fv) != 0) {
-      expected.lc = (initial.lc - 1) & word_mask;
+      expected.lc = (initial.lc + word_mask) & word_mask;
       expected.pc = start;
     } else {
       loop_frames::complete(expected);
@@ -486,7 +486,7 @@ unsigned nested_step(Registers &state,
     if (state.lc == 1 && (state.sr & fv) == 0) {
       loop_frames::complete(state);
     } else {
-      state.lc = (state.lc - 1) & word_mask;
+      state.lc = (state.lc + word_mask) & word_mask;
       state.pc = static_cast<Word>(state.stack[state.sp % stack_entries] >> word_bits);
     }
   }

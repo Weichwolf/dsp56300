@@ -46,10 +46,7 @@ std::uint64_t Core::Impl::semantic_region(void *const owner,
   const auto before = self.cpu.cycles;
   const auto retired = region.entry(&self.cpu, &context);
   cycles = self.cpu.cycles - before;
-  if (retired != 0) {
-    self.current_pc = region.pc;
-    self.current_words = region.words;
-  }
+  if (retired != 0) { self.current_pc = region.pc; }
   return retired | (static_cast<std::uint64_t>(self.cpu.reg.pc) << pc_shift);
 }
 }

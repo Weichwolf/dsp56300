@@ -25,7 +25,7 @@ situation on the i5 reference hosts (>=10x as direction on faster hosts) and
   workloads, measured by the developers. Component numbers are supporting
   evidence, not results.
 - Less code is better. Report the src/ and test/ line delta with each published
-  increment; see the reduction plan in Weichwolf/blofeld-src#31.
+  increment.
 
 ## Freedom
 
@@ -41,38 +41,20 @@ entries, variants, memory layout, devices, timing) through the public interface.
 
 - German with the user; English code, comments, docs and commits. C++23, LLVM 19,
   CMake/Ninja, warnings as errors, clang-format, clang-tidy clean.
-- Commit reviewed increments and push them to origin/main only. No force pushes
-  or backup branches. Validate your native host (Linux x86-64 or macOS ARM64)
-  without breaking the other; coordinate consumer pins in commits.
-- Coordinate in private Weichwolf/blofeld-src issues. Comments starting with
-  [Lead] come from the technical lead and set priorities: #30 experiments,
-  #31 reduction, #23 whole-instrument performance, #28 DSP AOT and backend,
-  #25 arithmetic/filter/LFO, #26 MIDI/SysEx, #27 MCU IRQ/display/USB.
-  Write short, result-first comments: table, what changed, what is open.
+- Commit reviewed increments. Validate your native host without breaking the
+  other. Record the exact core revision in consumer changes.
+- Use GitHub issues in this repository for concrete remaining work. Keep closed
+  issues with useful technical evidence and write short, result-first comments.
 - Sanitizer qualification (ASan/UBSan, separate TSan) of own and generated code
   happens at the goal, earlier only for a concrete risk.
 
 ## Branches
 
-- `main` is the only long-lived branch, locally and on the remote. The remote
-  holds `main`; no review or backup branches, no tags used as backups. One
-  exception: to hand unpublished work to another developer or host, push the
-  step's work branch (`work/<issue>-<step>`) and name it in the issue. Its
-  owner deletes it on the remote when the step is published or dropped. Code
-  is handed over as a branch, never as a patch pasted into an issue.
-- Local `main` equals the remote `main`. Fast-forward it (`git fetch --prune`,
-  then `git merge --ff-only`) before starting work, before any measurement that
-  names a published commit, and before every push. Nothing is committed on
-  local `main` that is not pushed in the same step.
-- Unpublished work lives on at most one work branch per open step, named
-  `work/<issue>-<step>` (for example `work/37-r1`), rebased on the remote
-  `main`, without merge commits. Publishing is: fast-forward `main` to it,
-  push, delete the work branch, all in one step.
-- A measurement baseline may be a detached worktree at a published commit. It
-  is removed when the result is posted.
-- A branch, worktree or stash is orphaned when its step is published, cancelled
-  or superseded, or when no open issue step names it. Orphans are deleted, not
-  archived: history on `main` and the issue record are the archive. A stash is
-  never storage.
-- At every publication `git branch` shows `main` plus the active work branches
-  and `git worktree list` shows nothing else. No force pushes to `main`.
+- Each host or agent may work on one `{hostname}/{issueid}_{issuename}` branch
+  with one open issue at a time. The owner creates and merges the pull request
+  with `gh` after required checks and approvals pass.
+- `main` is the only long-lived branch. Keep local `main` synchronized with
+  `origin/main` by fetching and fast-forwarding before work, before measuring
+  a published revision and after a PR merge. Never force-push `main`.
+- Remove work branches when merged, cancelled or superseded. Remove detached
+  measurement worktrees when the result is posted.

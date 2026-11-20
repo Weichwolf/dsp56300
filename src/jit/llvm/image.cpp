@@ -196,8 +196,7 @@ private:
         auto *function = module_.getFunction(name);
         function->setLinkage(llvm::GlobalValue::InternalLinkage);
         function->addFnAttr(llvm::Attribute::AlwaysInline);
-        const std::array<llvm::Constant *, 3> fields{
-            function, ir_.getInt32(last.pc), ir_.getInt32(last.instruction.words)};
+        const std::array<llvm::Constant *, 2> fields{function, ir_.getInt32(last.pc)};
         auto *site =
             constant(name + ".site", llvm::ConstantStruct::getAnon(module_.getContext(), fields));
         site->setAlignment(llvm::Align(alignof(SemanticRegion)));

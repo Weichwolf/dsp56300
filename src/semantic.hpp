@@ -13,7 +13,7 @@ using RegionEntry = std::uint32_t (*)(Cpu *, NativeContext *) noexcept;
 
 struct SemanticRegion {
   RegionEntry entry;
-  Word pc, words;
+  Word pc;
 };
 
 enum class SemanticFlow : std::uint8_t { fault, owner, sequential, branch };

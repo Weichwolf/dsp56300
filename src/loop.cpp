@@ -24,9 +24,8 @@ void Core::Impl::restore_loop() {
   cpu.reg.lc = static_cast<Word>(previous) & word_mask;
 }
 
-void Core::Impl::finish_loop() {
+void Core::Impl::finish_loop(const Word last) {
   auto &reg = cpu.reg;
-  const auto last = (current_pc + current_words - 1) & word_mask;
   const auto next = (reg.la + 1) & word_mask;
   if ((reg.sr & loop_flag) == 0 || last != reg.la || reg.pc != next || cpu.repeat_remaining != 0) {
     return;
