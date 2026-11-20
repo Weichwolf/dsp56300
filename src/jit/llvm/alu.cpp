@@ -57,6 +57,7 @@ public:
   void lower(Word code, const Banks &before, Banks &after);
   void immediate(const Instruction &instruction, Banks &banks);
   void shift(Word opcode, Banks &banks);
+  void logical_shift(Word opcode, Banks &banks);
   void flags(const Result &result);
 
 private:
@@ -124,7 +125,7 @@ private:
   std::optional<Result> unary(Word code, V value);
   void rounding(Result &result);
   void logic(Word code, V left, V right, Banks &after, unsigned destination);
-  void word_shift(Word code, const Banks &before, Banks &after, unsigned destination);
+  void word_shift(V original, Banks &after, unsigned destination, bool left, unsigned count);
   void word_result(V value, Banks &after, unsigned destination, V carried = nullptr);
 
   V word(V accumulator) {
@@ -288,18 +289,30 @@ void Alu::word_result(V value, Banks &after, const unsigned destination, V carri
   status_ = ir_.CreateOr(ir_.CreateAnd(status_, ir_.getInt32(~changed)), bits);
 }
 
-void Alu::word_shift(const Word code,
-                     const Banks &before,
-                     Banks &after,
-                     const unsigned destination) {
-  auto *original = word(before[destination]);
-  const bool left = (code & alu_mask) == word_left;
-  auto *value =
-      left ? ir_.CreateAnd(ir_.CreateShl(original, ir_.getInt32(1)), ir_.getInt32(word_mask))
-           : ir_.CreateLShr(original, ir_.getInt32(1));
-  auto *carried = ir_.CreateICmpNE(ir_.CreateAnd(original, ir_.getInt32(left ? sign24_bit : 1U)),
-                                   ir_.getInt32(0));
+void Alu::word_shift(
+    V original, Banks &after, const unsigned destination, const bool left, const unsigned count) {
+  auto *value = original;
+  auto *carried = boolean(false);
+  if (count != 0) {
+    value =
+        left ? ir_.CreateAnd(ir_.CreateShl(original, ir_.getInt32(count)), ir_.getInt32(word_mask))
+             : ir_.CreateLShr(original, ir_.getInt32(count));
+    const auto edge = left ? word_bits - count : count - 1;
+    carried =
+        ir_.CreateICmpNE(ir_.CreateAnd(original, ir_.getInt32(Word{1} << edge)), ir_.getInt32(0));
+  }
   word_result(value, after, destination, carried);
+}
+
+void Alu::logical_shift(const Word opcode, Banks &banks) {
+  constexpr Word count_mask = 31;
+  constexpr Word right_bit = 1U << 6;
+  const auto destination = opcode & 1U;
+  word_shift(word(banks[destination]),
+             banks,
+             destination,
+             (opcode & right_bit) == 0,
+             (opcode >> 1) & count_mask);
 }
 
 void Alu::shift(const Word opcode, Banks &banks) {
@@ -345,7 +358,7 @@ void Alu::lower(const Word code, const Banks &before, Banks &after) {
     return;
   }
   if ((code & alu_mask) == word_left || (code & alu_mask) == word_right) {
-    word_shift(code, before, after, destination);
+    word_shift(word(before[destination]), after, destination, (code & alu_mask) == word_left, 1);
     return;
   }
   auto operation = unary(code, before[destination]);
@@ -420,6 +433,10 @@ void lower_alu(
 void lower_arithmetic_shift(
     Builder &ir, const Word opcode, const Word mode, Banks &banks, V &status) {
   Alu(ir, mode, status).shift(opcode, banks);
+}
+
+void lower_logical_shift(Builder &ir, const Word opcode, Banks &banks, V &status) {
+  Alu(ir, 0, status).logical_shift(opcode, banks);
 }
 
 void lower_immediate_alu(

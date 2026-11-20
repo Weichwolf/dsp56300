@@ -22,7 +22,8 @@ namespace dsp56300::detail {
 namespace {
 bool ordinary(const Operation kind) {
   return kind == Operation::nop || kind == Operation::parallel || kind == Operation::bit_memory ||
-         kind == Operation::arithmetic_shift_immediate || kind == Operation::immediate_alu;
+         kind == Operation::arithmetic_shift_immediate ||
+         kind == Operation::logical_shift_immediate || kind == Operation::immediate_alu;
 }
 
 bool terminal(const Operation kind) {

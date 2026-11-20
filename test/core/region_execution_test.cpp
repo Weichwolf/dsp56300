@@ -16,6 +16,7 @@
 #include <iostream>
 #include <optional>
 #include <span>
+#include <string_view>
 
 namespace {
 using namespace dsp56300;
@@ -38,6 +39,9 @@ using Alus = std::array<Word, 2>;
 constexpr Alus ordinary{opcode<isa::Opcode::add_x1_a>, opcode<isa::Opcode::asr_a>};
 constexpr Alus carried{opcode<isa::Opcode::adc_x_a>, opcode<isa::Opcode::asr_a>};
 constexpr Alus partial{opcode<isa::Opcode::add_x1_a>, opcode<isa::Opcode::or_y1_a>};
+constexpr unsigned logical_left_count = 24, logical_right_count = 7;
+constexpr Alus logical{opcode<isa::Opcode::lsl_immediate> | (logical_left_count << 1),
+                       opcode<isa::Opcode::lsr_immediate> | (logical_right_count << 1) | 1};
 
 constexpr auto with_alu(const Alus alu) {
   auto result = source;
@@ -48,6 +52,7 @@ constexpr auto with_alu(const Alus alu) {
 
 constexpr auto carried_source = with_alu(carried);
 constexpr auto partial_source = with_alu(partial);
+constexpr auto logical_source = with_alu(logical);
 constexpr std::array<Word, iterations + 1> xdata{0xab000001,
                                                  test::sign24,
                                                  test::sign24 - 1,
@@ -94,6 +99,7 @@ program(const bool single, const bool repeat, const bool descending, const Alus 
   if (descending) { return descending_source; }
   if (alu == carried) { return carried_source; }
   if (alu == partial) { return partial_source; }
+  if (alu == logical) { return logical_source; }
   return single ? std::span<const Word>(single_source) : std::span<const Word>(source);
 }
 
@@ -143,6 +149,15 @@ void advance(Registers &state,
   if (operation == opcode<isa::Opcode::or_y1_a>) {
     test::bfu_model::apply(
         state, old, {.function = test::bfu_model::Function::bit_or, .source = 3});
+  } else if (operation == logical[0] || operation == logical[1]) {
+    const bool right = operation == logical[1];
+    test::bfu_model::apply(
+        state,
+        old,
+        {.function = right ? test::bfu_model::Function::right : test::bfu_model::Function::left,
+         .form = test::bfu_model::Form::shift_immediate,
+         .count = right ? logical_right_count : logical_left_count,
+         .destination_b = right});
   } else {
     test::sequence_model::alu(state, old, operation);
   }
@@ -223,38 +238,47 @@ void execute(const NativeImage &image, const Input input) {
   require(storage.p == original.p && storage.x == xdata && storage.y == ydata,
           "Declared code and both borrowed data banks remain unchanged");
 }
-}
 
-int main() try {
+void check_shape(const unsigned shape) {
   constexpr std::array selected{Word{0}};
   using Hint = std::optional<std::span<const Word>>;
-  for (const unsigned shape : {0U, 1U, 2U, 3U, 4U, 5U}) {
-    const bool single = shape != 0 && shape < 4;
-    const bool repeat = shape == 2;
-    const bool descending = shape == 3;
-    auto alu = ordinary;
-    if (shape == 4) { alu = carried; }
-    if (shape == 5) { alu = partial; }
-    const auto code = program(single, repeat, descending, alu);
-    Storage storage(code);
-    const auto count = single ? iterations : total;
-    for (const auto hint : {Hint{}, Hint{selected}}) {
-      const auto image = test::compile_program(code, entry, storage.buffers(), hint);
-      for (const auto mode : modes) {
-        for (const bool below : {false, true}) {
-          for (Word prefix = 0; prefix <= count; ++prefix) {
-            execute(image,
-                    {.mode = mode,
-                     .prefix = prefix,
-                     .alu = alu,
-                     .single = single,
-                     .below = below,
-                     .repeat = repeat,
-                     .descending = descending});
-          }
+  const bool single = shape != 0 && shape < 4;
+  const bool repeat = shape == 2;
+  const bool descending = shape == 3;
+  auto alu = ordinary;
+  if (shape == 4) { alu = carried; }
+  if (shape == 5) { alu = partial; }
+  if (shape == 6) { alu = logical; }
+  const auto code = program(single, repeat, descending, alu);
+  Storage storage(code);
+  const auto count = single ? iterations : total;
+  for (const auto hint : {Hint{}, Hint{selected}}) {
+    const auto image = test::compile_program(code, entry, storage.buffers(), hint);
+    for (const auto mode : modes) {
+      for (const bool below : {false, true}) {
+        for (Word prefix = 0; prefix <= count; ++prefix) {
+          execute(image,
+                  {.mode = mode,
+                   .prefix = prefix,
+                   .alu = alu,
+                   .single = single,
+                   .below = below,
+                   .repeat = repeat,
+                   .descending = descending});
         }
       }
     }
+  }
+}
+}
+
+int main(const int argc, const char *const *const argv) try {
+  const bool logical_shifts = argc == 2 && std::string_view{argv[1]} == "--logical-shifts";
+  require(argc == 1 || logical_shifts, "Expected --logical-shifts or no arguments");
+  if (logical_shifts) {
+    check_shape(6);
+  } else {
+    for (const unsigned shape : {0U, 1U, 2U, 3U, 4U, 5U}) { check_shape(shape); }
   }
   std::cout << test::checks << " fixed-layout loop boundary checks passed\n";
 } catch (const std::exception &error) {

@@ -311,8 +311,9 @@ bool append_immediate_alu(RegionPlan &plan, const Instruction &instruction) {
     const auto kind = instruction.opcode & 7U;
     if (kind == 1 || kind == 7) { return false; }
   } else {
-    constexpr Word count_mask = 63;
-    if (((instruction.opcode >> 1) & count_mask) >= accumulator_bits) { return false; }
+    const bool logical = instruction.operation == Operation::logical_shift_immediate;
+    const auto count = (instruction.opcode >> 1) & (logical ? 31U : 63U);
+    if (count > (logical ? word_bits : accumulator_bits - 1)) { return false; }
   }
   plan.computation = true;
   plan.steps.push_back({});
@@ -323,7 +324,8 @@ bool append(RegionPlan &plan, const BlockInstruction &operation) {
   const auto &instruction = operation.instruction;
   if (instruction.operation == Operation::bit_memory) { return append_bit(plan, instruction); }
   if (instruction.operation == Operation::immediate_alu ||
-      instruction.operation == Operation::arithmetic_shift_immediate) {
+      instruction.operation == Operation::arithmetic_shift_immediate ||
+      instruction.operation == Operation::logical_shift_immediate) {
     return append_immediate_alu(plan, instruction);
   }
   if ((instruction.operation != Operation::parallel && instruction.operation != Operation::nop) ||
