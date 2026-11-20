@@ -25,6 +25,7 @@ void lower_alu(
     Builder &ir, Word opcode, Word mode, const Banks &before, Banks &after, LLVMValueRef &status);
 void lower_arithmetic_shift(
     Builder &ir, Word opcode, Word mode, Banks &banks, LLVMValueRef &status);
+void lower_logical_shift(Builder &ir, Word opcode, Banks &banks, LLVMValueRef &status);
 void lower_immediate_alu(
     Builder &ir, const Instruction &instruction, Word mode, Banks &banks, LLVMValueRef &status);
 [[nodiscard]] LLVMValueRef
