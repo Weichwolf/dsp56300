@@ -11,6 +11,7 @@
 #include "jit/llvm/origins.hpp"
 #include "jit/llvm/region.hpp"
 #include "jit/llvm/runtime.hpp"
+#include "jit/pair_read_loop.hpp"
 #include "semantic.hpp"
 #include "semantic_ir.hpp"
 
@@ -127,7 +128,8 @@ public:
               const std::optional<std::span<const RegionLayout>> memory = std::nullopt,
               const std::optional<std::span<const Word>> region_modes = std::nullopt,
               const std::uint64_t variant = 0,
-              const bool direct = false)
+              const bool direct = false,
+              const bool paired = false)
       : module_(*llvm::unwrap(module.code())),
         locations_(module_, variant),
         ir_(module_.getContext()),
@@ -148,6 +150,7 @@ public:
     } else if (!vector && memory_) {
       prepare_regions(module, *memory_, region_modes);
     }
+    if (paired) { prepare_paired_reads(); }
     for (const auto head : plan_.units()) {
       units_.emplace(head, function(name_ + ".unit." + llvm::utohexstr(head, true), true));
     }
@@ -231,6 +234,76 @@ private:
     for (const auto target : targets) {
       transfer->addCase(ir_.getInt32(target), successor(target));
     }
+  }
+
+  void prepare_paired_reads() {
+    constexpr Word setup_words = 2;
+    for (const auto &[pc, instruction] : plan_.instructions) {
+      if (instruction.operation != Operation::loop_immediate || instruction.words != setup_words ||
+          pc > word_mask - setup_words) {
+        continue;
+      }
+      const auto body = pc + setup_words;
+      if (const auto loop = paired_port_read(plan_, body)) { prepare_paired_read(body, *loop); }
+    }
+  }
+
+  void prepare_paired_read(const Word pc, const PairedPortRead &loop) {
+    const auto &edges = loop.edges;
+    const std::array<Word, sizeof(SemanticPairedPortRead) / sizeof(Word)> words{
+        pc,
+        loop.end,
+        loop.destination_register,
+        loop.retired,
+        static_cast<Word>(loop.data.space),
+        loop.data.address,
+        static_cast<Word>(loop.strobe.space),
+        loop.strobe.address,
+        loop.bit,
+        loop.cycles,
+        loop.reads[0],
+        loop.reads[1],
+        edges[0],
+        edges[1],
+        edges[2],
+        edges[3]};
+    auto *data = llvm::ConstantDataArray::get(module_.getContext(), words);
+    auto *contract = new llvm::GlobalVariable(module_,
+                                              data->getType(),
+                                              true,
+                                              llvm::GlobalValue::PrivateLinkage,
+                                              data,
+                                              name_ + ".paired_read." + llvm::utohexstr(pc, true));
+    contract->setAlignment(llvm::Align(alignof(SemanticPairedPortRead)));
+    paired_reads_.emplace(pc, contract);
+  }
+
+  void emit_paired_read(const Word pc, Value *count, Value *window) {
+    const auto selected = paired_reads_.find(pc);
+    if (selected == paired_reads_.end()) { return; }
+    auto *adapter = module_.getFunction("dsp56300_semantic_paired_read");
+    if (adapter == nullptr || adapter->isDeclaration() || adapter->arg_size() != 5 ||
+        !adapter->getReturnType()->isIntegerTy(64)) {
+      throw std::invalid_argument("DSP image lacks the paired I/O ABI");
+    }
+    auto *commit = block(active_, "paired.complete");
+    auto *precise = block(active_, "paired.precise");
+    auto *result = ir_.CreateCall(adapter,
+                                  {active_->getArg(0),
+                                   ir_.CreateSub(active_->getArg(2), count),
+                                   selected->second,
+                                   window,
+                                   region_cost_});
+    auto *retired = ir_.CreateTrunc(result, ir_.getInt32Ty());
+    ir_.CreateCondBr(ir_.CreateIsNotNull(retired), commit, precise);
+    ir_.SetInsertPoint(commit);
+    auto *cost = ir_.CreateLoad(ir_.getInt64Ty(), region_cost_);
+    ir_.CreateStore(ir_.CreateAdd(count, retired), count_);
+    ir_.CreateStore(ir_.CreateSub(window, cost), window_);
+    ir_.CreateStore(ir_.getInt32(pc), pc_);
+    auto *yield = ir_.CreateTrunc(ir_.CreateLShr(result, flow_shift), ir_.getInt1Ty());
+    ir_.CreateCondBr(yield, exits_.at(ImageExit::owner), successor(pc));
+    ir_.SetInsertPoint(precise);
   }
 
   void emit_regions(const Word pc, Value *count, Value *window) {
@@ -512,6 +585,7 @@ private:
         ir_.CreateICmpNE(window, ir_.getInt64(0)), execute, exits_.at(ImageExit::deadline));
     ir_.SetInsertPoint(execute);
     memory_contracts();
+    emit_paired_read(pc, count, window);
     emit_regions(pc, count, window);
     auto *outcome =
         ir_.CreateCall(semantic_variant(operation), {active_->getArg(0), ir_.getInt32(pc)});
@@ -696,6 +770,7 @@ private:
   std::map<Word, llvm::Function *> units_, targets_;
   std::map<std::pair<Word, Word>, llvm::Function *> semantic_variants_;
   std::multimap<Word, FastRegion> regions_;
+  std::map<Word, llvm::GlobalVariable *> paired_reads_;
   std::map<Word, Block *> sites_, links_;
   std::map<ImageExit, Block *> exits_;
   std::set<Block *> cold_;
@@ -718,10 +793,12 @@ void lift_image(LlvmModule &module,
                 const std::optional<std::span<const RegionLayout>> memory,
                 const std::optional<std::span<const Word>> region_modes,
                 const std::uint64_t variant,
-                const bool direct) {
+                const bool direct,
+                const bool paired) {
   if (module.code() == nullptr) { throw std::logic_error("Image module was already transferred"); }
   if (plan.instructions.empty()) { throw std::invalid_argument("Image has no instructions"); }
-  const ImageLifter lifter(module, plan, entry, false, memory, region_modes, variant, direct);
+  const ImageLifter lifter(
+      module, plan, entry, false, memory, region_modes, variant, direct, paired);
 }
 
 void lift_vector(LlvmModule &module,
@@ -759,6 +836,9 @@ ImageArtifact lower_images(const std::string_view name,
   configure_memory(module, mode);
   mark_io(module);
   declare_callbacks(module, callbacks);
+  const bool paired = std::ranges::any_of(callbacks, [](const CallbackBinding &binding) {
+    return binding.role == CallbackRole::paired_read;
+  });
   for (const auto &translation : translations) {
     if (translation.vector) {
       lift_vector(module,
@@ -773,7 +853,8 @@ ImageArtifact lower_images(const std::string_view name,
                  translation.memory,
                  translation.region_modes,
                  translation.variant,
-                 mode == CompileOptions::MemoryMode::direct);
+                 mode == CompileOptions::MemoryMode::direct,
+                 paired);
     }
   }
   specialize_image(module, result.entries);

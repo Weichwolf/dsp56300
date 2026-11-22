@@ -148,6 +148,19 @@ std::uint64_t vector_variant(const std::span<const detail::ImageContracts::Varia
   throw std::logic_error("DSP vector has no declared source variant");
 }
 
+void validate_paired_reads(const CompileOptions options) {
+  const auto callback = [&](const CallbackRole role) {
+    return std::ranges::find(options.callbacks, role, &CallbackBinding::role) !=
+           options.callbacks.end();
+  };
+  if (callback(CallbackRole::paired_read) &&
+      (options.memory_mode != CompileOptions::MemoryMode::direct ||
+       callback(CallbackRole::retired))) {
+    throw std::invalid_argument(
+        "DSP paired I/O requires direct memory without retirement observation");
+  }
+}
+
 void validate(const CodeImage image, const CompileOptions options) {
   if (options.memory_mode != CompileOptions::MemoryMode::exact &&
       options.memory_mode != CompileOptions::MemoryMode::direct) {
@@ -167,6 +180,7 @@ void validate(const CodeImage image, const CompileOptions options) {
       throw std::invalid_argument("Duplicate DSP code variant");
     }
   }
+  validate_paired_reads(options);
   std::set<std::tuple<std::uint64_t, Word, std::uint64_t>> transfers;
   for (const auto transfer : options.transitions) {
     if (!ids.contains(transfer.from) || !ids.contains(transfer.to) ||

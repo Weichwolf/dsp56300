@@ -105,6 +105,12 @@ struct Core::Impl {
                                                      std::uint64_t window,
                                                      std::uint64_t &cycles) noexcept
       asm("dsp56300_semantic_region");
+  [[nodiscard]] static std::uint64_t
+  semantic_paired_read(void *owner,
+                       std::uint32_t budget,
+                       const detail::SemanticPairedPortRead &read,
+                       std::uint64_t window,
+                       std::uint64_t &cycles) noexcept asm("dsp56300_semantic_paired_read");
   [[nodiscard]] static detail::SemanticResult
   semantic_execute(void *owner, const detail::Instruction &decoded) noexcept;
   // Stable private LLVM boundary; the packed result does not depend on struct-return ABI.

@@ -48,7 +48,7 @@ set(dsp56300_semantic_sources
 add_library(dsp56300_semantics OBJECT ${dsp56300_semantic_sources})
 add_library(dsp56300_core STATIC
   src/io.cpp src/memory.cpp src/image_compile.cpp src/image_artifact.cpp src/image_entry.cpp src/image_sites.cpp src/jit/preparation.cpp src/jit/image_plan.cpp
-  src/jit/prefixes.cpp src/jit/prefix_access.cpp src/jit/llvm/runtime.cpp
+  src/jit/prefixes.cpp src/jit/prefix_access.cpp src/jit/pair_read_loop.cpp src/jit/llvm/runtime.cpp
   src/jit/llvm/lifecycle.cpp src/jit/llvm/bindings.cpp
   src/jit/llvm/image.cpp src/jit/llvm/image_regions.cpp src/jit/llvm/image_specialize.cpp src/jit/llvm/origins.cpp
   src/jit/llvm/region.cpp src/jit/llvm/region_plan.cpp src/jit/llvm/alu.cpp
@@ -281,6 +281,12 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   target_include_directories(dsp56300_memory_views_test SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
   target_link_libraries(dsp56300_memory_views_test PRIVATE dsp56300::core LLVM)
   add_test(NAME borrowed-memory-views COMMAND dsp56300_memory_views_test)
+
+  add_executable(dsp56300_paired_io_test test/core/paired_io_test.cpp)
+  target_include_directories(dsp56300_paired_io_test PRIVATE test/support)
+  target_include_directories(dsp56300_paired_io_test SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
+  target_link_libraries(dsp56300_paired_io_test PRIVATE dsp56300::core LLVM)
+  add_test(NAME installed-image-paired-io COMMAND dsp56300_paired_io_test)
   # Includes cold native image preparation on frequency-capped hosts.
   set_tests_properties(borrowed-memory-views PROPERTIES TIMEOUT 45)
   set_tests_properties(public-core-api PROPERTIES TIMEOUT 30)
