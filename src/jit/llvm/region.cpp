@@ -89,16 +89,19 @@ public:
                const std::size_t admission_steps = 0,
                const BatchAddressing addressing = BatchAddressing::automatic,
                const std::uint64_t variant = 0,
-               const bool direct = false)
+               const bool direct = false,
+               const bool linear_only = false)
       : context_(module.context()),
         function_(make_function(module, entry, admission_only)),
         locations_(*llvm::unwrap(module.code()), variant),
         ir_(context_, LLVMAppendBasicBlockInContext(context_, function_, "entry")),
         plan_(plan),
-        addressing_(addressing),
+        addressing_(linear_only ? BatchAddressing::linear : addressing),
+        linear_only_(linear_only),
         direct_(direct),
         self_loop_(
-            !admission_only && !plan_.batch && plan_.control.stack == ControlStack::none &&
+            !admission_only && !plan_.allow_partial_exit && !plan_.batch &&
+            plan_.control.stack == ControlStack::none &&
             plan_.operations.back().instruction.operation != Operation::bit_jump &&
             plan_.operations.back().instruction.operation != Operation::bit_branch &&
             (captured_loop() || (region_independent(plan_.operations) && plan_.control.valid &&
@@ -114,6 +117,7 @@ public:
     for (unsigned bank = 0; bank < bindings_.size(); ++bank) {
       bindings_[bank].resize(plan_.windows[bank].size());
     }
+    if (linear_only_) { require_linear_entry(); }
     if ((plan_.batch || !plan_.repeats.empty()) && addressing_ == BatchAddressing::automatic &&
         std::ranges::any_of(plan_.agu, [](bool used) { return used; })) {
       generate_versions(module, admission_only, admission_steps);
@@ -155,6 +159,22 @@ private:
     auto *function = LLVMAddFunction(
         module.code(), entry.empty() ? module.name().c_str() : std::string(entry).c_str(), type);
     return function;
+  }
+
+  void require_linear_entry() {
+    auto *linear = boolean(true);
+    for (unsigned index = 0; index < agu_registers; ++index) {
+      if (!plan_.agu[index]) { continue; }
+      auto *modifier = ir_.CreateAnd(reg(32, offsetof(Registers, m) + (index * sizeof(Word))),
+                                     ir_.getInt32(modifier_mask));
+      linear = ir_.CreateAnd(linear, ir_.CreateICmpEQ(modifier, ir_.getInt32(modifier_mask)));
+    }
+    auto *start = LLVMAppendBasicBlockInContext(context_, function_, "linear_region");
+    auto *miss = LLVMAppendBasicBlockInContext(context_, function_, "nonlinear_region");
+    LLVMBuildCondBr(ir_.get(), linear, start, miss);
+    ir_.SetInsertPoint(miss);
+    LLVMBuildRet(ir_.get(), ir_.getInt32(0));
+    ir_.SetInsertPoint(start);
   }
 
   void generate_versions(LlvmModule &module,
@@ -381,6 +401,10 @@ private:
     for (const auto offset : {offsetof(Cpu, processing), offsetof(Cpu, debug_flags)}) {
       require(ir_.CreateICmpEQ(load(8, offset), ir_.getInt8(0)));
     }
+    admit_address_registers();
+  }
+
+  void admit_address_registers() {
     for (unsigned index = 0; index < agu_registers; ++index) {
       cursors_[index] = reg(32, offsetof(Registers, r) + (index * sizeof(Word)));
       strides_[index] = reg(32, offsetof(Registers, n) + (index * sizeof(Word)));
@@ -388,6 +412,11 @@ private:
       auto *modifier = ir_.CreateAnd(reg(32, offsetof(Registers, m) + (index * sizeof(Word))),
                                      ir_.getInt32(modifier_mask));
       auto *linear = ir_.CreateICmpEQ(modifier, ir_.getInt32(modifier_mask));
+      if (linear_only_) {
+        masks_[index] = ir_.getInt32(word_mask);
+        origins_[index] = ir_.getInt32(0);
+        continue;
+      }
       if (plan_.batch && addressing_ == BatchAddressing::linear) { require(linear); }
       if (direct_ && repeated_unit_reads(index)) {
         masks_[index] = extended_unit_mask(modifier);
@@ -1043,7 +1072,7 @@ private:
     return ir_.CreateSelect(taken, target, following);
   }
 
-  void finish() {
+  void commit_values() {
     for (unsigned bank = 0; bank < banks_.size(); ++bank) { put(banks_[bank], bank_fields[bank]); }
     for (unsigned index = 0; index < agu_registers; ++index) {
       if (plan_.agu[index] || plan_.extents[0][index].accessed ||
@@ -1064,16 +1093,33 @@ private:
           ir_.CreateAnd(ir_.CreateAdd(sp_, ir_.getInt32(offset)), ir_.getInt32(stack_mask));
       ir_.CreateStore(frames_[offset], stack_address(slot));
     }
+  }
+
+  void commit_progress(V retired, V cycles) {
+    store(ir_.CreateAdd(initial_instructions_, retired), offsetof(Cpu, instructions));
+    store(ir_.CreateAdd(initial_cycles_, cycles), offsetof(Cpu, cycles));
+    store(ir_.getInt8(0), offsetof(Cpu, repeat_completed));
+    store(ir_.getInt8(0), offsetof(Cpu, interrupt_inhibited));
+  }
+
+  void finish_prefix(const RegionPlan::Step &step, const BlockInstruction &operation) {
+    // Previously retired effects stay committed. The rejected access has not executed.
+    commit_values();
+    commit_progress(ir_.getInt64(step.prefix_count), ir_.getInt64(step.prefix_cost));
+    const auto resume = (operation.pc + operation.instruction.words) & word_mask;
+    put(ir_.getInt32(resume), offsetof(Registers, pc));
+    LLVMBuildRet(ir_.get(), ir_.getInt32(step.prefix_count));
+  }
+
+  void finish() {
+    commit_values();
     auto *retired = ir_.CreateMul(turns_, ir_.getInt64(plan_.count));
     auto *cycles = ir_.CreateMul(turns_, ir_.getInt64(plan_.cost));
     if (plan_.setup) {
       retired = ir_.CreateAdd(retired, ir_.getInt64(1));
       cycles = ir_.CreateAdd(cycles, ir_.getInt64(plan_.setup->instruction.cycles));
     }
-    store(ir_.CreateAdd(initial_instructions_, retired), offsetof(Cpu, instructions));
-    store(ir_.CreateAdd(initial_cycles_, cycles), offsetof(Cpu, cycles));
-    store(ir_.getInt8(0), offsetof(Cpu, repeat_completed));
-    store(ir_.getInt8(0), offsetof(Cpu, interrupt_inhibited));
+    commit_progress(retired, cycles);
     auto *pc = next_pc();
     put(pc, offsetof(Registers, pc));
     if (plan_.setup) {
@@ -1222,12 +1268,23 @@ private:
         llvm19::lower_alu(
             ir_, instruction.opcode, plan_.operations[index].mode, before, banks_, status_);
       }
-      if (step.guards == 0) { continue; }
-      memory_guards(step.guards, std::span(plan_.steps).subspan(index + 1));
-      auto *ready = LLVMAppendBasicBlockInContext(context_, function_, "computed_address");
-      LLVMBuildCondBr(ir_.get(), eligible_, ready, miss);
-      ir_.SetInsertPoint(ready);
+      if (step.guards != 0) { guard_computed_address(miss, index); }
     }
+  }
+
+  void guard_computed_address(LLVMBasicBlockRef miss, const std::size_t index) {
+    const auto &step = plan_.steps[index];
+    memory_guards(step.guards, std::span(plan_.steps).subspan(index + 1));
+    auto *ready = LLVMAppendBasicBlockInContext(context_, function_, "computed_address");
+    auto *resume = step.finish_prefix
+                       ? LLVMAppendBasicBlockInContext(context_, function_, "resume_precise")
+                       : miss;
+    LLVMBuildCondBr(ir_.get(), eligible_, ready, resume);
+    if (step.finish_prefix) {
+      ir_.SetInsertPoint(resume);
+      finish_prefix(step, plan_.operations[index]);
+    }
+    ir_.SetInsertPoint(ready);
   }
 
   struct Live {
@@ -1546,7 +1603,7 @@ private:
   llvm19::Builder ir_;
   const RegionPlan &plan_;
   BatchAddressing addressing_;
-  bool direct_, self_loop_, split_flags_ = false;
+  bool linear_only_, direct_, self_loop_, split_flags_ = false;
   Word loop_count_ = 0;
   V cpu_, owner_, initial_cycles_ = nullptr, initial_instructions_ = nullptr;
   V control_taken_ = nullptr, control_count_ = nullptr, control_status_ = nullptr;
@@ -1607,19 +1664,28 @@ bool lift_region(LlvmModule &module,
                  const std::string_view entry,
                  Word *properties,
                  const std::uint64_t variant,
-                 const bool direct) {
+                 const bool direct,
+                 const bool linear_only,
+                 std::vector<Word> *resume) {
   if (module.code() == nullptr) { throw std::logic_error("Region module was already transferred"); }
   const auto name = entry.empty() ? module.name() : std::string(entry);
   if (LLVMGetNamedFunction(module.code(), name.c_str()) != nullptr) {
     throw std::invalid_argument("Region module already has its entry");
   }
-  const auto plan = plan_region(operations, memory);
+  const auto plan = plan_region(operations, memory, linear_only && resume != nullptr);
   if (!plan) { return false; }
+  if (resume != nullptr) {
+    for (std::size_t index = 0; index < plan->steps.size(); ++index) {
+      if (!plan->steps[index].finish_prefix) { continue; }
+      const auto &operation = plan->operations[index];
+      resume->push_back((operation.pc + operation.instruction.words) & word_mask);
+    }
+  }
   if (properties != nullptr) {
     *properties = (plan->batch ? 1U : 0U) | (split_flags(*plan) ? 2U : 0U);
   }
   const RegionLifter lift(
-      module, *plan, name, false, 0, BatchAddressing::automatic, variant, direct);
+      module, *plan, name, false, 0, BatchAddressing::automatic, variant, direct, linear_only);
   return true;
 }
 

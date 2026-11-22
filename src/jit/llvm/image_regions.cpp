@@ -52,10 +52,13 @@ auto body(const ImagePlan &plan, const Word first, const Word last) {
   return result;
 }
 
-void ordinary_regions(const ImagePlan &plan, std::vector<std::vector<BlockInstruction>> &result) {
+void ordinary_regions(const ImagePlan &plan,
+                      std::vector<std::vector<BlockInstruction>> &result,
+                      const bool complete_children = false) {
   const auto units = plan.units();
   const std::set heads(units.begin(), units.end());
-  const std::set entries(plan.entries.begin(), plan.entries.end());
+  std::set entries(plan.entries.begin(), plan.entries.end());
+  if (complete_children) { entries.insert(heads.begin(), heads.end()); }
   std::vector<BlockInstruction> current;
   const auto finish = [&] {
     if (current.size() > 1) {
@@ -69,11 +72,13 @@ void ordinary_regions(const ImagePlan &plan, std::vector<std::vector<BlockInstru
     current.clear();
   };
   for (const auto &[pc, instruction] : plan.instructions) {
-    if (!current.empty() &&
-        (heads.contains(pc) || pc != current.back().pc + current.back().instruction.words)) {
+    if (!current.empty() && ((!complete_children && heads.contains(pc)) ||
+                             pc != current.back().pc + current.back().instruction.words)) {
       finish();
     }
-    if (!ordinary(instruction.operation)) {
+    const auto immediate_child =
+        complete_children && instruction.operation == Operation::loop_immediate;
+    if (!ordinary(instruction.operation) && !immediate_child) {
       if (!current.empty() && terminal(instruction.operation)) {
         current.push_back({.instruction = instruction, .pc = pc});
       }
@@ -87,10 +92,13 @@ void ordinary_regions(const ImagePlan &plan, std::vector<std::vector<BlockInstru
 
 void prefixes(std::span<const BlockInstruction> operations,
               const std::span<const RegionLayout> memory,
-              std::vector<std::vector<BlockInstruction>> &result) {
+              std::vector<std::vector<BlockInstruction>> &result,
+              const bool allow_partial_exit = false) {
   while (operations.size() > 1) {
     auto length = operations.size();
-    while (length > 1 && !plan_region(operations.first(length), memory)) { --length; }
+    while (length > 1 && !plan_region(operations.first(length), memory, allow_partial_exit)) {
+      --length;
+    }
     if (length > 1) {
       const auto selected = operations.first(length);
       result.emplace_back(selected.begin(), selected.end());
@@ -155,6 +163,36 @@ image_regions(const ImagePlan &plan, const std::span<const RegionLayout> memory)
   result.clear();
   for (auto &[key, operations] : selected) {
     static_cast<void>(key);
+    result.push_back(std::move(operations));
+  }
+  return result;
+}
+
+std::vector<std::vector<BlockInstruction>>
+image_composed_regions(const ImagePlan &plan, const std::span<const RegionLayout> memory) {
+  std::vector<std::vector<BlockInstruction>> sequences;
+  std::vector<std::vector<BlockInstruction>> candidates;
+  // Keep the original callable entries and compile a region across complete DO bodies.
+  ordinary_regions(plan, sequences, true);
+  for (const auto &sequence : sequences) {
+    if (std::ranges::none_of(sequence, [](const auto &step) {
+          return step.instruction.operation == Operation::loop_immediate;
+        })) {
+      continue;
+    }
+    prefixes(sequence, memory, candidates, true);
+  }
+
+  std::map<Word, std::vector<BlockInstruction>> selected;
+  for (auto &operations : candidates) {
+    const auto planned = plan_region(operations, memory, true);
+    if (!planned || planned->repeats.empty()) { continue; }
+    auto &longest = selected[operations.front().pc];
+    if (longest.size() < operations.size()) { longest = std::move(operations); }
+  }
+  std::vector<std::vector<BlockInstruction>> result;
+  for (auto &[head, operations] : selected) {
+    static_cast<void>(head);
     result.push_back(std::move(operations));
   }
   return result;
