@@ -358,8 +358,8 @@ bool Core::Impl::image_transition(const bool eligible) {
   }
   const auto transfer = active_image->transitions.find(cpu.reg.pc);
   if (transfer == active_image->transitions.end()) { return false; }
+  // The pending transfer blocks execution without revoking the source binding.
   next_images = &transfer->second;
-  image_ready = false;
   yield_requested = true;
   return true;
 }
