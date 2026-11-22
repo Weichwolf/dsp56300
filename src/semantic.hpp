@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
+#include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 
 #include <array>
@@ -15,6 +16,13 @@ struct SemanticRegion {
   RegionEntry entry;
   Word pc;
 };
+
+struct SemanticPairedPortRead {
+  Word body, end, index, retired;
+  PairedPortTransfer transfer;
+};
+
+static_assert(sizeof(SemanticPairedPortRead) == 16 * sizeof(Word));
 
 enum class SemanticFlow : std::uint8_t { fault, owner, sequential, branch };
 

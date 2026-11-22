@@ -60,4 +60,12 @@ extern "C" DSP56300_IO_ENTRY void dsp56300_io_retired(dsp56300::Io *io,
   asm volatile("" : : "r"(io), "r"(count), "r"(region), "r"(site) : "memory");
 }
 
+#ifndef DSP56300_BINDING_IR
+extern "C" std::uint64_t dsp56300_io_paired_read(dsp56300::Io * /*owner*/,
+                                                 const dsp56300::PairedPortTransfer * /*transfer*/,
+                                                 std::uint64_t /*request*/) noexcept {
+  return 0;
+}
+#endif
+
 #undef DSP56300_IO_ENTRY

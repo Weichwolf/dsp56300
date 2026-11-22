@@ -38,7 +38,8 @@ constexpr std::array names{"dsp56300_io_read",
                            "dsp56300_io_reset",
                            "dsp56300_io_pending",
                            "dsp56300_io_revision",
-                           "dsp56300_io_retired"};
+                           "dsp56300_io_retired",
+                           "dsp56300_io_paired_read"};
 constexpr std::array interfaces{"_ZNK8dsp563004Core9registersEv",
                                 "_ZNK8dsp563004Core8progressEv",
                                 "_ZN8dsp563004Core13request_yieldEv"};
@@ -127,7 +128,7 @@ void wrap_callback(const CallbackTarget binding) {
   }
 }
 
-void retirement_attributes(llvm::Function &source) {
+void replaceable_attributes(llvm::Function &source) {
   std::vector<llvm::AttributeSet> parameters;
   for (auto &argument : source.args()) {
     auto attributes = source.getAttributes().getParamAttrs(argument.getArgNo());
@@ -142,7 +143,6 @@ void retirement_attributes(llvm::Function &source) {
   source.setAttributes(llvm::AttributeList::get(
       source.getContext(), {}, source.getAttributes().getRetAttrs(), parameters));
   source.addFnAttr(llvm::Attribute::NoUnwind);
-  source.addFnAttr("dsp56300-retirement");
 }
 
 llvm::Function *declaration(llvm::Function &source, const llvm::StringRef symbol) {
@@ -203,10 +203,14 @@ void declare_callbacks(LlvmModule &module, const std::span<const CallbackBinding
       throw std::invalid_argument("Invalid or duplicate DSP public callback role/name");
     }
     auto *source = native.getFunction(names[role]);
-    if (source == nullptr || source->isDeclaration()) {
+    if (source == nullptr ||
+        (source->isDeclaration() && binding.role != CallbackRole::paired_read)) {
       throw std::invalid_argument("DSP callback requires its core-owned public Io adapter");
     }
-    if (binding.role == CallbackRole::retired) { retirement_attributes(*source); }
+    if (binding.role == CallbackRole::retired || binding.role == CallbackRole::paired_read) {
+      replaceable_attributes(*source);
+    }
+    if (binding.role == CallbackRole::retired) { source->addFnAttr("dsp56300-retirement"); }
     auto *target = declaration(*source, name);
     targets.push_back({.source = source, .target = target});
     imports.push_back(target);

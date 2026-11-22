@@ -50,7 +50,8 @@ void lift_image(LlvmModule &module,
                 std::optional<std::span<const RegionLayout>> memory = std::nullopt,
                 std::optional<std::span<const Word>> region_modes = std::nullopt,
                 std::uint64_t variant = 0,
-                bool direct = false);
+                bool direct = false,
+                bool paired = false);
 void lift_vector(LlvmModule &module,
                  const ImagePlan &plan,
                  std::string_view entry = {},

@@ -131,7 +131,33 @@ struct CodeTransition {
 // Region site packs entry PC at bits0, native batch at24 and deferred flags at25.
 // Region bit26 with count zero marks one native unit entry (PC is the unit head).
 // An absent binding emits no observation.
-enum class CallbackRole : std::uint8_t { read, write, bit, reset, pending, revision, retired };
+enum class CallbackRole : std::uint8_t {
+  read,
+  write,
+  bit,
+  reset,
+  pending,
+  revision,
+  retired,
+  paired_read
+};
+
+// Paired-read callbacks receive the decoded ports, read and strobe offsets and cycle cost.
+// Each admitted turn writes one Y word at the next linear destination.
+// Signature: uint64_t(Io*, const PairedPortTransfer*, uint64_t request) noexcept.
+// The request packs turn count at bits 32–63 and destination at bits 0–23.
+// Return the committed count and final word in that same layout.
+// Supplying this callback in direct mode enables instruction-derived candidates.
+// The device validates its ordered effects, writable non-aliased Y span and event
+// horizon before committing. Shorten the request before any event inside a turn.
+// A synchronous yield or revision at the end of the last committed turn returns
+// to the owner with that turn's effects and nominal time. A zero result leaves all
+// effects to precise execution.
+struct PairedPortTransfer {
+  Word data_space, data_address, strobe_space, strobe_address, strobe_bit, cycles;
+  std::array<Word, 2> read_cycles;
+  std::array<Word, 4> edge_cycles;
+};
 
 struct CallbackBinding {
   CallbackRole role;
