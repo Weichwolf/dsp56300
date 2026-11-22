@@ -11,4 +11,7 @@ namespace dsp56300::detail {
 [[nodiscard]] std::vector<std::vector<BlockInstruction>> image_regions(const ImagePlan &plan);
 [[nodiscard]] std::vector<std::vector<BlockInstruction>>
 image_regions(const ImagePlan &plan, std::span<const RegionLayout> memory);
+
+[[nodiscard]] std::vector<std::vector<BlockInstruction>>
+image_composed_regions(const ImagePlan &plan, std::span<const RegionLayout> memory);
 }

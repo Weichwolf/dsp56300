@@ -2,6 +2,7 @@
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "isa.hpp"
+#include "memory_arena.hpp"
 #include "register_model.hpp"
 #include "support.hpp"
 
@@ -196,9 +197,143 @@ void exercise(const Form form, const Word count, const bool relative) {
     }
   }
 }
+
+namespace partial_exit {
+using test::require;
+template <isa::Opcode operation> constexpr Word op = static_cast<Word>(operation);
+
+constexpr Word entry = 0x100, child = entry + 3, read_site = entry + 6;
+constexpr Word toggled = 5, stored_pointer = 7, value = 0x55aa11, bit = 2;
+constexpr Word old_la = 0x200, old_lc = 3;
+constexpr Word device_address = 0xffff80;
+constexpr unsigned r1 = 17, x0 = 4;
+
+constexpr Word move(const Word base, const unsigned reg) {
+  constexpr Word low = 7;
+  constexpr Word high = 0x18;
+  constexpr auto low_shift = 16U;
+  constexpr auto high_shift = 17U;
+  constexpr Word register_mask = (low << low_shift) | (high << high_shift);
+  return (base & ~register_mask) | ((reg & low) << low_shift) | ((reg & high) << high_shift) |
+         (1U << 15);
+}
+
+constexpr std::array code{
+    op<isa::Opcode::bchg_absolute_short> | (toggled << 8) | bit,
+    op<isa::Opcode::do_immediate> | (2U << 8),
+    child + 1,
+    op<isa::Opcode::nop>,
+    op<isa::Opcode::nop>,
+    move(op<isa::Opcode::move_x_absolute_short>, r1) | (stored_pointer << 8),
+    move(op<isa::Opcode::move_x_effective>, x0) | (4U << 11) | (1U << 8),
+};
+
+struct Device final : Io {
+  bool read(const Space space, const Word address, const Word pc, Word &output) noexcept override {
+    ++calls;
+    const auto progress = owner->progress();
+    expected_boundary = space == Space::x && address == device_address && pc == read_site &&
+                        progress.instructions == 7 && progress.estimated_cycles == 12 &&
+                        ram[toggled] == 0;
+    output = value;
+    return accepts && expected_boundary;
+  }
+
+  bool write(Space /*space*/, Word /*address*/, Word /*pc*/, Word /*value*/) noexcept override {
+    return false;
+  }
+
+  bool bit(Space /*space*/,
+           Word /*address*/,
+           Word /*pc*/,
+           Word /*bit*/,
+           BitAction /*action*/,
+           bool & /*previous*/) noexcept override {
+    return false;
+  }
+
+  Core *owner = nullptr;
+  std::span<Word> ram;
+  unsigned calls = 0;
+  bool accepts = true, expected_boundary = false;
+};
+
+void verify() {
+  auto code_with_stop = std::vector<Word>(code.begin(), code.end());
+  code_with_stop.push_back(op<isa::Opcode::stop>);
+  const std::array spans{CodeSpan{.address = entry, .words = code_with_stop}};
+  constexpr std::array entries{entry};
+  constexpr std::array modes{0U};
+  const std::array variants{
+      CodeVariant{.id = 0, .code = spans, .entries = entries, .failed_fetches = {}}};
+  const auto image = Core::compile({.variants = variants},
+                                   {.memory = {},
+                                    .interrupts = {},
+                                    .transitions = {},
+                                    .callbacks = {},
+                                    .bindings = {},
+                                    .memory_mode = CompileOptions::MemoryMode::direct,
+                                    .region_modes = modes});
+  const test::MemoryArena arena;
+  const auto memory = arena.buffers();
+  const std::array banks{memory.program, memory.x, memory.y};
+  std::array<MemoryWindow, 3> windows{};
+  std::array<std::span<const MemoryWindow>, 3> regions{};
+  std::array<Memory::Views, 3> views{};
+  for (std::size_t i = 0; i < banks.size(); ++i) {
+    windows[i] = {.words = banks[i].first(512), .known = {}, .writable = true};
+    regions[i] = std::span(&windows[i], 1);
+    views[i] = {.read = {.data = banks[i], .mirrored_tail = {}},
+                .write = {.data = banks[i], .mirrored_tail = {}}};
+  }
+  Device device;
+  Core core(Memory::complete(regions, views), &device);
+  device.owner = &core;
+  device.ram = memory.x;
+  core.load(Space::program, entry, code_with_stop);
+  core.install(image, 0);
+  for (const bool split : {false, true}) {
+    for (const bool valid : {false, true}) {
+      core.reset();
+      Registers seed;
+      seed.pc = entry;
+      seed.la = old_la;
+      seed.lc = old_lc;
+      seed.m.fill(word_mask);
+      core.set_registers(seed);
+      memory.x[toggled] = Word{1} << bit;
+      memory.x[stored_pointer] = device_address;
+      device.calls = 0;
+      device.accepts = valid;
+      if (split) {
+        const auto prefix = core.run_until(12);
+        require(prefix.fault == Fault{} && prefix.retired == 7 && device.calls == 0 &&
+                    core.registers().pc == read_site,
+                "A deadline inside the fused region exposes exactly the original guest prefix");
+      }
+      const auto result = core.run_until(13);
+      require(device.calls == 1 && device.expected_boundary && memory.x[toggled] == 0,
+              "Precise fallback dispatches the port exactly once after the preceding RAM effect");
+      if (valid) {
+        require(result.fault == Fault{} &&
+                    result.progress == Progress{.instructions = 8, .estimated_cycles = 13} &&
+                    core.registers().pc == read_site + 1 &&
+                    (core.registers().x & word_mask) == value,
+                "A permitted port read retires at its original instruction and time");
+      } else {
+        require(result.fault.kind == FaultKind::io_read && result.fault.pc == read_site &&
+                    result.fault.space == Space::x && result.fault.address == device_address &&
+                    result.progress == Progress{.instructions = 7, .estimated_cycles = 12},
+                "A refused port read reports the original fault and preserves the retired prefix");
+      }
+    }
+  }
+}
+}
 }
 
 int main() try {
+  partial_exit::verify();
   for (const auto form : forms) {
     for (const Word count : {0U, 2U}) {
       for (const bool relative : {false, true}) { exercise(form, count, relative); }

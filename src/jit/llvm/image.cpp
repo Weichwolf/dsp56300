@@ -172,6 +172,7 @@ private:
   struct FastRegion {
     llvm::GlobalVariable *site;
     Word last_pc, last_words, mode, properties;
+    std::vector<Word> resume;
   };
 
   void prepare_regions(LlvmModule &module,
@@ -183,7 +184,7 @@ private:
                                scale_up,
                                rounding_mode | scale_down,
                                rounding_mode | scale_up};
-    for (auto operations : image_regions(plan_, memory)) {
+    const auto add = [&](auto operations, const bool linear_only) {
       for (const auto mode : modes) {
         if (selected && std::ranges::find(*selected, mode) == selected->end()) { continue; }
         for (auto &operation : operations) { operation.mode = mode; }
@@ -191,9 +192,18 @@ private:
         const auto &last = operations.back();
         const auto name = name_ + ".region." + llvm::utohexstr(first, true) + "." +
                           llvm::utohexstr(last.loop_address, true) + "." +
-                          llvm::utohexstr(mode, true);
+                          llvm::utohexstr(mode, true) + (linear_only ? ".linear_edge" : "");
         Word properties = 0;
-        if (!lift_region(module, operations, memory, name, &properties, variant_, direct_)) {
+        std::vector<Word> resume;
+        if (!lift_region(module,
+                         operations,
+                         memory,
+                         name,
+                         &properties,
+                         variant_,
+                         direct_,
+                         linear_only,
+                         &resume)) {
           continue;
         }
         auto *function = module_.getFunction(name);
@@ -208,9 +218,16 @@ private:
                                     .last_pc = last.pc,
                                     .last_words = last.instruction.words,
                                     .mode = mode,
-                                    .properties = properties});
+                                    .properties = properties,
+                                    .resume = std::move(resume)});
+      }
+    };
+    if (direct_) {
+      for (auto &operations : image_composed_regions(plan_, memory)) {
+        add(std::move(operations), true);
       }
     }
+    for (auto &operations : image_regions(plan_, memory)) { add(std::move(operations), false); }
   }
 
   void commit_region(Value *outcome, const FastRegion &region, const Word pc) {
@@ -226,6 +243,7 @@ private:
     retirement(retired, true, site);
     const auto end = (region.last_pc + region.last_words) & word_mask;
     std::set<Word> targets{pc, end};
+    targets.insert(region.resume.begin(), region.resume.end());
     for (const auto target : edges_.at(region.last_pc)) {
       if (targets_.contains(target)) { targets.insert(target); }
     }

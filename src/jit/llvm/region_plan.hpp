@@ -42,7 +42,8 @@ struct RegionPlan {
     NativeRegisterMove registers{};
     NativeAddressImmediate immediate{};
     std::optional<AddressForm> update = std::nullopt;
-    Word guards = 0;
+    Word guards = 0, prefix_count = 0, prefix_cost = 0;
+    bool finish_prefix = false;
     std::size_t repeat_end = 0;
     Word repetitions = 0;
   };
@@ -67,18 +68,19 @@ struct RegionPlan {
   std::array<std::int64_t, agu_registers> deltas{};
   std::array<bool, agu_registers> changed_n{}, agu{};
   std::array<std::optional<std::size_t>, agu_registers> definitions{};
-  std::array<bool, agu_registers> guardable{}, deferred{};
+  std::array<bool, agu_registers> guardable{}, deferred{}, no_prior_cursor_reads{};
   RegionControl control;
   std::optional<BlockInstruction> setup = std::nullopt;
   Word setup_count = 0;
   unsigned depth = 0;
   Word cost = 0, count = 0;
-  bool batch = false, computation = false;
+  bool batch = false, computation = false, allow_partial_exit = false;
 };
 
 [[nodiscard]] bool permitted(const RegionWindow &window, bool writing);
 [[nodiscard]] std::optional<RegionPlan> plan_region(std::span<const BlockInstruction> operations,
                                                     const JitRuntime &runtime);
 [[nodiscard]] std::optional<RegionPlan> plan_region(std::span<const BlockInstruction> operations,
-                                                    std::span<const RegionLayout> memory);
+                                                    std::span<const RegionLayout> memory,
+                                                    bool allow_partial_exit = false);
 }

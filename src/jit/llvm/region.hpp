@@ -23,7 +23,9 @@ namespace dsp56300::detail {
                                std::string_view entry = {},
                                Word *properties = nullptr,
                                std::uint64_t variant = 0,
-                               bool direct = false);
+                               bool direct = false,
+                               bool linear_only = false,
+                               std::vector<Word> *resume = nullptr);
 
 // Read-only uint64_t(const Cpu *, const NativeContext *) query: complete base
 // periods or zero. Relevant state/storage changes invalidate the certificate.

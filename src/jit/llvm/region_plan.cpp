@@ -96,6 +96,8 @@ bool destination(RegionPlan &plan, const unsigned reg) {
   } else if (reg >= r_register_base) {
     const auto index = reg - r_register_base;
     plan.definitions[index] = plan.steps.size();
+    plan.no_prior_cursor_reads[index] = std::ranges::none_of(
+        plan.extents, [index](const auto &bank) { return bank[index].accessed; });
     plan.guardable[index] =
         std::ranges::none_of(plan.absolute,
                              [](const auto &bank) {
@@ -134,13 +136,20 @@ bool append_move(RegionPlan &plan, const NativeMove &move, const bool advance) {
   if (mode == 6) { return append_absolute(plan, move); }
   plan.agu[form.index] = plan.agu[form.index] || mode != 4;
   const auto definition = plan.definitions[form.index];
-  if ((definition && !plan.guardable[form.index]) ||
-      ((mode == 0 || mode == 1 || mode == 5) && plan.changed_n[form.index])) {
-    return false;
-  }
-  if (definition && !plan.deferred[form.index]) {
-    plan.deferred[form.index] = true;
-    plan.steps[*definition].guards |= 1U << form.index;
+  if ((mode == 0 || mode == 1 || mode == 5) && plan.changed_n[form.index]) { return false; }
+  if (definition) {
+    const bool partial = !plan.guardable[form.index];
+    if (partial &&
+        (!plan.allow_partial_exit || plan.batch || !plan.no_prior_cursor_reads[form.index] ||
+         plan.steps[*definition].prefix_count == 0)) {
+      return false;
+    }
+    if (!plan.deferred[form.index]) {
+      plan.deferred[form.index] = true;
+      auto &step = plan.steps[*definition];
+      step.guards |= 1U << form.index;
+      step.finish_prefix |= partial;
+    }
   }
   if (mode == 0 || mode == 1 || mode == 5) { plan.batch = false; }
   const auto bank = move.space == Space::x ? 0U : 1U;
@@ -433,8 +442,11 @@ std::optional<std::size_t> append_repeat(RegionPlan &plan,
   const auto end = std::ranges::find(remaining, flow.direct[1], &BlockInstruction::pc);
   if (end == remaining.end() || end->pc != flow.direct[1]) { return {}; }
   const auto after = static_cast<std::size_t>(end - plan.operations.begin());
-  // Larger children retain their separately prepared native unit.
-  if (after != index + 2) { return {}; }
+  const auto child = plan.operations.subspan(index + 1, after - index - 1);
+  if (std::ranges::any_of(
+          child, [](const auto &step) { return loop_setup(step.instruction.operation); })) {
+    return {};
+  }
   plan.steps.push_back(
       {.memory = {}, .registers = {}, .repeat_end = after, .repetitions = repetitions});
   const RepeatAnalysis prior{
@@ -478,8 +490,12 @@ bool append_tree(RegionPlan &plan,
       const auto after = append_repeat(plan, index, last, context);
       if (!after) { return false; }
       index = *after - 1;
-    } else if (!append(plan, operation)) {
-      return false;
+    } else {
+      if (!append(plan, operation)) { return false; }
+      if (context.depth == 0) {
+        plan.steps[index].prefix_count = plan.count;
+        plan.steps[index].prefix_cost = plan.cost;
+      }
     }
   }
   return true;
@@ -488,6 +504,10 @@ bool append_tree(RegionPlan &plan,
 std::optional<RegionPlan> make_plan(RegionPlan plan) {
   const auto operations = plan.operations;
   if (operations.empty()) { return {}; }
+  if (operations.front().loop_address != inactive_loop ||
+      loop_setup(operations.front().instruction.operation)) {
+    plan.allow_partial_exit = false;
+  }
   if (operations.size() > 1 &&
       operations.front().instruction.operation == Operation::loop_immediate &&
       operations.front().loop_address == inactive_loop) {
@@ -551,7 +571,8 @@ std::optional<RegionPlan> plan_region(const std::span<const BlockInstruction> op
 }
 
 std::optional<RegionPlan> plan_region(const std::span<const BlockInstruction> operations,
-                                      const std::span<const RegionLayout> memory) {
+                                      const std::span<const RegionLayout> memory,
+                                      const bool allow_partial_exit) {
   const bool external = std::ranges::none_of(
       memory, [](const auto &region) { return region.space == Space::program; });
   RegionPlan plan{.operations = operations,
@@ -559,7 +580,8 @@ std::optional<RegionPlan> plan_region(const std::span<const BlockInstruction> op
                   .repeats = {},
                   .windows = {},
                   .windowed = {external, external},
-                  .control = {}};
+                  .control = {},
+                  .allow_partial_exit = allow_partial_exit};
   for (const auto &region : memory) {
     if (region.space != Space::x && region.space != Space::y) { continue; }
     if (!external && (region.first != 0 || region.tracked || !region.writable)) { return {}; }
