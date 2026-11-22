@@ -692,13 +692,41 @@ private:
     return bounds;
   }
 
+  [[nodiscard]] Word read_envelopes(const Word roots,
+                                    const std::span<const RegionPlan::Step> steps) const {
+    if (!direct_ || steps.size() != plan_.steps.size() || !plan_.repeats.empty()) { return 0; }
+    Word result = 0;
+    for (unsigned index = 0; index < agu_registers; ++index) {
+      const auto bit = Word{1} << index;
+      if ((roots & bit) == 0 || !repeated_unit_reads(index)) { continue; }
+      const auto explicit_update = [index](const RegionPlan::Step &step) {
+        return step.update && step.update->index == index;
+      };
+      if (std::ranges::none_of(steps, explicit_update)) { result |= bit; }
+    }
+    return result;
+  }
+
+  Bounds read_envelope(const unsigned index, const RegionPlan::Extent extent) {
+    auto *cursor = ir_.CreateZExt(cursors_[index], ir_.getInt64Ty());
+    // Linear streams that wrap are checked by precise execution. For modulo
+    // and reverse carry the entire ring bounds every emitted read.
+    return address_bounds(
+        {.first = ir_.CreateAdd(cursor, ir_.getInt64(static_cast<std::uint64_t>(extent.minimum))),
+         .last = ir_.CreateAdd(cursor, ir_.getInt64(static_cast<std::uint64_t>(extent.maximum)))},
+        index);
+  }
+
   void memory_guards(const Word roots, const std::span<const RegionPlan::Step> steps) {
-    const auto bounds = memory_bounds(roots, steps);
+    const auto envelopes = read_envelopes(roots, steps);
+    const auto bounds = memory_bounds(roots & ~envelopes, steps);
     for (unsigned bank = 0; bank < 2; ++bank) {
       for (unsigned index = 0; index < agu_registers; ++index) {
         if ((roots & (1U << index)) == 0 || !plan_.extents[bank][index].accessed) { continue; }
-        memory_bases_[bank][index] =
-            select_window(bank, bounds[bank][index], plan_.extents[bank][index].writing);
+        const auto extent = plan_.extents[bank][index];
+        const auto range =
+            (envelopes & (1U << index)) != 0 ? read_envelope(index, extent) : bounds[bank][index];
+        memory_bases_[bank][index] = select_window(bank, range, extent.writing);
       }
     }
   }
