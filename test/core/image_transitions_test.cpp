@@ -202,10 +202,17 @@ void reset_transfer(const NativeImage &image) {
   require(machine.core.run().yielded, "A real transfer precedes the explicit reset");
   machine.core.reset();
   machine.core.set_registers(machine.initial);
-  machine.core.install(image, 0);
   require(machine.core.progress() == Progress{} && machine.core.run().retired == 2,
-          "Only explicit reset cancels the pending transfer and restarts the loader");
+          "Reset cancels the pending transfer and keeps the validated source binding");
   check_boundary(machine);
+
+  machine.core.load(Space::program, start, std::array{op<isa::Opcode::nop>});
+  machine.core.reset();
+  machine.core.set_registers(machine.initial);
+  const auto revoked = machine.core.run();
+  require(revoked.fault.kind == FaultKind::unprepared_execution && revoked.fault.address == start &&
+              revoked.retired == 0 && revoked.progress == Progress{},
+          "Reset cannot revive a source binding revoked by an actual program write");
 }
 
 void initial_target(const NativeImage &image) {
