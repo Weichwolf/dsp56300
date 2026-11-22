@@ -381,12 +381,28 @@ private:
     for (const auto offset : {offsetof(Cpu, processing), offsetof(Cpu, debug_flags)}) {
       require(ir_.CreateICmpEQ(load(8, offset), ir_.getInt8(0)));
     }
+    address_admission();
+  }
+
+  void address_admission() {
+    // Describe the contiguous state explicitly. Independent loads can be
+    // combined into a gather even though one packed load supplies all lanes.
+    V packed_modifiers = nullptr;
+    if (direct_ && std::ranges::count(plan_.agu, true) >= 4) {
+      const auto offset = offsetof(Cpu, reg) + offsetof(Registers, m);
+      packed_modifiers =
+          ir_.CreateLoad(LLVMVectorType(ir_.getInt32Ty(), agu_registers), address(cpu_, offset));
+      LLVMSetAlignment(packed_modifiers, alignof(Word));
+    }
     for (unsigned index = 0; index < agu_registers; ++index) {
       cursors_[index] = reg(32, offsetof(Registers, r) + (index * sizeof(Word)));
       strides_[index] = reg(32, offsetof(Registers, n) + (index * sizeof(Word)));
       if (!plan_.agu[index]) { continue; }
-      auto *modifier = ir_.CreateAnd(reg(32, offsetof(Registers, m) + (index * sizeof(Word))),
-                                     ir_.getInt32(modifier_mask));
+      auto *value =
+          packed_modifiers != nullptr
+              ? LLVMBuildExtractElement(ir_.get(), packed_modifiers, ir_.getInt32(index), "")
+              : reg(32, offsetof(Registers, m) + (index * sizeof(Word)));
+      auto *modifier = ir_.CreateAnd(value, ir_.getInt32(modifier_mask));
       auto *linear = ir_.CreateICmpEQ(modifier, ir_.getInt32(modifier_mask));
       if (plan_.batch && addressing_ == BatchAddressing::linear) { require(linear); }
       if (direct_ && repeated_unit_reads(index)) {

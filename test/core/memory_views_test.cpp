@@ -803,6 +803,56 @@ void repeated_unit_reads(const Storage &storage,
   }
 }
 
+void mixed_address_streams() {
+  struct Stream {
+    unsigned index;
+    Word first, modifier, next;
+  };
+
+  constexpr std::array streams{Stream{.index = 0, .first = 9, .modifier = 0, .next = 8},
+                               Stream{.index = 2, .first = 15, .modifier = 7, .next = 12},
+                               Stream{.index = 4, .first = 19, .modifier = 0x8003, .next = 16},
+                               Stream{.index = 7, .first = 23, .modifier = word_mask, .next = 28}};
+  constexpr Word load_and_add = static_cast<Word>(isa::Opcode::move_x_effective) | (3U << 11) |
+                                (1U << 15) | (static_cast<Word>(isa::Opcode::adc_x_a) & 0xffU);
+  constexpr Word count = stream_read_count * streams.size();
+  std::array<Word, count + 1> program{};
+  std::size_t pc = 0;
+  for (Word read = 0; read < stream_read_count; ++read) {
+    for (const auto &stream : streams) { program[pc++] = load_and_add | (stream.index << 8); }
+  }
+  program.back() = static_cast<Word>(isa::Opcode::stop);
+  std::array<Word, 32> values{};
+  for (Word index = 0; index < values.size(); ++index) { values[index] = (index * index) + 1; }
+  const Storage storage;
+  Core reference(storage.memory());
+  Core product(storage.memory());
+  reference.load(Space::program, start, program);
+  reference.load(Space::x, 0, values);
+  const auto execute = [&](Core &core, const CompileOptions::MemoryMode mode) {
+    auto registers = core.registers();
+    registers.pc = start;
+    registers.sr = 0;
+    for (const auto &stream : streams) {
+      registers.r[stream.index] = stream.first;
+      registers.m[stream.index] = stream.modifier;
+    }
+    core.set_registers(registers);
+    core.install(image(storage, false, program, mode), 0);
+    const auto result = core.run(count);
+    require(result.fault == Fault{} && result.retired == count,
+            "Mixed addressing completes all projected reads");
+    for (const auto &stream : streams) {
+      require(core.registers().r[stream.index] == stream.next,
+              "Each non-adjacent AGU register preserves its addressing mode");
+    }
+    return core.state();
+  };
+  const auto exact = execute(reference, CompileOptions::MemoryMode::exact);
+  const auto direct = execute(product, CompileOptions::MemoryMode::direct);
+  require(same(exact, direct), "Mixed native memory streams preserve registers and timing");
+}
+
 void crossing_zero() {
   constexpr auto xread = static_cast<Word>(isa::Opcode::move_x_effective) | (1U << 15);
   constexpr auto setup = static_cast<Word>(isa::Opcode::do_immediate) | (3U << 8);
@@ -879,6 +929,7 @@ void crossing_zero() {
 int main() try {
   const test::NativeFaults faults(Core::host_fault);
   crossing_zero();
+  mixed_address_streams();
   direct_self_loop_empty_window();
   protected_operands();
   require(!Core::host_fault(0, false, 0),
