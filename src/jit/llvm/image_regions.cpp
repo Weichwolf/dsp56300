@@ -59,9 +59,9 @@ void ordinary_regions(const ImagePlan &plan,
                       std::vector<std::vector<BlockInstruction>> &result,
                       const bool complete_children = false) {
   const auto units = plan.units();
-  const std::set heads(units.begin(), units.end());
   std::set entries(plan.entries.begin(), plan.entries.end());
-  if (complete_children) { entries.insert(heads.begin(), heads.end()); }
+  // A branch may still enter a suffix even when fallthrough takes the whole span.
+  entries.insert(units.begin(), units.end());
   std::vector<BlockInstruction> current;
   const auto finish = [&] {
     if (current.size() > 1) {
@@ -75,8 +75,7 @@ void ordinary_regions(const ImagePlan &plan,
     current.clear();
   };
   for (const auto &[pc, instruction] : plan.instructions) {
-    if (!current.empty() && ((!complete_children && heads.contains(pc)) ||
-                             pc != current.back().pc + current.back().instruction.words)) {
+    if (!current.empty() && pc != current.back().pc + current.back().instruction.words) {
       finish();
     }
     const auto immediate_child =
