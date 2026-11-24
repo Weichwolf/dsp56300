@@ -408,6 +408,9 @@ private:
     for (unsigned index = 0; index < agu_registers; ++index) {
       cursors_[index] = reg(32, offsetof(Registers, r) + (index * sizeof(Word)));
       strides_[index] = reg(32, offsetof(Registers, n) + (index * sizeof(Word)));
+      if (plan_.changed_m[index]) {
+        modifiers_[index] = reg(32, offsetof(Registers, m) + (index * sizeof(Word)));
+      }
       if (!plan_.agu[index]) { continue; }
       auto *modifier = ir_.CreateAnd(reg(32, offsetof(Registers, m) + (index * sizeof(Word))),
                                      ir_.getInt32(modifier_mask));
@@ -843,7 +846,9 @@ private:
 
   V read_control_register(const unsigned number) {
     if (number >= m_register_base && number < m_register_base + agu_registers) {
-      return reg(32, offsetof(Registers, m) + ((number - m_register_base) * sizeof(Word)));
+      const auto index = number - m_register_base;
+      if (auto *value = modifiers_[index]) { return value; }
+      return reg(32, offsetof(Registers, m) + (index * sizeof(Word)));
     }
     const bool loop = plan_.control.stack == ControlStack::loop;
     switch (number) {
@@ -891,6 +896,10 @@ private:
   }
 
   void write_register(const unsigned number, V word) {
+    if (number >= m_register_base) {
+      modifiers_[number - m_register_base] = word;
+      return;
+    }
     if (number >= n_register_base) {
       strides_[number - n_register_base] = word;
       return;
@@ -1142,6 +1151,9 @@ private:
       if (plan_.changed_n[index]) {
         put(strides_[index], offsetof(Registers, n) + (index * sizeof(Word)));
       }
+      if (auto *value = modifiers_[index]) {
+        put(value, offsetof(Registers, m) + (index * sizeof(Word)));
+      }
     }
     put(status_, offsetof(Registers, sr));
     for (unsigned offset = 0; offset < frames_.size(); ++offset) {
@@ -1304,10 +1316,11 @@ private:
       if (instruction.operation == Operation::bit_jump ||
           instruction.operation == Operation::bit_branch) {
         auto *value = control_operand(instruction, step);
-        const auto mask = Word{1} << (instruction.opcode & five_bit_mask);
+        const auto bit = instruction.opcode & five_bit_mask;
+        const auto mask = Word{1} << bit;
+        const auto expected = ((instruction.opcode >> 5) & 1U) << bit;
         control_taken_ =
-            ir_.CreateICmpEQ(ir_.CreateAnd(value, ir_.getInt32(mask)),
-                             ir_.getInt32((instruction.opcode & (1U << 5)) != 0 ? mask : 0U));
+            ir_.CreateICmpEQ(ir_.CreateAnd(value, ir_.getInt32(mask)), ir_.getInt32(expected));
       } else if (loop_setup(instruction.operation)) {
         loop_control(instruction, step);
       } else if (instruction.operation == Operation::bit_memory) {
@@ -1317,10 +1330,14 @@ private:
             ir_, instruction.opcode, plan_.operations[index].mode, banks_, status_);
       } else if (instruction.operation == Operation::logical_shift_immediate) {
         llvm19::lower_logical_shift(ir_, instruction.opcode, banks_, status_);
+      } else if (instruction.operation == Operation::product_mixed) {
+        llvm19::lower_mixed_product(
+            ir_, instruction.opcode, plan_.operations[index].mode, banks_, status_);
       } else if (instruction.operation == Operation::immediate_alu) {
         llvm19::lower_immediate_alu(
             ir_, instruction, plan_.operations[index].mode, banks_, status_);
-      } else if (!plan_.control.valid || index + 1 != plan_.steps.size()) {
+      } else if (instruction.operation != Operation::move_control_register &&
+                 (!plan_.control.valid || index + 1 != plan_.steps.size())) {
         transfers(step.memory, instruction.opcode);
         llvm19::lower_alu(
             ir_, instruction.opcode, plan_.operations[index].mode, before, banks_, status_);
@@ -1346,7 +1363,7 @@ private:
 
   struct Live {
     std::array<V, 4> banks;
-    std::array<V, agu_registers> cursors, strides;
+    std::array<V, agu_registers> cursors, strides, modifiers;
     V status, limited = nullptr, grown = nullptr;
     std::array<V, stack_entries> frames{};
   };
@@ -1355,6 +1372,7 @@ private:
     Live state{.banks = banks_,
                .cursors = cursors_,
                .strides = strides_,
+               .modifiers = modifiers_,
                .status = status_,
                .frames = frames_};
     if (split_flags_) {
@@ -1370,6 +1388,7 @@ private:
     banks_ = state.banks;
     cursors_ = state.cursors;
     strides_ = state.strides;
+    modifiers_ = state.modifiers;
     status_ = state.status;
     frames_ = state.frames;
     if (state.limited != nullptr) {
@@ -1393,6 +1412,9 @@ private:
     for (unsigned index = 0; index < agu_registers; ++index) {
       result.cursors[index] = phi(initial.cursors[index], "cursor");
       result.strides[index] = phi(initial.strides[index], "stride");
+      if (auto *value = initial.modifiers[index]) {
+        result.modifiers[index] = phi(value, "modifier");
+      }
     }
     result.status = split_flags_ ? initial.status : phi(initial.status, "status");
     for (unsigned index = 0; index < result.frames.size(); ++index) {
@@ -1415,6 +1437,9 @@ private:
     for (unsigned index = 0; index < agu_registers; ++index) {
       incoming(phis.cursors[index], after.cursors[index]);
       incoming(phis.strides[index], after.strides[index]);
+      if (phis.modifiers[index] != nullptr) {
+        incoming(phis.modifiers[index], after.modifiers[index]);
+      }
     }
     for (unsigned index = 0; index < phis.frames.size(); ++index) {
       if (phis.frames[index] != nullptr) { incoming(phis.frames[index], after.frames[index]); }
@@ -1672,7 +1697,7 @@ private:
   V iteration_ = nullptr;
   std::array<V, stack_entries> frames_{};
   std::array<V, 4> banks_{};
-  std::array<V, agu_registers> cursors_{}, strides_{}, masks_{}, origins_{};
+  std::array<V, agu_registers> cursors_{}, strides_{}, modifiers_{}, masks_{}, origins_{};
   std::array<V, agu_registers> single_lengths_{};
   std::array<std::array<V, agu_registers>, 2> memory_bases_{};
   std::array<std::map<Word, V>, 2> absolute_bases_;

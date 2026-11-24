@@ -876,6 +876,25 @@ void crossing_zero() {
   repeated_unit_reads(storage, checked, direct);
 }
 
+NativeImage observed_direct_image(const std::span<const Word> program) {
+  const std::array spans{CodeSpan{.address = start, .words = program}};
+  constexpr std::array entries{start};
+  const std::array variants{
+      CodeVariant{.id = 0, .code = spans, .entries = entries, .failed_fetches = {}}};
+  constexpr std::array modes{0U};
+  constexpr std::array callbacks{
+      CallbackBinding{.role = CallbackRole::retired, .symbol = "record_retired"}};
+  const auto binding = test::retirement_binding();
+  return Core::compile({.variants = variants},
+                       {.memory = {},
+                        .interrupts = {},
+                        .transitions = {},
+                        .callbacks = callbacks,
+                        .bindings = binding,
+                        .memory_mode = CompileOptions::MemoryMode::direct,
+                        .region_modes = modes});
+}
+
 void grouped_single_wrap() {
   const Storage storage;
   constexpr Word turns = 8;
@@ -897,22 +916,7 @@ void grouped_single_wrap() {
   programmer.load(Space::program, start, program);
   programmer.load(Space::x, 0, data);
   const auto exact = image(storage, false, program);
-  const std::array spans{CodeSpan{.address = start, .words = program}};
-  constexpr std::array entries{start};
-  const std::array variants{
-      CodeVariant{.id = 0, .code = spans, .entries = entries, .failed_fetches = {}}};
-  constexpr std::array modes{0U};
-  constexpr std::array callbacks{
-      CallbackBinding{.role = CallbackRole::retired, .symbol = "record_retired"}};
-  const auto binding = test::retirement_binding();
-  const auto direct = Core::compile({.variants = variants},
-                                    {.memory = {},
-                                     .interrupts = {},
-                                     .transitions = {},
-                                     .callbacks = callbacks,
-                                     .bindings = binding,
-                                     .memory_mode = CompileOptions::MemoryMode::direct,
-                                     .region_modes = modes});
+  const auto direct = observed_direct_image(program);
   test::RetirementIo trace;
   Core reference(storage.memory());
   Core product(storage.memory(), &trace);
@@ -941,11 +945,61 @@ void grouped_single_wrap() {
     }
   }
 }
+
+void grouped_modifier_and_mixed_products() {
+  constexpr Word movec = static_cast<Word>(isa::Opcode::movec_register);
+  constexpr Word n1 = 25;
+  constexpr Word n2 = 26;
+  constexpr Word r5 = 21;
+  constexpr Word m2 = 2;
+  constexpr std::array program{movec | (n1 << 8) | m2,
+                               movec | (1U << 15) | (n2 << 8) | m2,
+                               static_cast<Word>(isa::Opcode::mpy_su) | 0x14U,
+                               movec | (r5 << 8) | m2,
+                               static_cast<Word>(isa::Opcode::mac_su) | 0x6aU,
+                               static_cast<Word>(isa::Opcode::stop)};
+  const Storage storage;
+  test::RetirementIo trace;
+  Core reference(storage.memory());
+  Core product(storage.memory(), &trace);
+  reference.load(Space::program, start, program);
+  reference.install(image(storage, false, program), 0);
+  product.install(observed_direct_image(program), 0);
+  Registers seed{};
+  constexpr auto x_operands = 0x800001ff'ffffULL;
+  constexpr auto y_operands = 0x7fffff00'003dULL;
+  constexpr Word old_modifier = 0x8a0007;
+  constexpr Word new_modifier = 0x91abcd;
+  seed.pc = start;
+  seed.x = x_operands;
+  seed.y = y_operands;
+  seed.m[m2] = old_modifier;
+  seed.n[2] = new_modifier;
+  for (const auto deadline : {0U, 1U, 3U, 7U}) {
+    trace.counts = {};
+    for (auto *core : {&reference, &product}) {
+      core->reset();
+      core->set_registers(seed);
+      require(core->run_until(deadline).fault == Fault{}, "Reach the modifier transfer boundary");
+    }
+    require(same(reference.state(), product.state()), "Preserve state at the exact cycle boundary");
+    require(reference.run().fault == Fault{} && product.run().fault == Fault{} &&
+                same(reference.state(), product.state()),
+            "Resume mixed arithmetic with the live modifier and original flags");
+    require(product.registers().n[1] == seed.m[m2] && product.registers().r[5] == seed.n[2],
+            "Read both the entry modifier and its updated value");
+    if (deadline == 0) {
+      require(trace.counts[0] == program.size() - 1,
+              "Retire mixed arithmetic and modifier moves together");
+    }
+  }
+}
 }
 
 int main() try {
   const test::NativeFaults faults(Core::host_fault);
   grouped_single_wrap();
+  grouped_modifier_and_mixed_products();
   crossing_zero();
   direct_self_loop_empty_window();
   protected_operands();

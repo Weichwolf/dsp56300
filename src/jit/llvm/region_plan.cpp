@@ -12,6 +12,7 @@
 #include "jit/move.hpp"
 #include "jit/preparation.hpp"
 #include "jit/translation.hpp"
+#include "transfers.hpp"
 
 #include <algorithm>
 #include <array>
@@ -329,8 +330,37 @@ bool append_immediate_alu(RegionPlan &plan, const Instruction &instruction) {
   return true;
 }
 
+bool append_modifier_move(RegionPlan &plan, const Instruction &instruction) {
+  const auto description = inspect_transfers(instruction.opcode);
+  if (!description || description->count != 1) { return false; }
+  const auto &[from, to] = description->moves.front();
+  const auto source = static_cast<unsigned>(from.reg);
+  const auto target = static_cast<unsigned>(to.reg);
+  const auto address_register = [](const unsigned number) {
+    return number >= r_register_base && number < m_register_base + agu_registers;
+  };
+  if (!address_register(source) || !address_register(target)) { return false; }
+  if (target >= m_register_base) {
+    plan.changed_m[target - m_register_base] = true;
+  } else if (!destination(plan, target)) {
+    return false;
+  }
+  plan.batch = false;
+  plan.computation = true;
+  plan.steps.push_back({.registers = {.source = source, .destination = target}});
+  return true;
+}
+
 bool append(RegionPlan &plan, const BlockInstruction &operation) {
   const auto &instruction = operation.instruction;
+  if (instruction.operation == Operation::move_control_register) {
+    return append_modifier_move(plan, instruction);
+  }
+  if (instruction.operation == Operation::product_mixed) {
+    plan.computation = true;
+    plan.steps.push_back({});
+    return true;
+  }
   if (instruction.operation == Operation::bit_memory) { return append_bit(plan, instruction); }
   if (instruction.operation == Operation::immediate_alu ||
       instruction.operation == Operation::arithmetic_shift_immediate ||
@@ -549,6 +579,10 @@ std::optional<RegionPlan> make_plan(RegionPlan plan) {
     pc = (pc + operation.instruction.words) & word_mask;
   }
   if (!append_tree(plan, 0, operations.size())) { return {}; }
+  // Memory admission uses the initial modifier of every effective address update.
+  for (unsigned index = 0; index < agu_registers; ++index) {
+    if (plan.changed_m[index] && plan.agu[index]) { return {}; }
+  }
   return plan;
 }
 }
