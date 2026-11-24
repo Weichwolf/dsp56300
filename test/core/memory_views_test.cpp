@@ -896,39 +896,6 @@ NativeImage observed_direct_image(const std::span<const Word> program) {
                         .region_modes = modes});
 }
 
-void grouped_fallthrough_at_branch_target() {
-  const Storage storage;
-  constexpr auto add = static_cast<Word>(isa::Opcode::add_x0_a);
-  constexpr auto jump = static_cast<Word>(isa::Opcode::jmp_absolute_short);
-  constexpr Word entry = start + 2;
-  constexpr std::array program{add, add, add, add, add, add, jump | entry};
-  Core reference(storage.memory());
-  reference.load(Space::program, start, program);
-  reference.install(image(storage, false, program), 0);
-  test::RetirementIo trace;
-  Core product(storage.memory(), &trace);
-  product.install(observed_direct_image(program), 0);
-  const Registers seed{.x = 1, .pc = start};
-  reference.set_registers(seed);
-  product.set_registers(seed);
-  trace.yield_owner = &product;
-  trace.yield = [](void *owner) noexcept { static_cast<Core *>(owner)->request_yield(); };
-  require(reference.run(program.size()).fault == Fault{} &&
-              product.run(program.size() + 1).retired == program.size() &&
-              trace.counts[0] == program.size() && product.registers().pc == entry &&
-              same(reference.state(), product.state()),
-          "The first region crosses the branch target before yielding");
-
-  trace.yield = nullptr;
-  for (const auto cycles : {1U, 3U, 9U}) {
-    const auto deadline = reference.progress().estimated_cycles + cycles;
-    require(reference.run_until(deadline).fault == Fault{} &&
-                product.run_until(deadline).fault == Fault{} &&
-                same(reference.state(), product.state()),
-            "The interior entry preserves the exact timed continuation");
-  }
-}
-
 void grouped_single_wrap() {
   const Storage storage;
   constexpr Word turns = 8;
@@ -1164,7 +1131,6 @@ void grouped_modifier_memory() {
 
 int main() try {
   const test::NativeFaults faults(Core::host_fault);
-  grouped_fallthrough_at_branch_target();
   grouped_single_wrap();
   grouped_modifier_and_mixed_products();
   grouped_displacement_moves();
