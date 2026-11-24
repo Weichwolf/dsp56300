@@ -66,7 +66,7 @@ std::optional<std::size_t> admission_prefix(const RegionPlan &plan) {
   return count;
 }
 
-enum class BatchAddressing : std::uint8_t { automatic, linear, general };
+enum class BatchAddressing : std::uint8_t { automatic, linear, general, single_wrap };
 
 [[nodiscard]] bool split_flags(const RegionPlan &plan) {
   return plan.batch && plan.computation &&
@@ -210,8 +210,33 @@ private:
     auto *first = LLVMAppendBasicBlockInContext(context_, function_, "linear");
     auto *second = LLVMAppendBasicBlockInContext(context_, function_, "general");
     LLVMBuildCondBr(ir_.get(), all_linear, first, second);
-    for (const auto [block, target] :
-         {std::pair{first, linear.function_}, std::pair{second, general.function_}}) {
+    std::vector versions{std::pair{first, linear.function_}, std::pair{second, general.function_}};
+    if (direct_ && plan_.batch && plan_.repeats.empty()) {
+      const RegionLifter wrapping(module,
+                                  plan_,
+                                  name + ".single_wrap",
+                                  admission_only,
+                                  admission_steps,
+                                  BatchAddressing::single_wrap,
+                                  variant_,
+                                  direct_);
+      auto *multiple = LLVMAppendBasicBlockInContext(context_, function_, "multiple_wrap");
+      auto *single = LLVMAppendBasicBlockInContext(context_, function_, "single_wrap");
+      ir_.SetInsertPoint(second);
+      auto *any_single = boolean(false);
+      for (unsigned index = 0; index < agu_registers; ++index) {
+        if (!plan_.agu[index]) { continue; }
+        auto *modifier = ir_.CreateAnd(reg(32, offsetof(Registers, m) + (index * sizeof(Word))),
+                                       ir_.getInt32(modifier_mask));
+        auto *single_wrap = ir_.CreateICmpULT(ir_.CreateSub(modifier, ir_.getInt32(1)),
+                                              ir_.getInt32(multiple_wrap_bit - 1));
+        any_single = ir_.CreateOr(any_single, single_wrap);
+      }
+      LLVMBuildCondBr(ir_.get(), any_single, single, multiple);
+      versions.back().first = multiple;
+      versions.emplace_back(single, wrapping.function_);
+    }
+    for (const auto [block, target] : versions) {
       LLVMSetLinkage(target, LLVMInternalLinkage);
       LLVMAddAttributeAtIndex(
           target,
@@ -437,7 +462,8 @@ private:
                         ir_.CreateICmpEQ(ir_.CreateAnd(mask, ir_.CreateAdd(mask, ir_.getInt32(1))),
                                          ir_.getInt32(0))));
       auto *accepted = ir_.CreateOr(linear, ring);
-      if (direct_ && !plan_.batch && plan_.repeats.empty()) {
+      if (direct_ && plan_.repeats.empty() &&
+          (!plan_.batch || addressing_ == BatchAddressing::single_wrap)) {
         auto *single = ir_.CreateAnd(ir_.CreateICmpNE(modifier, ir_.getInt32(0)),
                                      ir_.CreateICmpULT(modifier, ir_.getInt32(multiple_wrap_bit)));
         accepted = ir_.CreateOr(accepted, single);
@@ -620,6 +646,19 @@ private:
       range.first = ir_.CreateSelect(linear, range.first, begin);
       range.last = ir_.CreateSelect(linear, range.last, end);
     }
+    if (plan_.batch && single_lengths_[index] != nullptr) {
+      auto *length = single_lengths_[index];
+      auto *single = ir_.CreateICmpNE(length, ir_.getInt32(0));
+      auto *span = single_wrap_span(ir_.CreateSelect(single, length, ir_.getInt32(2)));
+      auto *cursor = cursors_[index];
+      auto *offset = ir_.CreateAnd(cursor, span);
+      auto *base = ir_.CreateAnd(cursor, ir_.CreateNot(span));
+      auto *last = ir_.CreateAdd(base, ir_.CreateSub(length, ir_.getInt32(1)));
+      // A canonical single-wrap cursor stays in its ring under unit updates.
+      require(ir_.CreateOr(ir_.CreateNot(single), ir_.CreateICmpULT(offset, length)));
+      range.first = ir_.CreateSelect(single, ir_.CreateZExt(base, ir_.getInt64Ty()), range.first);
+      range.last = ir_.CreateSelect(single, ir_.CreateZExt(last, ir_.getInt64Ty()), range.last);
+    }
     return range;
   }
 
@@ -646,8 +685,7 @@ private:
     }
   }
 
-  V single_wrap(V cursor, const AddressForm form, V step, const bool subtract) {
-    auto *length = single_lengths_[form.index];
+  V single_wrap_span(V length) {
     auto *type = ir_.getInt32Ty();
     constexpr std::string_view name = "llvm.ctlz";
     auto *module = LLVMGetGlobalParent(function_);
@@ -657,7 +695,12 @@ private:
     auto *zeros = LLVMBuildCall2(
         ir_.get(), LLVMGlobalGetValueType(ctlz), ctlz, arguments.data(), arguments.size(), "");
     auto *bits = ir_.CreateSub(ir_.getInt32(32), zeros);
-    auto *span = ir_.CreateSub(ir_.CreateShl(ir_.getInt32(1), bits), ir_.getInt32(1));
+    return ir_.CreateSub(ir_.CreateShl(ir_.getInt32(1), bits), ir_.getInt32(1));
+  }
+
+  V single_wrap(V cursor, const AddressForm form, V step, const bool subtract) {
+    auto *length = single_lengths_[form.index];
+    auto *span = single_wrap_span(length);
     constexpr auto sign = Word{1} << (word_bits - 1);
     auto *stride = ir_.CreateSub(ir_.CreateXor(step, ir_.getInt32(sign)), ir_.getInt32(sign));
     auto *delta = subtract ? ir_.CreateSub(ir_.getInt32(0), stride) : stride;

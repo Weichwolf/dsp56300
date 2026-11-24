@@ -982,21 +982,23 @@ void grouped_short_immediate_moves() {
   }
 }
 
-void grouped_single_wrap() {
+void grouped_single_wrap(const bool unit_steps) {
   const Storage storage;
   constexpr Word turns = 8;
   constexpr Word body = start + 2;
   constexpr Word ring_first = 128;
   constexpr Word modifier = 0xab000c;
   constexpr auto update = static_cast<Word>(isa::Opcode::move_address_update) | (1U << 11);
-  constexpr auto indexed =
-      static_cast<Word>(isa::Opcode::move_x_effective) | (1U << 15) | (5U << 11);
-  constexpr std::array program{static_cast<Word>(isa::Opcode::do_immediate) | (turns << 8),
-                               body + 2,
-                               update,
-                               indexed,
-                               static_cast<Word>(isa::Opcode::add_x0_a),
-                               static_cast<Word>(isa::Opcode::stop)};
+  constexpr auto load_x = static_cast<Word>(isa::Opcode::move_x_effective) | (1U << 15);
+  constexpr auto postincrement = load_x | (3U << 11) | (1U << 16);
+  constexpr auto indexed = load_x | (5U << 11);
+  constexpr auto predecrement = load_x | (7U << 11);
+  const std::array program{static_cast<Word>(isa::Opcode::do_immediate) | (turns << 8),
+                           body + 2,
+                           unit_steps ? postincrement : update,
+                           unit_steps ? predecrement : indexed,
+                           static_cast<Word>(isa::Opcode::add_x0_a),
+                           static_cast<Word>(isa::Opcode::stop)};
   std::array<Word, 256> data{};
   for (std::size_t i = 0; i < data.size(); ++i) { data[i] = static_cast<Word>(i); }
   Core programmer(storage.memory());
@@ -1027,7 +1029,7 @@ void grouped_single_wrap() {
               "Preserve the interrupted single-wrap loop");
       require(reference.run().fault == Fault{} && product.run().fault == Fault{} &&
                   same(reference.state(), product.state()),
-              "Resume the indexed reads and address updates at the original guest boundary");
+              "Resume the reads and address updates at the original guest boundary");
       require(trace.counts[0] != 0, "Retire the valid single-wrap body as a native region");
     }
   }
@@ -1263,7 +1265,8 @@ int main() try {
   const test::NativeFaults faults(Core::host_fault);
   grouped_conditional_transfers();
   grouped_short_immediate_moves();
-  grouped_single_wrap();
+  grouped_single_wrap(false);
+  grouped_single_wrap(true);
   grouped_modifier_and_mixed_products();
   grouped_power_products();
   grouped_displacement_moves();
