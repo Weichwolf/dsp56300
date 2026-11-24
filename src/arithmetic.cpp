@@ -53,13 +53,13 @@ std::uint64_t magnitude(const std::uint64_t value) noexcept {
 }
 
 void Core::Impl::arithmetic_flags(const std::uint64_t value, const bool overflowed) {
-  // Bit zero compares the integer field with its neighbor. Higher bits detect
-  // transitions within the integer field, including a change from the sign bit.
-  const auto adjacent = (value ^ (value << 1)) >> integer_shift(cpu.reg.sr);
+  const auto shift = integer_shift(cpu.reg.sr);
+  const auto integer = value >> shift;
+  const auto all_ones = ~std::uint64_t{0} >> shift;
   Word flags = value == 0 ? zero : 0;
   if ((value >> host_sign_bit) != 0) { flags |= negative; }
-  if (adjacent > 1) { flags |= extension; }
-  if ((adjacent & 1) == 0) { flags |= unnormalized; }
+  if (integer != 0 && integer != all_ones) { flags |= extension; }
+  if (((value >> shift) & 1) == ((value >> (shift - 1)) & 1)) { flags |= unnormalized; }
   if (overflowed) { flags |= overflow | limit; }
   constexpr Word changed = negative | zero | extension | unnormalized | overflow;
 
