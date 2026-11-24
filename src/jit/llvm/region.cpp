@@ -1388,14 +1388,20 @@ private:
   }
 
   struct Live {
-    std::array<V, 4> banks;
+    std::array<V, 6> banks;
     std::array<V, agu_registers> cursors, strides, modifiers;
     V status, limited = nullptr, grown = nullptr;
     std::array<V, stack_entries> frames{};
   };
 
   [[nodiscard]] Live live() {
-    Live state{.banks = banks_,
+    // Keep both halves of X and Y independent on native loop backedges.
+    Live state{.banks = {banks_[0],
+                         banks_[1],
+                         ir_.CreateAnd(banks_[2], ir_.getInt64(word_mask)),
+                         ir_.CreateLShr(banks_[2], ir_.getInt64(word_bits)),
+                         ir_.CreateAnd(banks_[3], ir_.getInt64(word_mask)),
+                         ir_.CreateLShr(banks_[3], ir_.getInt64(word_bits))},
                .cursors = cursors_,
                .strides = strides_,
                .modifiers = modifiers_,
@@ -1411,7 +1417,13 @@ private:
   }
 
   void restore_live(const Live &state) {
-    banks_ = state.banks;
+    const auto pair = [&](V low, V high) {
+      return ir_.CreateOr(low, ir_.CreateShl(high, ir_.getInt64(word_bits)));
+    };
+    banks_ = {state.banks[0],
+              state.banks[1],
+              pair(state.banks[2], state.banks[3]),
+              pair(state.banks[4], state.banks[5])};
     cursors_ = state.cursors;
     strides_ = state.strides;
     modifiers_ = state.modifiers;
@@ -1606,10 +1618,10 @@ private:
     LLVMBuildBr(ir_.get(), loop);
     ir_.SetInsertPoint(loop);
     const auto phis = live_phis(initial, start);
-    restore_live(phis);
     auto *completed = LLVMBuildPhi(ir_.get(), ir_.getInt64Ty(), "completed");
     auto *zero = ir_.getInt64(0);
     LLVMAddIncoming(completed, &zero, &start, 1);
+    restore_live(phis);
     for (unsigned index = 0; index < agu_registers; ++index) {
       if (plan_.agu[index]) {
         origins_[index] = ir_.CreateAnd(cursors_[index], ir_.CreateNot(masks_[index]));
