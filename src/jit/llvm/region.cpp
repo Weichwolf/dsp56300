@@ -708,16 +708,10 @@ private:
     return regular;
   }
 
-  [[nodiscard]] bool can_reuse_addresses() const {
-    return direct_ && single_turn() && plan_.repeats.empty() &&
-           std::ranges::none_of(plan_.definitions,
-                                [](const auto &definition) { return definition.has_value(); }) &&
-           std::ranges::none_of(plan_.changed_n, [](bool changed) { return changed; }) &&
-           std::ranges::none_of(plan_.changed_m, [](bool changed) { return changed; });
-  }
-
   V checked_address_update(V prior, const AddressForm form, V step) {
-    if (single_lengths_[form.index] == nullptr ||
+    const auto index = form.index;
+    if (single_lengths_[index] == nullptr || plan_.definitions[index].has_value() ||
+        plan_.changed_n[index] || plan_.changed_m[index] ||
         (!record_addresses_ && admitted_addresses_.empty())) {
       return advanced(prior, form, step);
     }
@@ -835,7 +829,10 @@ private:
     for (unsigned index = 0; index < agu_registers; ++index) {
       if (!plan_.deferred[index]) { roots |= 1U << index; }
     }
+    // Each admitted expression dominates the body of this turn.
+    record_addresses_ = direct_ && (single_turn() || self_loop_) && plan_.repeats.empty();
     memory_guards(roots, plan_.steps);
+    record_addresses_ = false;
   }
 
   V direct_base(const unsigned bank, const bool writing) {
@@ -1722,10 +1719,7 @@ private:
     admission();
     LLVMBuildCondBr(ir_.get(), eligible_, windows, miss);
     ir_.SetInsertPoint(windows);
-    // The address calculations in this admission block dominate the single turn.
-    record_addresses_ = can_reuse_addresses();
     initial_memory_guards();
-    record_addresses_ = false;
     LLVMBuildCondBr(ir_.get(), eligible_, start, miss);
     ir_.SetInsertPoint(miss);
     LLVMBuildRet(ir_.get(), ir_.getInt32(0));
