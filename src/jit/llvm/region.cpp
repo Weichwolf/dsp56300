@@ -461,17 +461,19 @@ private:
           ir_.CreateAnd(ir_.CreateICmpNE(mask, ir_.getInt32(0)),
                         ir_.CreateICmpEQ(ir_.CreateAnd(mask, ir_.CreateAdd(mask, ir_.getInt32(1))),
                                          ir_.getInt32(0))));
+      auto *full_mask = linear;
       auto *accepted = ir_.CreateOr(linear, ring);
       if (direct_ && plan_.repeats.empty() &&
           (!plan_.batch || addressing_ == BatchAddressing::single_wrap)) {
         auto *single = ir_.CreateAnd(ir_.CreateICmpNE(modifier, ir_.getInt32(0)),
                                      ir_.CreateICmpULT(modifier, ir_.getInt32(multiple_wrap_bit)));
         accepted = ir_.CreateOr(accepted, single);
+        if (plan_.batch) { full_mask = ir_.CreateOr(linear, single); }
         single_lengths_[index] =
             ir_.CreateSelect(single, ir_.CreateAdd(modifier, ir_.getInt32(1)), ir_.getInt32(0));
       }
       require(accepted);
-      masks_[index] = ir_.CreateSelect(linear, ir_.getInt32(word_mask), mask);
+      masks_[index] = ir_.CreateSelect(full_mask, ir_.getInt32(word_mask), mask);
       origins_[index] = ir_.CreateAnd(cursors_[index], ir_.CreateNot(masks_[index]));
     }
   }
@@ -647,23 +649,29 @@ private:
       range.last = ir_.CreateSelect(linear, range.last, end);
     }
     if (plan_.batch && single_lengths_[index] != nullptr) {
-      auto *length = single_lengths_[index];
-      auto *single = ir_.CreateICmpNE(length, ir_.getInt32(0));
-      auto *span = single_wrap_span(ir_.CreateSelect(single, length, ir_.getInt32(2)));
-      auto *cursor = cursors_[index];
-      auto *offset = ir_.CreateAnd(cursor, span);
-      auto *base = ir_.CreateAnd(cursor, ir_.CreateNot(span));
-      auto *last = ir_.CreateAdd(base, ir_.CreateSub(length, ir_.getInt32(1)));
-      // A canonical single-wrap cursor stays in its ring under unit updates.
-      require(ir_.CreateOr(ir_.CreateNot(single), ir_.CreateICmpULT(offset, length)));
-      range.first = ir_.CreateSelect(single, ir_.CreateZExt(base, ir_.getInt64Ty()), range.first);
-      range.last = ir_.CreateSelect(single, ir_.CreateZExt(last, ir_.getInt64Ty()), range.last);
+      auto *wrapped = ir_.CreateICmpNE(single_lengths_[index], ir_.getInt32(0));
+      const auto [first, last] = rings_[index];
+      range.first = ir_.CreateSelect(wrapped, ir_.CreateZExt(first, ir_.getInt64Ty()), range.first);
+      range.last = ir_.CreateSelect(wrapped, ir_.CreateZExt(last, ir_.getInt64Ty()), range.last);
     }
     return range;
   }
 
   void batch_memory_guards() {
     for (unsigned index = 0; index < agu_registers; ++index) {
+      if (auto *length = single_lengths_[index]) {
+        auto *single = ir_.CreateICmpNE(length, ir_.getInt32(0));
+        auto *span = single_wrap_span(ir_.CreateSelect(single, length, ir_.getInt32(2)));
+        auto *offset = ir_.CreateAnd(cursors_[index], span);
+        auto *base = ir_.CreateAnd(cursors_[index], ir_.CreateNot(span));
+        auto *last = ir_.CreateAdd(base, ir_.CreateSub(length, ir_.getInt32(1)));
+        // An admitted unit-step cursor remains in this ring throughout the batch.
+        require(ir_.CreateOr(ir_.CreateNot(single), ir_.CreateICmpULT(offset, length)));
+        // Linear and masked cursors never meet this sentinel.
+        auto *outside = ir_.getInt32(address_words);
+        rings_[index] = {.first = ir_.CreateSelect(single, base, outside),
+                         .last = ir_.CreateSelect(single, last, outside)};
+      }
       for (unsigned bank = 0; bank < 2; ++bank) {
         const auto &extent = plan_.extents[bank][index];
         if (!extent.accessed) { continue; }
@@ -733,6 +741,12 @@ private:
       return next;
     }
     auto *regular = ir_.CreateOr(origins_[form.index], ir_.CreateAnd(next, masks_[form.index]));
+    if (plan_.batch && single_lengths_[form.index] != nullptr) {
+      const auto [first, last] = rings_[form.index];
+      auto *boundary = subtract ? first : last;
+      auto *wrapped = subtract ? last : first;
+      return ir_.CreateSelect(ir_.CreateICmpEQ(cursor, boundary), wrapped, regular);
+    }
     if (auto *length = single_lengths_[form.index]) {
       auto *masked = LLVMGetInsertBlock(ir_.get());
       auto *single = LLVMAppendBasicBlockInContext(context_, function_, "single_wrap");
@@ -1802,6 +1816,7 @@ private:
   std::array<V, stack_entries> frames_{};
   std::array<V, 4> banks_{};
   std::array<V, agu_registers> cursors_{}, strides_{}, modifiers_{}, masks_{}, origins_{};
+  std::array<Bounds, agu_registers> rings_{};
   std::array<V, agu_registers> single_lengths_{};
   std::array<std::array<V, agu_registers>, 2> memory_bases_{};
   std::array<std::map<Word, V>, 2> absolute_bases_;
