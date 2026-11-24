@@ -36,7 +36,7 @@ struct NativeRegisterMove {
   [[nodiscard]] bool valid() const noexcept { return source != 0; }
 };
 
-struct NativeAddressImmediate {
+struct NativeRegisterImmediate {
   unsigned destination = 0;
   Word value = 0;
 
@@ -45,7 +45,7 @@ struct NativeAddressImmediate {
 
 // Compile-time transfer description, independent of the host instruction set.
 [[nodiscard]] std::optional<AddressForm> plan_address_update(const Instruction &instruction);
-[[nodiscard]] NativeAddressImmediate plan_address_immediate(const Instruction &instruction);
+[[nodiscard]] NativeRegisterImmediate plan_register_immediate(const Instruction &instruction);
 [[nodiscard]] NativeMoves plan_moves(const Instruction &instruction);
 [[nodiscard]] NativeRegisterMove plan_register_move(const Instruction &instruction);
 [[nodiscard]] NativeRegisterMove plan_register_move(const Instruction &instruction, bool partial);

@@ -40,7 +40,7 @@ struct RegionPlan {
   struct Step {
     NativeMoves memory{};
     NativeRegisterMove registers{};
-    NativeAddressImmediate immediate{};
+    NativeRegisterImmediate immediate{};
     std::optional<AddressForm> update = std::nullopt;
     Word guards = 0, prefix_count = 0, prefix_cost = 0;
     bool finish_prefix = false;

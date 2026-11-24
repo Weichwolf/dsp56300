@@ -144,9 +144,10 @@ NativeImage image(const Storage &storage,
                   .code = spans,
                   .entries = entries.empty() ? std::span<const Word>(default_entry) : entries,
                   .failed_fetches = {}}};
-  std::array<RegionLayout, 3> regions{};
+  constexpr std::array spaces{Space::program, Space::x, Space::y};
+  std::array<RegionLayout, spaces.size()> regions{};
   for (std::size_t bank = 0; bank < regions.size(); ++bank) {
-    regions[bank] = {.space = static_cast<Space>(bank),
+    regions[bank] = {.space = spaces[bank],
                      .first = 0,
                      .size = storage.words(),
                      .writable = storage.regions[bank].writable};
@@ -941,6 +942,46 @@ void grouped_conditional_transfers() {
   }
 }
 
+void grouped_short_immediate_moves() {
+  constexpr auto nop = static_cast<Word>(isa::Opcode::nop);
+  constexpr auto stop = static_cast<Word>(isa::Opcode::stop);
+  constexpr auto add_x0 = static_cast<Word>(isa::Opcode::add_x0_a) & 0xffU;
+  constexpr Word move_x0 = 0x248000 | add_x0;
+  constexpr Word move_a1 = 0x2cff00;
+  constexpr Word turns = 4;
+  constexpr Registers seed{.x = value, .a = 0x752654'000103ULL, .pc = start};
+  constexpr std::array linear{nop, move_x0, nop, move_a1, stop};
+  constexpr std::array loop{
+      static_cast<Word>(isa::Opcode::do_immediate) | (turns << 8), start + 3, nop, move_x0, stop};
+  for (const auto program : {std::span<const Word>(linear), std::span<const Word>(loop)}) {
+    const Storage storage;
+    Core reference(storage.memory());
+    reference.load(Space::program, start, program);
+    reference.install(image(storage, false, program), 0);
+    test::RetirementIo trace;
+    Core product(storage.memory(), &trace);
+    product.install(observed_direct_image(program), 0);
+    for (const auto deadline : {0U, 1U, 2U, 3U, 4U, 6U, 11U}) {
+      trace.counts = {};
+      for (auto *core : {&reference, &product}) {
+        core->reset();
+        core->set_registers(seed);
+        require(core->run_until(deadline).fault == Fault{},
+                "Reach a short immediate MOVE boundary");
+      }
+      require(same(reference.state(), product.state()),
+              "Preserve the ALU's input before the parallel MOVE at each deadline");
+      require(reference.run().fault == Fault{} && product.run().fault == Fault{} &&
+                  same(reference.state(), product.state()),
+              "Resume short immediate sequences and DO loops at the exact guest boundary");
+      if (deadline == 0) {
+        require(trace.counts[0] >= program.size() - 1,
+                "Retire short data immediate MOVEs as part of a native region");
+      }
+    }
+  }
+}
+
 void grouped_single_wrap() {
   const Storage storage;
   constexpr Word turns = 8;
@@ -1177,6 +1218,7 @@ void grouped_modifier_memory() {
 int main() try {
   const test::NativeFaults faults(Core::host_fault);
   grouped_conditional_transfers();
+  grouped_short_immediate_moves();
   grouped_single_wrap();
   grouped_modifier_and_mixed_products();
   grouped_displacement_moves();

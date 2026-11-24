@@ -108,13 +108,17 @@ std::optional<AddressForm> plan_address_update(const Instruction &instruction) {
                      .index = (instruction.opcode >> 8) & 7U};
 }
 
-NativeAddressImmediate plan_address_immediate(const Instruction &instruction) {
+NativeRegisterImmediate plan_register_immediate(const Instruction &instruction) {
   if (instruction.operation != Operation::parallel) { return {}; }
   const auto opcode = instruction.opcode;
   if (instruction.words == 1 && (opcode & parallel_group_mask) == immediate_group) {
     const auto reg = (opcode >> 16) & five_bit_mask;
-    if (reg >= r_register_base) { return {.destination = reg, .value = (opcode >> 8) & byte_mask}; }
-    return {};
+    if (reg < x0_register) { return {}; }
+    const auto shape = inspect_transfers(opcode);
+    if (!shape || shape->count != 1) { return {}; }
+    const auto &source = shape->moves.front().source;
+    if (source.kind != TransferOperandKind::immediate) { return {}; }
+    return {.destination = reg, .value = source.immediate << source.immediate_shift};
   }
   // Fixed memory-group, load, immediate-EA and zero ALU fields. Only the
   // five register-selector bits and the irrelevant X/Y bus bit can vary.

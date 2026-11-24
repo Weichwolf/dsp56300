@@ -3,6 +3,7 @@
 
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "fields.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
 #include "jit/image_plan.hpp"
@@ -36,6 +37,11 @@ bool terminal(const Operation kind) {
          kind == Operation::return_subroutine || kind == Operation::bit_jump ||
          kind == Operation::bit_branch || kind == Operation::conditional_transfer ||
          loop_setup(kind);
+}
+
+bool short_data_immediate(const Instruction &instruction) {
+  const auto move = plan_register_immediate(instruction);
+  return move.valid() && move.destination < r_register_base;
 }
 
 auto body(const ImagePlan &plan, const Word first, const Word last) {
@@ -82,14 +88,15 @@ void ordinary_regions(const ImagePlan &plan,
     }
     const auto immediate_child =
         complete_children && instruction.operation == Operation::loop_immediate;
-    if (!ordinary(instruction.operation) && !immediate_child) {
-      if (!current.empty() && terminal(instruction.operation)) {
-        current.push_back({.instruction = instruction, .pc = pc});
-      }
-      finish();
-    } else {
+    const bool data_immediate = short_data_immediate(instruction);
+    if (!data_immediate && (ordinary(instruction.operation) || immediate_child)) {
+      current.push_back({.instruction = instruction, .pc = pc});
+      continue;
+    }
+    if (!current.empty() && (terminal(instruction.operation) || data_immediate)) {
       current.push_back({.instruction = instruction, .pc = pc});
     }
+    finish();
   }
   finish();
 }
@@ -147,7 +154,12 @@ image_regions(const ImagePlan &plan, const std::span<const RegionLayout> memory)
   for (auto operations : image_regions(plan)) {
     if (at_loop_end(operations.back())) {
       if (plan_region(operations, memory)) {
-        for (const auto &operation : operations) { covered.insert(operation.pc); }
+        // Keep the ordinary entries in newly groupable DO bodies for shorter grants.
+        if (std::ranges::none_of(operations, [](const auto &operation) {
+              return short_data_immediate(operation.instruction);
+            })) {
+          for (const auto &operation : operations) { covered.insert(operation.pc); }
+        }
         result.push_back(std::move(operations));
       }
       continue;

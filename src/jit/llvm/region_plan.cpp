@@ -402,7 +402,7 @@ bool append_parallel(RegionPlan &plan, const Instruction &instruction) {
     plan.steps.push_back({.update = update});
     return true;
   }
-  const auto immediate = plan_address_immediate(instruction);
+  const auto immediate = plan_register_immediate(instruction);
   if (immediate.valid()) {
     if (!destination(plan, immediate.destination)) { return false; }
     plan.steps.push_back({.memory = {}, .registers = {}, .immediate = immediate});
