@@ -283,7 +283,8 @@ private:
     }
   }
 
-  void budget_admission(V budget, V credit) {
+  void budget_admission(V budget, V window) {
+    auto *remaining_cycles = ir_.CreateNot(initial_cycles_);
     if (plan_.setup || single_turn()) {
       const auto turns = plan_.setup ? plan_.setup_count : 1U;
       const auto count = (std::uint64_t{plan_.count} * turns) + (plan_.setup ? 1U : 0U);
@@ -291,14 +292,15 @@ private:
                         (plan_.setup ? plan_.setup->instruction.cycles : 0U);
       turns_ = ir_.getInt64(turns);
       eligible_ = ir_.CreateAnd(ir_.CreateICmpUGE(budget, ir_.getInt32(count)),
-                                ir_.CreateICmpUGE(credit, ir_.getInt64(cost)));
+                                ir_.CreateICmpUGE(window, ir_.getInt64(cost)));
+      require(ir_.CreateICmpUGE(remaining_cycles, ir_.getInt64(cost)));
       require(ir_.CreateICmpUGE(ir_.getInt64(std::numeric_limits<std::uint64_t>::max() - count),
                                 initial_instructions_));
       if (plan_.setup) { require(ir_.CreateICmpUGE(ir_.getInt32(stack_entries - 3), sc_)); }
     } else {
       turns_ = minimum(
           ir_.CreateZExt(ir_.CreateUDiv(budget, ir_.getInt32(plan_.count)), ir_.getInt64Ty()),
-          ir_.CreateUDiv(credit, ir_.getInt64(plan_.cost)));
+          ir_.CreateUDiv(minimum(window, remaining_cycles), ir_.getInt64(plan_.cost)));
       turns_ = minimum(
           turns_,
           ir_.CreateUDiv(ir_.CreateSub(ir_.getInt64(std::numeric_limits<std::uint64_t>::max()),
@@ -353,17 +355,14 @@ private:
     sp_ = reg(32, offsetof(Registers, sp));
     sc_ = reg(32, offsetof(Registers, sc));
     saved_ = stack(ir_.CreateAnd(sp_, ir_.getInt32(stack_mask)));
-    auto *deadline = load(64, offsetof(NativeContext, cycle_deadline), owner_);
-    auto *credit = ir_.CreateSelect(ir_.CreateICmpUGE(deadline, initial_cycles_),
-                                    ir_.CreateSub(deadline, initial_cycles_),
-                                    ir_.getInt64(0));
+    auto *window = load(64, offsetof(NativeContext, cycle_window), owner_);
     auto *budget = load(32, offsetof(NativeContext, budget), owner_);
     finite_count_ = ir_.CreateSelect(ir_.CreateICmpEQ(lc_, ir_.getInt32(0)),
                                      ir_.getInt64(address_words),
                                      ir_.CreateZExt(lc_, ir_.getInt64Ty()));
     forever_ =
         ir_.CreateICmpNE(ir_.CreateAnd(status_, ir_.getInt32(forever_flag)), ir_.getInt32(0));
-    budget_admission(budget, credit);
+    budget_admission(budget, window);
     stack_admission();
     stack_state();
     require(ir_.CreateICmpEQ(ir_.CreateAnd(status_, ir_.getInt32(numeric_mode_mask)),

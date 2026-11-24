@@ -460,8 +460,10 @@ void direct(const void *code, const Case input, const Grant grant) {
                   .cycles = grant.initial_cycles,
                   .repeat_completed = true,
                   .interrupt_inhibited = true};
+  const auto window =
+      grant.deadline > grant.initial_cycles ? grant.deadline - grant.initial_cycles : 0;
   detail::NativeContext context{
-      .runtime = fixture.runtime(), .budget = grant.quota, .cycle_deadline = grant.deadline};
+      .runtime = fixture.runtime(), .budget = grant.quota, .cycle_window = window};
   const auto retired = detail::enter_block(code, cpu, context);
   cpu.reg.a >>= detail::padding_bits;
   cpu.reg.b >>= detail::padding_bits;

@@ -108,9 +108,7 @@ std::uint64_t Core::Impl::semantic_region(void *const owner,
                   .writes = {self.views[1].write.data.data(), self.views[2].write.data.data()},
                   .admitted_memory = true},
       .budget = budget,
-      .cycle_deadline =
-          self.cpu.cycles +
-          std::min(window, std::numeric_limits<std::uint64_t>::max() - self.cpu.cycles)};
+      .cycle_window = window};
   const auto before = self.cpu.cycles;
   const auto retired = region.entry(&self.cpu, &context);
   cycles = self.cpu.cycles - before;

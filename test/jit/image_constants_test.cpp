@@ -262,7 +262,7 @@ void direct_case(const detail::PreparedRegion &native, const Input input, const 
                                           .windows = {std::span(fixture.windows.data(), 1),
                                                       std::span(&fixture.windows[1], 1)}},
                               .budget = grant == 1 ? instruction_count - 1 : instruction_count,
-                              .cycle_deadline = grant == 2 ? cycle_count - 1 : cycle_count};
+                              .cycle_window = grant == 2 ? cycle_count - 1 : cycle_count};
   const auto data = fixture.data;
   const auto known = fixture.known;
   const auto retired = detail::enter_block(native.entry, cpu, owner);
@@ -309,7 +309,7 @@ void store_before_cursor() {
                                           .windows = {std::span(fixture.windows.data(), 1),
                                                       std::span(&fixture.windows[1], 1)}},
                               .budget = 3,
-                              .cycle_deadline = 4};
+                              .cycle_window = 4};
   const auto data = fixture.data;
   const auto known = fixture.known;
   auto compiler = std::make_unique<detail::LlvmCompiler>();

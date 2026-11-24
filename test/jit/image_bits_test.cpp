@@ -311,7 +311,7 @@ void direct_case(const detail::PreparedRegion &native,
                                           .windows = {std::span(fixture.windows.data(), 1),
                                                       std::span(&fixture.windows[1], 1)}},
                               .budget = static_cast<Word>(ops.size()),
-                              .cycle_deadline = cost(ops)};
+                              .cycle_window = cost(ops)};
   const auto data = fixture.data;
   const auto known = fixture.known;
   const auto retired = detail::enter_block(native.entry, cpu, owner);

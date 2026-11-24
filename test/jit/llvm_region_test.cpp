@@ -440,7 +440,7 @@ void direct(const Input input, const Word mode) {
     shifted.b <<= detail::padding_bits;
     detail::Cpu cpu{.reg = shifted};
     const Word cost = length - 1 + tail_cost(input);
-    detail::NativeContext owner{.runtime = {}, .budget = length, .cycle_deadline = cost};
+    detail::NativeContext owner{.runtime = {}, .budget = length, .cycle_window = cost};
     const auto calls = fallback_calls;
     const auto retired = detail::enter_block(image->entry, cpu, owner);
     cpu.reg.a >>= detail::padding_bits;
@@ -587,7 +587,7 @@ void admission_failures() {
     state.a <<= detail::padding_bits;
     state.b <<= detail::padding_bits;
     detail::Cpu cpu{.reg = state};
-    detail::NativeContext owner{.runtime = {}, .budget = length, .cycle_deadline = length + 3};
+    detail::NativeContext owner{.runtime = {}, .budget = length, .cycle_window = length + 3};
     const auto calls = fallback_calls;
     require(detail::enter_block(image->entry, cpu, owner) == 0 && fallback_calls == calls + 1,
             "An unproved complete region uses the exact ordinary entry");

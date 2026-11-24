@@ -47,7 +47,7 @@ struct JitRuntime {
 struct NativeContext {
   JitRuntime runtime;
   std::uint32_t budget = 0;
-  std::uint64_t cycle_deadline = std::numeric_limits<std::uint64_t>::max();
+  std::uint64_t cycle_window = std::numeric_limits<std::uint64_t>::max();
 };
 
 } // namespace dsp56300::detail

@@ -186,7 +186,7 @@ void linked_flat_storage() {
     NativeContext owner{
         .runtime = {.memory = {JitMemory{.data = buffer->data(), .words = words}, {}}},
         .budget = 6,
-        .cycle_deadline = 6};
+        .cycle_window = 6};
     require(enter_block(entry_point, cpu, owner) == 6 && cpu.reg == expected &&
                 cpu.instructions == 6 && cpu.cycles == 6 && *buffer == wanted &&
                 owner.boundary == NativeBoundary::context,

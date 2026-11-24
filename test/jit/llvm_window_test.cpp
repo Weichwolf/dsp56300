@@ -236,7 +236,7 @@ void direct(Fixture &fixture, const Input input, const Word mode) {
     shifted.a <<= detail::padding_bits;
     shifted.b <<= detail::padding_bits;
     detail::Cpu cpu{.reg = shifted};
-    detail::NativeContext owner{.runtime = {}, .budget = total, .cycle_deadline = wanted.cycles};
+    detail::NativeContext owner{.runtime = {}, .budget = total, .cycle_window = wanted.cycles};
     const auto before = fallback_calls;
     const auto retired = detail::enter_block(image->entry, cpu, owner);
     cpu.reg.a >>= detail::padding_bits;
@@ -425,7 +425,7 @@ void cross_space_cursor(const Forms forms) {
   shifted.b <<= detail::padding_bits;
   detail::Cpu cpu{.reg = shifted};
   const auto cycles = 3 * ((forms.load == 7 ? 2U : 1U) + (forms.store == 7 ? 2U : 1U));
-  detail::NativeContext owner{.runtime = {}, .budget = 6, .cycle_deadline = cycles};
+  detail::NativeContext owner{.runtime = {}, .budget = 6, .cycle_window = cycles};
   const auto before = fallback_calls;
   const auto retired = detail::enter_block(image->entry, cpu, owner);
   cpu.reg.a >>= detail::padding_bits;
@@ -473,7 +473,7 @@ void linked_owner(const void *entry_point, Fixture &fixture, const Registers &se
   shifted.b <<= detail::padding_bits;
   detail::Cpu cpu{.reg = shifted};
   detail::NativeContext owner{
-      .runtime = fixture.runtime(), .budget = 6, .cycle_deadline = wanted.cycles};
+      .runtime = fixture.runtime(), .budget = 6, .cycle_window = wanted.cycles};
   const auto retired = detail::enter_block(entry_point, cpu, owner);
   cpu.reg.a >>= detail::padding_bits;
   cpu.reg.b >>= detail::padding_bits;
@@ -495,7 +495,7 @@ void linked_miss(const void *entry_point,
   shifted.b <<= detail::padding_bits;
   detail::Cpu cpu{.reg = shifted};
   detail::NativeContext owner{
-      .runtime = fixture.runtime(), .budget = grant.instructions, .cycle_deadline = grant.cycles};
+      .runtime = fixture.runtime(), .budget = grant.instructions, .cycle_window = grant.cycles};
   const auto data = fixture.data;
   const auto known = fixture.known;
   require(detail::enter_block(entry_point, cpu, owner) == 0 && cpu.reg == shifted &&
