@@ -431,7 +431,15 @@ private:
           ir_.CreateAnd(ir_.CreateICmpNE(mask, ir_.getInt32(0)),
                         ir_.CreateICmpEQ(ir_.CreateAnd(mask, ir_.CreateAdd(mask, ir_.getInt32(1))),
                                          ir_.getInt32(0))));
-      require(ir_.CreateOr(linear, ring));
+      auto *accepted = ir_.CreateOr(linear, ring);
+      if (direct_ && !plan_.batch && plan_.repeats.empty()) {
+        auto *single = ir_.CreateAnd(ir_.CreateICmpNE(modifier, ir_.getInt32(0)),
+                                     ir_.CreateICmpULT(modifier, ir_.getInt32(multiple_wrap_bit)));
+        accepted = ir_.CreateOr(accepted, single);
+        single_lengths_[index] =
+            ir_.CreateSelect(single, ir_.CreateAdd(modifier, ir_.getInt32(1)), ir_.getInt32(0));
+      }
+      require(accepted);
       masks_[index] = ir_.CreateSelect(linear, ir_.getInt32(word_mask), mask);
       origins_[index] = ir_.CreateAnd(cursors_[index], ir_.CreateNot(masks_[index]));
     }
@@ -633,10 +641,43 @@ private:
     }
   }
 
+  V single_wrap(V cursor, const AddressForm form, V step, const bool subtract) {
+    auto *length = single_lengths_[form.index];
+    auto *type = ir_.getInt32Ty();
+    constexpr std::string_view name = "llvm.ctlz";
+    auto *module = LLVMGetGlobalParent(function_);
+    auto *ctlz = LLVMGetIntrinsicDeclaration(
+        module, LLVMLookupIntrinsicID(name.data(), name.size()), &type, 1);
+    std::array arguments{ir_.CreateSub(length, ir_.getInt32(1)), boolean(false)};
+    auto *zeros = LLVMBuildCall2(
+        ir_.get(), LLVMGlobalGetValueType(ctlz), ctlz, arguments.data(), arguments.size(), "");
+    auto *bits = ir_.CreateSub(ir_.getInt32(32), zeros);
+    auto *span = ir_.CreateSub(ir_.CreateShl(ir_.getInt32(1), bits), ir_.getInt32(1));
+    constexpr auto sign = Word{1} << (word_bits - 1);
+    auto *stride = ir_.CreateSub(ir_.CreateXor(step, ir_.getInt32(sign)), ir_.getInt32(sign));
+    auto *delta = subtract ? ir_.CreateSub(ir_.getInt32(0), stride) : stride;
+    auto *next = ir_.CreateAdd(cursor, delta);
+    auto *lower = ir_.CreateAnd(cursor, ir_.CreateNot(span));
+    auto *upper = ir_.CreateAdd(lower, length);
+    auto *below = LLVMBuildICmp(ir_.get(), LLVMIntSLT, next, lower, "");
+    auto *above = LLVMBuildICmp(ir_.get(), LLVMIntSGE, next, upper, "");
+    auto *wrapped = ir_.CreateSelect(above,
+                                     ir_.CreateSub(next, length),
+                                     ir_.CreateSelect(below, ir_.CreateAdd(next, length), next));
+    auto *negative = LLVMBuildICmp(ir_.get(), LLVMIntSLT, stride, ir_.getInt32(0), "");
+    auto *magnitude = ir_.CreateSelect(negative, ir_.CreateSub(ir_.getInt32(0), stride), stride);
+    auto *positive = LLVMBuildICmp(ir_.get(), LLVMIntSGT, stride, ir_.getInt32(0), "");
+    auto *large = ir_.CreateOr(ir_.CreateICmpUGT(magnitude, length),
+                               ir_.CreateAnd(ir_.CreateICmpEQ(magnitude, length), positive));
+    auto *aligned = ir_.CreateICmpEQ(ir_.CreateAnd(delta, span), ir_.getInt32(0));
+    return ir_.CreateAnd(ir_.CreateSelect(ir_.CreateAnd(large, aligned), next, wrapped),
+                         ir_.getInt32(word_mask));
+  }
+
   V advanced(V cursor, const AddressForm form) {
     auto *step = form.mode < 2 || form.mode == 5 ? strides_[form.index] : ir_.getInt32(1);
-    auto *next = form.mode == 0 || form.mode == 2 || form.mode == 7 ? ir_.CreateSub(cursor, step)
-                                                                    : ir_.CreateAdd(cursor, step);
+    const bool subtract = form.mode == 0 || form.mode == 2 || form.mode == 7;
+    auto *next = subtract ? ir_.CreateSub(cursor, step) : ir_.CreateAdd(cursor, step);
     // The single-operation batch has already proved every accessed address in range.
     // Its final post-update may wrap; finish() masks the committed register.
     if (split_flags_ && loop_count_ == 1 && addressing_ == BatchAddressing::linear) {
@@ -644,7 +685,23 @@ private:
       if (form.mode == 3) { LLVMSetNUW(next, 1); }
       return next;
     }
-    return ir_.CreateOr(origins_[form.index], ir_.CreateAnd(next, masks_[form.index]));
+    auto *regular = ir_.CreateOr(origins_[form.index], ir_.CreateAnd(next, masks_[form.index]));
+    if (auto *length = single_lengths_[form.index]) {
+      auto *masked = LLVMGetInsertBlock(ir_.get());
+      auto *single = LLVMAppendBasicBlockInContext(context_, function_, "single_wrap");
+      auto *done = LLVMAppendBasicBlockInContext(context_, function_, "updated_address");
+      LLVMBuildCondBr(ir_.get(), ir_.CreateICmpNE(length, ir_.getInt32(0)), single, done);
+      ir_.SetInsertPoint(single);
+      auto *wrapped = single_wrap(cursor, form, step, subtract);
+      LLVMBuildBr(ir_.get(), done);
+      ir_.SetInsertPoint(done);
+      auto *result = LLVMBuildPhi(ir_.get(), ir_.getInt32Ty(), "");
+      std::array values{regular, wrapped};
+      std::array blocks{masked, single};
+      LLVMAddIncoming(result, values.data(), blocks.data(), values.size());
+      return result;
+    }
+    return regular;
   }
 
   V effective(std::array<V, agu_registers> &cursors, const AddressForm form) {
@@ -1616,6 +1673,7 @@ private:
   std::array<V, stack_entries> frames_{};
   std::array<V, 4> banks_{};
   std::array<V, agu_registers> cursors_{}, strides_{}, masks_{}, origins_{};
+  std::array<V, agu_registers> single_lengths_{};
   std::array<std::array<V, agu_registers>, 2> memory_bases_{};
   std::array<std::map<Word, V>, 2> absolute_bases_;
   std::array<std::vector<std::array<Binding, 2>>, 2> bindings_;

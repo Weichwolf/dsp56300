@@ -6,6 +6,7 @@
 #include "memory_arena.hpp"
 #include "native_faults.hpp"
 #include "reject_io.hpp"
+#include "retirement_observer.hpp"
 #include "support.hpp"
 
 #include <array>
@@ -874,10 +875,77 @@ void crossing_zero() {
   }
   repeated_unit_reads(storage, checked, direct);
 }
+
+void grouped_single_wrap() {
+  const Storage storage;
+  constexpr Word turns = 8;
+  constexpr Word body = start + 2;
+  constexpr Word ring_first = 128;
+  constexpr Word modifier = 0xab000c;
+  constexpr auto update = static_cast<Word>(isa::Opcode::move_address_update) | (1U << 11);
+  constexpr auto indexed =
+      static_cast<Word>(isa::Opcode::move_x_effective) | (1U << 15) | (5U << 11);
+  constexpr std::array program{static_cast<Word>(isa::Opcode::do_immediate) | (turns << 8),
+                               body + 2,
+                               update,
+                               indexed,
+                               static_cast<Word>(isa::Opcode::add_x0_a),
+                               static_cast<Word>(isa::Opcode::stop)};
+  std::array<Word, 256> data{};
+  for (std::size_t i = 0; i < data.size(); ++i) { data[i] = static_cast<Word>(i); }
+  Core programmer(storage.memory());
+  programmer.load(Space::program, start, program);
+  programmer.load(Space::x, 0, data);
+  const auto exact = image(storage, false, program);
+  const std::array spans{CodeSpan{.address = start, .words = program}};
+  constexpr std::array entries{start};
+  const std::array variants{
+      CodeVariant{.id = 0, .code = spans, .entries = entries, .failed_fetches = {}}};
+  constexpr std::array modes{0U};
+  constexpr std::array callbacks{
+      CallbackBinding{.role = CallbackRole::retired, .symbol = "record_retired"}};
+  const auto binding = test::retirement_binding();
+  const auto direct = Core::compile({.variants = variants},
+                                    {.memory = {},
+                                     .interrupts = {},
+                                     .transitions = {},
+                                     .callbacks = callbacks,
+                                     .bindings = binding,
+                                     .memory_mode = CompileOptions::MemoryMode::direct,
+                                     .region_modes = modes});
+  test::RetirementIo trace;
+  Core reference(storage.memory());
+  Core product(storage.memory(), &trace);
+  reference.install(exact, 0);
+  product.install(direct, 0);
+  for (const auto stride : {3U, word_mask - 1}) {
+    for (const auto deadline : {1U, 4U, 11U, 23U, 34U}) {
+      Registers seed{};
+      seed.pc = start;
+      seed.r[0] = ring_first + 11;
+      seed.n[0] = stride;
+      seed.m.fill(word_mask);
+      seed.m[0] = modifier;
+      trace.counts = {};
+      for (auto *core : {&reference, &product}) {
+        core->reset();
+        core->set_registers(seed);
+        require(core->run_until(deadline).fault == Fault{}, "Reach the requested cycle boundary");
+      }
+      require(same(reference.state(), product.state()),
+              "Preserve the interrupted single-wrap loop");
+      require(reference.run().fault == Fault{} && product.run().fault == Fault{} &&
+                  same(reference.state(), product.state()),
+              "Resume the indexed reads and address updates at the original guest boundary");
+      require(trace.counts[0] != 0, "Retire the valid single-wrap body as a native region");
+    }
+  }
+}
 }
 
 int main() try {
   const test::NativeFaults faults(Core::host_fault);
+  grouped_single_wrap();
   crossing_zero();
   direct_self_loop_empty_window();
   protected_operands();
