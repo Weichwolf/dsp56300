@@ -896,6 +896,51 @@ NativeImage observed_direct_image(const std::span<const Word> program) {
                         .region_modes = modes});
 }
 
+void grouped_conditional_transfers() {
+  constexpr Word equal = 10U << 12;
+  constexpr Word zero = 1U << 2;
+  constexpr auto nop = static_cast<Word>(isa::Opcode::nop);
+  constexpr auto stop = static_cast<Word>(isa::Opcode::stop);
+  constexpr auto read_x =
+      static_cast<Word>(isa::Opcode::move_x_effective) | (1U << 15) | (3U << 11) | (2U << 8);
+  constexpr std::array forms{0x020000U | equal, 0x030102U | equal, 0x020902U | equal};
+  for (const auto transfer : forms) {
+    const Storage storage;
+    const std::array program{nop, transfer, read_x, stop};
+    Core reference(storage.memory());
+    reference.load(Space::program, start, program);
+    reference.load(Space::x, target, std::array{value, other});
+    reference.install(image(storage, false, program), 0);
+    test::RetirementIo trace;
+    Core product(storage.memory(), &trace);
+    product.install(observed_direct_image(program), 0);
+    for (const auto status : {0U, zero}) {
+      for (const auto deadline : {1U, 2U, 3U, 4U}) {
+        Registers seed{};
+        seed.pc = start;
+        seed.sr = status;
+        seed.a = value;
+        seed.b = other;
+        seed.r[1] = target + 1;
+        seed.r[2] = target;
+        seed.m.fill(word_mask);
+        trace.counts = {};
+        for (auto *core : {&reference, &product}) {
+          core->reset();
+          core->set_registers(seed);
+          require(core->run_until(deadline).fault == Fault{},
+                  "Reach a conditional transfer boundary");
+        }
+        require(same(reference.state(), product.state()),
+                "Preserve conditional accumulator and address transfers at each deadline");
+        if (deadline >= 2) {
+          require(trace.counts[0] == 2, "Retire the conditional transfer at the end of its region");
+        }
+      }
+    }
+  }
+}
+
 void grouped_single_wrap() {
   const Storage storage;
   constexpr Word turns = 8;
@@ -1131,6 +1176,7 @@ void grouped_modifier_memory() {
 
 int main() try {
   const test::NativeFaults faults(Core::host_fault);
+  grouped_conditional_transfers();
   grouped_single_wrap();
   grouped_modifier_and_mixed_products();
   grouped_displacement_moves();

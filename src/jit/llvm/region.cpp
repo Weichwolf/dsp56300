@@ -1333,6 +1333,8 @@ private:
             ir_, instruction.opcode, plan_.operations[index].mode, banks_, status_);
       } else if (instruction.operation == Operation::logical_shift_immediate) {
         llvm19::lower_logical_shift(ir_, instruction.opcode, banks_, status_);
+      } else if (instruction.operation == Operation::conditional_transfer) {
+        conditional_transfer(instruction.opcode, plan_.operations[index].mode, before);
       } else if (instruction.operation == Operation::product_mixed) {
         llvm19::lower_mixed_product(
             ir_, instruction.opcode, plan_.operations[index].mode, banks_, status_);
@@ -1348,6 +1350,25 @@ private:
             ir_, instruction.opcode, plan_.operations[index].mode, before, banks_, status_);
       }
       if (step.guards != 0) { guard_computed_address(miss, index); }
+    }
+  }
+
+  void conditional_transfer(const Word opcode, const Word mode, const std::array<V, 4> &before) {
+    constexpr Word address_only = 1U << 11;
+    constexpr Word dual = 1U << 16;
+    auto *selected = llvm19::condition(ir_, status_, (opcode >> 12) & 15U);
+    if ((opcode & address_only) == 0) {
+      constexpr Word operand_bits = 0x78;
+      constexpr Word transfer_alu = 1;
+      const unsigned accumulator = (opcode >> 3) & 1U;
+      llvm19::lower_alu(ir_, (opcode & operand_bits) | transfer_alu, mode, before, banks_, status_);
+      banks_[accumulator] = ir_.CreateSelect(selected, banks_[accumulator], before[accumulator]);
+    }
+    if ((opcode & (address_only | dual)) != 0) {
+      const unsigned source = (opcode >> 8) & 7U;
+      const unsigned target = opcode & 7U;
+      write_register(r_register_base + target,
+                     ir_.CreateSelect(selected, cursors_[source], cursors_[target]));
     }
   }
 

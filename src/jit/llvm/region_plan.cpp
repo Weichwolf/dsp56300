@@ -370,23 +370,21 @@ bool append_addressed_move(RegionPlan &plan, const Instruction &instruction) {
   return true;
 }
 
-bool append(RegionPlan &plan, const BlockInstruction &operation) {
-  const auto &instruction = operation.instruction;
-  if (instruction.operation == Operation::move_control_register) {
-    return append_modifier_move(plan, instruction);
+bool append_conditional_transfer(RegionPlan &plan, const Word opcode) {
+  constexpr Word address_only = 1U << 11;
+  constexpr Word dual = 1U << 16;
+  const auto source = (opcode >> 4) & 7U;
+  if ((opcode & address_only) == 0 && source != 0 && source < 4) { return false; }
+  if ((opcode & (address_only | dual)) != 0 &&
+      !destination(plan, r_register_base + (opcode & 7U))) {
+    return false;
   }
-  if (instruction.operation == Operation::product_mixed) {
-    plan.computation = true;
-    plan.steps.push_back({});
-    return true;
-  }
-  if (addressed_move(instruction.operation)) { return append_addressed_move(plan, instruction); }
-  if (instruction.operation == Operation::bit_memory) { return append_bit(plan, instruction); }
-  if (instruction.operation == Operation::immediate_alu ||
-      instruction.operation == Operation::arithmetic_shift_immediate ||
-      instruction.operation == Operation::logical_shift_immediate) {
-    return append_immediate_alu(plan, instruction);
-  }
+  plan.computation = true;
+  plan.steps.push_back({});
+  return true;
+}
+
+bool append_parallel(RegionPlan &plan, const Instruction &instruction) {
   if ((instruction.operation != Operation::parallel && instruction.operation != Operation::nop) ||
       !llvm19::supported_alu(instruction.opcode)) {
     return false;
@@ -424,6 +422,29 @@ bool append(RegionPlan &plan, const BlockInstruction &operation) {
   }
   plan.steps.push_back({.memory = moves, .registers = registers});
   return true;
+}
+
+bool append(RegionPlan &plan, const BlockInstruction &operation) {
+  const auto &instruction = operation.instruction;
+  if (instruction.operation == Operation::move_control_register) {
+    return append_modifier_move(plan, instruction);
+  }
+  if (instruction.operation == Operation::conditional_transfer) {
+    return append_conditional_transfer(plan, instruction.opcode);
+  }
+  if (instruction.operation == Operation::product_mixed) {
+    plan.computation = true;
+    plan.steps.push_back({});
+    return true;
+  }
+  if (addressed_move(instruction.operation)) { return append_addressed_move(plan, instruction); }
+  if (instruction.operation == Operation::bit_memory) { return append_bit(plan, instruction); }
+  if (instruction.operation == Operation::immediate_alu ||
+      instruction.operation == Operation::arithmetic_shift_immediate ||
+      instruction.operation == Operation::logical_shift_immediate) {
+    return append_immediate_alu(plan, instruction);
+  }
+  return append_parallel(plan, instruction);
 }
 
 struct TreeContext {

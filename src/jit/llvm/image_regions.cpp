@@ -34,7 +34,8 @@ bool terminal(const Operation kind) {
          kind == Operation::conditional_jump || kind == Operation::relative_branch ||
          kind == Operation::call_short || kind == Operation::call_effective ||
          kind == Operation::return_subroutine || kind == Operation::bit_jump ||
-         kind == Operation::bit_branch || loop_setup(kind);
+         kind == Operation::bit_branch || kind == Operation::conditional_transfer ||
+         loop_setup(kind);
 }
 
 auto body(const ImagePlan &plan, const Word first, const Word last) {
