@@ -270,11 +270,10 @@ void Alu::rounding(Result &result) {
 void Alu::flags(const Result &result) {
   const unsigned shift =
       integer_shift + ((mode_ & scale_down) != 0 ? 1U : 0U) - ((mode_ & scale_up) != 0 ? 1U : 0U);
-  auto *integer = ir_.CreateLShr(result.value, ir_.getInt64(shift));
-  auto *extended =
-      ir_.CreateAnd(ir_.CreateICmpNE(integer, ir_.getInt64(0)),
-                    ir_.CreateICmpNE(integer, ir_.getInt64(~std::uint64_t{0} >> shift)));
-  auto *adjacent = ir_.CreateXor(integer, ir_.CreateLShr(result.value, ir_.getInt64(shift - 1)));
+  auto *adjacent =
+      ir_.CreateLShr(ir_.CreateXor(result.value, ir_.CreateShl(result.value, ir_.getInt64(1))),
+                     ir_.getInt64(shift));
+  auto *extended = ir_.CreateICmpUGT(adjacent, ir_.getInt64(1));
   auto *unnormal = ir_.CreateICmpEQ(ir_.CreateAnd(adjacent, ir_.getInt64(1)), ir_.getInt64(0));
   auto *bits =
       ir_.CreateOr(flag(ir_.CreateICmpEQ(result.value, ir_.getInt64(0)), zero),
