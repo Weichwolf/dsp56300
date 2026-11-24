@@ -590,8 +590,10 @@ private:
     ir_.SetInsertPoint(sites_.at(pc));
     auto *time = block(active_, "time");
     auto *execute = block(active_, "execute");
-    auto *commit = block(active_, "commit");
-    auto *continued = block(active_, "continued");
+    auto *advance = block(active_, "advance");
+    auto *halt = block(active_, "halt");
+    auto *owner = block(active_, "owner");
+    cold_.insert(halt);
     auto *sequential = block(active_, "sequential");
     auto *branched = block(active_, "branch");
     auto *count = ir_.CreateLoad(ir_.getInt32Ty(), count_);
@@ -609,29 +611,33 @@ private:
         ir_.CreateCall(semantic_variant(operation), {active_->getArg(0), ir_.getInt32(pc)});
     auto *next = ir_.CreateTrunc(outcome, ir_.getInt32Ty());
     auto *flow = ir_.CreateTrunc(ir_.CreateLShr(outcome, flow_shift), ir_.getInt8Ty());
-    ir_.CreateStore(next, pc_);
-    ir_.CreateCondBr(
-        ir_.CreateICmpEQ(flow, ir_.getInt8(static_cast<unsigned>(SemanticFlow::fault))),
-        exits_.at(ImageExit::fault),
-        commit);
-    ir_.SetInsertPoint(commit);
-    ir_.CreateStore(ir_.CreateAdd(count, ir_.getInt32(1)), count_);
-    auto *cost = ir_.getInt64(operation.cycles);
-    ir_.CreateStore(ir_.CreateSelect(ir_.CreateICmpUGT(window, cost),
-                                     ir_.CreateSub(window, cost),
-                                     ir_.getInt64(0)),
-                    window_);
     constexpr unsigned opcode_shift = 24;
     constexpr unsigned kind_shift = 48;
     const auto site = static_cast<std::uint64_t>(pc) |
                       (static_cast<std::uint64_t>(operation.opcode) << opcode_shift) |
                       (static_cast<std::uint64_t>(operation.operation) << kind_shift);
-    retirement(ir_.getInt32(1), false, site);
+    auto *retired = ir_.CreateAdd(count, ir_.getInt32(1));
+    ir_.CreateCondBr(
+        ir_.CreateICmpUGE(flow, ir_.getInt8(static_cast<unsigned>(SemanticFlow::sequential))),
+        advance,
+        halt);
+    ir_.SetInsertPoint(halt);
     ir_.CreateCondBr(
         ir_.CreateICmpEQ(flow, ir_.getInt8(static_cast<unsigned>(SemanticFlow::owner))),
-        exits_.at(ImageExit::owner),
-        continued);
-    ir_.SetInsertPoint(continued);
+        owner,
+        exits_.at(ImageExit::fault));
+    ir_.SetInsertPoint(owner);
+    static_cast<void>(emit_retirement(*owner, active_->getArg(0), ir_.getInt32(1), false, site));
+    result(retired, ImageExit::owner);
+    ir_.SetInsertPoint(advance);
+    ir_.CreateStore(retired, count_);
+    ir_.CreateStore(next, pc_);
+    auto *cost = ir_.getInt64(operation.cycles);
+    ir_.CreateStore(ir_.CreateSelect(ir_.CreateICmpUGT(window, cost),
+                                     ir_.CreateSub(window, cost),
+                                     ir_.getInt64(0)),
+                    window_);
+    retirement(ir_.getInt32(1), false, site);
     ir_.CreateCondBr(
         ir_.CreateICmpEQ(flow, ir_.getInt8(static_cast<unsigned>(SemanticFlow::sequential))),
         sequential,
