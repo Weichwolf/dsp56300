@@ -8,7 +8,6 @@
 #include "product_fields.hpp"
 #include "rounding.hpp"
 
-#include <array>
 #include <bit>
 #include <cstdint>
 
@@ -16,9 +15,6 @@ namespace dsp56300 {
 using namespace detail;
 
 namespace {
-constexpr std::array<std::uint8_t, 4> power_sources{3, 0, 1, 2};
-constexpr unsigned maximum_power = 23;
-
 struct Product {
   std::int64_t left = 0, right = 0;
   bool accumulate = false, subtract = false, rounded = false, destination_b = false;
@@ -33,7 +29,7 @@ Product immediate_product(const Instruction &decoded, const Registers &state) {
   const auto opcode = decoded.opcode;
   const auto selector = (opcode >> 4) & 3U;
   const bool power = decoded.operation == Operation::product_power;
-  const auto source = power ? power_sources[selector] : selector;
+  const auto source = power ? power_product_sources[selector] : selector;
   const auto coefficient = power ? std::int64_t{1}
                                        << (word_bits - 1 - ((opcode >> 8) & five_bit_mask))
                                  : signed_word(decoded.extension);
@@ -66,7 +62,7 @@ void Core::Impl::execute_product(const Instruction &decoded) {
   const auto opcode = decoded.opcode;
   if (decoded.operation == Operation::product_power) {
     const unsigned power = (opcode >> 8) & five_bit_mask;
-    if (power == 0 || power > maximum_power) {
+    if (power == 0 || power > maximum_product_power) {
       // Power zero needs separate qualification; do not guess its sign.
       fail(power == 0 ? FaultKind::unsupported_mode : FaultKind::invalid_instruction,
            Space::program,

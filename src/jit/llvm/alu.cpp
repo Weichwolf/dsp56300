@@ -58,6 +58,7 @@ public:
   void lower(Word code, const Banks &before, Banks &after);
   void immediate(const Instruction &instruction, Banks &banks);
   void mixed_product(Word opcode, Banks &banks);
+  void power_product(Word opcode, Banks &banks);
   void shift(Word opcode, Banks &banks);
   void logical_shift(Word opcode, Banks &banks);
   void flags(const Result &result);
@@ -166,6 +167,20 @@ void Alu::mixed_product(const Word opcode, Banks &banks) {
   if ((opcode & (1U << 4)) != 0) { term = ir_.CreateSub(ir_.getInt64(0), term); }
   auto *initial = (opcode & (1U << 8)) == 0 ? banks[destination] : ir_.getInt64(0);
   const auto result = arithmetic(initial, term, false);
+  flags(result);
+  banks[destination] = result.value;
+}
+
+void Alu::power_product(const Word opcode, Banks &banks) {
+  const auto encoded = power_product_sources[(opcode >> 4) & 3U];
+  const auto source = ((encoded & 1U) << 1U) | (encoded >> 1U);
+  const auto shift = word_bits + padding_bits - ((opcode >> 8) & five_bit_mask);
+  const auto destination = (opcode >> 3) & 1U;
+  auto *term = ir_.CreateShl(product_word(banks, source), ir_.getInt64(shift));
+  if ((opcode & 4U) != 0) { term = ir_.CreateSub(ir_.getInt64(0), term); }
+  auto *initial = (opcode & 2U) != 0 ? banks[destination] : ir_.getInt64(0);
+  auto result = arithmetic(initial, term, false);
+  if ((opcode & 1U) != 0) { rounding(result); }
   flags(result);
   banks[destination] = result.value;
 }
@@ -396,8 +411,14 @@ void Alu::lower(const Word code, const Banks &before, Banks &after) {
 }
 }
 
-void lower_mixed_product(Builder &ir, const Word opcode, const Word mode, Banks &banks, V &status) {
-  Alu(ir, mode, status).mixed_product(opcode, banks);
+void lower_product(
+    Builder &ir, const Instruction &instruction, const Word mode, Banks &banks, V &status) {
+  Alu alu(ir, mode, status);
+  if (instruction.operation == Operation::product_power) {
+    alu.power_product(instruction.opcode, banks);
+  } else {
+    alu.mixed_product(instruction.opcode, banks);
+  }
 }
 
 Word flag_inputs(const Word opcode) {

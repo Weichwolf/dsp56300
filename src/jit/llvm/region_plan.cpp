@@ -12,6 +12,7 @@
 #include "jit/move.hpp"
 #include "jit/preparation.hpp"
 #include "jit/translation.hpp"
+#include "product_fields.hpp"
 #include "transfers.hpp"
 
 #include <algorithm>
@@ -432,7 +433,11 @@ bool append(RegionPlan &plan, const BlockInstruction &operation) {
   if (instruction.operation == Operation::conditional_transfer) {
     return append_conditional_transfer(plan, instruction.opcode);
   }
-  if (instruction.operation == Operation::product_mixed) {
+  if (instruction.operation == Operation::product_power) {
+    const auto power = (instruction.opcode >> 8) & five_bit_mask;
+    if (power == 0 || power > maximum_product_power) { return false; }
+  }
+  if (llvm19::supported_product(instruction.operation)) {
     plan.computation = true;
     plan.steps.push_back({});
     return true;

@@ -1335,9 +1335,8 @@ private:
         llvm19::lower_logical_shift(ir_, instruction.opcode, banks_, status_);
       } else if (instruction.operation == Operation::conditional_transfer) {
         conditional_transfer(instruction.opcode, plan_.operations[index].mode, before);
-      } else if (instruction.operation == Operation::product_mixed) {
-        llvm19::lower_mixed_product(
-            ir_, instruction.opcode, plan_.operations[index].mode, banks_, status_);
+      } else if (llvm19::supported_product(instruction.operation)) {
+        llvm19::lower_product(ir_, instruction, plan_.operations[index].mode, banks_, status_);
       } else if (instruction.operation == Operation::immediate_alu) {
         llvm19::lower_immediate_alu(
             ir_, instruction, plan_.operations[index].mode, banks_, status_);

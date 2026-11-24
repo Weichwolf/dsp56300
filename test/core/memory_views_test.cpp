@@ -1082,6 +1082,50 @@ void grouped_modifier_and_mixed_products() {
   }
 }
 
+void grouped_power_products() {
+  constexpr auto nop = static_cast<Word>(isa::Opcode::nop);
+  constexpr auto stop = static_cast<Word>(isa::Opcode::stop);
+  constexpr auto multiply = static_cast<Word>(isa::Opcode::mpy_power);
+  constexpr Word minimum_power = 23U << 8;
+  constexpr Word maximum_power = 1U << 8;
+  constexpr Word rounded_subtract = 7U;
+  constexpr Word destination_b = 1U << 3;
+  constexpr std::array program{nop,
+                               multiply | maximum_power | rounded_subtract,
+                               nop,
+                               multiply | minimum_power | destination_b,
+                               stop};
+  constexpr std::array invalid{nop, multiply, stop};
+  constexpr Registers seed{
+      .x = 0x18'7caa'fd7f01ULL, .y = 0xff'ffe1'34b23fULL, .a = 0x7f'ffff'fffed1'41ULL, .pc = start};
+  const Storage storage;
+  Core reference(storage.memory());
+  test::RetirementIo trace;
+  Core product(storage.memory(), &trace);
+  for (const auto words : {std::span<const Word>(program), std::span<const Word>(invalid)}) {
+    reference.load(Space::program, start, words);
+    reference.install(image(storage, false, words), 0);
+    product.install(observed_direct_image(words), 0);
+    for (const auto deadline : {0U, 1U, 2U, 3U, 4U}) {
+      trace.counts = {};
+      for (auto *core : {&reference, &product}) {
+        core->reset();
+        core->set_registers(seed);
+        static_cast<void>(core->run_until(deadline));
+      }
+      require(same(reference.state(), product.state()),
+              "Preserve the power-product cycle boundary");
+      const auto expected = reference.run();
+      const auto actual = product.run();
+      require(actual.fault == expected.fault && same(reference.state(), product.state()),
+              "Preserve the power-product result, flags and invalid coefficients");
+      if (deadline == 0 && words.size() == program.size()) {
+        require(trace.counts[0] == program.size() - 1, "Retire power products in native groups");
+      }
+    }
+  }
+}
+
 void grouped_displacement_moves() {
   constexpr auto short_load = static_cast<Word>(isa::Opcode::move_displacement_short);
   constexpr auto long_move = static_cast<Word>(isa::Opcode::move_displacement_long);
@@ -1221,6 +1265,7 @@ int main() try {
   grouped_short_immediate_moves();
   grouped_single_wrap();
   grouped_modifier_and_mixed_products();
+  grouped_power_products();
   grouped_displacement_moves();
   grouped_modifier_memory();
   crossing_zero();

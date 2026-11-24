@@ -4,6 +4,10 @@
 #include <cstdint>
 
 namespace dsp56300::detail {
+// Encoded power-product sources in X0, Y0, X1, Y1 order.
+inline constexpr std::array<std::uint8_t, 4> power_product_sources{3, 0, 1, 2};
+inline constexpr unsigned maximum_product_power = 23;
+
 // Encoded mixed-product operands in X0, Y0, X1, Y1 order.
 inline constexpr std::array<std::array<std::uint8_t, 2>, 16> mixed_product_pairs{{{0, 0},
                                                                                   {1, 1},

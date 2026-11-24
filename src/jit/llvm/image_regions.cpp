@@ -27,7 +27,7 @@ bool ordinary(const Operation kind) {
          kind == Operation::arithmetic_shift_immediate ||
          kind == Operation::logical_shift_immediate || kind == Operation::immediate_alu ||
          kind == Operation::move_control_register || kind == Operation::product_mixed ||
-         addressed_move(kind);
+         kind == Operation::product_power || addressed_move(kind);
 }
 
 bool terminal(const Operation kind) {
@@ -39,7 +39,8 @@ bool terminal(const Operation kind) {
          loop_setup(kind);
 }
 
-bool short_data_immediate(const Instruction &instruction) {
+bool ends_ordinary_region(const Instruction &instruction) {
+  if (instruction.operation == Operation::product_power) { return true; }
   const auto move = plan_register_immediate(instruction);
   return move.valid() && move.destination < r_register_base;
 }
@@ -88,12 +89,12 @@ void ordinary_regions(const ImagePlan &plan,
     }
     const auto immediate_child =
         complete_children && instruction.operation == Operation::loop_immediate;
-    const bool data_immediate = short_data_immediate(instruction);
-    if (!data_immediate && (ordinary(instruction.operation) || immediate_child)) {
+    const bool ends_region = ends_ordinary_region(instruction);
+    if (!ends_region && (ordinary(instruction.operation) || immediate_child)) {
       current.push_back({.instruction = instruction, .pc = pc});
       continue;
     }
-    if (!current.empty() && (terminal(instruction.operation) || data_immediate)) {
+    if (!current.empty() && (terminal(instruction.operation) || ends_region)) {
       current.push_back({.instruction = instruction, .pc = pc});
     }
     finish();
@@ -156,7 +157,7 @@ image_regions(const ImagePlan &plan, const std::span<const RegionLayout> memory)
       if (plan_region(operations, memory)) {
         // Keep the ordinary entries in newly groupable DO bodies for shorter grants.
         if (std::ranges::none_of(operations, [](const auto &operation) {
-              return short_data_immediate(operation.instruction);
+              return ends_ordinary_region(operation.instruction);
             })) {
           for (const auto &operation : operations) { covered.insert(operation.pc); }
         }
