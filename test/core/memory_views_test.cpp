@@ -9,6 +9,7 @@
 #include "retirement_observer.hpp"
 #include "support.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <cstddef>
@@ -994,12 +995,92 @@ void grouped_modifier_and_mixed_products() {
     }
   }
 }
+
+void grouped_displacement_moves() {
+  constexpr auto short_load = static_cast<Word>(isa::Opcode::move_displacement_short);
+  constexpr auto long_move = static_cast<Word>(isa::Opcode::move_displacement_long);
+  constexpr Word short_offset = 0x79;
+  constexpr Word long_offset = 77;
+  constexpr Word y_on_r1 = (1U << 16) | (1U << 8);
+  constexpr std::array program{short_load | ((short_offset & 0x7eU) << 10) |
+                                   ((short_offset & 1U) << 6) | (1U << 4) | 4U,
+                               static_cast<Word>(isa::Opcode::add_x0_a),
+                               long_move | y_on_r1 | 12U,
+                               long_offset,
+                               long_move | y_on_r1 | (1U << 6) | 6U,
+                               long_offset,
+                               static_cast<Word>(isa::Opcode::stop)};
+  const Storage checked_storage;
+  const Storage direct_storage;
+  test::RetirementIo trace;
+  Core reference(checked_storage.memory());
+  Core product(direct_storage.memory(), &trace);
+  std::array<Word, 512> data{};
+  for (std::size_t i = 0; i < data.size(); ++i) { data[i] = static_cast<Word>(i + 1); }
+  for (auto *core : {&reference, &product}) {
+    core->load(Space::program, start, program);
+    core->load(Space::x, 0, data);
+  }
+  const auto exact_image = image(checked_storage, false, program);
+  const auto direct_image = observed_direct_image(program);
+  reference.install(exact_image, 0);
+  product.install(direct_image, 0);
+  constexpr std::array modifiers{word_mask, 0x801fU, 22U};
+  constexpr Word source = 0x105;
+  constexpr Word destination = 0x131;
+  for (const auto modifier : modifiers) {
+    for (const auto deadline : {0U, 2U, 5U}) {
+      trace.counts = {};
+      for (auto *core : {&reference, &product}) {
+        core->reset();
+        Registers seed{};
+        seed.pc = start;
+        seed.r[0] = source;
+        seed.r[1] = destination;
+        seed.m[0] = modifier;
+        seed.m[1] = modifier;
+        core->set_registers(seed);
+        require(core->run_until(deadline).fault == Fault{}, "Reach a displacement cycle boundary");
+      }
+      require(same(reference.state(), product.state()), "Preserve the displacement move prefix");
+      require(reference.run().fault == Fault{} && product.run().fault == Fault{} &&
+                  same(reference.state(), product.state()),
+              "Resume displacement moves with the same operands and result");
+      require(product.registers().r[0] == source && product.registers().r[1] == destination,
+              "Displacement addressing leaves both cursor registers unchanged");
+      require(std::ranges::equal(checked_storage.regions[2].words, direct_storage.regions[2].words),
+              "Store the same word at the same bank address");
+      if (deadline == 0) {
+        require(trace.counts[0] == 4, "Retire both displacement widths as one native region");
+      }
+    }
+  }
+  constexpr Word peripheral_offset = 6;
+  for (const auto modifier : {0U, word_mask}) {
+    Core checked_fault(checked_storage.memory());
+    Core direct_fault(direct_storage.memory());
+    checked_fault.install(exact_image, 0);
+    direct_fault.install(direct_image, 0);
+    Registers seed{};
+    seed.pc = start;
+    seed.r[0] = modifier == 0 ? source : peripheral_offset;
+    seed.m[0] = modifier;
+    checked_fault.set_registers(seed);
+    direct_fault.set_registers(seed);
+    const auto expected = checked_fault.run();
+    const auto actual = direct_fault.run();
+    require(expected.fault != Fault{} && actual.fault == expected.fault && actual.retired == 0 &&
+                actual.fault.pc == start,
+            "Keep the original address and PC on protected and peripheral accesses");
+  }
+}
 }
 
 int main() try {
   const test::NativeFaults faults(Core::host_fault);
   grouped_single_wrap();
   grouped_modifier_and_mixed_products();
+  grouped_displacement_moves();
   crossing_zero();
   direct_self_loop_empty_window();
   protected_operands();

@@ -313,15 +313,16 @@ private:
 
   [[nodiscard]] bool repeated_unit_reads(const unsigned index) const {
     if (!single_turn()) { return false; }
-    const auto uses_stride = [index](const AddressForm form) {
-      return form.index == index && (form.mode < 2 || form.mode == 5);
+    const auto needs_offset = [index](const AddressForm form) {
+      return form.index == index &&
+             (form.mode < 2 || form.mode == 5 || form.mode == displacement_mode);
     };
     unsigned reads = 0;
     for (const auto &step : plan_.steps) {
-      if (step.update && uses_stride(*step.update)) { return false; }
+      if (step.update && needs_offset(*step.update)) { return false; }
       for (const auto &move : std::span(step.memory.transfers).first(step.memory.count)) {
         if (move.address.mode == 6 || move.address.index != index) { continue; }
-        if (uses_stride(move.address) || !move.load) { return false; }
+        if (needs_offset(move.address) || !move.load) { return false; }
         if (move.address.mode != 4) { ++reads; }
       }
     }
@@ -677,8 +678,7 @@ private:
                          ir_.getInt32(word_mask));
   }
 
-  V advanced(V cursor, const AddressForm form) {
-    auto *step = form.mode < 2 || form.mode == 5 ? strides_[form.index] : ir_.getInt32(1);
+  V advanced(V cursor, const AddressForm form, V step) {
     const bool subtract = form.mode == 0 || form.mode == 2 || form.mode == 7;
     auto *next = subtract ? ir_.CreateSub(cursor, step) : ir_.CreateAdd(cursor, step);
     // The single-operation batch has already proved every accessed address in range.
@@ -711,7 +711,11 @@ private:
     if (form.mode == 6) { return ir_.getInt32(form.extra & word_mask); }
     auto *prior = cursors[form.index];
     if (form.mode == 4) { return prior; }
-    auto *next = advanced(prior, form);
+    if (form.mode == displacement_mode) {
+      return advanced(prior, form, ir_.getInt32(form.extra & word_mask));
+    }
+    auto *step = form.mode < 2 || form.mode == 5 ? strides_[form.index] : ir_.getInt32(1);
+    auto *next = advanced(prior, form, step);
     if (form.mode != 5) { cursors[form.index] = next; }
     return form.mode == 5 || form.mode == 7 ? next : prior;
   }
@@ -1336,6 +1340,8 @@ private:
       } else if (instruction.operation == Operation::immediate_alu) {
         llvm19::lower_immediate_alu(
             ir_, instruction, plan_.operations[index].mode, banks_, status_);
+      } else if (instruction.operation == Operation::move_displacement) {
+        transfers(step.memory, instruction.opcode);
       } else if (instruction.operation != Operation::move_control_register &&
                  (!plan_.control.valid || index + 1 != plan_.steps.size())) {
         transfers(step.memory, instruction.opcode);

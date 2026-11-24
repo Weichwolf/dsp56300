@@ -152,7 +152,7 @@ bool append_move(RegionPlan &plan, const NativeMove &move, const bool advance) {
       step.finish_prefix |= partial;
     }
   }
-  if (mode == 0 || mode == 1 || mode == 5) { plan.batch = false; }
+  if (mode == 0 || mode == 1 || mode == 5 || mode == displacement_mode) { plan.batch = false; }
   const auto bank = move.space == Space::x ? 0U : 1U;
   if (!std::ranges::any_of(plan.windows[bank],
                            [&move](const auto &window) { return permitted(window, !move.load); })) {
@@ -351,6 +351,14 @@ bool append_modifier_move(RegionPlan &plan, const Instruction &instruction) {
   return true;
 }
 
+bool append_displacement(RegionPlan &plan, const Instruction &instruction) {
+  const auto moves = plan_moves(instruction);
+  if (moves.count == 0 || !append_moves(plan, moves)) { return false; }
+  plan.computation = true;
+  plan.steps.push_back({.memory = moves});
+  return true;
+}
+
 bool append(RegionPlan &plan, const BlockInstruction &operation) {
   const auto &instruction = operation.instruction;
   if (instruction.operation == Operation::move_control_register) {
@@ -360,6 +368,9 @@ bool append(RegionPlan &plan, const BlockInstruction &operation) {
     plan.computation = true;
     plan.steps.push_back({});
     return true;
+  }
+  if (instruction.operation == Operation::move_displacement) {
+    return append_displacement(plan, instruction);
   }
   if (instruction.operation == Operation::bit_memory) { return append_bit(plan, instruction); }
   if (instruction.operation == Operation::immediate_alu ||

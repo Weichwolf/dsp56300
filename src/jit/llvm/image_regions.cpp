@@ -24,7 +24,8 @@ bool ordinary(const Operation kind) {
   return kind == Operation::nop || kind == Operation::parallel || kind == Operation::bit_memory ||
          kind == Operation::arithmetic_shift_immediate ||
          kind == Operation::logical_shift_immediate || kind == Operation::immediate_alu ||
-         kind == Operation::move_control_register || kind == Operation::product_mixed;
+         kind == Operation::move_control_register || kind == Operation::product_mixed ||
+         kind == Operation::move_displacement;
 }
 
 bool terminal(const Operation kind) {

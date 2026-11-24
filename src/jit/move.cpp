@@ -5,6 +5,7 @@
 #include "dsp56300/memory.hpp"
 #include "fields.hpp"
 #include "instruction.hpp"
+#include "transfers.hpp"
 
 #include <array>
 #include <optional>
@@ -67,6 +68,24 @@ NativeMoves long_moves(const Instruction &instruction) {
           .count = 2,
           .long_pair = true};
 }
+
+NativeMoves displacement_move(const Instruction &instruction) {
+  const auto description = inspect_transfers(instruction.opcode);
+  if (!description || description->count != 1) { return {}; }
+  const auto &[source, destination] = description->moves.front();
+  const bool load = source.kind == TransferOperandKind::memory;
+  const auto &memory = load ? source : destination;
+  const auto &reg = load ? destination : source;
+  const auto offset = memory.address.kind == AddressKind::displacement_extension
+                          ? instruction.extension
+                          : memory.address.literal;
+  const NativeMove transfer{
+      .address = {.mode = displacement_mode, .index = memory.address.index, .extra = offset},
+      .reg = static_cast<unsigned>(reg.reg),
+      .space = memory.space == TransferSpace::x ? Space::x : Space::y,
+      .load = load};
+  return {.transfers = {transfer}, .count = 1};
+}
 }
 
 std::optional<AddressForm> plan_address_update(const Instruction &instruction) {
@@ -97,6 +116,9 @@ NativeAddressImmediate plan_address_immediate(const Instruction &instruction) {
 }
 
 NativeMoves plan_moves(const Instruction &instruction) {
+  if (instruction.operation == Operation::move_displacement) {
+    return displacement_move(instruction);
+  }
   NativeMoves result;
   if (instruction.operation != Operation::parallel) { return result; }
   const auto opcode = instruction.opcode;

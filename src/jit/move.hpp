@@ -8,6 +8,8 @@
 #include <optional>
 
 namespace dsp56300::detail {
+inline constexpr unsigned displacement_mode = 8;
+
 struct NativeMove {
   AddressForm address;
   unsigned reg = 4;
