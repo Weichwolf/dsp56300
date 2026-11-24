@@ -439,15 +439,14 @@ private:
         modifiers_[index] = reg(32, offsetof(Registers, m) + (index * sizeof(Word)));
       }
       if (!plan_.agu[index]) { continue; }
-      auto *modifier = ir_.CreateAnd(reg(32, offsetof(Registers, m) + (index * sizeof(Word))),
-                                     ir_.getInt32(modifier_mask));
-      auto *linear = ir_.CreateICmpEQ(modifier, ir_.getInt32(modifier_mask));
-      if (linear_only_) {
+      if (addressing_ == BatchAddressing::linear) {
         masks_[index] = ir_.getInt32(word_mask);
         origins_[index] = ir_.getInt32(0);
         continue;
       }
-      if (plan_.batch && addressing_ == BatchAddressing::linear) { require(linear); }
+      auto *modifier = ir_.CreateAnd(reg(32, offsetof(Registers, m) + (index * sizeof(Word))),
+                                     ir_.getInt32(modifier_mask));
+      auto *linear = ir_.CreateICmpEQ(modifier, ir_.getInt32(modifier_mask));
       if (direct_ && repeated_unit_reads(index)) {
         masks_[index] = extended_unit_mask(modifier);
         origins_[index] = ir_.CreateAnd(cursors_[index], ir_.CreateNot(masks_[index]));
