@@ -492,12 +492,12 @@ V transfer_word(Builder &ir, V value, const Word mode, V &status) {
   const unsigned shift =
       bus_shift + ((mode & scale_down) != 0 ? 1U : 0U) - ((mode & scale_up) != 0 ? 1U : 0U);
   auto *word = LLVMBuildAShr(ir.get(), value, ir.getInt64(shift), "");
-  auto *minimum = ir.getInt64(static_cast<std::uint64_t>(static_cast<std::int64_t>(minimum_word)));
-  auto *maximum = ir.getInt64(maximum_word);
-  auto *low = LLVMBuildICmp(ir.get(), LLVMIntSLT, word, minimum, "");
-  auto *high = LLVMBuildICmp(ir.get(), LLVMIntSGT, word, maximum, "");
-  auto *limited = ir.CreateOr(low, high);
-  word = ir.CreateSelect(low, minimum, ir.CreateSelect(high, maximum, word));
+  // Bias the signed 24-bit interval so one unsigned comparison detects clipping.
+  auto *biased = ir.CreateAdd(word, ir.getInt64(sign24_bit));
+  auto *limited = ir.CreateICmpUGT(biased, ir.getInt64(word_mask));
+  auto *sign = LLVMBuildAShr(ir.get(), value, ir.getInt64(host_sign_bit), "");
+  auto *clamped = ir.CreateXor(sign, ir.getInt64(maximum_word));
+  word = ir.CreateSelect(limited, clamped, word);
   const auto growth_shift = shift + word_bits - 3;
   auto *adjacent = ir.CreateXor(ir.CreateLShr(value, ir.getInt64(growth_shift)),
                                 ir.CreateLShr(value, ir.getInt64(growth_shift + 1)));
