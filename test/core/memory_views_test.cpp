@@ -1074,6 +1074,59 @@ void grouped_displacement_moves() {
             "Keep the original address and PC on protected and peripheral accesses");
   }
 }
+
+void grouped_modifier_memory() {
+  constexpr Word effective = static_cast<Word>(isa::Opcode::movec_effective);
+  constexpr Word absolute = static_cast<Word>(isa::Opcode::movec_absolute_short);
+  constexpr Word register_move = static_cast<Word>(isa::Opcode::movec_register);
+  constexpr Word literal = 0x8f001f;
+  constexpr Word m2 = 2;
+  constexpr Word m3 = 3;
+  constexpr Word n1 = 25;
+  constexpr Word load = 1U << 15;
+  constexpr Word destination = 11;
+  constexpr Word source = 12;
+  constexpr std::array program{effective | load | (6U << 11) | (4U << 8) | m2,
+                               literal,
+                               absolute | (1U << 6) | (destination << 8) | m2,
+                               effective | load | (3U << 11) | m3,
+                               register_move | (n1 << 8) | m3,
+                               static_cast<Word>(isa::Opcode::stop)};
+  const Storage exact_storage;
+  const Storage direct_storage;
+  test::RetirementIo trace;
+  Core reference(exact_storage.memory());
+  Core product(direct_storage.memory(), &trace);
+  for (auto *core : {&reference, &product}) {
+    core->load(Space::program, start, program);
+    constexpr std::array data{value};
+    core->load(Space::x, source, data);
+  }
+  reference.install(image(exact_storage, false, program), 0);
+  product.install(observed_direct_image(program), 0);
+  for (const auto deadline : {0U, 1U, 3U, 5U}) {
+    trace.counts = {};
+    for (auto *core : {&reference, &product}) {
+      core->reset();
+      Registers seed{};
+      seed.pc = start;
+      seed.r[0] = source;
+      seed.m[0] = word_mask;
+      core->set_registers(seed);
+      require(core->run_until(deadline).fault == Fault{}, "Reach the MOVEC memory cycle boundary");
+    }
+    require(same(reference.state(), product.state()), "Preserve MOVEC state before resume");
+    require(reference.run().fault == Fault{} && product.run().fault == Fault{} &&
+                same(reference.state(), product.state()),
+            "Keep modifier values and cursor updates exact across memory transfers");
+    require(direct_storage.word(Space::y, destination) == literal &&
+                product.registers().r[0] == source + 1 && product.registers().n[1] == value,
+            "Store the active modifier and feed the loaded modifier to the register move");
+    if (deadline == 0) {
+      require(trace.counts[0] == 4, "Retire all modifier transfer forms in one region");
+    }
+  }
+}
 }
 
 int main() try {
@@ -1081,6 +1134,7 @@ int main() try {
   grouped_single_wrap();
   grouped_modifier_and_mixed_products();
   grouped_displacement_moves();
+  grouped_modifier_memory();
   crossing_zero();
   direct_self_loop_empty_window();
   protected_operands();

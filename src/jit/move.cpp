@@ -69,21 +69,32 @@ NativeMoves long_moves(const Instruction &instruction) {
           .long_pair = true};
 }
 
-NativeMoves displacement_move(const Instruction &instruction) {
+AddressForm described_address(const TransferOperand &operand, const Word extension) {
+  const auto &address = operand.address;
+  if (operand.kind == TransferOperandKind::extension) {
+    return {.mode = 6, .index = 4, .extra = extension};
+  }
+  if (address.kind == AddressKind::absolute) { return {.mode = 6, .extra = address.literal}; }
+  if (address.kind == AddressKind::displacement ||
+      address.kind == AddressKind::displacement_extension) {
+    return {.mode = displacement_mode,
+            .index = address.index,
+            .extra = address.kind == AddressKind::displacement ? address.literal : extension};
+  }
+  return {.mode = static_cast<unsigned>(address.kind), .index = address.index, .extra = extension};
+}
+
+NativeMoves addressed_transfer(const Instruction &instruction) {
   const auto description = inspect_transfers(instruction.opcode);
   if (!description || description->count != 1) { return {}; }
   const auto &[source, destination] = description->moves.front();
-  const bool load = source.kind == TransferOperandKind::memory;
+  const bool load = source.kind != TransferOperandKind::register_value;
   const auto &memory = load ? source : destination;
   const auto &reg = load ? destination : source;
-  const auto offset = memory.address.kind == AddressKind::displacement_extension
-                          ? instruction.extension
-                          : memory.address.literal;
-  const NativeMove transfer{
-      .address = {.mode = displacement_mode, .index = memory.address.index, .extra = offset},
-      .reg = static_cast<unsigned>(reg.reg),
-      .space = memory.space == TransferSpace::x ? Space::x : Space::y,
-      .load = load};
+  const NativeMove transfer{.address = described_address(memory, instruction.extension),
+                            .reg = static_cast<unsigned>(reg.reg),
+                            .space = memory.space == TransferSpace::x ? Space::x : Space::y,
+                            .load = load};
   return {.transfers = {transfer}, .count = 1};
 }
 }
@@ -116,9 +127,7 @@ NativeAddressImmediate plan_address_immediate(const Instruction &instruction) {
 }
 
 NativeMoves plan_moves(const Instruction &instruction) {
-  if (instruction.operation == Operation::move_displacement) {
-    return displacement_move(instruction);
-  }
+  if (addressed_move(instruction.operation)) { return addressed_transfer(instruction); }
   NativeMoves result;
   if (instruction.operation != Operation::parallel) { return result; }
   const auto opcode = instruction.opcode;

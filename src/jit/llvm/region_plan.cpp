@@ -351,9 +351,20 @@ bool append_modifier_move(RegionPlan &plan, const Instruction &instruction) {
   return true;
 }
 
-bool append_displacement(RegionPlan &plan, const Instruction &instruction) {
+bool append_addressed_move(RegionPlan &plan, const Instruction &instruction) {
   const auto moves = plan_moves(instruction);
-  if (moves.count == 0 || !append_moves(plan, moves)) { return false; }
+  if (moves.count != 1) { return false; }
+  const auto &move = moves.transfers.front();
+  if (instruction.operation == Operation::move_displacement) {
+    if (!append_moves(plan, moves)) { return false; }
+  } else {
+    if (move.reg < m_register_base || move.reg >= m_register_base + agu_registers ||
+        !append_move(plan, move, true)) {
+      return false;
+    }
+    if (move.load) { plan.changed_m[move.reg - m_register_base] = true; }
+    plan.batch = false;
+  }
   plan.computation = true;
   plan.steps.push_back({.memory = moves});
   return true;
@@ -369,9 +380,7 @@ bool append(RegionPlan &plan, const BlockInstruction &operation) {
     plan.steps.push_back({});
     return true;
   }
-  if (instruction.operation == Operation::move_displacement) {
-    return append_displacement(plan, instruction);
-  }
+  if (addressed_move(instruction.operation)) { return append_addressed_move(plan, instruction); }
   if (instruction.operation == Operation::bit_memory) { return append_bit(plan, instruction); }
   if (instruction.operation == Operation::immediate_alu ||
       instruction.operation == Operation::arithmetic_shift_immediate ||

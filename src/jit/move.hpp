@@ -10,6 +10,11 @@
 namespace dsp56300::detail {
 inline constexpr unsigned displacement_mode = 8;
 
+[[nodiscard]] constexpr bool addressed_move(const Operation kind) noexcept {
+  return kind == Operation::move_displacement || kind == Operation::move_control_effective ||
+         kind == Operation::move_control_short;
+}
+
 struct NativeMove {
   AddressForm address;
   unsigned reg = 4;

@@ -7,6 +7,7 @@
 #include "jit.hpp"
 #include "jit/image_plan.hpp"
 #include "jit/llvm/region_plan.hpp"
+#include "jit/move.hpp"
 #include "jit/preparation.hpp"
 
 #include <algorithm>
@@ -25,7 +26,7 @@ bool ordinary(const Operation kind) {
          kind == Operation::arithmetic_shift_immediate ||
          kind == Operation::logical_shift_immediate || kind == Operation::immediate_alu ||
          kind == Operation::move_control_register || kind == Operation::product_mixed ||
-         kind == Operation::move_displacement;
+         addressed_move(kind);
 }
 
 bool terminal(const Operation kind) {

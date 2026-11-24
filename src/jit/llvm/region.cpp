@@ -1340,7 +1340,7 @@ private:
       } else if (instruction.operation == Operation::immediate_alu) {
         llvm19::lower_immediate_alu(
             ir_, instruction, plan_.operations[index].mode, banks_, status_);
-      } else if (instruction.operation == Operation::move_displacement) {
+      } else if (addressed_move(instruction.operation)) {
         transfers(step.memory, instruction.opcode);
       } else if (instruction.operation != Operation::move_control_register &&
                  (!plan_.control.valid || index + 1 != plan_.steps.size())) {
