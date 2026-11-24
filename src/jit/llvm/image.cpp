@@ -203,7 +203,8 @@ private:
                          variant_,
                          direct_,
                          linear_only,
-                         &resume)) {
+                         &resume,
+                         /*admitted_site=*/true)) {
           continue;
         }
         auto *function = module_.getFunction(name);

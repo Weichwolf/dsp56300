@@ -92,7 +92,8 @@ public:
                const BatchAddressing addressing = BatchAddressing::automatic,
                const std::uint64_t variant = 0,
                const bool direct = false,
-               const bool linear_only = false)
+               const bool linear_only = false,
+               const bool admitted_site = false)
       : context_(module.context()),
         function_(make_function(module, entry, admission_only)),
         locations_(*llvm::unwrap(module.code()), variant),
@@ -101,6 +102,7 @@ public:
         addressing_(linear_only ? BatchAddressing::linear : addressing),
         linear_only_(linear_only),
         direct_(direct),
+        admitted_site_(admitted_site),
         self_loop_(
             !admission_only && !plan_.allow_partial_exit && !plan_.batch &&
             plan_.control.stack == ControlStack::none &&
@@ -190,7 +192,9 @@ private:
                               admission_steps,
                               BatchAddressing::linear,
                               variant_,
-                              direct_);
+                              direct_,
+                              false,
+                              admitted_site_);
     const RegionLifter general(module,
                                plan_,
                                name + ".general",
@@ -198,7 +202,9 @@ private:
                                admission_steps,
                                BatchAddressing::general,
                                variant_,
-                               direct_);
+                               direct_,
+                               false,
+                               admitted_site_);
     auto *all_linear = boolean(true);
     for (unsigned index = 0; index < agu_registers; ++index) {
       if (!plan_.agu[index]) { continue; }
@@ -219,7 +225,9 @@ private:
                                   admission_steps,
                                   BatchAddressing::single_wrap,
                                   variant_,
-                                  direct_);
+                                  direct_,
+                                  false,
+                                  admitted_site_);
       auto *multiple = LLVMAppendBasicBlockInContext(context_, function_, "multiple_wrap");
       auto *single = LLVMAppendBasicBlockInContext(context_, function_, "single_wrap");
       ir_.SetInsertPoint(second);
@@ -392,11 +400,13 @@ private:
     budget_admission(budget, window);
     stack_admission();
     stack_state();
-    require(ir_.CreateICmpEQ(ir_.CreateAnd(status_, ir_.getInt32(numeric_mode_mask)),
-                             ir_.getInt32(plan_.operations.front().mode)));
-    require(ir_.CreateICmpEQ(
-        reg(32, offsetof(Registers, pc)),
-        ir_.getInt32(plan_.setup ? plan_.setup->pc : plan_.operations.front().pc)));
+    if (!admitted_site_ || !single_turn()) {
+      require(ir_.CreateICmpEQ(ir_.CreateAnd(status_, ir_.getInt32(numeric_mode_mask)),
+                               ir_.getInt32(plan_.operations.front().mode)));
+      require(ir_.CreateICmpEQ(
+          reg(32, offsetof(Registers, pc)),
+          ir_.getInt32(plan_.setup ? plan_.setup->pc : plan_.operations.front().pc)));
+    }
     auto *active_la = ir_.CreateSelect(
         ir_.CreateICmpNE(ir_.CreateAnd(status_, ir_.getInt32(loop_flag)), ir_.getInt32(0)),
         reg(32, offsetof(Registers, la)),
@@ -1800,7 +1810,7 @@ private:
   llvm19::Builder ir_;
   const RegionPlan &plan_;
   BatchAddressing addressing_;
-  bool linear_only_, direct_, self_loop_, split_flags_ = false;
+  bool linear_only_, direct_, admitted_site_, self_loop_, split_flags_ = false;
   bool record_addresses_ = false;
   std::map<std::tuple<std::uintptr_t, unsigned, unsigned, Word>, V> admitted_addresses_;
   Word loop_count_ = 0;
@@ -1867,7 +1877,8 @@ bool lift_region(LlvmModule &module,
                  const std::uint64_t variant,
                  const bool direct,
                  const bool linear_only,
-                 std::vector<Word> *resume) {
+                 std::vector<Word> *resume,
+                 const bool admitted_site) {
   if (module.code() == nullptr) { throw std::logic_error("Region module was already transferred"); }
   const auto name = entry.empty() ? module.name() : std::string(entry);
   if (LLVMGetNamedFunction(module.code(), name.c_str()) != nullptr) {
@@ -1885,8 +1896,16 @@ bool lift_region(LlvmModule &module,
   if (properties != nullptr) {
     *properties = (plan->batch ? 1U : 0U) | (split_flags(*plan) ? 2U : 0U);
   }
-  const RegionLifter lift(
-      module, *plan, name, false, 0, BatchAddressing::automatic, variant, direct, linear_only);
+  const RegionLifter lift(module,
+                          *plan,
+                          name,
+                          false,
+                          0,
+                          BatchAddressing::automatic,
+                          variant,
+                          direct,
+                          linear_only,
+                          admitted_site);
   return true;
 }
 
