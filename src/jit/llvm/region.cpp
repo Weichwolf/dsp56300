@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -38,6 +39,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -706,15 +708,38 @@ private:
     return regular;
   }
 
+  [[nodiscard]] bool can_reuse_addresses() const {
+    return direct_ && single_turn() && plan_.repeats.empty() &&
+           std::ranges::none_of(plan_.definitions,
+                                [](const auto &definition) { return definition.has_value(); }) &&
+           std::ranges::none_of(plan_.changed_n, [](bool changed) { return changed; }) &&
+           std::ranges::none_of(plan_.changed_m, [](bool changed) { return changed; });
+  }
+
+  V checked_address_update(V prior, const AddressForm form, V step) {
+    if (single_lengths_[form.index] == nullptr ||
+        (!record_addresses_ && admitted_addresses_.empty())) {
+      return advanced(prior, form, step);
+    }
+    const auto key =
+        std::tuple(std::bit_cast<std::uintptr_t>(prior), form.index, form.mode, form.extra);
+    if (const auto found = admitted_addresses_.find(key); found != admitted_addresses_.end()) {
+      return found->second;
+    }
+    auto *next = advanced(prior, form, step);
+    if (record_addresses_) { admitted_addresses_.emplace(key, next); }
+    return next;
+  }
+
   V effective(std::array<V, agu_registers> &cursors, const AddressForm form) {
     if (form.mode == 6) { return ir_.getInt32(form.extra & word_mask); }
     auto *prior = cursors[form.index];
     if (form.mode == 4) { return prior; }
     if (form.mode == displacement_mode) {
-      return advanced(prior, form, ir_.getInt32(form.extra & word_mask));
+      return checked_address_update(prior, form, ir_.getInt32(form.extra & word_mask));
     }
     auto *step = form.mode < 2 || form.mode == 5 ? strides_[form.index] : ir_.getInt32(1);
-    auto *next = advanced(prior, form, step);
+    auto *next = checked_address_update(prior, form, step);
     if (form.mode != 5) { cursors[form.index] = next; }
     return form.mode == 5 || form.mode == 7 ? next : prior;
   }
@@ -1697,7 +1722,10 @@ private:
     admission();
     LLVMBuildCondBr(ir_.get(), eligible_, windows, miss);
     ir_.SetInsertPoint(windows);
+    // The address calculations in this admission block dominate the single turn.
+    record_addresses_ = can_reuse_addresses();
     initial_memory_guards();
+    record_addresses_ = false;
     LLVMBuildCondBr(ir_.get(), eligible_, start, miss);
     ir_.SetInsertPoint(miss);
     LLVMBuildRet(ir_.get(), ir_.getInt32(0));
@@ -1723,6 +1751,8 @@ private:
   const RegionPlan &plan_;
   BatchAddressing addressing_;
   bool linear_only_, direct_, self_loop_, split_flags_ = false;
+  bool record_addresses_ = false;
+  std::map<std::tuple<std::uintptr_t, unsigned, unsigned, Word>, V> admitted_addresses_;
   Word loop_count_ = 0;
   V cpu_, owner_, initial_cycles_ = nullptr, initial_instructions_ = nullptr;
   V control_taken_ = nullptr, control_count_ = nullptr, control_status_ = nullptr;
