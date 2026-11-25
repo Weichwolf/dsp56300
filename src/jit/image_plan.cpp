@@ -195,6 +195,12 @@ ImagePlan plan_image(const CodeVariant &source, const std::span<const Word> exte
   const auto duplicates = std::ranges::unique(result.entries);
   result.entries.erase(duplicates.begin(), duplicates.end());
   validate_targets(result, external_entries, source.failed_fetches);
+  for (const auto start : source.region_starts) {
+    if (result.find(start) == nullptr) {
+      reject(start, "region start is not a declared instruction boundary");
+    }
+  }
+  result.region_starts.assign(source.region_starts.begin(), source.region_starts.end());
   return result;
 }
 

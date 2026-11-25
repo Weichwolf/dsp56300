@@ -522,6 +522,69 @@ void region_mode_hints() {
   }
 }
 
+void region_start_hints() {
+  constexpr Word add = static_cast<Word>(isa::Opcode::add_x0_a);
+  constexpr std::array code{static_cast<Word>(isa::Opcode::add_immediate_long),
+                            3U,
+                            add,
+                            add,
+                            add,
+                            static_cast<Word>(isa::Opcode::stop)};
+  constexpr std::array hint{start + 3};
+  const std::array spans{CodeSpan{.address = start, .words = code}};
+  std::array variants{
+      CodeVariant{.id = 0, .code = spans, .entries = initial_entries, .failed_fetches = {}}};
+  const CodeImage input{.variants = variants};
+  const Source source;
+  const std::array layouts{VariantLayout{.id = 0, .memory = source.memory}};
+  const std::array callbacks{
+      CallbackBinding{.role = CallbackRole::retired, .symbol = "record_retired"}};
+  const auto binding = retirement_binding();
+  const CompileOptions options{.memory = layouts,
+                               .interrupts = {},
+                               .transitions = {},
+                               .callbacks = callbacks,
+                               .bindings = binding};
+  const auto baseline = Core::lower(input, options);
+  variants[0].region_starts = hint;
+  const auto prepared = Core::lower(input, options);
+  bool stale_artifact = false;
+  try {
+    static_cast<void>(Core::load(input, options, baseline.artifact()));
+  } catch (const std::invalid_argument &) { stale_artifact = true; }
+  require(stale_artifact && baseline.identity() != prepared.identity(),
+          "Additional group starts participate in semantic artifact identity");
+  const auto precise = test::compile_image(baseline, binding);
+  const auto grouped =
+      test::compile_image(Core::load(input, options, prepared.artifact()), binding);
+  RetirementMachine control(precise, code, false);
+  RetirementMachine candidate(grouped, code, false);
+  for (auto *machine : {&control, &candidate}) {
+    auto seed = machine->core->registers();
+    seed.pc = hint.front();
+    seed.x = 0x400000;
+    machine->core->set_registers(seed);
+    const auto result = machine->core->run();
+    require(result.retired == 3 && result.state == ExecutionState::stopped &&
+                result.fault == Fault{},
+            "A hint preserves ordinary execution and STOP from the middle of a region");
+  }
+  require(control.core->registers() == candidate.core->registers() &&
+              control.core->progress() == candidate.core->progress() &&
+              control.io.counts == std::array<std::uint64_t, 2>{0, 3} &&
+              candidate.io.counts == std::array<std::uint64_t, 2>{2, 1},
+          "The already-prepared suffix has the same effects and can retire as a group");
+  constexpr std::array extension{start + 1};
+  variants[0].region_starts = extension;
+  bool invalid = false;
+  try {
+    static_cast<void>(Core::lower(input, options));
+  } catch (const std::invalid_argument &error) {
+    invalid = std::string_view(error.what()).contains("region start");
+  }
+  require(invalid, "An instruction extension cannot become a group start");
+}
+
 void unit_entries(const std::span<const std::byte> binding) {
   constexpr std::array code{nop, nop, static_cast<Word>(isa::Opcode::stop)};
   const std::array spans{CodeSpan{.address = start, .words = code}};
@@ -652,6 +715,7 @@ int main() try {
   roundtrip();
   retirement_observation();
   region_mode_hints();
+  region_start_hints();
   std::cout << "Semantic artifacts restore native execution without lowering\n";
 } catch (const std::exception &error) {
 

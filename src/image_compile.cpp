@@ -59,6 +59,8 @@ void hash_variant(llvm::SHA256 &hash, const CodeVariant &source) {
   for (const auto address : source.entries) { hash_word(hash, address); }
   hash_word(hash, source.failed_fetches.size());
   for (const auto address : source.failed_fetches) { hash_word(hash, address); }
+  hash_word(hash, source.region_starts.size());
+  for (const auto address : source.region_starts) { hash_word(hash, address); }
 }
 
 std::string symbol(const CodeImage image, const CompileOptions options) {

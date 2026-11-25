@@ -14,6 +14,7 @@ struct ImagePlan {
   // Sorted, unique instruction starts; descriptors own their complete source values.
   std::map<Word, Instruction> instructions;
   std::vector<Word> entries;
+  std::vector<Word> region_starts;
   [[nodiscard]] const Instruction *find(Word address) const noexcept;
   // Natural control-flow blocks, independent of transport fragments and execution quotas.
   [[nodiscard]] std::vector<Word> units() const;

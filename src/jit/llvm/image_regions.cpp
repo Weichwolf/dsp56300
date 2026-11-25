@@ -69,6 +69,7 @@ void ordinary_regions(const ImagePlan &plan,
   const auto units = plan.units();
   const std::set heads(units.begin(), units.end());
   std::set entries(plan.entries.begin(), plan.entries.end());
+  entries.insert(plan.region_starts.begin(), plan.region_starts.end());
   if (complete_children) { entries.insert(heads.begin(), heads.end()); }
   std::vector<BlockInstruction> current;
   const auto finish = [&] {
