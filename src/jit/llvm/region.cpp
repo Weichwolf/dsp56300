@@ -733,6 +733,15 @@ private:
   V single_wrap(V cursor, const AddressForm form, V step, const bool subtract) {
     auto *length = single_lengths_[form.index];
     auto *span = single_wrap_span(length);
+    if (form.mode == 3) {
+      // A positive unit step cannot cross the lower bound or span a full ring.
+      auto *one = ir_.getInt32(1);
+      auto *next = ir_.CreateAdd(cursor, one);
+      auto *offset = ir_.CreateAdd(ir_.CreateAnd(cursor, span), one);
+      auto *wrap = ir_.CreateICmpUGE(offset, length);
+      return ir_.CreateAnd(ir_.CreateSelect(wrap, ir_.CreateSub(next, length), next),
+                           ir_.getInt32(word_mask));
+    }
     constexpr auto sign = Word{1} << (word_bits - 1);
     auto *stride = ir_.CreateSub(ir_.CreateXor(step, ir_.getInt32(sign)), ir_.getInt32(sign));
     auto *delta = subtract ? ir_.CreateSub(ir_.getInt32(0), stride) : stride;
