@@ -990,17 +990,24 @@ void grouped_single_wrap(const bool unit_steps) {
   constexpr Word modifier = 0xab000c;
   constexpr Word multiple_wrap_last = 71;
   constexpr Word multiple_wrap_modifier = 0x8007;
+  constexpr Word linear_start = 202;
+  constexpr Word high_ring_last = 189;
+  constexpr Word high_modifier = 0xcc0005;
   constexpr auto update = static_cast<Word>(isa::Opcode::move_address_update) | (1U << 11);
   constexpr auto load_x = static_cast<Word>(isa::Opcode::move_x_effective) | (1U << 15);
   constexpr auto postincrement = load_x | (3U << 11) | (1U << 16);
   constexpr auto second_cursor = postincrement | (1U << 8);
+  constexpr auto linear_cursor = postincrement | (2U << 8);
+  constexpr auto high_cursor = postincrement | (7U << 8);
   constexpr auto indexed = load_x | (5U << 11);
   constexpr auto predecrement = load_x | (7U << 11);
   const std::array program{static_cast<Word>(isa::Opcode::do_immediate) | (turns << 8),
-                           body + 3,
+                           body + 5,
                            unit_steps ? postincrement : update,
                            unit_steps ? predecrement : indexed,
                            second_cursor,
+                           linear_cursor,
+                           high_cursor,
                            static_cast<Word>(isa::Opcode::add_x0_a),
                            static_cast<Word>(isa::Opcode::stop)};
   std::array<Word, 256> data{};
@@ -1021,10 +1028,13 @@ void grouped_single_wrap(const bool unit_steps) {
       seed.pc = start;
       seed.r[0] = ring_first + (unit_steps ? 12U : 11U);
       seed.r[1] = multiple_wrap_last;
+      seed.r[2] = linear_start;
+      seed.r[7] = high_ring_last;
       seed.n[0] = stride;
       seed.m.fill(word_mask);
       seed.m[0] = modifier;
       seed.m[1] = multiple_wrap_modifier;
+      seed.m[7] = high_modifier;
       trace.counts = {};
       for (auto *core : {&reference, &product}) {
         core->reset();
