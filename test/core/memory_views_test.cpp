@@ -878,11 +878,15 @@ void crossing_zero() {
   repeated_unit_reads(storage, checked, direct);
 }
 
-NativeImage observed_direct_image(const std::span<const Word> program) {
+NativeImage observed_direct_image(const std::span<const Word> program,
+                                  const std::optional<Word> additional_entry = std::nullopt) {
   const std::array spans{CodeSpan{.address = start, .words = program}};
-  constexpr std::array entries{start};
+  const std::array entries{start, additional_entry.value_or(start)};
   const std::array variants{
-      CodeVariant{.id = 0, .code = spans, .entries = entries, .failed_fetches = {}}};
+      CodeVariant{.id = 0,
+                  .code = spans,
+                  .entries = std::span(entries).first(additional_entry ? entries.size() : 1U),
+                  .failed_fetches = {}}};
   constexpr std::array modes{0U};
   constexpr std::array callbacks{
       CallbackBinding{.role = CallbackRole::retired, .symbol = "record_retired"}};
@@ -895,6 +899,45 @@ NativeImage observed_direct_image(const std::span<const Word> program) {
                         .bindings = binding,
                         .memory_mode = CompileOptions::MemoryMode::direct,
                         .region_modes = modes});
+}
+
+void adjacent_ordinary_regions() {
+  constexpr auto add = static_cast<Word>(isa::Opcode::add_x0_a);
+  constexpr auto shift = static_cast<Word>(isa::Opcode::asr_a);
+  constexpr auto stop = static_cast<Word>(isa::Opcode::stop);
+  constexpr auto jump = static_cast<Word>(isa::Opcode::jmp_absolute_short);
+  constexpr std::array entries{start, start + 2};
+  constexpr std::array program{add, shift, add, shift, stop, jump | entries.back()};
+  const Storage storage;
+  test::RetirementIo trace;
+  Core reference(storage.memory());
+  Core product(storage.memory(), &trace);
+  reference.load(Space::program, start, program);
+  reference.install(image(storage, false, program, CompileOptions::MemoryMode::exact, {}, entries),
+                    0);
+  product.install(observed_direct_image(program, entries.back()), 0);
+
+  for (const auto pc : entries) {
+    for (const auto grant : {1U, 2U, 3U, 4U}) {
+      for (auto *core : {&reference, &product}) {
+        core->reset();
+        core->set_registers(Registers{.x = other, .a = value, .pc = pc});
+        const auto result = core->run_until(grant);
+        require(result.fault == Fault{}, "Reach the original boundary for a short cycle grant");
+      }
+      require(same(reference.state(), product.state()),
+              "Keep both original entries and all intervening cycle boundaries");
+    }
+  }
+
+  product.reset();
+  product.set_registers(Registers{.x = other, .a = value, .pc = start});
+  trace.counts = {};
+  trace.yield_owner = &product;
+  trace.yield = [](void *owner) noexcept { static_cast<Core *>(owner)->request_yield(); };
+  const auto result = product.run(4);
+  require(result.yielded && result.retired == 4 && trace.counts[0] == 4 && trace.counts[1] == 0,
+          "Retire both adjacent ordinary regions together when the full grant fits");
 }
 
 void grouped_conditional_transfers() {
@@ -1279,6 +1322,7 @@ void grouped_modifier_memory() {
 
 int main() try {
   const test::NativeFaults faults(Core::host_fault);
+  adjacent_ordinary_regions();
   grouped_conditional_transfers();
   grouped_short_immediate_moves();
   grouped_single_wrap(false);
