@@ -5,6 +5,7 @@
 #include "dsp56300/memory.hpp"
 #include "fields.hpp"
 #include "instruction.hpp"
+#include "transfers.hpp"
 
 #include <array>
 #include <optional>
@@ -67,6 +68,35 @@ NativeMoves long_moves(const Instruction &instruction) {
           .count = 2,
           .long_pair = true};
 }
+
+AddressForm described_address(const TransferOperand &operand, const Word extension) {
+  const auto &address = operand.address;
+  if (operand.kind == TransferOperandKind::extension) {
+    return {.mode = 6, .index = 4, .extra = extension};
+  }
+  if (address.kind == AddressKind::absolute) { return {.mode = 6, .extra = address.literal}; }
+  if (address.kind == AddressKind::displacement ||
+      address.kind == AddressKind::displacement_extension) {
+    return {.mode = displacement_mode,
+            .index = address.index,
+            .extra = address.kind == AddressKind::displacement ? address.literal : extension};
+  }
+  return {.mode = static_cast<unsigned>(address.kind), .index = address.index, .extra = extension};
+}
+
+NativeMoves addressed_transfer(const Instruction &instruction) {
+  const auto description = inspect_transfers(instruction.opcode);
+  if (!description || description->count != 1) { return {}; }
+  const auto &[source, destination] = description->moves.front();
+  const bool load = source.kind != TransferOperandKind::register_value;
+  const auto &memory = load ? source : destination;
+  const auto &reg = load ? destination : source;
+  const NativeMove transfer{.address = described_address(memory, instruction.extension),
+                            .reg = static_cast<unsigned>(reg.reg),
+                            .space = memory.space == TransferSpace::x ? Space::x : Space::y,
+                            .load = load};
+  return {.transfers = {transfer}, .count = 1};
+}
 }
 
 std::optional<AddressForm> plan_address_update(const Instruction &instruction) {
@@ -78,13 +108,17 @@ std::optional<AddressForm> plan_address_update(const Instruction &instruction) {
                      .index = (instruction.opcode >> 8) & 7U};
 }
 
-NativeAddressImmediate plan_address_immediate(const Instruction &instruction) {
+NativeRegisterImmediate plan_register_immediate(const Instruction &instruction) {
   if (instruction.operation != Operation::parallel) { return {}; }
   const auto opcode = instruction.opcode;
   if (instruction.words == 1 && (opcode & parallel_group_mask) == immediate_group) {
     const auto reg = (opcode >> 16) & five_bit_mask;
-    if (reg >= r_register_base) { return {.destination = reg, .value = (opcode >> 8) & byte_mask}; }
-    return {};
+    if (reg < x0_register) { return {}; }
+    const auto shape = inspect_transfers(opcode);
+    if (!shape || shape->count != 1) { return {}; }
+    const auto &source = shape->moves.front().source;
+    if (source.kind != TransferOperandKind::immediate) { return {}; }
+    return {.destination = reg, .value = source.immediate << source.immediate_shift};
   }
   // Fixed memory-group, load, immediate-EA and zero ALU fields. Only the
   // five register-selector bits and the irrelevant X/Y bus bit can vary.
@@ -97,6 +131,7 @@ NativeAddressImmediate plan_address_immediate(const Instruction &instruction) {
 }
 
 NativeMoves plan_moves(const Instruction &instruction) {
+  if (addressed_move(instruction.operation)) { return addressed_transfer(instruction); }
   NativeMoves result;
   if (instruction.operation != Operation::parallel) { return result; }
   const auto opcode = instruction.opcode;

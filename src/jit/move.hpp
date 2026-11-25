@@ -8,6 +8,13 @@
 #include <optional>
 
 namespace dsp56300::detail {
+inline constexpr unsigned displacement_mode = 8;
+
+[[nodiscard]] constexpr bool addressed_move(const Operation kind) noexcept {
+  return kind == Operation::move_displacement || kind == Operation::move_control_effective ||
+         kind == Operation::move_control_short;
+}
+
 struct NativeMove {
   AddressForm address;
   unsigned reg = 4;
@@ -29,7 +36,7 @@ struct NativeRegisterMove {
   [[nodiscard]] bool valid() const noexcept { return source != 0; }
 };
 
-struct NativeAddressImmediate {
+struct NativeRegisterImmediate {
   unsigned destination = 0;
   Word value = 0;
 
@@ -38,7 +45,7 @@ struct NativeAddressImmediate {
 
 // Compile-time transfer description, independent of the host instruction set.
 [[nodiscard]] std::optional<AddressForm> plan_address_update(const Instruction &instruction);
-[[nodiscard]] NativeAddressImmediate plan_address_immediate(const Instruction &instruction);
+[[nodiscard]] NativeRegisterImmediate plan_register_immediate(const Instruction &instruction);
 [[nodiscard]] NativeMoves plan_moves(const Instruction &instruction);
 [[nodiscard]] NativeRegisterMove plan_register_move(const Instruction &instruction);
 [[nodiscard]] NativeRegisterMove plan_register_move(const Instruction &instruction, bool partial);

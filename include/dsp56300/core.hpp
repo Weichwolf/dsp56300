@@ -98,6 +98,10 @@ struct CodeVariant {
   // Explicit expected fetch failures, never substitutes for missing code.
   // Entry performs the real read; a readable word fails as unprepared execution.
   std::span<const Word> failed_fetches;
+  // Additional group starts at already-declared instruction boundaries.
+  // The default preserves aggregate initialization by existing callers.
+  // NOLINTNEXTLINE(readability-redundant-member-init)
+  std::span<const Word> region_starts{};
 };
 
 struct CodeImage {

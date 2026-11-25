@@ -14,6 +14,7 @@ namespace dsp56300::detail {
 
 // Linkable guarded region with dynamic owner storage and no ISA fallback or
 // embedded instance addresses. A guard miss returns zero without CPU effects.
+// An admitted image entry has already selected the instruction site and numeric mode.
 [[nodiscard]] bool lift_region(LlvmModule &module,
                                std::span<const BlockInstruction> operations,
                                const JitRuntime &runtime);
@@ -25,7 +26,8 @@ namespace dsp56300::detail {
                                std::uint64_t variant = 0,
                                bool direct = false,
                                bool linear_only = false,
-                               std::vector<Word> *resume = nullptr);
+                               std::vector<Word> *resume = nullptr,
+                               bool admitted_site = false);
 
 // Read-only uint64_t(const Cpu *, const NativeContext *) query: complete base
 // periods or zero. Relevant state/storage changes invalidate the certificate.

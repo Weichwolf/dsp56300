@@ -67,7 +67,7 @@ void admitted_native() {
       x.fill(first);
       y.fill(second);
       detail::Cpu cpu{.reg = initial};
-      detail::NativeContext context{.runtime = {}, .budget = budget, .cycle_deadline = deadline};
+      detail::NativeContext context{.runtime = {}, .budget = budget, .cycle_window = deadline};
       const auto before = fallback_calls;
       const auto turns = std::min(std::uint64_t{budget / 2}, deadline / 2);
       require(
@@ -197,7 +197,7 @@ private:
     }
     detail::Cpu cpu{.reg = seed};
     detail::NativeContext context{
-        .runtime = {}, .budget = input.grant, .cycle_deadline = input.deadline};
+        .runtime = {}, .budget = input.grant, .cycle_window = input.deadline};
     const auto before = fallback_calls;
     const auto retired = run_(&cpu, &context);
     const auto expected_retired = std::uint64_t{turns} * 2;

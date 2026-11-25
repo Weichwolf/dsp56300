@@ -5,9 +5,9 @@
 #include "dsp56300/memory.hpp"
 #include "fields.hpp"
 #include "instruction.hpp"
+#include "product_fields.hpp"
 #include "rounding.hpp"
 
-#include <array>
 #include <bit>
 #include <cstdint>
 
@@ -15,25 +15,6 @@ namespace dsp56300 {
 using namespace detail;
 
 namespace {
-constexpr std::array<std::uint8_t, 4> power_sources{3, 0, 1, 2};
-constexpr std::array<std::array<std::uint8_t, 2>, 16> pairs{{{0, 0},
-                                                             {1, 1},
-                                                             {2, 0},
-                                                             {3, 1},
-                                                             {0, 3},
-                                                             {1, 0},
-                                                             {2, 1},
-                                                             {3, 2},
-                                                             {2, 2},
-                                                             {3, 3},
-                                                             {0, 2},
-                                                             {1, 3},
-                                                             {3, 0},
-                                                             {0, 1},
-                                                             {1, 2},
-                                                             {2, 3}}};
-constexpr unsigned maximum_power = 23;
-
 struct Product {
   std::int64_t left = 0, right = 0;
   bool accumulate = false, subtract = false, rounded = false, destination_b = false;
@@ -48,7 +29,7 @@ Product immediate_product(const Instruction &decoded, const Registers &state) {
   const auto opcode = decoded.opcode;
   const auto selector = (opcode >> 4) & 3U;
   const bool power = decoded.operation == Operation::product_power;
-  const auto source = power ? power_sources[selector] : selector;
+  const auto source = power ? power_product_sources[selector] : selector;
   const auto coefficient = power ? std::int64_t{1}
                                        << (word_bits - 1 - ((opcode >> 8) & five_bit_mask))
                                  : signed_word(decoded.extension);
@@ -62,7 +43,7 @@ Product immediate_product(const Instruction &decoded, const Registers &state) {
 
 Product mixed_product(const Instruction &decoded, const Registers &state) {
   const auto opcode = decoded.opcode;
-  const auto pair = pairs[opcode & 15U];
+  const auto pair = mixed_product_pairs[opcode & 15U];
   const Word left = input(state, pair[0]);
   const Word right = input(state, pair[1]);
   const bool double_product = decoded.operation == Operation::product_double;
@@ -81,7 +62,7 @@ void Core::Impl::execute_product(const Instruction &decoded) {
   const auto opcode = decoded.opcode;
   if (decoded.operation == Operation::product_power) {
     const unsigned power = (opcode >> 8) & five_bit_mask;
-    if (power == 0 || power > maximum_power) {
+    if (power == 0 || power > maximum_product_power) {
       // Power zero needs separate qualification; do not guess its sign.
       fail(power == 0 ? FaultKind::unsupported_mode : FaultKind::invalid_instruction,
            Space::program,

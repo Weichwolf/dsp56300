@@ -6,8 +6,10 @@
 #include "memory_arena.hpp"
 #include "native_faults.hpp"
 #include "reject_io.hpp"
+#include "retirement_observer.hpp"
 #include "support.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <cstddef>
@@ -142,9 +144,10 @@ NativeImage image(const Storage &storage,
                   .code = spans,
                   .entries = entries.empty() ? std::span<const Word>(default_entry) : entries,
                   .failed_fetches = {}}};
-  std::array<RegionLayout, 3> regions{};
+  constexpr std::array spaces{Space::program, Space::x, Space::y};
+  std::array<RegionLayout, spaces.size()> regions{};
   for (std::size_t bank = 0; bank < regions.size(); ++bank) {
-    regions[bank] = {.space = static_cast<Space>(bank),
+    regions[bank] = {.space = spaces[bank],
                      .first = 0,
                      .size = storage.words(),
                      .writable = storage.regions[bank].writable};
@@ -874,10 +877,406 @@ void crossing_zero() {
   }
   repeated_unit_reads(storage, checked, direct);
 }
+
+NativeImage observed_direct_image(const std::span<const Word> program) {
+  const std::array spans{CodeSpan{.address = start, .words = program}};
+  constexpr std::array entries{start};
+  const std::array variants{
+      CodeVariant{.id = 0, .code = spans, .entries = entries, .failed_fetches = {}}};
+  constexpr std::array modes{0U};
+  constexpr std::array callbacks{
+      CallbackBinding{.role = CallbackRole::retired, .symbol = "record_retired"}};
+  const auto binding = test::retirement_binding();
+  return Core::compile({.variants = variants},
+                       {.memory = {},
+                        .interrupts = {},
+                        .transitions = {},
+                        .callbacks = callbacks,
+                        .bindings = binding,
+                        .memory_mode = CompileOptions::MemoryMode::direct,
+                        .region_modes = modes});
+}
+
+void grouped_conditional_transfers() {
+  constexpr Word equal = 10U << 12;
+  constexpr Word zero = 1U << 2;
+  constexpr auto nop = static_cast<Word>(isa::Opcode::nop);
+  constexpr auto stop = static_cast<Word>(isa::Opcode::stop);
+  constexpr auto read_x =
+      static_cast<Word>(isa::Opcode::move_x_effective) | (1U << 15) | (3U << 11) | (2U << 8);
+  constexpr std::array forms{0x020000U | equal, 0x030102U | equal, 0x020902U | equal};
+  for (const auto transfer : forms) {
+    const Storage storage;
+    const std::array program{nop, transfer, read_x, stop};
+    Core reference(storage.memory());
+    reference.load(Space::program, start, program);
+    reference.load(Space::x, target, std::array{value, other});
+    reference.install(image(storage, false, program), 0);
+    test::RetirementIo trace;
+    Core product(storage.memory(), &trace);
+    product.install(observed_direct_image(program), 0);
+    for (const auto status : {0U, zero}) {
+      for (const auto deadline : {1U, 2U, 3U, 4U}) {
+        Registers seed{};
+        seed.pc = start;
+        seed.sr = status;
+        seed.a = value;
+        seed.b = other;
+        seed.r[1] = target + 1;
+        seed.r[2] = target;
+        seed.m.fill(word_mask);
+        trace.counts = {};
+        for (auto *core : {&reference, &product}) {
+          core->reset();
+          core->set_registers(seed);
+          require(core->run_until(deadline).fault == Fault{},
+                  "Reach a conditional transfer boundary");
+        }
+        require(same(reference.state(), product.state()),
+                "Preserve conditional accumulator and address transfers at each deadline");
+        if (deadline >= 2) {
+          require(trace.counts[0] == 2, "Retire the conditional transfer at the end of its region");
+        }
+      }
+    }
+  }
+}
+
+void grouped_short_immediate_moves() {
+  constexpr auto nop = static_cast<Word>(isa::Opcode::nop);
+  constexpr auto stop = static_cast<Word>(isa::Opcode::stop);
+  constexpr auto add_x0 = static_cast<Word>(isa::Opcode::add_x0_a) & 0xffU;
+  constexpr Word move_x0 = 0x248000 | add_x0;
+  constexpr Word move_a1 = 0x2cff00;
+  constexpr Word turns = 4;
+  constexpr Registers seed{.x = value, .a = 0x752654'000103ULL, .pc = start};
+  constexpr std::array linear{nop, move_x0, nop, move_a1, stop};
+  constexpr std::array loop{
+      static_cast<Word>(isa::Opcode::do_immediate) | (turns << 8), start + 3, nop, move_x0, stop};
+  for (const auto program : {std::span<const Word>(linear), std::span<const Word>(loop)}) {
+    const Storage storage;
+    Core reference(storage.memory());
+    reference.load(Space::program, start, program);
+    reference.install(image(storage, false, program), 0);
+    test::RetirementIo trace;
+    Core product(storage.memory(), &trace);
+    product.install(observed_direct_image(program), 0);
+    for (const auto deadline : {0U, 1U, 2U, 3U, 4U, 6U, 11U}) {
+      trace.counts = {};
+      for (auto *core : {&reference, &product}) {
+        core->reset();
+        core->set_registers(seed);
+        require(core->run_until(deadline).fault == Fault{},
+                "Reach a short immediate MOVE boundary");
+      }
+      require(same(reference.state(), product.state()),
+              "Preserve the ALU's input before the parallel MOVE at each deadline");
+      require(reference.run().fault == Fault{} && product.run().fault == Fault{} &&
+                  same(reference.state(), product.state()),
+              "Resume short immediate sequences and DO loops at the exact guest boundary");
+      if (deadline == 0) {
+        require(trace.counts[0] >= program.size() - 1,
+                "Retire short data immediate MOVEs as part of a native region");
+      }
+    }
+  }
+}
+
+void grouped_single_wrap(const bool unit_steps) {
+  const Storage storage;
+  constexpr Word turns = 8;
+  constexpr Word body = start + 2;
+  constexpr Word ring_first = 128;
+  constexpr Word modifier = 0xab000c;
+  constexpr Word multiple_wrap_last = 71;
+  constexpr Word multiple_wrap_modifier = 0x8007;
+  constexpr auto update = static_cast<Word>(isa::Opcode::move_address_update) | (1U << 11);
+  constexpr auto load_x = static_cast<Word>(isa::Opcode::move_x_effective) | (1U << 15);
+  constexpr auto postincrement = load_x | (3U << 11) | (1U << 16);
+  constexpr auto second_cursor = postincrement | (1U << 8);
+  constexpr auto indexed = load_x | (5U << 11);
+  constexpr auto predecrement = load_x | (7U << 11);
+  const std::array program{static_cast<Word>(isa::Opcode::do_immediate) | (turns << 8),
+                           body + 3,
+                           unit_steps ? postincrement : update,
+                           unit_steps ? predecrement : indexed,
+                           second_cursor,
+                           static_cast<Word>(isa::Opcode::add_x0_a),
+                           static_cast<Word>(isa::Opcode::stop)};
+  std::array<Word, 256> data{};
+  for (std::size_t i = 0; i < data.size(); ++i) { data[i] = static_cast<Word>(i); }
+  Core programmer(storage.memory());
+  programmer.load(Space::program, start, program);
+  programmer.load(Space::x, 0, data);
+  const auto exact = image(storage, false, program);
+  const auto direct = observed_direct_image(program);
+  test::RetirementIo trace;
+  Core reference(storage.memory());
+  Core product(storage.memory(), &trace);
+  reference.install(exact, 0);
+  product.install(direct, 0);
+  for (const auto stride : {3U, word_mask - 1}) {
+    for (const auto deadline : {1U, 4U, 11U, 23U, 34U}) {
+      Registers seed{};
+      seed.pc = start;
+      seed.r[0] = ring_first + (unit_steps ? 12U : 11U);
+      seed.r[1] = multiple_wrap_last;
+      seed.n[0] = stride;
+      seed.m.fill(word_mask);
+      seed.m[0] = modifier;
+      seed.m[1] = multiple_wrap_modifier;
+      trace.counts = {};
+      for (auto *core : {&reference, &product}) {
+        core->reset();
+        core->set_registers(seed);
+        require(core->run_until(deadline).fault == Fault{}, "Reach the requested cycle boundary");
+      }
+      require(same(reference.state(), product.state()),
+              "Preserve the interrupted single-wrap loop");
+      require(reference.run().fault == Fault{} && product.run().fault == Fault{} &&
+                  same(reference.state(), product.state()),
+              "Resume the reads and address updates at the original guest boundary");
+      require(trace.counts[0] != 0, "Retire the valid single-wrap body as a native region");
+    }
+  }
+}
+
+void grouped_modifier_and_mixed_products() {
+  constexpr Word movec = static_cast<Word>(isa::Opcode::movec_register);
+  constexpr Word n1 = 25;
+  constexpr Word n2 = 26;
+  constexpr Word r5 = 21;
+  constexpr Word m2 = 2;
+  constexpr std::array program{movec | (n1 << 8) | m2,
+                               movec | (1U << 15) | (n2 << 8) | m2,
+                               static_cast<Word>(isa::Opcode::mpy_su) | 0x14U,
+                               movec | (r5 << 8) | m2,
+                               static_cast<Word>(isa::Opcode::mac_su) | 0x6aU,
+                               static_cast<Word>(isa::Opcode::stop)};
+  const Storage storage;
+  test::RetirementIo trace;
+  Core reference(storage.memory());
+  Core product(storage.memory(), &trace);
+  reference.load(Space::program, start, program);
+  reference.install(image(storage, false, program), 0);
+  product.install(observed_direct_image(program), 0);
+  Registers seed{};
+  constexpr auto x_operands = 0x800001ff'ffffULL;
+  constexpr auto y_operands = 0x7fffff00'003dULL;
+  constexpr Word old_modifier = 0x8a0007;
+  constexpr Word new_modifier = 0x91abcd;
+  seed.pc = start;
+  seed.x = x_operands;
+  seed.y = y_operands;
+  seed.m[m2] = old_modifier;
+  seed.n[2] = new_modifier;
+  for (const auto deadline : {0U, 1U, 3U, 7U}) {
+    trace.counts = {};
+    for (auto *core : {&reference, &product}) {
+      core->reset();
+      core->set_registers(seed);
+      require(core->run_until(deadline).fault == Fault{}, "Reach the modifier transfer boundary");
+    }
+    require(same(reference.state(), product.state()), "Preserve state at the exact cycle boundary");
+    require(reference.run().fault == Fault{} && product.run().fault == Fault{} &&
+                same(reference.state(), product.state()),
+            "Resume mixed arithmetic with the live modifier and original flags");
+    require(product.registers().n[1] == seed.m[m2] && product.registers().r[5] == seed.n[2],
+            "Read both the entry modifier and its updated value");
+    if (deadline == 0) {
+      require(trace.counts[0] == program.size() - 1,
+              "Retire mixed arithmetic and modifier moves together");
+    }
+  }
+}
+
+void grouped_power_products() {
+  constexpr auto nop = static_cast<Word>(isa::Opcode::nop);
+  constexpr auto stop = static_cast<Word>(isa::Opcode::stop);
+  constexpr auto multiply = static_cast<Word>(isa::Opcode::mpy_power);
+  constexpr Word minimum_power = 23U << 8;
+  constexpr Word maximum_power = 1U << 8;
+  constexpr Word rounded_subtract = 7U;
+  constexpr Word destination_b = 1U << 3;
+  constexpr std::array program{nop,
+                               multiply | maximum_power | rounded_subtract,
+                               nop,
+                               multiply | minimum_power | destination_b,
+                               stop};
+  constexpr std::array invalid{nop, multiply, stop};
+  constexpr Registers seed{
+      .x = 0x18'7caa'fd7f01ULL, .y = 0xff'ffe1'34b23fULL, .a = 0x7f'ffff'fffed1'41ULL, .pc = start};
+  const Storage storage;
+  Core reference(storage.memory());
+  test::RetirementIo trace;
+  Core product(storage.memory(), &trace);
+  for (const auto words : {std::span<const Word>(program), std::span<const Word>(invalid)}) {
+    reference.load(Space::program, start, words);
+    reference.install(image(storage, false, words), 0);
+    product.install(observed_direct_image(words), 0);
+    for (const auto deadline : {0U, 1U, 2U, 3U, 4U}) {
+      trace.counts = {};
+      for (auto *core : {&reference, &product}) {
+        core->reset();
+        core->set_registers(seed);
+        static_cast<void>(core->run_until(deadline));
+      }
+      require(same(reference.state(), product.state()),
+              "Preserve the power-product cycle boundary");
+      const auto expected = reference.run();
+      const auto actual = product.run();
+      require(actual.fault == expected.fault && same(reference.state(), product.state()),
+              "Preserve the power-product result, flags and invalid coefficients");
+      if (deadline == 0 && words.size() == program.size()) {
+        require(trace.counts[0] == program.size() - 1, "Retire power products in native groups");
+      }
+    }
+  }
+}
+
+void grouped_displacement_moves() {
+  constexpr auto short_load = static_cast<Word>(isa::Opcode::move_displacement_short);
+  constexpr auto long_move = static_cast<Word>(isa::Opcode::move_displacement_long);
+  constexpr Word short_offset = 0x79;
+  constexpr Word long_offset = 77;
+  constexpr Word y_on_r1 = (1U << 16) | (1U << 8);
+  constexpr std::array program{short_load | ((short_offset & 0x7eU) << 10) |
+                                   ((short_offset & 1U) << 6) | (1U << 4) | 4U,
+                               static_cast<Word>(isa::Opcode::add_x0_a),
+                               long_move | y_on_r1 | 12U,
+                               long_offset,
+                               long_move | y_on_r1 | (1U << 6) | 6U,
+                               long_offset,
+                               static_cast<Word>(isa::Opcode::stop)};
+  const Storage checked_storage;
+  const Storage direct_storage;
+  test::RetirementIo trace;
+  Core reference(checked_storage.memory());
+  Core product(direct_storage.memory(), &trace);
+  std::array<Word, 512> data{};
+  for (std::size_t i = 0; i < data.size(); ++i) { data[i] = static_cast<Word>(i + 1); }
+  for (auto *core : {&reference, &product}) {
+    core->load(Space::program, start, program);
+    core->load(Space::x, 0, data);
+  }
+  const auto exact_image = image(checked_storage, false, program);
+  const auto direct_image = observed_direct_image(program);
+  reference.install(exact_image, 0);
+  product.install(direct_image, 0);
+  constexpr std::array modifiers{word_mask, 0x801fU, 22U};
+  constexpr Word source = 0x105;
+  constexpr Word destination = 0x131;
+  for (const auto modifier : modifiers) {
+    for (const auto deadline : {0U, 2U, 5U}) {
+      trace.counts = {};
+      for (auto *core : {&reference, &product}) {
+        core->reset();
+        Registers seed{};
+        seed.pc = start;
+        seed.r[0] = source;
+        seed.r[1] = destination;
+        seed.m[0] = modifier;
+        seed.m[1] = modifier;
+        core->set_registers(seed);
+        require(core->run_until(deadline).fault == Fault{}, "Reach a displacement cycle boundary");
+      }
+      require(same(reference.state(), product.state()), "Preserve the displacement move prefix");
+      require(reference.run().fault == Fault{} && product.run().fault == Fault{} &&
+                  same(reference.state(), product.state()),
+              "Resume displacement moves with the same operands and result");
+      require(product.registers().r[0] == source && product.registers().r[1] == destination,
+              "Displacement addressing leaves both cursor registers unchanged");
+      require(std::ranges::equal(checked_storage.regions[2].words, direct_storage.regions[2].words),
+              "Store the same word at the same bank address");
+      if (deadline == 0) {
+        require(trace.counts[0] == 4, "Retire both displacement widths as one native region");
+      }
+    }
+  }
+  constexpr Word peripheral_offset = 6;
+  for (const auto modifier : {0U, word_mask}) {
+    Core checked_fault(checked_storage.memory());
+    Core direct_fault(direct_storage.memory());
+    checked_fault.install(exact_image, 0);
+    direct_fault.install(direct_image, 0);
+    Registers seed{};
+    seed.pc = start;
+    seed.r[0] = modifier == 0 ? source : peripheral_offset;
+    seed.m[0] = modifier;
+    checked_fault.set_registers(seed);
+    direct_fault.set_registers(seed);
+    const auto expected = checked_fault.run();
+    const auto actual = direct_fault.run();
+    require(expected.fault != Fault{} && actual.fault == expected.fault && actual.retired == 0 &&
+                actual.fault.pc == start,
+            "Keep the original address and PC on protected and peripheral accesses");
+  }
+}
+
+void grouped_modifier_memory() {
+  constexpr Word effective = static_cast<Word>(isa::Opcode::movec_effective);
+  constexpr Word absolute = static_cast<Word>(isa::Opcode::movec_absolute_short);
+  constexpr Word register_move = static_cast<Word>(isa::Opcode::movec_register);
+  constexpr Word literal = 0x8f001f;
+  constexpr Word m2 = 2;
+  constexpr Word m3 = 3;
+  constexpr Word n1 = 25;
+  constexpr Word load = 1U << 15;
+  constexpr Word destination = 11;
+  constexpr Word source = 12;
+  constexpr std::array program{effective | load | (6U << 11) | (4U << 8) | m2,
+                               literal,
+                               absolute | (1U << 6) | (destination << 8) | m2,
+                               effective | load | (3U << 11) | m3,
+                               register_move | (n1 << 8) | m3,
+                               static_cast<Word>(isa::Opcode::stop)};
+  const Storage exact_storage;
+  const Storage direct_storage;
+  test::RetirementIo trace;
+  Core reference(exact_storage.memory());
+  Core product(direct_storage.memory(), &trace);
+  for (auto *core : {&reference, &product}) {
+    core->load(Space::program, start, program);
+    constexpr std::array data{value};
+    core->load(Space::x, source, data);
+  }
+  reference.install(image(exact_storage, false, program), 0);
+  product.install(observed_direct_image(program), 0);
+  for (const auto deadline : {0U, 1U, 3U, 5U}) {
+    trace.counts = {};
+    for (auto *core : {&reference, &product}) {
+      core->reset();
+      Registers seed{};
+      seed.pc = start;
+      seed.r[0] = source;
+      seed.m[0] = word_mask;
+      core->set_registers(seed);
+      require(core->run_until(deadline).fault == Fault{}, "Reach the MOVEC memory cycle boundary");
+    }
+    require(same(reference.state(), product.state()), "Preserve MOVEC state before resume");
+    require(reference.run().fault == Fault{} && product.run().fault == Fault{} &&
+                same(reference.state(), product.state()),
+            "Keep modifier values and cursor updates exact across memory transfers");
+    require(direct_storage.word(Space::y, destination) == literal &&
+                product.registers().r[0] == source + 1 && product.registers().n[1] == value,
+            "Store the active modifier and feed the loaded modifier to the register move");
+    if (deadline == 0) {
+      require(trace.counts[0] == 4, "Retire all modifier transfer forms in one region");
+    }
+  }
+}
 }
 
 int main() try {
   const test::NativeFaults faults(Core::host_fault);
+  grouped_conditional_transfers();
+  grouped_short_immediate_moves();
+  grouped_single_wrap(false);
+  grouped_single_wrap(true);
+  grouped_modifier_and_mixed_products();
+  grouped_power_products();
+  grouped_displacement_moves();
+  grouped_modifier_memory();
   crossing_zero();
   direct_self_loop_empty_window();
   protected_operands();

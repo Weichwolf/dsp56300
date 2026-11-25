@@ -40,7 +40,7 @@ struct RegionPlan {
   struct Step {
     NativeMoves memory{};
     NativeRegisterMove registers{};
-    NativeAddressImmediate immediate{};
+    NativeRegisterImmediate immediate{};
     std::optional<AddressForm> update = std::nullopt;
     Word guards = 0, prefix_count = 0, prefix_cost = 0;
     bool finish_prefix = false;
@@ -66,7 +66,7 @@ struct RegionPlan {
   std::array<std::array<Extent, agu_registers>, 2> extents{};
   std::array<std::map<Word, bool>, 2> absolute{};
   std::array<std::int64_t, agu_registers> deltas{};
-  std::array<bool, agu_registers> changed_n{}, agu{};
+  std::array<bool, agu_registers> changed_n{}, changed_m{}, agu{};
   std::array<std::optional<std::size_t>, agu_registers> definitions{};
   std::array<bool, agu_registers> guardable{}, deferred{}, no_prior_cursor_reads{};
   RegionControl control;

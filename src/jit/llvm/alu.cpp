@@ -6,6 +6,7 @@
 #include "fields.hpp"
 #include "instruction.hpp"
 #include "jit/llvm/builder.hpp"
+#include "product_fields.hpp"
 
 #include <array>
 #include <cstdint>
@@ -56,6 +57,8 @@ public:
 
   void lower(Word code, const Banks &before, Banks &after);
   void immediate(const Instruction &instruction, Banks &banks);
+  void mixed_product(Word opcode, Banks &banks);
+  void power_product(Word opcode, Banks &banks);
   void shift(Word opcode, Banks &banks);
   void logical_shift(Word opcode, Banks &banks);
   void flags(const Result &result);
@@ -114,10 +117,12 @@ private:
         ir_.getInt64(bus_shift));
   }
 
-  V product_word(const Banks &before, const unsigned selector) {
+  V product_word(const Banks &before, const unsigned selector, const bool unsigned_word = false) {
     auto *bank = before[selector < 2 ? 2U : 3U];
     if ((selector & 1U) != 0) { bank = ir_.CreateLShr(bank, ir_.getInt64(word_bits)); }
-    return ir_.CreateSExt(ir_.CreateTrunc(bank, ir_.getIntNTy(word_bits)), ir_.getInt64Ty());
+    auto *word = ir_.CreateTrunc(bank, ir_.getIntNTy(word_bits));
+    return unsigned_word ? ir_.CreateZExt(word, ir_.getInt64Ty())
+                         : ir_.CreateSExt(word, ir_.getInt64Ty());
   }
 
   Result product(Word code, const Banks &before, unsigned destination);
@@ -149,6 +154,35 @@ Result Alu::product(const Word code, const Banks &before, const unsigned destina
   if ((code & 4U) != 0) { term = ir_.CreateSub(ir_.getInt64(0), term); }
   auto *initial = (code & 2U) != 0 ? before[destination] : ir_.getInt64(0);
   return arithmetic(initial, term, false);
+}
+
+void Alu::mixed_product(const Word opcode, Banks &banks) {
+  const auto [left, right] = mixed_product_pairs[opcode & 15U];
+  const auto selector = [](const unsigned value) { return ((value & 1U) << 1) | (value >> 1); };
+  const auto destination = (opcode & (1U << 5)) != 0 ? 1U : 0U;
+  auto *term =
+      ir_.CreateShl(ir_.CreateMul(product_word(banks, selector(left), (opcode & (1U << 6)) != 0),
+                                  product_word(banks, selector(right), true)),
+                    ir_.getInt64(padding_bits + 1));
+  if ((opcode & (1U << 4)) != 0) { term = ir_.CreateSub(ir_.getInt64(0), term); }
+  auto *initial = (opcode & (1U << 8)) == 0 ? banks[destination] : ir_.getInt64(0);
+  const auto result = arithmetic(initial, term, false);
+  flags(result);
+  banks[destination] = result.value;
+}
+
+void Alu::power_product(const Word opcode, Banks &banks) {
+  const auto encoded = power_product_sources[(opcode >> 4) & 3U];
+  const auto source = ((encoded & 1U) << 1U) | (encoded >> 1U);
+  const auto shift = word_bits + padding_bits - ((opcode >> 8) & five_bit_mask);
+  const auto destination = (opcode >> 3) & 1U;
+  auto *term = ir_.CreateShl(product_word(banks, source), ir_.getInt64(shift));
+  if ((opcode & 4U) != 0) { term = ir_.CreateSub(ir_.getInt64(0), term); }
+  auto *initial = (opcode & 2U) != 0 ? banks[destination] : ir_.getInt64(0);
+  auto result = arithmetic(initial, term, false);
+  if ((opcode & 1U) != 0) { rounding(result); }
+  flags(result);
+  banks[destination] = result.value;
 }
 
 Result Alu::sum(V left, V right, const Word kind, const bool carried) {
@@ -377,6 +411,16 @@ void Alu::lower(const Word code, const Banks &before, Banks &after) {
 }
 }
 
+void lower_product(
+    Builder &ir, const Instruction &instruction, const Word mode, Banks &banks, V &status) {
+  Alu alu(ir, mode, status);
+  if (instruction.operation == Operation::product_power) {
+    alu.power_product(instruction.opcode, banks);
+  } else {
+    alu.mixed_product(instruction.opcode, banks);
+  }
+}
+
 Word flag_inputs(const Word opcode) {
   if (conditional_alu(opcode)) { return byte_mask; }
   const auto code = opcode & byte_mask;
@@ -448,12 +492,12 @@ V transfer_word(Builder &ir, V value, const Word mode, V &status) {
   const unsigned shift =
       bus_shift + ((mode & scale_down) != 0 ? 1U : 0U) - ((mode & scale_up) != 0 ? 1U : 0U);
   auto *word = LLVMBuildAShr(ir.get(), value, ir.getInt64(shift), "");
-  auto *minimum = ir.getInt64(static_cast<std::uint64_t>(static_cast<std::int64_t>(minimum_word)));
-  auto *maximum = ir.getInt64(maximum_word);
-  auto *low = LLVMBuildICmp(ir.get(), LLVMIntSLT, word, minimum, "");
-  auto *high = LLVMBuildICmp(ir.get(), LLVMIntSGT, word, maximum, "");
-  auto *limited = ir.CreateOr(low, high);
-  word = ir.CreateSelect(low, minimum, ir.CreateSelect(high, maximum, word));
+  // Bias the signed 24-bit interval so one unsigned comparison detects clipping.
+  auto *biased = ir.CreateAdd(word, ir.getInt64(sign24_bit));
+  auto *limited = ir.CreateICmpUGT(biased, ir.getInt64(word_mask));
+  auto *sign = LLVMBuildAShr(ir.get(), value, ir.getInt64(host_sign_bit), "");
+  auto *clamped = ir.CreateXor(sign, ir.getInt64(maximum_word));
+  word = ir.CreateSelect(limited, clamped, word);
   const auto growth_shift = shift + word_bits - 3;
   auto *adjacent = ir.CreateXor(ir.CreateLShr(value, ir.getInt64(growth_shift)),
                                 ir.CreateLShr(value, ir.getInt64(growth_shift + 1)));

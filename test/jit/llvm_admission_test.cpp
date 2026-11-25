@@ -69,7 +69,7 @@ bool exercise(const Frame &frame, const Input input) {
   cpu.reg.r[1] = destination;
   cpu.reg.lc = count;
   cpu.reg.m[1] = modifier;
-  NativeContext owner{.runtime = runtime, .budget = 16, .cycle_deadline = credit};
+  NativeContext owner{.runtime = runtime, .budget = 16, .cycle_window = credit};
   const auto before_cpu = representation(cpu);
   const auto before_owner = representation(owner);
   const auto before_data = data;
@@ -195,7 +195,7 @@ Counts run() {
     const NativeContext owner{
         .runtime = {.memory = {}, .windows = {std::span(&protected_window, 1), {}}},
         .budget = 6,
-        .cycle_deadline = 6};
+        .cycle_window = 6};
     require(admission(&cpu, &owner) == 0 && cpu.reg == before,
             "Admission rejects a RAM binding overlapping core state");
   }
@@ -293,7 +293,7 @@ bool exercise(Fixture &fixture, const Input input) {
     wanted.r[index + 1] = pointer;
   }
   fits = fits && pointer < fixture.data.size() && input.credit >= fixture.depth + 1;
-  NativeContext owner{.runtime = fixture.runtime, .budget = 16, .cycle_deadline = input.credit};
+  NativeContext owner{.runtime = fixture.runtime, .budget = 16, .cycle_window = input.credit};
   const auto before_cpu = representation(cpu);
   const auto before_owner = representation(owner);
   const auto bound = fixture.admission(&cpu, &owner);
@@ -409,7 +409,7 @@ void modules() {
   const auto *native_execute = compiler.install(module);
   const auto native_query = std::bit_cast<Admission>(compiler.resolve("admission"));
   Cpu cpu{.reg = fixture.seed};
-  NativeContext owner{.runtime = fixture.runtime, .budget = 6, .cycle_deadline = 6};
+  NativeContext owner{.runtime = fixture.runtime, .budget = 6, .cycle_window = 6};
   require(native_query(&cpu, &owner) == 6 && enter_block(native_execute, cpu, owner) == 6,
           "The shared native object retains each entry's exact 64/32-bit ABI");
   bool transferred = false;
@@ -428,7 +428,7 @@ void revisions() {
   compiler.define("dsp56300_region_memory", std::bit_cast<const void *>(&dsp56300_region_memory));
   const auto query = std::bit_cast<Admission>(compiler.install(module));
   Cpu cpu{.reg = fixture.seed};
-  const NativeContext owner{.runtime = fixture.runtime, .budget = 6, .cycle_deadline = 6};
+  const NativeContext owner{.runtime = fixture.runtime, .budget = 6, .cycle_window = 6};
   const auto check = [&](const std::uint64_t expected) {
     const auto initial_cpu = representation(cpu);
     const auto initial_owner = representation(owner);

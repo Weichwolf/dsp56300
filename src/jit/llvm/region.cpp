@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -38,6 +39,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -64,7 +66,7 @@ std::optional<std::size_t> admission_prefix(const RegionPlan &plan) {
   return count;
 }
 
-enum class BatchAddressing : std::uint8_t { automatic, linear, general };
+enum class BatchAddressing : std::uint8_t { automatic, linear, general, single_wrap };
 
 [[nodiscard]] bool split_flags(const RegionPlan &plan) {
   return plan.batch && plan.computation &&
@@ -90,7 +92,8 @@ public:
                const BatchAddressing addressing = BatchAddressing::automatic,
                const std::uint64_t variant = 0,
                const bool direct = false,
-               const bool linear_only = false)
+               const bool linear_only = false,
+               const bool admitted_site = false)
       : context_(module.context()),
         function_(make_function(module, entry, admission_only)),
         locations_(*llvm::unwrap(module.code()), variant),
@@ -99,6 +102,7 @@ public:
         addressing_(linear_only ? BatchAddressing::linear : addressing),
         linear_only_(linear_only),
         direct_(direct),
+        admitted_site_(admitted_site),
         self_loop_(
             !admission_only && !plan_.allow_partial_exit && !plan_.batch &&
             plan_.control.stack == ControlStack::none &&
@@ -188,7 +192,9 @@ private:
                               admission_steps,
                               BatchAddressing::linear,
                               variant_,
-                              direct_);
+                              direct_,
+                              false,
+                              admitted_site_);
     const RegionLifter general(module,
                                plan_,
                                name + ".general",
@@ -196,7 +202,9 @@ private:
                                admission_steps,
                                BatchAddressing::general,
                                variant_,
-                               direct_);
+                               direct_,
+                               false,
+                               admitted_site_);
     auto *all_linear = boolean(true);
     for (unsigned index = 0; index < agu_registers; ++index) {
       if (!plan_.agu[index]) { continue; }
@@ -208,8 +216,35 @@ private:
     auto *first = LLVMAppendBasicBlockInContext(context_, function_, "linear");
     auto *second = LLVMAppendBasicBlockInContext(context_, function_, "general");
     LLVMBuildCondBr(ir_.get(), all_linear, first, second);
-    for (const auto [block, target] :
-         {std::pair{first, linear.function_}, std::pair{second, general.function_}}) {
+    std::vector versions{std::pair{first, linear.function_}, std::pair{second, general.function_}};
+    if (direct_ && plan_.batch && plan_.repeats.empty()) {
+      const RegionLifter wrapping(module,
+                                  plan_,
+                                  name + ".single_wrap",
+                                  admission_only,
+                                  admission_steps,
+                                  BatchAddressing::single_wrap,
+                                  variant_,
+                                  direct_,
+                                  false,
+                                  admitted_site_);
+      auto *multiple = LLVMAppendBasicBlockInContext(context_, function_, "multiple_wrap");
+      auto *single = LLVMAppendBasicBlockInContext(context_, function_, "single_wrap");
+      ir_.SetInsertPoint(second);
+      auto *any_single = boolean(false);
+      for (unsigned index = 0; index < agu_registers; ++index) {
+        if (!plan_.agu[index]) { continue; }
+        auto *modifier = ir_.CreateAnd(reg(32, offsetof(Registers, m) + (index * sizeof(Word))),
+                                       ir_.getInt32(modifier_mask));
+        auto *single_wrap = ir_.CreateICmpULT(ir_.CreateSub(modifier, ir_.getInt32(1)),
+                                              ir_.getInt32(multiple_wrap_bit - 1));
+        any_single = ir_.CreateOr(any_single, single_wrap);
+      }
+      LLVMBuildCondBr(ir_.get(), any_single, single, multiple);
+      versions.back().first = multiple;
+      versions.emplace_back(single, wrapping.function_);
+    }
+    for (const auto [block, target] : versions) {
       LLVMSetLinkage(target, LLVMInternalLinkage);
       LLVMAddAttributeAtIndex(
           target,
@@ -283,7 +318,8 @@ private:
     }
   }
 
-  void budget_admission(V budget, V credit) {
+  void budget_admission(V budget, V window) {
+    auto *remaining_cycles = ir_.CreateNot(initial_cycles_);
     if (plan_.setup || single_turn()) {
       const auto turns = plan_.setup ? plan_.setup_count : 1U;
       const auto count = (std::uint64_t{plan_.count} * turns) + (plan_.setup ? 1U : 0U);
@@ -291,14 +327,15 @@ private:
                         (plan_.setup ? plan_.setup->instruction.cycles : 0U);
       turns_ = ir_.getInt64(turns);
       eligible_ = ir_.CreateAnd(ir_.CreateICmpUGE(budget, ir_.getInt32(count)),
-                                ir_.CreateICmpUGE(credit, ir_.getInt64(cost)));
+                                ir_.CreateICmpUGE(window, ir_.getInt64(cost)));
+      require(ir_.CreateICmpUGE(remaining_cycles, ir_.getInt64(cost)));
       require(ir_.CreateICmpUGE(ir_.getInt64(std::numeric_limits<std::uint64_t>::max() - count),
                                 initial_instructions_));
       if (plan_.setup) { require(ir_.CreateICmpUGE(ir_.getInt32(stack_entries - 3), sc_)); }
     } else {
       turns_ = minimum(
           ir_.CreateZExt(ir_.CreateUDiv(budget, ir_.getInt32(plan_.count)), ir_.getInt64Ty()),
-          ir_.CreateUDiv(credit, ir_.getInt64(plan_.cost)));
+          ir_.CreateUDiv(minimum(window, remaining_cycles), ir_.getInt64(plan_.cost)));
       turns_ = minimum(
           turns_,
           ir_.CreateUDiv(ir_.CreateSub(ir_.getInt64(std::numeric_limits<std::uint64_t>::max()),
@@ -313,15 +350,16 @@ private:
 
   [[nodiscard]] bool repeated_unit_reads(const unsigned index) const {
     if (!single_turn()) { return false; }
-    const auto uses_stride = [index](const AddressForm form) {
-      return form.index == index && (form.mode < 2 || form.mode == 5);
+    const auto needs_offset = [index](const AddressForm form) {
+      return form.index == index &&
+             (form.mode < 2 || form.mode == 5 || form.mode == displacement_mode);
     };
     unsigned reads = 0;
     for (const auto &step : plan_.steps) {
-      if (step.update && uses_stride(*step.update)) { return false; }
+      if (step.update && needs_offset(*step.update)) { return false; }
       for (const auto &move : std::span(step.memory.transfers).first(step.memory.count)) {
         if (move.address.mode == 6 || move.address.index != index) { continue; }
-        if (uses_stride(move.address) || !move.load) { return false; }
+        if (needs_offset(move.address) || !move.load) { return false; }
         if (move.address.mode != 4) { ++reads; }
       }
     }
@@ -352,24 +390,23 @@ private:
     sp_ = reg(32, offsetof(Registers, sp));
     sc_ = reg(32, offsetof(Registers, sc));
     saved_ = stack(ir_.CreateAnd(sp_, ir_.getInt32(stack_mask)));
-    auto *deadline = load(64, offsetof(NativeContext, cycle_deadline), owner_);
-    auto *credit = ir_.CreateSelect(ir_.CreateICmpUGE(deadline, initial_cycles_),
-                                    ir_.CreateSub(deadline, initial_cycles_),
-                                    ir_.getInt64(0));
+    auto *window = load(64, offsetof(NativeContext, cycle_window), owner_);
     auto *budget = load(32, offsetof(NativeContext, budget), owner_);
     finite_count_ = ir_.CreateSelect(ir_.CreateICmpEQ(lc_, ir_.getInt32(0)),
                                      ir_.getInt64(address_words),
                                      ir_.CreateZExt(lc_, ir_.getInt64Ty()));
     forever_ =
         ir_.CreateICmpNE(ir_.CreateAnd(status_, ir_.getInt32(forever_flag)), ir_.getInt32(0));
-    budget_admission(budget, credit);
+    budget_admission(budget, window);
     stack_admission();
     stack_state();
-    require(ir_.CreateICmpEQ(ir_.CreateAnd(status_, ir_.getInt32(numeric_mode_mask)),
-                             ir_.getInt32(plan_.operations.front().mode)));
-    require(ir_.CreateICmpEQ(
-        reg(32, offsetof(Registers, pc)),
-        ir_.getInt32(plan_.setup ? plan_.setup->pc : plan_.operations.front().pc)));
+    if (!admitted_site_ || !single_turn()) {
+      require(ir_.CreateICmpEQ(ir_.CreateAnd(status_, ir_.getInt32(numeric_mode_mask)),
+                               ir_.getInt32(plan_.operations.front().mode)));
+      require(ir_.CreateICmpEQ(
+          reg(32, offsetof(Registers, pc)),
+          ir_.getInt32(plan_.setup ? plan_.setup->pc : plan_.operations.front().pc)));
+    }
     auto *active_la = ir_.CreateSelect(
         ir_.CreateICmpNE(ir_.CreateAnd(status_, ir_.getInt32(loop_flag)), ir_.getInt32(0)),
         reg(32, offsetof(Registers, la)),
@@ -408,16 +445,18 @@ private:
     for (unsigned index = 0; index < agu_registers; ++index) {
       cursors_[index] = reg(32, offsetof(Registers, r) + (index * sizeof(Word)));
       strides_[index] = reg(32, offsetof(Registers, n) + (index * sizeof(Word)));
+      if (plan_.changed_m[index]) {
+        modifiers_[index] = reg(32, offsetof(Registers, m) + (index * sizeof(Word)));
+      }
       if (!plan_.agu[index]) { continue; }
-      auto *modifier = ir_.CreateAnd(reg(32, offsetof(Registers, m) + (index * sizeof(Word))),
-                                     ir_.getInt32(modifier_mask));
-      auto *linear = ir_.CreateICmpEQ(modifier, ir_.getInt32(modifier_mask));
-      if (linear_only_) {
+      if (addressing_ == BatchAddressing::linear) {
         masks_[index] = ir_.getInt32(word_mask);
         origins_[index] = ir_.getInt32(0);
         continue;
       }
-      if (plan_.batch && addressing_ == BatchAddressing::linear) { require(linear); }
+      auto *modifier = ir_.CreateAnd(reg(32, offsetof(Registers, m) + (index * sizeof(Word))),
+                                     ir_.getInt32(modifier_mask));
+      auto *linear = ir_.CreateICmpEQ(modifier, ir_.getInt32(modifier_mask));
       if (direct_ && repeated_unit_reads(index)) {
         masks_[index] = extended_unit_mask(modifier);
         origins_[index] = ir_.CreateAnd(cursors_[index], ir_.CreateNot(masks_[index]));
@@ -431,8 +470,19 @@ private:
           ir_.CreateAnd(ir_.CreateICmpNE(mask, ir_.getInt32(0)),
                         ir_.CreateICmpEQ(ir_.CreateAnd(mask, ir_.CreateAdd(mask, ir_.getInt32(1))),
                                          ir_.getInt32(0))));
-      require(ir_.CreateOr(linear, ring));
-      masks_[index] = ir_.CreateSelect(linear, ir_.getInt32(word_mask), mask);
+      auto *full_mask = linear;
+      auto *accepted = ir_.CreateOr(linear, ring);
+      if (direct_ && plan_.repeats.empty() &&
+          (!plan_.batch || addressing_ == BatchAddressing::single_wrap)) {
+        auto *single = ir_.CreateAnd(ir_.CreateICmpNE(modifier, ir_.getInt32(0)),
+                                     ir_.CreateICmpULT(modifier, ir_.getInt32(multiple_wrap_bit)));
+        accepted = ir_.CreateOr(accepted, single);
+        if (plan_.batch) { full_mask = ir_.CreateOr(linear, single); }
+        single_lengths_[index] =
+            ir_.CreateSelect(single, ir_.CreateAdd(modifier, ir_.getInt32(1)), ir_.getInt32(0));
+      }
+      require(accepted);
+      masks_[index] = ir_.CreateSelect(full_mask, ir_.getInt32(word_mask), mask);
       origins_[index] = ir_.CreateAnd(cursors_[index], ir_.CreateNot(masks_[index]));
     }
   }
@@ -607,11 +657,30 @@ private:
       range.first = ir_.CreateSelect(linear, range.first, begin);
       range.last = ir_.CreateSelect(linear, range.last, end);
     }
+    if (plan_.batch && single_lengths_[index] != nullptr) {
+      auto *wrapped = ir_.CreateICmpNE(single_lengths_[index], ir_.getInt32(0));
+      const auto [first, last] = rings_[index];
+      range.first = ir_.CreateSelect(wrapped, ir_.CreateZExt(first, ir_.getInt64Ty()), range.first);
+      range.last = ir_.CreateSelect(wrapped, ir_.CreateZExt(last, ir_.getInt64Ty()), range.last);
+    }
     return range;
   }
 
   void batch_memory_guards() {
     for (unsigned index = 0; index < agu_registers; ++index) {
+      if (auto *length = single_lengths_[index]) {
+        auto *single = ir_.CreateICmpNE(length, ir_.getInt32(0));
+        auto *span = single_wrap_span(ir_.CreateSelect(single, length, ir_.getInt32(2)));
+        auto *offset = ir_.CreateAnd(cursors_[index], span);
+        auto *base = ir_.CreateAnd(cursors_[index], ir_.CreateNot(span));
+        auto *last = ir_.CreateAdd(base, ir_.CreateSub(length, ir_.getInt32(1)));
+        // An admitted unit-step cursor remains in this ring throughout the batch.
+        require(ir_.CreateOr(ir_.CreateNot(single), ir_.CreateICmpULT(offset, length)));
+        // Linear and masked cursors never meet this sentinel.
+        auto *outside = ir_.getInt32(address_words);
+        rings_[index] = {.first = ir_.CreateSelect(single, base, outside),
+                         .last = ir_.CreateSelect(single, last, outside)};
+      }
       for (unsigned bank = 0; bank < 2; ++bank) {
         const auto &extent = plan_.extents[bank][index];
         if (!extent.accessed) { continue; }
@@ -633,10 +702,46 @@ private:
     }
   }
 
-  V advanced(V cursor, const AddressForm form) {
-    auto *step = form.mode < 2 || form.mode == 5 ? strides_[form.index] : ir_.getInt32(1);
-    auto *next = form.mode == 0 || form.mode == 2 || form.mode == 7 ? ir_.CreateSub(cursor, step)
-                                                                    : ir_.CreateAdd(cursor, step);
+  V single_wrap_span(V length) {
+    auto *type = ir_.getInt32Ty();
+    constexpr std::string_view name = "llvm.ctlz";
+    auto *module = LLVMGetGlobalParent(function_);
+    auto *ctlz = LLVMGetIntrinsicDeclaration(
+        module, LLVMLookupIntrinsicID(name.data(), name.size()), &type, 1);
+    std::array arguments{ir_.CreateSub(length, ir_.getInt32(1)), boolean(false)};
+    auto *zeros = LLVMBuildCall2(
+        ir_.get(), LLVMGlobalGetValueType(ctlz), ctlz, arguments.data(), arguments.size(), "");
+    auto *bits = ir_.CreateSub(ir_.getInt32(32), zeros);
+    return ir_.CreateSub(ir_.CreateShl(ir_.getInt32(1), bits), ir_.getInt32(1));
+  }
+
+  V single_wrap(V cursor, const AddressForm form, V step, const bool subtract) {
+    auto *length = single_lengths_[form.index];
+    auto *span = single_wrap_span(length);
+    constexpr auto sign = Word{1} << (word_bits - 1);
+    auto *stride = ir_.CreateSub(ir_.CreateXor(step, ir_.getInt32(sign)), ir_.getInt32(sign));
+    auto *delta = subtract ? ir_.CreateSub(ir_.getInt32(0), stride) : stride;
+    auto *next = ir_.CreateAdd(cursor, delta);
+    auto *lower = ir_.CreateAnd(cursor, ir_.CreateNot(span));
+    auto *upper = ir_.CreateAdd(lower, length);
+    auto *below = LLVMBuildICmp(ir_.get(), LLVMIntSLT, next, lower, "");
+    auto *above = LLVMBuildICmp(ir_.get(), LLVMIntSGE, next, upper, "");
+    auto *wrapped = ir_.CreateSelect(above,
+                                     ir_.CreateSub(next, length),
+                                     ir_.CreateSelect(below, ir_.CreateAdd(next, length), next));
+    auto *negative = LLVMBuildICmp(ir_.get(), LLVMIntSLT, stride, ir_.getInt32(0), "");
+    auto *magnitude = ir_.CreateSelect(negative, ir_.CreateSub(ir_.getInt32(0), stride), stride);
+    auto *positive = LLVMBuildICmp(ir_.get(), LLVMIntSGT, stride, ir_.getInt32(0), "");
+    auto *large = ir_.CreateOr(ir_.CreateICmpUGT(magnitude, length),
+                               ir_.CreateAnd(ir_.CreateICmpEQ(magnitude, length), positive));
+    auto *aligned = ir_.CreateICmpEQ(ir_.CreateAnd(delta, span), ir_.getInt32(0));
+    return ir_.CreateAnd(ir_.CreateSelect(ir_.CreateAnd(large, aligned), next, wrapped),
+                         ir_.getInt32(word_mask));
+  }
+
+  V advanced(V cursor, const AddressForm form, V step) {
+    const bool subtract = form.mode == 0 || form.mode == 2 || form.mode == 7;
+    auto *next = subtract ? ir_.CreateSub(cursor, step) : ir_.CreateAdd(cursor, step);
     // The single-operation batch has already proved every accessed address in range.
     // Its final post-update may wrap; finish() masks the committed register.
     if (split_flags_ && loop_count_ == 1 && addressing_ == BatchAddressing::linear) {
@@ -644,14 +749,57 @@ private:
       if (form.mode == 3) { LLVMSetNUW(next, 1); }
       return next;
     }
-    return ir_.CreateOr(origins_[form.index], ir_.CreateAnd(next, masks_[form.index]));
+    auto *regular = ir_.CreateOr(origins_[form.index], ir_.CreateAnd(next, masks_[form.index]));
+    if (plan_.batch && single_lengths_[form.index] != nullptr) {
+      const auto [first, last] = rings_[form.index];
+      auto *boundary = subtract ? first : last;
+      auto *wrapped = subtract ? last : first;
+      return ir_.CreateSelect(ir_.CreateICmpEQ(cursor, boundary), wrapped, regular);
+    }
+    if (auto *length = single_lengths_[form.index]) {
+      auto *masked = LLVMGetInsertBlock(ir_.get());
+      auto *single = LLVMAppendBasicBlockInContext(context_, function_, "single_wrap");
+      auto *done = LLVMAppendBasicBlockInContext(context_, function_, "updated_address");
+      LLVMBuildCondBr(ir_.get(), ir_.CreateICmpNE(length, ir_.getInt32(0)), single, done);
+      ir_.SetInsertPoint(single);
+      auto *wrapped = single_wrap(cursor, form, step, subtract);
+      LLVMBuildBr(ir_.get(), done);
+      ir_.SetInsertPoint(done);
+      auto *result = LLVMBuildPhi(ir_.get(), ir_.getInt32Ty(), "");
+      std::array values{regular, wrapped};
+      std::array blocks{masked, single};
+      LLVMAddIncoming(result, values.data(), blocks.data(), values.size());
+      return result;
+    }
+    return regular;
+  }
+
+  V checked_address_update(V prior, const AddressForm form, V step) {
+    const auto index = form.index;
+    if (single_lengths_[index] == nullptr || plan_.definitions[index].has_value() ||
+        plan_.changed_n[index] || plan_.changed_m[index] ||
+        (!record_addresses_ && admitted_addresses_.empty())) {
+      return advanced(prior, form, step);
+    }
+    const auto key =
+        std::tuple(std::bit_cast<std::uintptr_t>(prior), form.index, form.mode, form.extra);
+    if (const auto found = admitted_addresses_.find(key); found != admitted_addresses_.end()) {
+      return found->second;
+    }
+    auto *next = advanced(prior, form, step);
+    if (record_addresses_) { admitted_addresses_.emplace(key, next); }
+    return next;
   }
 
   V effective(std::array<V, agu_registers> &cursors, const AddressForm form) {
     if (form.mode == 6) { return ir_.getInt32(form.extra & word_mask); }
     auto *prior = cursors[form.index];
     if (form.mode == 4) { return prior; }
-    auto *next = advanced(prior, form);
+    if (form.mode == displacement_mode) {
+      return checked_address_update(prior, form, ir_.getInt32(form.extra & word_mask));
+    }
+    auto *step = form.mode < 2 || form.mode == 5 ? strides_[form.index] : ir_.getInt32(1);
+    auto *next = checked_address_update(prior, form, step);
     if (form.mode != 5) { cursors[form.index] = next; }
     return form.mode == 5 || form.mode == 7 ? next : prior;
   }
@@ -747,7 +895,10 @@ private:
     for (unsigned index = 0; index < agu_registers; ++index) {
       if (!plan_.deferred[index]) { roots |= 1U << index; }
     }
+    // Each admitted expression dominates the body of this turn.
+    record_addresses_ = direct_ && (single_turn() || self_loop_) && plan_.repeats.empty();
     memory_guards(roots, plan_.steps);
+    record_addresses_ = false;
   }
 
   V direct_base(const unsigned bank, const bool writing) {
@@ -786,7 +937,9 @@ private:
 
   V read_control_register(const unsigned number) {
     if (number >= m_register_base && number < m_register_base + agu_registers) {
-      return reg(32, offsetof(Registers, m) + ((number - m_register_base) * sizeof(Word)));
+      const auto index = number - m_register_base;
+      if (auto *value = modifiers_[index]) { return value; }
+      return reg(32, offsetof(Registers, m) + (index * sizeof(Word)));
     }
     const bool loop = plan_.control.stack == ControlStack::loop;
     switch (number) {
@@ -834,6 +987,10 @@ private:
   }
 
   void write_register(const unsigned number, V word) {
+    if (number >= m_register_base) {
+      modifiers_[number - m_register_base] = word;
+      return;
+    }
     if (number >= n_register_base) {
       strides_[number - n_register_base] = word;
       return;
@@ -1085,6 +1242,9 @@ private:
       if (plan_.changed_n[index]) {
         put(strides_[index], offsetof(Registers, n) + (index * sizeof(Word)));
       }
+      if (auto *value = modifiers_[index]) {
+        put(value, offsetof(Registers, m) + (index * sizeof(Word)));
+      }
     }
     put(status_, offsetof(Registers, sr));
     for (unsigned offset = 0; offset < frames_.size(); ++offset) {
@@ -1247,10 +1407,11 @@ private:
       if (instruction.operation == Operation::bit_jump ||
           instruction.operation == Operation::bit_branch) {
         auto *value = control_operand(instruction, step);
-        const auto mask = Word{1} << (instruction.opcode & five_bit_mask);
+        const auto bit = instruction.opcode & five_bit_mask;
+        const auto mask = Word{1} << bit;
+        const auto expected = ((instruction.opcode >> 5) & 1U) << bit;
         control_taken_ =
-            ir_.CreateICmpEQ(ir_.CreateAnd(value, ir_.getInt32(mask)),
-                             ir_.getInt32((instruction.opcode & (1U << 5)) != 0 ? mask : 0U));
+            ir_.CreateICmpEQ(ir_.CreateAnd(value, ir_.getInt32(mask)), ir_.getInt32(expected));
       } else if (loop_setup(instruction.operation)) {
         loop_control(instruction, step);
       } else if (instruction.operation == Operation::bit_memory) {
@@ -1260,15 +1421,41 @@ private:
             ir_, instruction.opcode, plan_.operations[index].mode, banks_, status_);
       } else if (instruction.operation == Operation::logical_shift_immediate) {
         llvm19::lower_logical_shift(ir_, instruction.opcode, banks_, status_);
+      } else if (instruction.operation == Operation::conditional_transfer) {
+        conditional_transfer(instruction.opcode, plan_.operations[index].mode, before);
+      } else if (llvm19::supported_product(instruction.operation)) {
+        llvm19::lower_product(ir_, instruction, plan_.operations[index].mode, banks_, status_);
       } else if (instruction.operation == Operation::immediate_alu) {
         llvm19::lower_immediate_alu(
             ir_, instruction, plan_.operations[index].mode, banks_, status_);
-      } else if (!plan_.control.valid || index + 1 != plan_.steps.size()) {
+      } else if (addressed_move(instruction.operation)) {
+        transfers(step.memory, instruction.opcode);
+      } else if (instruction.operation != Operation::move_control_register &&
+                 (!plan_.control.valid || index + 1 != plan_.steps.size())) {
         transfers(step.memory, instruction.opcode);
         llvm19::lower_alu(
             ir_, instruction.opcode, plan_.operations[index].mode, before, banks_, status_);
       }
       if (step.guards != 0) { guard_computed_address(miss, index); }
+    }
+  }
+
+  void conditional_transfer(const Word opcode, const Word mode, const std::array<V, 4> &before) {
+    constexpr Word address_only = 1U << 11;
+    constexpr Word dual = 1U << 16;
+    auto *selected = llvm19::condition(ir_, status_, (opcode >> 12) & 15U);
+    if ((opcode & address_only) == 0) {
+      constexpr Word operand_bits = 0x78;
+      constexpr Word transfer_alu = 1;
+      const unsigned accumulator = (opcode >> 3) & 1U;
+      llvm19::lower_alu(ir_, (opcode & operand_bits) | transfer_alu, mode, before, banks_, status_);
+      banks_[accumulator] = ir_.CreateSelect(selected, banks_[accumulator], before[accumulator]);
+    }
+    if ((opcode & (address_only | dual)) != 0) {
+      const unsigned source = (opcode >> 8) & 7U;
+      const unsigned target = opcode & 7U;
+      write_register(r_register_base + target,
+                     ir_.CreateSelect(selected, cursors_[source], cursors_[target]));
     }
   }
 
@@ -1288,16 +1475,23 @@ private:
   }
 
   struct Live {
-    std::array<V, 4> banks;
-    std::array<V, agu_registers> cursors, strides;
+    std::array<V, 6> banks;
+    std::array<V, agu_registers> cursors, strides, modifiers;
     V status, limited = nullptr, grown = nullptr;
     std::array<V, stack_entries> frames{};
   };
 
   [[nodiscard]] Live live() {
-    Live state{.banks = banks_,
+    // Keep both halves of X and Y independent on native loop backedges.
+    Live state{.banks = {banks_[0],
+                         banks_[1],
+                         ir_.CreateAnd(banks_[2], ir_.getInt64(word_mask)),
+                         ir_.CreateLShr(banks_[2], ir_.getInt64(word_bits)),
+                         ir_.CreateAnd(banks_[3], ir_.getInt64(word_mask)),
+                         ir_.CreateLShr(banks_[3], ir_.getInt64(word_bits))},
                .cursors = cursors_,
                .strides = strides_,
+               .modifiers = modifiers_,
                .status = status_,
                .frames = frames_};
     if (split_flags_) {
@@ -1310,9 +1504,16 @@ private:
   }
 
   void restore_live(const Live &state) {
-    banks_ = state.banks;
+    const auto pair = [&](V low, V high) {
+      return ir_.CreateOr(low, ir_.CreateShl(high, ir_.getInt64(word_bits)));
+    };
+    banks_ = {state.banks[0],
+              state.banks[1],
+              pair(state.banks[2], state.banks[3]),
+              pair(state.banks[4], state.banks[5])};
     cursors_ = state.cursors;
     strides_ = state.strides;
+    modifiers_ = state.modifiers;
     status_ = state.status;
     frames_ = state.frames;
     if (state.limited != nullptr) {
@@ -1336,6 +1537,9 @@ private:
     for (unsigned index = 0; index < agu_registers; ++index) {
       result.cursors[index] = phi(initial.cursors[index], "cursor");
       result.strides[index] = phi(initial.strides[index], "stride");
+      if (auto *value = initial.modifiers[index]) {
+        result.modifiers[index] = phi(value, "modifier");
+      }
     }
     result.status = split_flags_ ? initial.status : phi(initial.status, "status");
     for (unsigned index = 0; index < result.frames.size(); ++index) {
@@ -1358,6 +1562,9 @@ private:
     for (unsigned index = 0; index < agu_registers; ++index) {
       incoming(phis.cursors[index], after.cursors[index]);
       incoming(phis.strides[index], after.strides[index]);
+      if (phis.modifiers[index] != nullptr) {
+        incoming(phis.modifiers[index], after.modifiers[index]);
+      }
     }
     for (unsigned index = 0; index < phis.frames.size(); ++index) {
       if (phis.frames[index] != nullptr) { incoming(phis.frames[index], after.frames[index]); }
@@ -1498,10 +1705,10 @@ private:
     LLVMBuildBr(ir_.get(), loop);
     ir_.SetInsertPoint(loop);
     const auto phis = live_phis(initial, start);
-    restore_live(phis);
     auto *completed = LLVMBuildPhi(ir_.get(), ir_.getInt64Ty(), "completed");
     auto *zero = ir_.getInt64(0);
     LLVMAddIncoming(completed, &zero, &start, 1);
+    restore_live(phis);
     for (unsigned index = 0; index < agu_registers; ++index) {
       if (plan_.agu[index]) {
         origins_[index] = ir_.CreateAnd(cursors_[index], ir_.CreateNot(masks_[index]));
@@ -1603,7 +1810,9 @@ private:
   llvm19::Builder ir_;
   const RegionPlan &plan_;
   BatchAddressing addressing_;
-  bool linear_only_, direct_, self_loop_, split_flags_ = false;
+  bool linear_only_, direct_, admitted_site_, self_loop_, split_flags_ = false;
+  bool record_addresses_ = false;
+  std::map<std::tuple<std::uintptr_t, unsigned, unsigned, Word>, V> admitted_addresses_;
   Word loop_count_ = 0;
   V cpu_, owner_, initial_cycles_ = nullptr, initial_instructions_ = nullptr;
   V control_taken_ = nullptr, control_count_ = nullptr, control_status_ = nullptr;
@@ -1615,7 +1824,9 @@ private:
   V iteration_ = nullptr;
   std::array<V, stack_entries> frames_{};
   std::array<V, 4> banks_{};
-  std::array<V, agu_registers> cursors_{}, strides_{}, masks_{}, origins_{};
+  std::array<V, agu_registers> cursors_{}, strides_{}, modifiers_{}, masks_{}, origins_{};
+  std::array<Bounds, agu_registers> rings_{};
+  std::array<V, agu_registers> single_lengths_{};
   std::array<std::array<V, agu_registers>, 2> memory_bases_{};
   std::array<std::map<Word, V>, 2> absolute_bases_;
   std::array<std::vector<std::array<Binding, 2>>, 2> bindings_;
@@ -1666,7 +1877,8 @@ bool lift_region(LlvmModule &module,
                  const std::uint64_t variant,
                  const bool direct,
                  const bool linear_only,
-                 std::vector<Word> *resume) {
+                 std::vector<Word> *resume,
+                 const bool admitted_site) {
   if (module.code() == nullptr) { throw std::logic_error("Region module was already transferred"); }
   const auto name = entry.empty() ? module.name() : std::string(entry);
   if (LLVMGetNamedFunction(module.code(), name.c_str()) != nullptr) {
@@ -1684,8 +1896,16 @@ bool lift_region(LlvmModule &module,
   if (properties != nullptr) {
     *properties = (plan->batch ? 1U : 0U) | (split_flags(*plan) ? 2U : 0U);
   }
-  const RegionLifter lift(
-      module, *plan, name, false, 0, BatchAddressing::automatic, variant, direct, linear_only);
+  const RegionLifter lift(module,
+                          *plan,
+                          name,
+                          false,
+                          0,
+                          BatchAddressing::automatic,
+                          variant,
+                          direct,
+                          linear_only,
+                          admitted_site);
   return true;
 }
 

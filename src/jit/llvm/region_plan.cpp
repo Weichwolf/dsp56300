@@ -12,6 +12,8 @@
 #include "jit/move.hpp"
 #include "jit/preparation.hpp"
 #include "jit/translation.hpp"
+#include "product_fields.hpp"
+#include "transfers.hpp"
 
 #include <algorithm>
 #include <array>
@@ -151,7 +153,7 @@ bool append_move(RegionPlan &plan, const NativeMove &move, const bool advance) {
       step.finish_prefix |= partial;
     }
   }
-  if (mode == 0 || mode == 1 || mode == 5) { plan.batch = false; }
+  if (mode == 0 || mode == 1 || mode == 5 || mode == displacement_mode) { plan.batch = false; }
   const auto bank = move.space == Space::x ? 0U : 1U;
   if (!std::ranges::any_of(plan.windows[bank],
                            [&move](const auto &window) { return permitted(window, !move.load); })) {
@@ -329,14 +331,61 @@ bool append_immediate_alu(RegionPlan &plan, const Instruction &instruction) {
   return true;
 }
 
-bool append(RegionPlan &plan, const BlockInstruction &operation) {
-  const auto &instruction = operation.instruction;
-  if (instruction.operation == Operation::bit_memory) { return append_bit(plan, instruction); }
-  if (instruction.operation == Operation::immediate_alu ||
-      instruction.operation == Operation::arithmetic_shift_immediate ||
-      instruction.operation == Operation::logical_shift_immediate) {
-    return append_immediate_alu(plan, instruction);
+bool append_modifier_move(RegionPlan &plan, const Instruction &instruction) {
+  const auto description = inspect_transfers(instruction.opcode);
+  if (!description || description->count != 1) { return false; }
+  const auto &[from, to] = description->moves.front();
+  const auto source = static_cast<unsigned>(from.reg);
+  const auto target = static_cast<unsigned>(to.reg);
+  const auto address_register = [](const unsigned number) {
+    return number >= r_register_base && number < m_register_base + agu_registers;
+  };
+  if (!address_register(source) || !address_register(target)) { return false; }
+  if (target >= m_register_base) {
+    plan.changed_m[target - m_register_base] = true;
+  } else if (!destination(plan, target)) {
+    return false;
   }
+  plan.batch = false;
+  plan.computation = true;
+  plan.steps.push_back({.registers = {.source = source, .destination = target}});
+  return true;
+}
+
+bool append_addressed_move(RegionPlan &plan, const Instruction &instruction) {
+  const auto moves = plan_moves(instruction);
+  if (moves.count != 1) { return false; }
+  const auto &move = moves.transfers.front();
+  if (instruction.operation == Operation::move_displacement) {
+    if (!append_moves(plan, moves)) { return false; }
+  } else {
+    if (move.reg < m_register_base || move.reg >= m_register_base + agu_registers ||
+        !append_move(plan, move, true)) {
+      return false;
+    }
+    if (move.load) { plan.changed_m[move.reg - m_register_base] = true; }
+    plan.batch = false;
+  }
+  plan.computation = true;
+  plan.steps.push_back({.memory = moves});
+  return true;
+}
+
+bool append_conditional_transfer(RegionPlan &plan, const Word opcode) {
+  constexpr Word address_only = 1U << 11;
+  constexpr Word dual = 1U << 16;
+  const auto source = (opcode >> 4) & 7U;
+  if ((opcode & address_only) == 0 && source != 0 && source < 4) { return false; }
+  if ((opcode & (address_only | dual)) != 0 &&
+      !destination(plan, r_register_base + (opcode & 7U))) {
+    return false;
+  }
+  plan.computation = true;
+  plan.steps.push_back({});
+  return true;
+}
+
+bool append_parallel(RegionPlan &plan, const Instruction &instruction) {
   if ((instruction.operation != Operation::parallel && instruction.operation != Operation::nop) ||
       !llvm19::supported_alu(instruction.opcode)) {
     return false;
@@ -354,7 +403,7 @@ bool append(RegionPlan &plan, const BlockInstruction &operation) {
     plan.steps.push_back({.update = update});
     return true;
   }
-  const auto immediate = plan_address_immediate(instruction);
+  const auto immediate = plan_register_immediate(instruction);
   if (immediate.valid()) {
     if (!destination(plan, immediate.destination)) { return false; }
     plan.steps.push_back({.memory = {}, .registers = {}, .immediate = immediate});
@@ -374,6 +423,33 @@ bool append(RegionPlan &plan, const BlockInstruction &operation) {
   }
   plan.steps.push_back({.memory = moves, .registers = registers});
   return true;
+}
+
+bool append(RegionPlan &plan, const BlockInstruction &operation) {
+  const auto &instruction = operation.instruction;
+  if (instruction.operation == Operation::move_control_register) {
+    return append_modifier_move(plan, instruction);
+  }
+  if (instruction.operation == Operation::conditional_transfer) {
+    return append_conditional_transfer(plan, instruction.opcode);
+  }
+  if (instruction.operation == Operation::product_power) {
+    const auto power = (instruction.opcode >> 8) & five_bit_mask;
+    if (power == 0 || power > maximum_product_power) { return false; }
+  }
+  if (llvm19::supported_product(instruction.operation)) {
+    plan.computation = true;
+    plan.steps.push_back({});
+    return true;
+  }
+  if (addressed_move(instruction.operation)) { return append_addressed_move(plan, instruction); }
+  if (instruction.operation == Operation::bit_memory) { return append_bit(plan, instruction); }
+  if (instruction.operation == Operation::immediate_alu ||
+      instruction.operation == Operation::arithmetic_shift_immediate ||
+      instruction.operation == Operation::logical_shift_immediate) {
+    return append_immediate_alu(plan, instruction);
+  }
+  return append_parallel(plan, instruction);
 }
 
 struct TreeContext {
@@ -549,6 +625,10 @@ std::optional<RegionPlan> make_plan(RegionPlan plan) {
     pc = (pc + operation.instruction.words) & word_mask;
   }
   if (!append_tree(plan, 0, operations.size())) { return {}; }
+  // Memory admission uses the initial modifier of every effective address update.
+  for (unsigned index = 0; index < agu_registers; ++index) {
+    if (plan.changed_m[index] && plan.agu[index]) { return {}; }
+  }
   return plan;
 }
 }

@@ -3,10 +3,12 @@
 
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "fields.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
 #include "jit/image_plan.hpp"
 #include "jit/llvm/region_plan.hpp"
+#include "jit/move.hpp"
 #include "jit/preparation.hpp"
 
 #include <algorithm>
@@ -23,7 +25,9 @@ namespace {
 bool ordinary(const Operation kind) {
   return kind == Operation::nop || kind == Operation::parallel || kind == Operation::bit_memory ||
          kind == Operation::arithmetic_shift_immediate ||
-         kind == Operation::logical_shift_immediate || kind == Operation::immediate_alu;
+         kind == Operation::logical_shift_immediate || kind == Operation::immediate_alu ||
+         kind == Operation::move_control_register || kind == Operation::product_mixed ||
+         kind == Operation::product_power || addressed_move(kind);
 }
 
 bool terminal(const Operation kind) {
@@ -31,7 +35,14 @@ bool terminal(const Operation kind) {
          kind == Operation::conditional_jump || kind == Operation::relative_branch ||
          kind == Operation::call_short || kind == Operation::call_effective ||
          kind == Operation::return_subroutine || kind == Operation::bit_jump ||
-         kind == Operation::bit_branch || loop_setup(kind);
+         kind == Operation::bit_branch || kind == Operation::conditional_transfer ||
+         loop_setup(kind);
+}
+
+bool ends_ordinary_region(const Instruction &instruction) {
+  if (instruction.operation == Operation::product_power) { return true; }
+  const auto move = plan_register_immediate(instruction);
+  return move.valid() && move.destination < r_register_base;
 }
 
 auto body(const ImagePlan &plan, const Word first, const Word last) {
@@ -58,6 +69,7 @@ void ordinary_regions(const ImagePlan &plan,
   const auto units = plan.units();
   const std::set heads(units.begin(), units.end());
   std::set entries(plan.entries.begin(), plan.entries.end());
+  entries.insert(plan.region_starts.begin(), plan.region_starts.end());
   if (complete_children) { entries.insert(heads.begin(), heads.end()); }
   std::vector<BlockInstruction> current;
   const auto finish = [&] {
@@ -78,14 +90,15 @@ void ordinary_regions(const ImagePlan &plan,
     }
     const auto immediate_child =
         complete_children && instruction.operation == Operation::loop_immediate;
-    if (!ordinary(instruction.operation) && !immediate_child) {
-      if (!current.empty() && terminal(instruction.operation)) {
-        current.push_back({.instruction = instruction, .pc = pc});
-      }
-      finish();
-    } else {
+    const bool ends_region = ends_ordinary_region(instruction);
+    if (!ends_region && (ordinary(instruction.operation) || immediate_child)) {
+      current.push_back({.instruction = instruction, .pc = pc});
+      continue;
+    }
+    if (!current.empty() && (terminal(instruction.operation) || ends_region)) {
       current.push_back({.instruction = instruction, .pc = pc});
     }
+    finish();
   }
   finish();
 }
@@ -143,7 +156,12 @@ image_regions(const ImagePlan &plan, const std::span<const RegionLayout> memory)
   for (auto operations : image_regions(plan)) {
     if (at_loop_end(operations.back())) {
       if (plan_region(operations, memory)) {
-        for (const auto &operation : operations) { covered.insert(operation.pc); }
+        // Keep the ordinary entries in newly groupable DO bodies for shorter grants.
+        if (std::ranges::none_of(operations, [](const auto &operation) {
+              return ends_ordinary_region(operation.instruction);
+            })) {
+          for (const auto &operation : operations) { covered.insert(operation.pc); }
+        }
         result.push_back(std::move(operations));
       }
       continue;

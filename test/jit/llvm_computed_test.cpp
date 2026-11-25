@@ -206,7 +206,7 @@ void direct(const Word mode, const bool ring) {
     padded.a <<= detail::padding_bits;
     padded.b <<= detail::padding_bits;
     detail::Cpu cpu{.reg = padded};
-    detail::NativeContext owner{.runtime = {}, .budget = length, .cycle_deadline = length};
+    detail::NativeContext owner{.runtime = {}, .budget = length, .cycle_window = length};
     const auto calls = fallback_calls;
     const auto retired = detail::enter_block(image->entry, cpu, owner);
     cpu.reg.a >>= detail::padding_bits;
