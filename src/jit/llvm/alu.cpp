@@ -151,9 +151,8 @@ Result Alu::product(const Word code, const Banks &before, const unsigned destina
   auto *term =
       ir_.CreateShl(ir_.CreateMul(product_word(before, pair[0]), product_word(before, pair[1])),
                     ir_.getInt64(padding_bits + 1));
-  if ((code & 4U) != 0) { term = ir_.CreateSub(ir_.getInt64(0), term); }
   auto *initial = (code & 2U) != 0 ? before[destination] : ir_.getInt64(0);
-  return arithmetic(initial, term, false);
+  return arithmetic(initial, term, (code & 4U) != 0);
 }
 
 void Alu::mixed_product(const Word opcode, Banks &banks) {
@@ -164,9 +163,8 @@ void Alu::mixed_product(const Word opcode, Banks &banks) {
       ir_.CreateShl(ir_.CreateMul(product_word(banks, selector(left), (opcode & (1U << 6)) != 0),
                                   product_word(banks, selector(right), true)),
                     ir_.getInt64(padding_bits + 1));
-  if ((opcode & (1U << 4)) != 0) { term = ir_.CreateSub(ir_.getInt64(0), term); }
   auto *initial = (opcode & (1U << 8)) == 0 ? banks[destination] : ir_.getInt64(0);
-  const auto result = arithmetic(initial, term, false);
+  const auto result = arithmetic(initial, term, (opcode & (1U << 4)) != 0);
   flags(result);
   banks[destination] = result.value;
 }
@@ -177,9 +175,8 @@ void Alu::power_product(const Word opcode, Banks &banks) {
   const auto shift = word_bits + padding_bits - ((opcode >> 8) & five_bit_mask);
   const auto destination = (opcode >> 3) & 1U;
   auto *term = ir_.CreateShl(product_word(banks, source), ir_.getInt64(shift));
-  if ((opcode & 4U) != 0) { term = ir_.CreateSub(ir_.getInt64(0), term); }
   auto *initial = (opcode & 2U) != 0 ? banks[destination] : ir_.getInt64(0);
-  auto result = arithmetic(initial, term, false);
+  auto result = arithmetic(initial, term, (opcode & 4U) != 0);
   if ((opcode & 1U) != 0) { rounding(result); }
   flags(result);
   banks[destination] = result.value;
