@@ -441,21 +441,36 @@ private:
     admit_address_registers();
   }
 
+  V admission_modifiers() {
+    if (!direct_ || addressing_ == BatchAddressing::linear ||
+        std::ranges::count(plan_.agu, true) < 3) {
+      return nullptr;
+    }
+    // Adjacent modifier registers can be loaded together before selecting lanes.
+    auto *type = LLVMVectorType(ir_.getInt32Ty(), agu_registers);
+    auto *values = ir_.CreateLoad(type, address(cpu_, offsetof(Cpu, reg) + offsetof(Registers, m)));
+    LLVMSetAlignment(values, alignof(Word));
+    return values;
+  }
+
   void admit_address_registers() {
+    const auto modifier_at = [this, values = admission_modifiers()](const unsigned index) {
+      if (values != nullptr) {
+        return LLVMBuildExtractElement(ir_.get(), values, ir_.getInt32(index), "");
+      }
+      return reg(32, offsetof(Registers, m) + (index * sizeof(Word)));
+    };
     for (unsigned index = 0; index < agu_registers; ++index) {
       cursors_[index] = reg(32, offsetof(Registers, r) + (index * sizeof(Word)));
       strides_[index] = reg(32, offsetof(Registers, n) + (index * sizeof(Word)));
-      if (plan_.changed_m[index]) {
-        modifiers_[index] = reg(32, offsetof(Registers, m) + (index * sizeof(Word)));
-      }
+      if (plan_.changed_m[index]) { modifiers_[index] = modifier_at(index); }
       if (!plan_.agu[index]) { continue; }
       if (addressing_ == BatchAddressing::linear) {
         masks_[index] = ir_.getInt32(word_mask);
         origins_[index] = ir_.getInt32(0);
         continue;
       }
-      auto *modifier = ir_.CreateAnd(reg(32, offsetof(Registers, m) + (index * sizeof(Word))),
-                                     ir_.getInt32(modifier_mask));
+      auto *modifier = ir_.CreateAnd(modifier_at(index), ir_.getInt32(modifier_mask));
       auto *linear = ir_.CreateICmpEQ(modifier, ir_.getInt32(modifier_mask));
       if (direct_ && repeated_unit_reads(index)) {
         masks_[index] = extended_unit_mask(modifier);
