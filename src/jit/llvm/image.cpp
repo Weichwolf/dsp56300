@@ -5,11 +5,13 @@
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
+#include "jit.hpp"
 #include "jit/image_plan.hpp"
 #include "jit/llvm/bindings.hpp"
 #include "jit/llvm/image_regions.hpp"
 #include "jit/llvm/origins.hpp"
 #include "jit/llvm/region.hpp"
+#include "jit/llvm/region_plan.hpp"
 #include "jit/llvm/runtime.hpp"
 #include "jit/pair_read_loop.hpp"
 #include "semantic.hpp"
@@ -173,7 +175,36 @@ private:
     llvm::GlobalVariable *site;
     Word last_pc, last_words, mode, properties;
     std::vector<Word> resume;
+    Word minimum_instructions = 0, minimum_cycles = 0;
   };
+
+  enum class RegionForm : std::uint8_t { ordinary, repeat, sequence };
+
+  static std::vector<std::vector<BlockInstruction>>
+  sequential_regions(const std::vector<std::vector<BlockInstruction>> &ordinary) {
+    constexpr Word no_loop = word_mask + 1U;
+    constexpr std::size_t maximum_operations = 24;
+    std::map<Word, const std::vector<BlockInstruction> *> entries;
+    for (const auto &operations : ordinary) {
+      if (operations.back().loop_address == no_loop) {
+        entries.emplace(operations.front().pc, &operations);
+      }
+    }
+    std::vector<std::vector<BlockInstruction>> result;
+    for (const auto &entry : entries) {
+      const auto *prefix = entry.second;
+      const auto &tail = prefix->back();
+      const auto next = tail.pc + tail.instruction.words;
+      const auto suffix = entries.find(next);
+      if (suffix == entries.end() || prefix->size() + suffix->second->size() > maximum_operations) {
+        continue;
+      }
+      auto sequence = *prefix;
+      sequence.insert(sequence.end(), suffix->second->begin(), suffix->second->end());
+      result.push_back(std::move(sequence));
+    }
+    return result;
+  }
 
   void prepare_regions(LlvmModule &module,
                        const std::span<const RegionLayout> memory,
@@ -184,7 +215,18 @@ private:
                                scale_up,
                                rounding_mode | scale_down,
                                rounding_mode | scale_up};
-    const auto add = [&](auto operations, const bool linear_only) {
+    const auto add = [&](auto operations, const RegionForm form) {
+      const bool linear_only = form == RegionForm::repeat;
+      constexpr std::array suffixes{"", ".linear_edge", ".sequence"};
+      const auto *suffix = suffixes[static_cast<std::size_t>(form)];
+      Word minimum_instructions = 0;
+      Word minimum_cycles = 0;
+      if (form == RegionForm::sequence) {
+        const auto planned = plan_region(operations, memory);
+        if (!planned) { return; }
+        minimum_instructions = planned->count;
+        minimum_cycles = planned->cost;
+      }
       for (const auto mode : modes) {
         if (selected && std::ranges::find(*selected, mode) == selected->end()) { continue; }
         for (auto &operation : operations) { operation.mode = mode; }
@@ -192,7 +234,7 @@ private:
         const auto &last = operations.back();
         const auto name = name_ + ".region." + llvm::utohexstr(first, true) + "." +
                           llvm::utohexstr(last.loop_address, true) + "." +
-                          llvm::utohexstr(mode, true) + (linear_only ? ".linear_edge" : "");
+                          llvm::utohexstr(mode, true) + suffix;
         Word properties = 0;
         std::vector<Word> resume;
         if (!lift_region(module,
@@ -220,15 +262,23 @@ private:
                                     .last_words = last.instruction.words,
                                     .mode = mode,
                                     .properties = properties,
-                                    .resume = std::move(resume)});
+                                    .resume = std::move(resume),
+                                    .minimum_instructions = minimum_instructions,
+                                    .minimum_cycles = minimum_cycles});
       }
     };
     if (direct_) {
       for (auto &operations : image_composed_regions(plan_, memory)) {
-        add(std::move(operations), true);
+        add(std::move(operations), RegionForm::repeat);
       }
     }
-    for (auto &operations : image_regions(plan_, memory)) { add(std::move(operations), false); }
+    auto ordinary = image_regions(plan_, memory);
+    if (direct_) {
+      for (auto &operations : sequential_regions(ordinary)) {
+        add(std::move(operations), RegionForm::sequence);
+      }
+    }
+    for (auto &operations : ordinary) { add(std::move(operations), RegionForm::ordinary); }
   }
 
   void commit_region(Value *outcome, const FastRegion &region, const Word pc) {
@@ -325,7 +375,12 @@ private:
     ir_.SetInsertPoint(precise);
   }
 
-  void emit_regions(const Word pc, Value *count, Value *window) {
+  struct RegionGrant {
+    Value *count;
+    Value *window;
+  };
+
+  void emit_regions(const Word pc, RegionGrant grant) {
     const auto [first, last] = regions_.equal_range(pc);
     if (first == last) { return; }
     auto *adapter = module_.getFunction("dsp56300_semantic_region");
@@ -355,12 +410,17 @@ private:
         auto *continued = block(active_, "region.complete");
         auto *miss = region == regions.back() ? precise : block(active_, "region.next");
         cold_.insert(miss);
-        auto *outcome = ir_.CreateCall(adapter,
-                                       {active_->getArg(0),
-                                        ir_.CreateSub(active_->getArg(2), count),
-                                        region->site,
-                                        window,
-                                        region_cost_});
+        auto *budget = ir_.CreateSub(active_->getArg(2), grant.count);
+        if (region->minimum_cycles != 0) {
+          auto *ready = block(active_, "region.grant");
+          auto *fits =
+              ir_.CreateAnd(ir_.CreateICmpUGE(budget, ir_.getInt32(region->minimum_instructions)),
+                            ir_.CreateICmpUGE(grant.window, ir_.getInt64(region->minimum_cycles)));
+          ir_.CreateCondBr(fits, ready, miss);
+          ir_.SetInsertPoint(ready);
+        }
+        auto *outcome = ir_.CreateCall(
+            adapter, {active_->getArg(0), budget, region->site, grant.window, region_cost_});
         ir_.CreateCondBr(
             ir_.CreateICmpNE(ir_.CreateTrunc(outcome, ir_.getInt32Ty()), ir_.getInt32(0)),
             continued,
@@ -607,7 +667,7 @@ private:
     ir_.SetInsertPoint(execute);
     memory_contracts();
     emit_paired_read(pc, count, window);
-    emit_regions(pc, count, window);
+    emit_regions(pc, {.count = count, .window = window});
     auto *outcome =
         ir_.CreateCall(semantic_variant(operation), {active_->getArg(0), ir_.getInt32(pc)});
     auto *next = ir_.CreateTrunc(outcome, ir_.getInt32Ty());
