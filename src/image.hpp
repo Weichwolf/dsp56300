@@ -3,6 +3,7 @@
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
+#include "jit/fixed_pass.hpp"
 #include "jit/image_plan.hpp"
 #include "jit/llvm/image.hpp"
 
@@ -39,6 +40,7 @@ struct ImageContracts {
     bool fixed_memory = false;
     ImageEntry entry = nullptr;
     std::map<Word, std::uint64_t> prefixes;
+    std::map<Word, PassEffects> fixed_passes;
   };
 
   [[nodiscard]] std::map<std::tuple<Word, Word, Word>, ImagePlan>

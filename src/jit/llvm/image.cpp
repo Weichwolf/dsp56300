@@ -6,6 +6,8 @@
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
+#include "jit/fixed_pass.hpp"
+#include "jit/fixed_pass_memory.hpp"
 #include "jit/image_plan.hpp"
 #include "jit/llvm/bindings.hpp"
 #include "jit/llvm/image_regions.hpp"
@@ -131,7 +133,8 @@ public:
               const std::optional<std::span<const Word>> region_modes = std::nullopt,
               const std::uint64_t variant = 0,
               const bool direct = false,
-              const bool paired = false)
+              const bool paired = false,
+              const std::span<const FixedPassTranslation> fixed_passes = {})
       : module_(*llvm::unwrap(module.code())),
         locations_(module_, variant),
         ir_(module_.getContext()),
@@ -166,11 +169,23 @@ public:
     dispatch_->addFnAttr(llvm::Attribute::AlwaysInline);
     table_ = table();
     emit_dispatch();
+    for (const auto &pass : fixed_passes) {
+      fixed_passes_.emplace(pass.path.front(),
+                            FixedPass{.entry = emit_fixed_proof(pass.path),
+                                      .write_count = pass.effects.writes.size(),
+                                      .cost = pass.effects.cost});
+    }
     for (const auto &unit : units_) { emit_unit(unit.second, unit.first); }
     emit_entry();
   }
 
 private:
+  struct FixedPass {
+    llvm::Function *entry;
+    std::size_t write_count;
+    FixedPassCost cost;
+  };
+
   struct FastRegion {
     llvm::GlobalVariable *site;
     Word last_pc, last_words, mode, properties;
@@ -646,6 +661,94 @@ private:
     return link->second;
   }
 
+  llvm::Function *emit_fixed_proof(const std::span<const Word> path) {
+    const auto name = name_ + ".fixed." + llvm::utohexstr(path.front(), true);
+    auto *type = llvm::FunctionType::get(ir_.getInt64Ty(), {ir_.getPtrTy()}, false);
+    auto *proof = llvm::Function::Create(type, llvm::GlobalValue::InternalLinkage, name, module_);
+    attributes(proof);
+    const llvm::IRBuilderBase::InsertPointGuard saved(ir_);
+    ir_.SetInsertPoint(block(proof, "entry"));
+    auto *exit = block(proof, "exit");
+    auto *result = llvm::PHINode::Create(
+        ir_.getInt64Ty(), static_cast<unsigned>(path.size()), "fixed.outcome", exit);
+    for (std::size_t index = 0; index < path.size(); ++index) {
+      const auto pc = path[index];
+      memory_contracts();
+      auto *actual = ir_.CreateCall(semantic_variant(plan_.instructions.at(pc)),
+                                    {proof->getArg(0), ir_.getInt32(pc)});
+      actual->addFnAttr(llvm::Attribute::NoInline);
+      result->addIncoming(actual, ir_.GetInsertBlock());
+      if (index + 1 == path.size()) {
+        ir_.CreateBr(exit);
+        break;
+      }
+      auto *next = ir_.CreateTrunc(actual, ir_.getInt32Ty());
+      auto *flow = ir_.CreateLShr(actual, flow_shift);
+      auto *matching = ir_.CreateICmpEQ(next, ir_.getInt32(path[index + 1]));
+      auto *ordinary =
+          ir_.CreateICmpUGE(flow, ir_.getInt64(static_cast<unsigned>(SemanticFlow::sequential)));
+      auto *follow = block(proof, "following");
+      ir_.CreateCondBr(ir_.CreateAnd(matching, ordinary), follow, exit);
+      ir_.SetInsertPoint(follow);
+    }
+    ir_.SetInsertPoint(exit);
+    ir_.CreateRet(result);
+    return proof;
+  }
+
+  void emit_fixed_pass(const Word pc, const RegionGrant grant) {
+    const auto [count, window] = grant;
+    const auto pass = fixed_passes_.find(pc);
+    if (pass == fixed_passes_.end()) { return; }
+    auto *adapter = module_.getFunction("dsp56300_semantic_fixed_pass");
+    if (adapter == nullptr || adapter->isDeclaration() || adapter->arg_size() != 7 ||
+        !adapter->getReturnType()->isIntegerTy(64)) {
+      throw std::invalid_argument("DSP image lacks its private fixed-pass ABI");
+    }
+    auto *receipt = llvm::StructType::get(ir_.getInt32Ty(), ir_.getInt64Ty());
+    llvm::AllocaInst *scratch = nullptr;
+    llvm::AllocaInst *commit = nullptr;
+    {
+      const llvm::IRBuilderBase::InsertPointGuard saved(ir_);
+      ir_.SetInsertPoint(&active_->getEntryBlock(), active_->getEntryBlock().begin());
+      scratch = ir_.CreateAlloca(ir_.getInt8Ty(),
+                                 ir_.getInt64(pass->second.write_count * sizeof(PassWord)));
+      scratch->setAlignment(llvm::Align(alignof(PassWord)));
+      commit = ir_.CreateAlloca(receipt);
+    }
+    auto *precise = block(active_, "fixed.precise");
+    auto *admitted = block(active_, "fixed.admitted");
+    auto *quota = ir_.CreateSub(active_->getArg(2), count);
+    const auto cost = pass->second.cost;
+    auto *time = ir_.CreateICmpUGE(ir_.CreateLShr(window, 1), ir_.getInt64(cost.cycles));
+    auto *room = ir_.CreateICmpUGE(ir_.CreateLShr(quota, 1), ir_.getInt32(cost.instructions));
+    ir_.CreateCondBr(ir_.CreateAnd(time, room), admitted, precise);
+    ir_.SetInsertPoint(admitted);
+    auto *actual = ir_.CreateCall(
+        adapter,
+        {active_->getArg(0), ir_.getInt32(pc), pass->second.entry, window, scratch, quota, commit});
+    auto *flow = ir_.CreateLShr(actual, flow_shift);
+    auto *committed = block(active_, "fixed.committed");
+    ir_.CreateCondBr(
+        ir_.CreateICmpEQ(flow, ir_.getInt64(static_cast<unsigned>(SemanticFlow::sequential))),
+        precise,
+        committed);
+    ir_.SetInsertPoint(committed);
+    auto *retired = ir_.CreateTrunc(actual, ir_.getInt32Ty());
+    auto *next = ir_.CreateLoad(ir_.getInt32Ty(), ir_.CreateStructGEP(receipt, commit, 0));
+    auto *cycles = ir_.CreateLoad(ir_.getInt64Ty(), ir_.CreateStructGEP(receipt, commit, 1));
+    ir_.CreateStore(next, pc_);
+    ir_.CreateStore(ir_.CreateAdd(count, retired), count_);
+    ir_.CreateStore(ir_.CreateSub(window, cycles), window_);
+    auto *transfer = ir_.CreateSwitch(flow, exits_.at(ImageExit::unprepared), 3);
+    transfer->addCase(ir_.getInt64(static_cast<unsigned>(SemanticFlow::fault)),
+                      exits_.at(ImageExit::fault));
+    transfer->addCase(ir_.getInt64(static_cast<unsigned>(SemanticFlow::owner)),
+                      exits_.at(ImageExit::owner));
+    transfer->addCase(ir_.getInt64(static_cast<unsigned>(SemanticFlow::folded)), sites_.at(pc));
+    ir_.SetInsertPoint(precise);
+  }
+
   void emit_instruction(const Word pc, const Instruction &operation) {
     ir_.SetCurrentDebugLocation(Origins::instruction(*active_, pc));
     ir_.SetInsertPoint(sites_.at(pc));
@@ -665,6 +768,7 @@ private:
     ir_.CreateCondBr(
         ir_.CreateICmpNE(window, ir_.getInt64(0)), execute, exits_.at(ImageExit::deadline));
     ir_.SetInsertPoint(execute);
+    emit_fixed_pass(pc, {.count = count, .window = window});
     memory_contracts();
     emit_paired_read(pc, count, window);
     emit_regions(pc, {.count = count, .window = window});
@@ -731,7 +835,8 @@ private:
                                                  ir_.getInt32(memory.flags),
                                                  ir_.getInt32(memory.external)};
     auto *value = llvm::ConstantStruct::getAnon(module_.getContext(), fields);
-    const auto name = active_->getName().str() + ".memory." + std::to_string(memory.space) + "." +
+    auto *const owner = ir_.GetInsertBlock()->getParent();
+    const auto name = owner->getName().str() + ".memory." + std::to_string(memory.space) + "." +
                       std::to_string(memory.index);
     auto *description = module_.getGlobalVariable(name, true);
     if (description == nullptr) {
@@ -740,7 +845,7 @@ private:
       throw std::invalid_argument("DSP memory contract conflicts with an existing constant");
     }
     description->setAlignment(llvm::Align(alignof(SemanticMemory)));
-    ir_.CreateCall(function, {active_->getArg(0), description});
+    ir_.CreateCall(function, {owner->getArg(0), description});
   }
 
   void memory_contracts() {
@@ -856,6 +961,7 @@ private:
   std::map<std::pair<Word, Word>, llvm::Function *> semantic_variants_;
   std::multimap<Word, FastRegion> regions_;
   std::map<Word, llvm::GlobalVariable *> paired_reads_;
+  std::map<Word, FixedPass> fixed_passes_;
   std::map<Word, Block *> sites_, links_;
   std::map<ImageExit, Block *> exits_;
   std::set<Block *> cold_;
@@ -879,11 +985,12 @@ void lift_image(LlvmModule &module,
                 const std::optional<std::span<const Word>> region_modes,
                 const std::uint64_t variant,
                 const bool direct,
-                const bool paired) {
+                const bool paired,
+                const std::span<const FixedPassTranslation> fixed_passes) {
   if (module.code() == nullptr) { throw std::logic_error("Image module was already transferred"); }
   if (plan.instructions.empty()) { throw std::invalid_argument("Image has no instructions"); }
   const ImageLifter lifter(
-      module, plan, entry, false, memory, region_modes, variant, direct, paired);
+      module, plan, entry, false, memory, region_modes, variant, direct, paired, fixed_passes);
 }
 
 void lift_vector(LlvmModule &module,
@@ -939,7 +1046,8 @@ ImageArtifact lower_images(const std::string_view name,
                  translation.region_modes,
                  translation.variant,
                  mode == CompileOptions::MemoryMode::direct,
-                 paired);
+                 paired,
+                 translation.fixed_passes);
     }
   }
   specialize_image(module, result.entries);

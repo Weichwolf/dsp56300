@@ -94,5 +94,6 @@ struct alignas(64) Cpu {
   bool interrupt_inhibited = false;
   ExecutionState processing = ExecutionState::running;
   std::uint8_t debug_flags = 0;
+  bool operator==(const Cpu &) const = default;
 };
 } // namespace dsp56300::detail

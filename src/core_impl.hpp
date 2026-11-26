@@ -8,6 +8,7 @@
 #include "image.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
+#include "jit/fixed_pass_memory.hpp"
 #include "program_cache.hpp"
 #include "semantic.hpp"
 #include "vector_state.hpp"
@@ -111,6 +112,24 @@ struct Core::Impl {
                        const detail::SemanticPairedPortRead &read,
                        std::uint64_t window,
                        std::uint64_t &cycles) noexcept asm("dsp56300_semantic_paired_read");
+  using FixedPassEntry = std::uint64_t (*)(void *) noexcept;
+  [[nodiscard]] static std::uint64_t semantic_fixed_pass(void *owner,
+                                                         Word head,
+                                                         FixedPassEntry proof,
+                                                         std::uint64_t window,
+                                                         detail::PassWord *scratch,
+                                                         std::uint32_t quota,
+                                                         detail::PassCommit &commit) noexcept
+      asm("dsp56300_semantic_fixed_pass");
+  [[nodiscard]] static std::uint64_t checked_fixed_pass(void *owner,
+                                                        Word head,
+                                                        FixedPassEntry proof,
+                                                        std::uint64_t window,
+                                                        detail::PassWord *scratch,
+                                                        std::uint32_t quota,
+                                                        detail::PassCommit &commit,
+                                                        std::uint64_t retained_horizon) noexcept;
+  [[nodiscard]] RunResult advance_proven_pass(std::uint32_t quota);
   [[nodiscard]] static detail::SemanticResult
   semantic_execute(void *owner, const detail::Instruction &decoded) noexcept;
   // Stable private LLVM boundary; the packed result does not depend on struct-return ABI.
@@ -205,7 +224,31 @@ struct Core::Impl {
   void restore_loop();
   void execute_loop(const detail::Instruction &decoded);
   [[nodiscard]] Word loop_count(const detail::Instruction &decoded);
+
+  // Fixed passes start between instructions with no active REP. Operand
+  // latches are initialized by each instruction before use.
+  struct FixedPassState {
+    detail::Cpu cpu;
+    Vector vector;
+    Word current_pc, debug_vector;
+  };
+
+  static constexpr std::size_t fixed_pass_observations = 64;
+
+  struct FixedPassMemo {
+    FixedPassState state;
+    std::array<detail::PassWord, fixed_pass_observations> cells;
+    std::array<Word, fixed_pass_observations> device_values;
+    FixedPassEntry proof;
+    std::uint64_t revision;
+    std::size_t cell_count;
+  };
+
   detail::Cpu cpu;
+  std::optional<FixedPassMemo> fixed_pass_memo;
+  std::optional<std::uint64_t> fixed_pass_handoff_cycle;
+  bool fixed_pass_handoff_pending = false;
+  std::uint64_t proven_deadline = 0;
   Io *io;
   std::unique_ptr<detail::ProgramCache> icache;
   std::unique_ptr<detail::NativeCall> native_call;
@@ -232,5 +275,6 @@ struct Core::Impl {
   bool image_storage_admitted = false;
   bool terminal_fault = false;
   std::array<bool, 3> aliases_program{true, false, false};
+  bool canonical_data = false;
 };
 } // namespace dsp56300

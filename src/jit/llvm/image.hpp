@@ -2,6 +2,7 @@
 #pragma once
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "jit/fixed_pass.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -15,6 +16,11 @@ namespace dsp56300::detail {
 class LlvmModule;
 struct ImagePlan;
 
+struct FixedPassTranslation {
+  std::span<const Word> path;
+  const PassEffects &effects;
+};
+
 struct ImageTranslation {
   std::string_view name;
   const ImagePlan &plan;
@@ -22,6 +28,7 @@ struct ImageTranslation {
   std::optional<std::span<const RegionLayout>> memory;
   std::optional<std::span<const Word>> region_modes = std::nullopt;
   std::uint64_t variant = 0;
+  std::span<const FixedPassTranslation> fixed_passes;
 };
 
 // Owned pre-O3 IR and exports; no execution owner or native compiler is retained.
@@ -51,7 +58,8 @@ void lift_image(LlvmModule &module,
                 std::optional<std::span<const Word>> region_modes = std::nullopt,
                 std::uint64_t variant = 0,
                 bool direct = false,
-                bool paired = false);
+                bool paired = false,
+                std::span<const FixedPassTranslation> fixed_passes = {});
 void lift_vector(LlvmModule &module,
                  const ImagePlan &plan,
                  std::string_view entry = {},

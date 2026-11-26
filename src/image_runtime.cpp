@@ -293,6 +293,9 @@ void Core::install(const NativeImage &image, const std::uint64_t variant) {
           ? std::make_unique<detail::NativeCall>(image.impl_->text_ranges, self.views)
           : nullptr;
   self.native_call = std::move(native_call);
+  self.fixed_pass_memo.reset();
+  self.fixed_pass_handoff_cycle.reset();
+  self.fixed_pass_handoff_pending = false;
   self.image = image.impl_;
   self.active_image = &selected;
   self.image_windows = granted;

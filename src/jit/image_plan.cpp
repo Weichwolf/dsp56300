@@ -1,16 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "jit/image_plan.hpp"
 
+#include "bit_instruction.hpp"
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
+#include "fields.hpp"
 #include "instruction.hpp"
 #include "jit.hpp"
+#include "jit/fixed_pass.hpp"
 #include "jit/preparation.hpp"
 #include "vector_instruction.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
+#include <limits>
 #include <llvm/ADT/StringExtras.h>
 #include <map>
 #include <optional>
@@ -107,6 +112,84 @@ void validate_targets(const ImagePlan &plan,
 const Instruction *ImagePlan::find(const Word address) const noexcept {
   const auto found = instructions.find(address);
   return found == instructions.end() ? nullptr : &found->second;
+}
+
+namespace {
+struct ImmediateLoop {
+  Word first, after, remaining;
+};
+
+std::optional<Word> fixed_loop_next(const BlockInstruction &step,
+                                    std::optional<ImmediateLoop> &loop) {
+  const auto &instruction = step.instruction;
+  const auto flow = successors(step);
+  const auto next = step.pc + instruction.words;
+  if (!loop) {
+    const auto after = flow.direct[1];
+    if (after <= next) { return std::nullopt; }
+    const auto count = ((instruction.opcode >> 8) & byte_mask) | ((instruction.opcode & 15U) << 8);
+    if (count == 0) { return after; }
+    loop = ImmediateLoop{.first = next, .after = after, .remaining = count};
+    return next;
+  }
+  if (flow.indirect || flow.call || flow.count != 1 || flow.direct[0] != next ||
+      next > loop->after) {
+    return std::nullopt;
+  }
+  if (next < loop->after) { return next; }
+  if (--loop->remaining != 0) { return loop->first; }
+  loop.reset();
+  return next;
+}
+
+bool fixed_pass_edge(const BlockInstruction &step, const Word target, std::vector<Word> &returns) {
+  const auto &instruction = step.instruction;
+  const auto kind = instruction.operation;
+  if (kind == Operation::return_subroutine) {
+    if (returns.empty() || returns.back() != target) { return false; }
+    returns.pop_back();
+    return true;
+  }
+  const auto flow = successors(step);
+  const auto direct = std::span(flow.direct).first(flow.count);
+  if (flow.indirect || std::ranges::find(direct, target) == direct.end()) { return false; }
+  const bool branch_call =
+      (kind == Operation::bit_jump || kind == Operation::bit_branch) && bit_call(instruction);
+  if (!flow.call && !branch_call) { return true; }
+  const bool unconditional = flow.call && !flow.conditional;
+  const auto return_pc = (step.pc + instruction.words) & word_mask;
+  if (unconditional && target != direct.back()) { return false; }
+  if (!unconditional && direct.back() == return_pc) { return false; }
+  if (unconditional || target != return_pc) { returns.push_back(return_pc); }
+  return true;
+}
+}
+
+std::optional<FixedPassCost> ImagePlan::fixed_pass_cost(const std::span<const Word> path) const {
+  if (path.empty() || path.size() > std::numeric_limits<std::uint32_t>::max() ||
+      std::ranges::find(path.subspan(1), path.front()) != path.end()) {
+    return std::nullopt;
+  }
+  std::vector<Word> returns;
+  std::optional<ImmediateLoop> loop;
+  std::uint64_t cycles = 0;
+  for (std::size_t index = 0; index < path.size(); ++index) {
+    const auto pc = path[index];
+    const auto *instruction = find(pc);
+    const auto target = index + 1 < path.size() ? path[index + 1] : path.front();
+    if (instruction == nullptr || instruction->operation == Operation::unsupported ||
+        instruction->cycles == 0) {
+      return std::nullopt;
+    }
+    const BlockInstruction step{.instruction = *instruction, .pc = pc};
+    const bool follows = loop || instruction->operation == Operation::loop_immediate
+                             ? fixed_loop_next(step, loop) == target
+                             : fixed_pass_edge(step, target, returns);
+    if (!follows) { return std::nullopt; }
+    cycles += instruction->cycles;
+  }
+  if (loop || !returns.empty()) { return std::nullopt; }
+  return FixedPassCost{.instructions = static_cast<std::uint32_t>(path.size()), .cycles = cycles};
 }
 
 std::vector<Word> ImagePlan::units() const {

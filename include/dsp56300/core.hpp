@@ -3,6 +3,7 @@
 #include "dsp56300/memory.hpp"
 
 #include <array>
+#include <compare>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -168,6 +169,18 @@ struct CallbackBinding {
   std::string_view symbol;
 };
 
+struct StableRead {
+  Space space;
+  Word address;
+  auto operator<=>(const StableRead &) const = default;
+};
+
+struct FixedPassDeclaration {
+  std::uint64_t variant;
+  std::span<const Word> path;
+  std::span<const StableRead> device_reads;
+};
+
 struct CompileOptions {
   enum class MemoryMode : std::uint8_t { exact, direct };
   // Per variant: omitted means dynamic grants; an empty declared layout requires zero grants.
@@ -181,6 +194,9 @@ struct CompileOptions {
   // Absent prepares all supported numeric modes; an empty set prepares none.
   // Every unselected mode retains general native execution.
   std::optional<std::span<const Word>> region_modes = std::nullopt;
+  // NOLINTNEXTLINE(readability-redundant-member-init) Older designated initializers may omit this
+  // field.
+  std::span<const FixedPassDeclaration> fixed_passes{};
 };
 
 struct SemanticExport {
@@ -276,6 +292,28 @@ public:
     return {};
   }
 
+  // Absolute core cycle before which these ordinary device reads remain stable and
+  // side-effect-free. Zero declines the current grant. This query does not advance I/O.
+  [[nodiscard]] virtual std::uint64_t
+  stable_reads_until(std::span<const StableRead> /*reads*/) const noexcept {
+    return 0;
+  }
+
+  // Absolute exclusive cycle for unchanged masked reads and unobserved RAM stores.
+  // Zero declines extension beyond the ordinary execution deadline.
+  [[nodiscard]] virtual std::uint64_t
+  stable_masked_reads_until(std::span<const StableRead> /*reads*/,
+                            std::span<const Word> /*masks*/,
+                            std::span<const StableRead> /*stores*/) const noexcept {
+    return 0;
+  }
+
+  // Observe a granted stable device word without advancing its owner.
+  [[nodiscard]] virtual bool stable_read_value(StableRead /*read*/,
+                                               Word & /*value*/) const noexcept {
+    return false;
+  }
+
   virtual bool read(Space space, Word address, Word pc, Word &value) noexcept = 0;
   virtual bool write(Space space, Word address, Word pc, Word value) noexcept = 0;
   virtual bool
@@ -332,6 +370,15 @@ public:
   // This is nominal ISA progress, not a derivative peripheral/bus clock.
   // Translation and retained code never depend on the supplied deadline.
   [[nodiscard]] RunResult run_until(std::uint64_t base_cycle_deadline);
+
+  // Instructions execute up to precise_deadline. Verified state-neutral passes
+  // may extend progress before base_cycle_deadline through an explicit Io grant.
+  struct RunLimits {
+    std::uint64_t base_cycle_deadline;
+    std::uint64_t precise_deadline;
+  };
+
+  [[nodiscard]] RunResult run_until(RunLimits limits);
   // A synchronous Io callback can return this run after actual instruction
   // retirement. Guest state and compiled code survive; no cross-thread mutation.
   void request_yield() noexcept;
