@@ -194,8 +194,8 @@ struct CompileOptions {
   // Absent prepares all supported numeric modes; an empty set prepares none.
   // Every unselected mode retains general native execution.
   std::optional<std::span<const Word>> region_modes = std::nullopt;
-  // NOLINTNEXTLINE(readability-redundant-member-init) Older designated initializers may omit this
-  // field.
+  // Existing designated initializers may omit this optional field.
+  // NOLINTNEXTLINE(readability-redundant-member-init)
   std::span<const FixedPassDeclaration> fixed_passes{};
 };
 
