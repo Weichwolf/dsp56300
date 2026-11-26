@@ -93,6 +93,16 @@ public:
 
   [[nodiscard]] constexpr Buffers storage() const noexcept { return buffers_; }
 
+  // Each backing byte has one address among the active X/Y word and knowledge
+  // windows. Replace these loans through Core::set_memory before remapping.
+  [[nodiscard]] constexpr Memory with_canonical_data() const noexcept {
+    auto memory = *this;
+    memory.canonical_data_ = true;
+    return memory;
+  }
+
+  [[nodiscard]] constexpr bool canonical_data() const noexcept { return canonical_data_; }
+
 private:
   explicit constexpr Memory(const Buffers buffers) noexcept : buffers_(buffers) {}
 
@@ -100,5 +110,6 @@ private:
   std::array<std::span<const MemoryWindow>, 3> regions_{};
   std::array<Views, 3> views_{};
   friend class Core;
+  bool canonical_data_ = false;
 };
 }

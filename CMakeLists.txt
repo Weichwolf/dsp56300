@@ -42,13 +42,13 @@ set(dsp56300_semantic_sources
   src/move.cpp src/processing.cpp src/products.cpp
   src/program_cache.cpp src/registers.cpp src/repeat.cpp src/runtime.cpp
   src/saturation.cpp src/semantic_region.cpp src/semantic.cpp src/image_runtime.cpp src/shifts.cpp src/state.cpp
-  src/jit/llvm/region_memory.cpp
+  src/jit/llvm/region_memory.cpp src/jit/fixed_pass_memory.cpp src/semantic_fixed_pass.cpp
   src/transfer.cpp src/transfer_description.cpp src/transfer_info.cpp
   src/transfer_parallel.cpp src/transfer_special.cpp src/viterbi.cpp)
 add_library(dsp56300_semantics OBJECT ${dsp56300_semantic_sources})
 add_library(dsp56300_core STATIC
   src/io.cpp src/memory.cpp src/image_compile.cpp src/image_artifact.cpp src/image_entry.cpp src/image_sites.cpp src/jit/preparation.cpp src/jit/image_plan.cpp
-  src/jit/prefixes.cpp src/jit/prefix_access.cpp src/jit/pair_read_loop.cpp src/jit/llvm/runtime.cpp
+  src/jit/fixed_pass.cpp src/jit/prefixes.cpp src/jit/prefix_access.cpp src/jit/pair_read_loop.cpp src/jit/llvm/runtime.cpp
   src/jit/llvm/lifecycle.cpp src/jit/llvm/bindings.cpp
   src/jit/llvm/image.cpp src/jit/llvm/image_regions.cpp src/jit/llvm/image_specialize.cpp src/jit/llvm/origins.cpp
   src/jit/llvm/region.cpp src/jit/llvm/region_plan.cpp src/jit/llvm/alu.cpp
@@ -133,6 +133,17 @@ if(BUILD_TESTING AND DSP56300_BUILD_TESTING)
   target_include_directories(dsp56300_kernel_bench PRIVATE test/support)
   target_include_directories(dsp56300_kernel_bench SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
   target_link_libraries(dsp56300_kernel_bench PRIVATE dsp56300::core dsp56300_kernel_host LLVM)
+  add_executable(dsp56300_fixed_pass_test test/core/fixed_pass_test.cpp)
+  target_include_directories(dsp56300_fixed_pass_test PRIVATE src)
+  target_link_libraries(dsp56300_fixed_pass_test PRIVATE dsp56300::core)
+  add_test(NAME fixed-pass-control-flow COMMAND dsp56300_fixed_pass_test)
+  set_tests_properties(fixed-pass-control-flow PROPERTIES TIMEOUT 10)
+  add_executable(dsp56300_fixed_pass_memory_test test/core/fixed_pass_memory_test.cpp)
+  target_include_directories(dsp56300_fixed_pass_memory_test PRIVATE src test/support)
+  target_link_libraries(dsp56300_fixed_pass_memory_test PRIVATE dsp56300::core)
+  add_test(NAME fixed-pass-memory-effects COMMAND dsp56300_fixed_pass_memory_test)
+  set_tests_properties(fixed-pass-memory-effects PROPERTIES TIMEOUT 60)
+
   add_executable(dsp56300_artifact_test test/core/artifact_test.cpp)
   target_include_directories(dsp56300_artifact_test SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
   target_link_libraries(dsp56300_artifact_test PRIVATE dsp56300::core ${CMAKE_DL_LIBS})

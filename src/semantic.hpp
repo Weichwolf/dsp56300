@@ -25,7 +25,7 @@ struct SemanticPairedPortRead {
 static_assert(sizeof(SemanticPairedPortRead) == 16 * sizeof(Word));
 
 // The image checks whether execution may continue with one comparison against sequential.
-enum class SemanticFlow : std::uint8_t { fault, owner, sequential, branch };
+enum class SemanticFlow : std::uint8_t { fault, owner, sequential, branch, folded };
 
 // Compiler-facing values, with architectural state retained by Core.
 struct SemanticResult {

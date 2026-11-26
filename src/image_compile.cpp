@@ -2,6 +2,7 @@
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "image.hpp"
+#include "jit/fixed_pass.hpp"
 #include "jit/image_plan.hpp"
 #include "jit/llvm/bindings.hpp"
 #include "jit/llvm/image.hpp"
@@ -107,6 +108,20 @@ std::string symbol(const CodeImage image, const CompileOptions options) {
     hash_word(hash, options.region_modes->size());
     for (const auto mode : *options.region_modes) { hash_word(hash, mode); }
   }
+  if (!options.fixed_passes.empty()) {
+    hash.update("fixed-pass");
+    hash_word(hash, options.fixed_passes.size());
+    for (const auto &pass : options.fixed_passes) {
+      hash_word(hash, pass.variant);
+      hash_word(hash, pass.path.size());
+      for (const auto pc : pass.path) { hash_word(hash, pc); }
+      hash_word(hash, pass.device_reads.size());
+      for (const auto &read : pass.device_reads) {
+        hash_word(hash, static_cast<unsigned>(read.space));
+        hash_word(hash, read.address);
+      }
+    }
+  }
   return "dsp56300_image_" + llvm::toHex(hash.final(), true);
 }
 
@@ -191,12 +206,50 @@ void validate(const CodeImage image, const CompileOptions options) {
       throw std::invalid_argument("Invalid or duplicate DSP code transition");
     }
   }
+  std::set<std::pair<std::uint64_t, Word>> heads;
+  for (const auto &pass : options.fixed_passes) {
+    if (!ids.contains(pass.variant) || pass.path.empty() ||
+        !heads.emplace(pass.variant, pass.path.front()).second) {
+      throw std::invalid_argument("DSP image has an invalid or duplicate fixed-pass declaration");
+    }
+  }
   std::set<std::uint64_t> layouts;
   for (const auto &layout : options.memory) {
     if (!ids.contains(layout.id) || !layouts.insert(layout.id).second) {
       throw std::invalid_argument("Unknown or duplicate DSP variant layout");
     }
   }
+}
+
+void prepare_fixed_passes(detail::ImageContracts::Variant &variant,
+                          const detail::ImagePlan &plan,
+                          const CompileOptions options) {
+  if ((!variant.fixed_memory && options.memory_mode != CompileOptions::MemoryMode::direct) ||
+      std::ranges::any_of(options.callbacks, [](const CallbackBinding &binding) {
+        return binding.role == CallbackRole::retired;
+      })) {
+    return;
+  }
+  for (const auto &request : options.fixed_passes) {
+    if (request.variant == variant.id) {
+      if (auto effects = detail::fixed_pass_effects(plan, request.path, request.device_reads)) {
+        variant.fixed_passes.emplace(request.path.front(), std::move(*effects));
+      }
+    }
+  }
+}
+
+std::vector<detail::FixedPassTranslation>
+fixed_translations(const detail::ImageContracts::Variant &variant, const CompileOptions options) {
+  std::vector<detail::FixedPassTranslation> translations;
+  for (const auto &request : options.fixed_passes) {
+    if (request.variant != variant.id) { continue; }
+    const auto proof = variant.fixed_passes.find(request.path.front());
+    if (proof != variant.fixed_passes.end()) {
+      translations.push_back({.path = request.path, .effects = proof->second});
+    }
+  }
+  return translations;
 }
 
 void validate_transitions(const detail::ImageContracts &image,
@@ -293,7 +346,15 @@ SemanticImage Core::load(const CodeImage image,
                          const CompileOptions options,
                          const std::span<const std::byte> artifact) {
   validate(image, options);
-  return SemanticImage(SemanticImage::Impl::deserialize(artifact, symbol(image, options)));
+  auto loaded = SemanticImage::Impl::deserialize(artifact, symbol(image, options));
+  if (!options.fixed_passes.empty()) {
+    for (auto &variant : loaded->variants) {
+      const detail::ImagePlan plan{
+          .instructions = variant.instructions, .entries = {}, .region_starts = {}};
+      prepare_fixed_passes(variant, plan, options);
+    }
+  }
+  return SemanticImage(std::move(loaded));
 }
 
 SemanticImage Core::lower(const CodeImage image, const CompileOptions options) {
@@ -329,6 +390,7 @@ SemanticImage Core::lower(const CodeImage image, const CompileOptions options) {
         std::ranges::find(options.memory, source.id, &VariantLayout::id) != options.memory.end();
     if (variant.fixed_memory) { variant.memory = regions(source.id, options); }
     variant.prefixes = detail::foreground_prefixes(plan, variant.memory);
+    prepare_fixed_passes(variant, plan, options);
     append_program(variant, source.code);
     plans.push_back(plan);
     result->variants.push_back(std::move(variant));
@@ -341,16 +403,19 @@ SemanticImage Core::lower(const CodeImage image, const CompileOptions options) {
   names.reserve(image.variants.size());
   std::map<std::tuple<Word, Word, Word>, std::string> vector_symbols;
   std::vector<detail::ImageTranslation> translations;
+  std::vector<std::vector<detail::FixedPassTranslation>> fixed_passes(plans.size());
   translations.reserve(plans.size() + vector_plans.size());
   for (std::size_t index = 0; index < image.variants.size(); ++index) {
     const auto &variant = result->variants[index];
     names.push_back(index == 0 ? image_name
                                : image_name + ".variant." + llvm::utohexstr(variant.id, true));
+    fixed_passes[index] = fixed_translations(variant, options);
     translations.push_back({.name = names.back(),
                             .plan = plans[index],
                             .memory = memory_view(variant),
                             .region_modes = options.region_modes,
-                            .variant = variant.id});
+                            .variant = variant.id,
+                            .fixed_passes = fixed_passes[index]});
     result->report.prepared_entries += variant.instructions.size();
   }
   for (const auto &[key, plan] : vector_plans) {
@@ -362,7 +427,8 @@ SemanticImage Core::lower(const CodeImage image, const CompileOptions options) {
                             .plan = plan,
                             .vector = true,
                             .memory = std::nullopt,
-                            .variant = vector_variant(result->variants, key)});
+                            .variant = vector_variant(result->variants, key),
+                            .fixed_passes = {}});
     result->report.prepared_entries += plan.instructions.size();
   }
   auto artifact =

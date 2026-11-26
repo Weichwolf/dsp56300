@@ -634,12 +634,11 @@ void repeat_eligibility() {
   require(refused, "Missing post-REP metadata reports an error without reading a protected P hole");
 }
 
-void direct_self_loop_empty_window() {
+void direct_self_loop_empty_window(const Word jump) {
   Storage storage;
   constexpr auto read = static_cast<Word>(isa::Opcode::move_x_effective) | (4U << 11) | (1U << 15);
   constexpr auto adc = static_cast<Word>(isa::Opcode::adc_x_a);
-  constexpr auto jump = static_cast<Word>(isa::Opcode::jmp_absolute_short) | start;
-  constexpr std::array program{read, adc, jump};
+  const std::array program{read, adc, jump};
   const auto native = image(storage, false, program, CompileOptions::MemoryMode::direct);
   Core programmer(storage.memory());
   programmer.load(Space::program, start, program);
@@ -649,6 +648,7 @@ void direct_self_loop_empty_window() {
     registers.pc = start;
     registers.omr = 0;
     registers.r[0] = target;
+    registers.r[1] = start;
     registers.m.fill(word_mask);
     core.set_registers(registers);
     core.install(native, 0);
@@ -658,6 +658,14 @@ void direct_self_loop_empty_window() {
   require(executed.retired == 12 && executed.fault == Fault{} &&
               (programmer.registers().x & word_mask) == value,
           "A protected direct self-loop reads mapped X and completes all four turns");
+  const auto cutoff = executed.progress.estimated_cycles + 1;
+  const auto partial = programmer.run_until(cutoff);
+  require(partial.retired == 1 && partial.fault == Fault{} &&
+              partial.progress.estimated_cycles >= cutoff && programmer.registers().pc == start + 1,
+          "A short deadline stops after the completed read within the loop body");
+  const auto resumed = programmer.run(2);
+  require(resumed.retired == 2 && resumed.fault == Fault{} && programmer.registers().pc == start,
+          "Resume the existing loop and reach its original entry");
   storage.descriptors[1] = {};
   const auto x = storage.views[1].read.data.first(storage.words());
   checked(mprotect(x.data(), x.size_bytes(), PROT_NONE) == 0);
@@ -1332,7 +1340,9 @@ int main() try {
   grouped_displacement_moves();
   grouped_modifier_memory();
   crossing_zero();
-  direct_self_loop_empty_window();
+  direct_self_loop_empty_window(static_cast<Word>(isa::Opcode::jmp_absolute_short) | start);
+  direct_self_loop_empty_window(static_cast<Word>(isa::Opcode::jmp_effective) | (4U << 11) |
+                                (1U << 8));
   protected_operands();
   require(!Core::host_fault(0, false, 0),
           "Unowned faults are not claimed outside native execution");

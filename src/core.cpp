@@ -26,17 +26,19 @@ namespace {
 
 class DeadlineScope {
 public:
-  DeadlineScope(std::uint64_t &limit, const std::uint64_t deadline) : limit_(limit) {
+  DeadlineScope(std::uint64_t &limit, const std::uint64_t deadline)
+      : limit_(limit), previous_(limit) {
     limit_ = deadline;
   }
 
-  ~DeadlineScope() { limit_ = std::numeric_limits<std::uint64_t>::max(); }
+  ~DeadlineScope() { limit_ = previous_; }
 
   DeadlineScope(const DeadlineScope &) = delete;
   DeadlineScope &operator=(const DeadlineScope &) = delete;
 
 private:
   std::uint64_t &limit_;
+  std::uint64_t previous_;
 };
 
 Buffers bind_memory(const Memory memory, Io *const io, const bool complete) {
@@ -182,6 +184,7 @@ Core::Core(const Memory memory, Io *const io)
                                    memory.storage().program.empty(),
                                    memory.regions_,
                                    memory.views_)) {
+  impl_->canonical_data = memory.canonical_data();
   reset();
 }
 
@@ -199,6 +202,10 @@ void Core::set_memory(const Memory memory) {
   self.regions = replacement.regions;
   self.views = replacement.views;
   self.external = replacement.external;
+  self.canonical_data = memory.canonical_data();
+  self.fixed_pass_memo.reset();
+  self.fixed_pass_handoff_cycle.reset();
+  self.fixed_pass_handoff_pending = false;
   self.aliases_program = replacement.aliases_program;
   self.native_call = std::unique_ptr<detail::NativeCall>{};
   self.image.reset();
@@ -251,6 +258,9 @@ void Core::reset() {
   }
 
   impl_->cpu = {};
+  impl_->fixed_pass_memo.reset();
+  impl_->fixed_pass_handoff_cycle.reset();
+  impl_->fixed_pass_handoff_pending = false;
   impl_->vector = {};
   impl_->next_images = nullptr;
   impl_->debug_vector = 0;
@@ -269,9 +279,9 @@ Fault Core::fault() const noexcept {
 }
 
 RunResult Core::run(const std::uint32_t instruction_budget) {
-
   const detail::ExecutionGuard guard(impl_->executing);
   impl_->yield_requested = false;
+  impl_->fixed_pass_handoff_pending = false;
   if (impl_->image) { return impl_->run_image(instruction_budget); }
   RunResult result;
 
@@ -297,6 +307,30 @@ RunResult Core::run_until(const std::uint64_t base_cycle_deadline) {
   }
   const DeadlineScope scope(impl_->cycle_deadline, base_cycle_deadline);
   return run(std::numeric_limits<std::uint32_t>::max());
+}
+
+RunResult Core::run_until(const RunLimits limits) {
+  if (impl_->executing) { throw std::logic_error("Recursive DSP execution is not permitted"); }
+  if (limits.precise_deadline > limits.base_cycle_deadline) {
+    throw std::invalid_argument("Precise DSP deadline exceeds its execution grant");
+  }
+  if (limits.precise_deadline == limits.base_cycle_deadline) {
+    return run_until(limits.precise_deadline);
+  }
+  const DeadlineScope grant(impl_->proven_deadline, limits.base_cycle_deadline);
+  constexpr auto quota = std::numeric_limits<std::uint32_t>::max();
+  if (const auto advanced = impl_->advance_proven_pass(quota); advanced.retired != 0) {
+    return advanced;
+  }
+  const auto precise = run_until(limits.precise_deadline);
+  if (precise.yielded && precise.state == ExecutionState::running) {
+    auto advanced = impl_->advance_proven_pass(quota - precise.retired);
+    if (advanced.retired != 0) {
+      advanced.retired += precise.retired;
+      return advanced;
+    }
+  }
+  return precise;
 }
 
 bool Core::interrupt_ready() const {

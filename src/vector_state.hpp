@@ -15,6 +15,7 @@ struct VectorState {
   VectorPhase phase = VectorPhase::none;
   std::array<Word, 2> words{};
   bool loaded = false;
+  bool operator==(const VectorState &) const = default;
 };
 
 } // namespace dsp56300::detail

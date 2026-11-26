@@ -85,6 +85,7 @@ void canonicalize_semantic_entry(LLVMModuleRef module) {
                            "dsp56300_semantic_memory",
                            "dsp56300_semantic_retired",
                            "dsp56300_semantic_region",
+                           "dsp56300_semantic_fixed_pass",
                            "dsp56300_semantic_numeric_mode"}) {
     const auto alias = std::string(1, '\001') + name;
     auto *escaped = LLVMGetNamedFunction(module, alias.c_str());

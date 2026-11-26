@@ -15,6 +15,7 @@ struct Successors {
   // Register/stack/vector targets and implicit DO/REP continuation stay open.
   bool indirect = false;
   bool call = false;
+  bool conditional = false;
 };
 
 struct PreparationGraph {

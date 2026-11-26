@@ -103,14 +103,13 @@ public:
         linear_only_(linear_only),
         direct_(direct),
         admitted_site_(admitted_site),
-        self_loop_(
-            !admission_only && !plan_.allow_partial_exit && !plan_.batch &&
-            plan_.control.stack == ControlStack::none &&
-            plan_.operations.back().instruction.operation != Operation::bit_jump &&
-            plan_.operations.back().instruction.operation != Operation::bit_branch &&
-            (captured_loop() || (region_independent(plan_.operations) && plan_.control.valid &&
-                                 (plan_.control.reg < agu_registers ||
-                                  plan_.control.target == plan_.operations.front().pc)))),
+        self_loop_(!admission_only && !plan_.allow_partial_exit && !plan_.batch &&
+                   plan_.control.stack == ControlStack::none &&
+                   plan_.operations.back().instruction.operation != Operation::bit_jump &&
+                   plan_.operations.back().instruction.operation != Operation::bit_branch &&
+                   (captured_loop() || (region_independent(plan_.operations) &&
+                                        plan_.control.valid && plan_.control.reg >= agu_registers &&
+                                        plan_.control.target == plan_.operations.front().pc))),
         cpu_(LLVMGetParam(function_, 0)),
         owner_(LLVMGetParam(function_, 1)),
         variant_(variant) {

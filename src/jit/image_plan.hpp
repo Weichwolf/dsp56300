@@ -3,9 +3,11 @@
 #include "dsp56300/core.hpp"
 #include "dsp56300/memory.hpp"
 #include "instruction.hpp"
+#include "jit/fixed_pass.hpp"
 
 #include <array>
 #include <map>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -18,6 +20,8 @@ struct ImagePlan {
   [[nodiscard]] const Instruction *find(Word address) const noexcept;
   // Natural control-flow blocks, independent of transport fragments and execution quotas.
   [[nodiscard]] std::vector<Word> units() const;
+  // Proves explicit control flow and base costs; implicit flow and effects need separate checks.
+  [[nodiscard]] std::optional<FixedPassCost> fixed_pass_cost(std::span<const Word> path) const;
   // Encoding-derived edges plus real REP/DO backedges; other targets use native dispatch.
   [[nodiscard]] std::map<Word, std::vector<Word>> edges() const;
 };
