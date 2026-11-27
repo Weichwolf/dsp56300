@@ -63,12 +63,15 @@ std::uint32_t Core::Impl::semantic_foreground(void *const owner,
                               .variant = self.active_image->id,
                               .revision = self.image_revision};
   const auto *offer = self.io->offer_foreground(grant);
-  constexpr Word condition_codes = 0xff;
+  // A committed offer exits the native image. Its next entry selects the
+  // received scaling mode and complete architectural loop state afresh.
+  constexpr Word transferable_status =
+      0xff | detail::scale_up | detail::scale_down | detail::loop_flag | detail::forever_flag;
   if (offer == nullptr || offer->work.instructions == 0 || offer->work.instructions > quota ||
       offer->work.instructions > maximum - cpu.instructions || offer->work.estimated_cycles == 0 ||
       offer->work.estimated_cycles > grant.foreground_cycles ||
       offer->work.estimated_cycles > maximum - cpu.cycles || offer->registers.omr != cpu.reg.omr ||
-      ((offer->registers.sr ^ cpu.reg.sr) & ~condition_codes) != 0 ||
+      ((offer->registers.sr ^ cpu.reg.sr) & ~transferable_status) != 0 ||
       !self.active_image->instructions.contains(offer->last_pc) ||
       !self.active_image->instructions.contains(offer->registers.pc) ||
       !valid_registers(offer->registers)) {

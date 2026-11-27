@@ -813,6 +813,74 @@ void prepared_foreground() {
           "The owner can independently grant the prepared work beyond the precise horizon");
 }
 
+void foreground_mode_continuation() {
+  constexpr Word stop = static_cast<Word>(isa::Opcode::stop);
+  constexpr Word scale_up = Word{1} << 11;
+  constexpr Word loop = Word{1} << 15;
+  constexpr Word irq_level = Word{1} << 8;
+  constexpr std::array code{static_cast<Word>(isa::Opcode::ori_control) | (8U << 8),
+                            static_cast<Word>(isa::Opcode::do_immediate) | (3U << 8),
+                            start + 4,
+                            move | (3U << 8),
+                            move | (2U << 16) | (7U << 8),
+                            stop};
+  const std::array spans{CodeSpan{.address = start, .words = code}};
+  std::array variants{CodeVariant{.id = 0,
+                                  .code = spans,
+                                  .entries = initial_entries,
+                                  .failed_fetches = {},
+                                  .foreground_entries = initial_entries}};
+  constexpr std::array modes{Word{0}, scale_up};
+  const CompileOptions options{.memory = {},
+                               .interrupts = {},
+                               .transitions = {},
+                               .callbacks = {},
+                               .bindings = {},
+                               .region_modes = modes};
+  const auto native = test::compile_image(Core::lower({.variants = variants}, options));
+  variants.front().foreground_entries = {};
+  const auto ordinary = test::compile_image(Core::lower({.variants = variants}, options));
+
+  std::array<Word, program_words> p{};
+  std::array<Word, data_words> x{};
+  std::array<Word, data_words> y{};
+  std::ranges::copy(code, p.begin() + start);
+  const auto memory = Memory::separate({.program = p, .x = x, .y = y});
+  Core worker(memory);
+  Registers initial = worker.registers();
+  initial.pc = start;
+  worker.set_registers(initial);
+  worker.install(ordinary, 0);
+  const auto prefix = worker.run(2);
+  ForegroundIo io;
+  require(worker.capture_foreground(io.receipt) &&
+              ((io.receipt.registers.sr ^ initial.sr) & (scale_up | loop)) == (scale_up | loop),
+          "Original ORI and DO leave scaling and loop state in the receipt");
+  io.receipt.publish = [](void *context) noexcept { ++*static_cast<unsigned *>(context); };
+  io.receipt.context = &io.published;
+  Core owner(memory, &io);
+  owner.set_registers(initial);
+  owner.install(native, 0);
+  const auto committed = owner.run(2);
+  require(io.published == 1 && committed.progress == prefix.progress &&
+              owner.registers() == worker.registers(),
+          "Foreground publication preserves the original mode and loop frame");
+  const auto remaining = worker.run();
+  const auto resumed = owner.run();
+  require(remaining.state == ExecutionState::stopped && remaining.fault == Fault{} &&
+              resumed.state == ExecutionState::stopped && resumed.fault == Fault{} &&
+              resumed.progress == remaining.progress && owner.registers() == worker.registers(),
+          "The next native entry executes the active loop in the received scaling mode");
+
+  owner.reset();
+  owner.set_registers(initial);
+  io.receipt.registers.sr ^= irq_level;
+  const auto intact = owner.run(2);
+  require(io.published == 1 && intact.fault == Fault{} && intact.progress == prefix.progress &&
+              owner.registers().sr == (io.receipt.registers.sr ^ irq_level),
+          "A receipt changing interrupt eligibility retains ordinary native execution");
+}
+
 }
 
 extern "C" LLVMErrorRef LLVMRunPasses(LLVMModuleRef M,
@@ -835,6 +903,7 @@ int main() try {
   region_mode_hints();
   region_start_hints();
   prepared_foreground();
+  foreground_mode_continuation();
   std::cout << "Semantic artifacts restore native execution without lowering\n";
 } catch (const std::exception &error) {
 
