@@ -17,6 +17,8 @@ struct ImagePlan {
   std::map<Word, Instruction> instructions;
   std::vector<Word> entries;
   std::vector<Word> region_starts;
+  // NOLINTNEXTLINE(readability-redundant-member-init)
+  std::span<const Word> foreground_entries{};
   [[nodiscard]] const Instruction *find(Word address) const noexcept;
   // Natural control-flow blocks, independent of transport fragments and execution quotas.
   [[nodiscard]] std::vector<Word> units() const;

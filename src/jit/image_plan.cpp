@@ -163,6 +163,16 @@ bool fixed_pass_edge(const BlockInstruction &step, const Word target, std::vecto
   if (unconditional || target != return_pc) { returns.push_back(return_pc); }
   return true;
 }
+
+void admit_foreground(ImagePlan &plan, const std::span<const Word> entries) {
+  std::set<Word> unique;
+  for (const auto pc : entries) {
+    if (plan.find(pc) == nullptr || !unique.insert(pc).second) {
+      reject(pc, "foreground offer requires a unique declared instruction boundary");
+    }
+  }
+  plan.foreground_entries = entries;
+}
 }
 
 std::optional<FixedPassCost> ImagePlan::fixed_pass_cost(const std::span<const Word> path) const {
@@ -284,6 +294,7 @@ ImagePlan plan_image(const CodeVariant &source, const std::span<const Word> exte
     }
   }
   result.region_starts.assign(source.region_starts.begin(), source.region_starts.end());
+  admit_foreground(result, source.foreground_entries);
   return result;
 }
 

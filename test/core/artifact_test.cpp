@@ -695,6 +695,124 @@ void retirement_observation() {
   }
 }
 
+struct ForegroundIo final : Io {
+  ForegroundGrant received{};
+  ForegroundCommit receipt{};
+  unsigned offered = 0, published = 0;
+
+  [[nodiscard]] const ForegroundCommit *
+  offer_foreground(const ForegroundGrant &grant) noexcept override {
+    received = grant;
+    ++offered;
+    return &receipt;
+  }
+
+  bool read(Space /*space*/, Word /*address*/, Word /*pc*/, Word & /*value*/) noexcept override {
+    return false;
+  }
+
+  bool write(Space /*space*/, Word /*address*/, Word /*pc*/, Word /*value*/) noexcept override {
+    return false;
+  }
+
+  bool bit(Space /*space*/,
+           Word /*address*/,
+           Word /*pc*/,
+           Word /*bit*/,
+           BitAction /*action*/,
+           bool & /*previous*/) noexcept override {
+    return false;
+  }
+};
+
+void prepared_foreground() {
+  constexpr std::array code{
+      move | (3U << 8), move | (2U << 16) | (7U << 8), static_cast<Word>(isa::Opcode::stop)};
+  constexpr std::array entries{start};
+  const std::array spans{CodeSpan{.address = start, .words = code}};
+  std::array variants{CodeVariant{.id = 0,
+                                  .code = spans,
+                                  .entries = initial_entries,
+                                  .failed_fetches = {},
+                                  .foreground_entries = entries}};
+  const CodeImage program{.variants = variants};
+  constexpr CompileOptions options{
+      .memory = {}, .interrupts = {}, .transitions = {}, .callbacks = {}, .bindings = {}};
+  const auto image = Core::lower(program, options);
+  const auto native = test::compile_image(Core::load(program, options, image.artifact()));
+  variants.front().foreground_entries = {};
+  bool stale = false;
+  try {
+    static_cast<void>(Core::load(program, options, image.artifact()));
+  } catch (const std::invalid_argument &) { stale = true; }
+  require(stale, "Prepared foreground declarations participate in artifact identity");
+  const auto ordinary = test::compile_image(Core::lower(program, options));
+
+  std::array<Word, program_words> p{};
+  std::array<Word, data_words> x{};
+  std::array<Word, data_words> y{};
+  std::ranges::copy(code, p.begin() + start);
+  const auto memory = Memory::separate({.program = p, .x = x, .y = y});
+  Core worker(memory);
+  auto initial = worker.registers();
+  initial.pc = start;
+  worker.set_registers(initial);
+  worker.install(ordinary, 0);
+  ForegroundIo io;
+  require(!worker.capture_foreground(io.receipt), "Unexecuted workers have no completed work");
+  const auto expected = worker.run(2);
+  require(expected.retired == 2 && expected.fault == Fault{},
+          "The independent worker executes two real instructions");
+
+  Core owner(memory, &io);
+  owner.set_registers(initial);
+  owner.install(native, 0);
+  require(worker.capture_foreground(io.receipt) && io.receipt.registers == worker.registers() &&
+              io.receipt.work == expected.progress && io.receipt.last_pc == start + 1,
+          "A stopped worker captures completed registers and the last original instruction");
+  io.receipt.publish = [](void *context) noexcept { ++*static_cast<unsigned *>(context); };
+  io.receipt.context = &io.published;
+  const auto accepted = owner.run(2);
+  require(io.offered == 1 && io.published == 1 && io.received.pc == start &&
+              io.received.instructions == 2 && io.received.variant == 0 &&
+              accepted.retired == expected.retired && accepted.progress == expected.progress &&
+              accepted.fault == Fault{} && owner.registers() == worker.registers(),
+          "A native foreground offer publishes once and preserves exact state and progress");
+  require(owner.run(1).state == worker.run(1).state &&
+              owner.state().registers == worker.state().registers,
+          "Accepted foreground work resumes at the next native instruction");
+  ForegroundCommit stopped{};
+  require(!worker.capture_foreground(stopped), "A worker cannot offer a hidden STOP continuation");
+
+  for (const bool bad_registers : {false, true}) {
+    owner.reset();
+    owner.set_registers(initial);
+    const auto saved = io.receipt.registers;
+    if (bad_registers) { io.receipt.registers.omr ^= 1U; }
+    const auto rejected = owner.run(bad_registers ? 2U : 1U);
+    const auto retired = bad_registers ? 2U : 1U;
+    require(io.published == 1 && rejected.retired == retired && rejected.fault == Fault{} &&
+                owner.registers().pc == start + retired,
+            "Insufficient quota or changed addressing mode retains ordinary native execution");
+    io.receipt.registers = saved;
+  }
+  owner.reset();
+  owner.set_registers(initial);
+  const auto limited = owner.run_until(1);
+  require(io.published == 1 && io.received.precise_cycles == 1 &&
+              io.received.foreground_cycles == 1 && limited.retired == 1 &&
+              limited.fault == Fault{},
+          "A foreground receipt beyond the current cycle grant does not publish");
+  owner.reset();
+  owner.set_registers(initial);
+  const auto extended = owner.run_until(
+      {.base_cycle_deadline = expected.progress.estimated_cycles, .precise_deadline = 1});
+  require(io.published == 2 && io.received.precise_cycles == 1 &&
+              io.received.foreground_cycles == expected.progress.estimated_cycles &&
+              extended.progress == expected.progress && extended.fault == Fault{},
+          "The owner can independently grant the prepared work beyond the precise horizon");
+}
+
 }
 
 extern "C" LLVMErrorRef LLVMRunPasses(LLVMModuleRef M,
@@ -716,6 +834,7 @@ int main() try {
   retirement_observation();
   region_mode_hints();
   region_start_hints();
+  prepared_foreground();
   std::cout << "Semantic artifacts restore native execution without lowering\n";
 } catch (const std::exception &error) {
 

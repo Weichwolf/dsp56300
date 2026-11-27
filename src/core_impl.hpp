@@ -112,6 +112,11 @@ struct Core::Impl {
                        const detail::SemanticPairedPortRead &read,
                        std::uint64_t window,
                        std::uint64_t &cycles) noexcept asm("dsp56300_semantic_paired_read");
+  [[nodiscard]] bool plain_foreground() const noexcept;
+  [[nodiscard]] static bool valid_registers(const Registers &state) noexcept;
+  [[nodiscard]] static std::uint32_t
+  semantic_foreground(void *owner, Word pc, std::uint32_t quota, std::uint64_t window) noexcept
+      asm("dsp56300_semantic_foreground");
   using FixedPassEntry = std::uint64_t (*)(void *) noexcept;
   [[nodiscard]] static std::uint64_t semantic_fixed_pass(void *owner,
                                                          Word head,

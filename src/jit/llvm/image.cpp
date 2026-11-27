@@ -749,6 +749,25 @@ private:
     ir_.SetInsertPoint(precise);
   }
 
+  void emit_foreground(const Word pc, const RegionGrant grant) {
+    if (!std::ranges::contains(plan_.foreground_entries, pc)) { return; }
+    auto *adapter = module_.getFunction("dsp56300_semantic_foreground");
+    if (adapter == nullptr || adapter->isDeclaration() || adapter->arg_size() != 4 ||
+        !adapter->getReturnType()->isIntegerTy(32)) {
+      throw std::invalid_argument("DSP image lacks its private foreground ABI");
+    }
+    auto *quota = ir_.CreateSub(active_->getArg(2), grant.count);
+    auto *retired =
+        ir_.CreateCall(adapter, {active_->getArg(0), ir_.getInt32(pc), quota, grant.window});
+    auto *committed = block(active_, "foreground.committed");
+    auto *precise = block(active_, "foreground.precise");
+    ir_.CreateCondBr(ir_.CreateICmpNE(retired, ir_.getInt32(0)), committed, precise);
+    ir_.SetInsertPoint(committed);
+    ir_.CreateStore(ir_.CreateAdd(grant.count, retired), count_);
+    ir_.CreateBr(exits_.at(ImageExit::budget));
+    ir_.SetInsertPoint(precise);
+  }
+
   void emit_instruction(const Word pc, const Instruction &operation) {
     ir_.SetCurrentDebugLocation(Origins::instruction(*active_, pc));
     ir_.SetInsertPoint(sites_.at(pc));
@@ -768,6 +787,7 @@ private:
     ir_.CreateCondBr(
         ir_.CreateICmpNE(window, ir_.getInt64(0)), execute, exits_.at(ImageExit::deadline));
     ir_.SetInsertPoint(execute);
+    emit_foreground(pc, {.count = count, .window = window});
     emit_fixed_pass(pc, {.count = count, .window = window});
     memory_contracts();
     emit_paired_read(pc, count, window);
