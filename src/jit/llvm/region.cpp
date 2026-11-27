@@ -452,13 +452,70 @@ private:
     return values;
   }
 
-  void admit_address_registers() {
-    const auto modifier_at = [this, values = admission_modifiers()](const unsigned index) {
-      if (values != nullptr) {
-        return LLVMBuildExtractElement(ir_.get(), values, ir_.getInt32(index), "");
-      }
-      return reg(32, offsetof(Registers, m) + (index * sizeof(Word)));
+  struct ModifierAdmission {
+    V mask = nullptr, accepted = nullptr, length = nullptr;
+  };
+
+  ModifierAdmission describe_modifiers(V raw, const bool packed) {
+    const auto constant = [&](Word value) -> V {
+      auto *scalar = ir_.getInt32(value);
+      if (!packed) { return scalar; }
+      std::array<V, agu_registers> words{};
+      words.fill(scalar);
+      return LLVMConstVector(words.data(), words.size());
     };
+    auto *modifier = ir_.CreateAnd(raw, constant(modifier_mask));
+    auto *linear = ir_.CreateICmpEQ(modifier, constant(modifier_mask));
+    auto *mask = ir_.CreateAnd(modifier, constant(multiple_wrap_mask));
+    auto *ring = ir_.CreateAnd(
+        ir_.CreateICmpEQ(
+            ir_.CreateAnd(modifier, constant(multiple_wrap_bit | multiple_reserved_bit)),
+            constant(multiple_wrap_bit)),
+        ir_.CreateAnd(
+            ir_.CreateICmpNE(mask, constant(0)),
+            ir_.CreateICmpEQ(ir_.CreateAnd(mask, ir_.CreateAdd(mask, constant(1))), constant(0))));
+    auto *full = linear;
+    auto *accepted = ir_.CreateOr(linear, ring);
+    V length = nullptr;
+    if (direct_ && plan_.repeats.empty() &&
+        (!plan_.batch || addressing_ == BatchAddressing::single_wrap)) {
+      auto *single = ir_.CreateAnd(ir_.CreateICmpNE(modifier, constant(0)),
+                                   ir_.CreateICmpULT(modifier, constant(multiple_wrap_bit)));
+      accepted = ir_.CreateOr(accepted, single);
+      if (plan_.batch) { full = ir_.CreateOr(linear, single); }
+      length = ir_.CreateSelect(single, ir_.CreateAdd(modifier, constant(1)), constant(0));
+    }
+    return {.mask = ir_.CreateSelect(full, constant(word_mask), mask),
+            .accepted = accepted,
+            .length = length};
+  }
+
+  ModifierAdmission admit_packed_modifiers(V values) {
+    if (values == nullptr) { return {}; }
+    Word used = 0;
+    for (unsigned index = 0; index < agu_registers; ++index) {
+      if (!plan_.agu[index]) { continue; }
+      if (repeated_unit_reads(index)) { return {}; }
+      used |= Word{1} << index;
+    }
+    // One predicate admits the active lanes. Unused modifiers do not constrain the region.
+    const auto combined = describe_modifiers(values, true);
+    auto *valid = LLVMBuildBitCast(ir_.get(), combined.accepted, ir_.getIntNTy(agu_registers), "");
+    auto *bits = LLVMConstInt(ir_.getIntNTy(agu_registers), used, 0);
+    require(ir_.CreateICmpEQ(ir_.CreateAnd(valid, bits), bits));
+    return combined;
+  }
+
+  void admit_address_registers() {
+    auto *values = admission_modifiers();
+    const auto lane = [this](V vector, unsigned index) -> V {
+      return LLVMBuildExtractElement(ir_.get(), vector, ir_.getInt32(index), "");
+    };
+    const auto modifier_at = [&](const unsigned index) -> V {
+      return values != nullptr ? lane(values, index)
+                               : reg(32, offsetof(Registers, m) + (index * sizeof(Word)));
+    };
+    const auto combined = admit_packed_modifiers(values);
     for (unsigned index = 0; index < agu_registers; ++index) {
       cursors_[index] = reg(32, offsetof(Registers, r) + (index * sizeof(Word)));
       strides_[index] = reg(32, offsetof(Registers, n) + (index * sizeof(Word)));
@@ -469,34 +526,18 @@ private:
         origins_[index] = ir_.getInt32(0);
         continue;
       }
-      auto *modifier = ir_.CreateAnd(modifier_at(index), ir_.getInt32(modifier_mask));
-      auto *linear = ir_.CreateICmpEQ(modifier, ir_.getInt32(modifier_mask));
-      if (direct_ && repeated_unit_reads(index)) {
-        masks_[index] = extended_unit_mask(modifier);
-        origins_[index] = ir_.CreateAnd(cursors_[index], ir_.CreateNot(masks_[index]));
-        continue;
+      if (combined.mask != nullptr) {
+        masks_[index] = lane(combined.mask, index);
+        if (combined.length != nullptr) { single_lengths_[index] = lane(combined.length, index); }
+      } else if (direct_ && repeated_unit_reads(index)) {
+        masks_[index] =
+            extended_unit_mask(ir_.CreateAnd(modifier_at(index), ir_.getInt32(modifier_mask)));
+      } else {
+        const auto mode = describe_modifiers(modifier_at(index), false);
+        require(mode.accepted);
+        masks_[index] = mode.mask;
+        single_lengths_[index] = mode.length;
       }
-      auto *mask = ir_.CreateAnd(modifier, ir_.getInt32(multiple_wrap_mask));
-      auto *ring = ir_.CreateAnd(
-          ir_.CreateICmpEQ(
-              ir_.CreateAnd(modifier, ir_.getInt32(multiple_wrap_bit | multiple_reserved_bit)),
-              ir_.getInt32(multiple_wrap_bit)),
-          ir_.CreateAnd(ir_.CreateICmpNE(mask, ir_.getInt32(0)),
-                        ir_.CreateICmpEQ(ir_.CreateAnd(mask, ir_.CreateAdd(mask, ir_.getInt32(1))),
-                                         ir_.getInt32(0))));
-      auto *full_mask = linear;
-      auto *accepted = ir_.CreateOr(linear, ring);
-      if (direct_ && plan_.repeats.empty() &&
-          (!plan_.batch || addressing_ == BatchAddressing::single_wrap)) {
-        auto *single = ir_.CreateAnd(ir_.CreateICmpNE(modifier, ir_.getInt32(0)),
-                                     ir_.CreateICmpULT(modifier, ir_.getInt32(multiple_wrap_bit)));
-        accepted = ir_.CreateOr(accepted, single);
-        if (plan_.batch) { full_mask = ir_.CreateOr(linear, single); }
-        single_lengths_[index] =
-            ir_.CreateSelect(single, ir_.CreateAdd(modifier, ir_.getInt32(1)), ir_.getInt32(0));
-      }
-      require(accepted);
-      masks_[index] = ir_.CreateSelect(full_mask, ir_.getInt32(word_mask), mask);
       origins_[index] = ir_.CreateAnd(cursors_[index], ir_.CreateNot(masks_[index]));
     }
   }
