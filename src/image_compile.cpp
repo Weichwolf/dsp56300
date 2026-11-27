@@ -62,6 +62,8 @@ void hash_variant(llvm::SHA256 &hash, const CodeVariant &source) {
   for (const auto address : source.failed_fetches) { hash_word(hash, address); }
   hash_word(hash, source.region_starts.size());
   for (const auto address : source.region_starts) { hash_word(hash, address); }
+  hash_word(hash, source.foreground_entries.size());
+  for (const auto address : source.foreground_entries) { hash_word(hash, address); }
 }
 
 std::string symbol(const CodeImage image, const CompileOptions options) {
@@ -192,9 +194,16 @@ void validate(const CodeImage image, const CompileOptions options) {
     }
   }
   std::set<std::uint64_t> ids;
+  const bool trace = std::ranges::any_of(options.callbacks, [](const CallbackBinding &callback) {
+    return callback.role == CallbackRole::retired;
+  });
   for (const auto &source : image.variants) {
     if (!ids.insert(source.id).second) {
       throw std::invalid_argument("Duplicate DSP code variant");
+    }
+    if (trace && !source.foreground_entries.empty()) {
+      throw std::invalid_argument(
+          "Foreground handoffs do not provide instruction retirement traces");
     }
   }
   validate_paired_reads(options);

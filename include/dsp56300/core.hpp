@@ -103,6 +103,10 @@ struct CodeVariant {
   // The default preserves aggregate initialization by existing callers.
   // NOLINTNEXTLINE(readability-redundant-member-init)
   std::span<const Word> region_starts{};
+  // Optional offers at precise native boundaries. A compiled region can pass
+  // through a declaration without an offer when it already owns the work.
+  // NOLINTNEXTLINE(readability-redundant-member-init)
+  std::span<const Word> foreground_entries{};
 };
 
 struct CodeImage {
@@ -124,6 +128,21 @@ struct VariantLayout {
 struct InterruptRequest {
   Word vector;
   unsigned level;
+};
+
+struct ForegroundGrant {
+  Word pc;
+  std::uint32_t instructions;
+  std::uint64_t precise_cycles, foreground_cycles;
+  std::uint64_t variant, revision;
+};
+
+struct ForegroundCommit {
+  Registers registers;
+  Progress work;
+  Word last_pc;
+  void (*publish)(void *) noexcept = nullptr;
+  void *context = nullptr;
 };
 
 struct CodeTransition {
@@ -314,6 +333,17 @@ public:
     return false;
   }
 
+  // The consumer may offer work already executed by a separate core. The
+  // receipt and its inputs must remain valid until the next offer. The core
+  // calls publish only after accepting it. Publication may only write ordinary
+  // data in the current mapping, with no I/O or code writes.
+  // A receipt crossing the precise grant requires an independent device proof
+  // that the intervening events commute with its effects.
+  [[nodiscard]] virtual const ForegroundCommit *
+  offer_foreground(const ForegroundGrant & /*grant*/) noexcept {
+    return nullptr;
+  }
+
   virtual bool read(Space space, Word address, Word pc, Word &value) noexcept = 0;
   virtual bool write(Space space, Word address, Word pc, Word value) noexcept = 0;
   virtual bool
@@ -346,6 +376,10 @@ public:
   [[nodiscard]] State state() const;
   // Completed nominal work; does not materialize a register snapshot.
   [[nodiscard]] Progress progress() const noexcept;
+  // Read a separate stopped owner's completed foreground work since reset.
+  // Only plain native continuation can be captured. The caller proves that its
+  // original inputs still match and arranges publication of its data effects.
+  [[nodiscard]] bool capture_foreground(ForegroundCommit &output) const noexcept;
   // Stopped-owner foreground guarantee in nominal cycles, excluding asynchronous IRQs.
   // State/code/binding changes invalidate it; zero is uncertified, UINT64_MAX is unbounded.
   // Executes no guest or bus I/O.
