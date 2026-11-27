@@ -793,12 +793,10 @@ private:
     auto *wrapped = ir_.CreateSelect(above,
                                      ir_.CreateSub(next, length),
                                      ir_.CreateSelect(below, ir_.CreateAdd(next, length), next));
-    auto *negative = LLVMBuildICmp(ir_.get(), LLVMIntSLT, stride, ir_.getInt32(0), "");
-    auto *magnitude = ir_.CreateSelect(negative, ir_.CreateSub(ir_.getInt32(0), stride), stride);
-    auto *positive = LLVMBuildICmp(ir_.get(), LLVMIntSGT, stride, ir_.getInt32(0), "");
-    auto *large = ir_.CreateOr(ir_.CreateICmpUGT(magnitude, length),
-                               ir_.CreateAnd(ir_.CreateICmpEQ(magnitude, length), positive));
-    auto *aligned = ir_.CreateICmpEQ(ir_.CreateAnd(delta, span), ir_.getInt32(0));
+    // The signed stride is small enough to translate [-length, length) without overflow.
+    auto *offset = ir_.CreateAdd(stride, length);
+    auto *large = ir_.CreateICmpUGE(offset, ir_.CreateShl(length, ir_.getInt32(1)));
+    auto *aligned = ir_.CreateICmpEQ(ir_.CreateAnd(step, span), ir_.getInt32(0));
     return ir_.CreateAnd(ir_.CreateSelect(ir_.CreateAnd(large, aligned), next, wrapped),
                          ir_.getInt32(word_mask));
   }
