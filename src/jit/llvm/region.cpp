@@ -763,11 +763,11 @@ private:
     auto *module = LLVMGetGlobalParent(function_);
     auto *ctlz = LLVMGetIntrinsicDeclaration(
         module, LLVMLookupIntrinsicID(name.data(), name.size()), &type, 1);
-    std::array arguments{ir_.CreateSub(length, ir_.getInt32(1)), boolean(false)};
+    // Admitted rings have at least two words, including the batch sentinel.
+    std::array arguments{ir_.CreateSub(length, ir_.getInt32(1)), boolean(true)};
     auto *zeros = LLVMBuildCall2(
         ir_.get(), LLVMGlobalGetValueType(ctlz), ctlz, arguments.data(), arguments.size(), "");
-    auto *bits = ir_.CreateSub(ir_.getInt32(32), zeros);
-    return ir_.CreateSub(ir_.CreateShl(ir_.getInt32(1), bits), ir_.getInt32(1));
+    return ir_.CreateLShr(ir_.getInt32(~Word{0}), zeros);
   }
 
   V single_wrap(V cursor, const AddressForm form, V step, const bool subtract) {
